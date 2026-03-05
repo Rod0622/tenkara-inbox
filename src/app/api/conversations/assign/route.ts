@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest) {
     .from("conversations")
     .update({ assignee_id: assigneeId || null })
     .eq("id", conversationId)
-    .select("*, assignee:inbox.team_members(*)")
+    .select("*, assignee:team_members(*)")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
