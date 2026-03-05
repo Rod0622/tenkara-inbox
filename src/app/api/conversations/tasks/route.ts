@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select("*, assignee:inbox.team_members(*)")
+    .select("*, assignee:team_members(*)")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       assignee_id: assigneeId || null,
       due_date: dueDate || null,
     })
-    .select("*, assignee:inbox.team_members(*)")
+    .select("*, assignee:team_members(*)")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest) {
     .from("tasks")
     .update({ is_done: isDone })
     .eq("id", taskId)
-    .select("*, assignee:inbox.team_members(*)")
+    .select("*, assignee:team_members(*)")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

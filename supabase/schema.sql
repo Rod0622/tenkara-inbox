@@ -83,7 +83,7 @@ CREATE TABLE inbox.account_access (
 );
 
 -- ── Labels ───────────────────────────────────────────
-CREATE TABLE inbox.labels (
+CREATE TABLE labels (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT UNIQUE NOT NULL,
   color TEXT NOT NULL,
@@ -140,7 +140,7 @@ CREATE INDEX idx_msg_sent ON inbox.messages(sent_at DESC);
 -- ── Conversation Labels ──────────────────────────────
 CREATE TABLE inbox.conversation_labels (
   conversation_id UUID REFERENCES inbox.conversations(id) ON DELETE CASCADE,
-  label_id UUID REFERENCES inbox.labels(id) ON DELETE CASCADE,
+  label_id UUID REFERENCES labels(id) ON DELETE CASCADE,
   PRIMARY KEY (conversation_id, label_id)
 );
 
@@ -203,7 +203,7 @@ INSERT INTO inbox.team_members (email, name, initials, color, role, department) 
   ('cj@trytenkara.com','CJ Munko','CM','#F85149','member','Operations'),
   ('ryan@trytenkara.com','Ryan Walsh','RW','#39D2C0','member','Sales');
 
-INSERT INTO inbox.labels (name, color, bg_color, sort_order) VALUES
+INSERT INTO labels (name, color, bg_color, sort_order) VALUES
   ('New','#39D2C0','rgba(57,210,192,0.12)',0),
   ('Inquiry','#58A6FF','rgba(88,166,255,0.12)',1),
   ('Call Skillset','#BC8CFF','rgba(188,140,255,0.12)',2),
@@ -224,7 +224,7 @@ ALTER TABLE inbox.email_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.provider_presets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.team_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.account_access ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inbox.labels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.conversation_labels ENABLE ROW LEVEL SECURITY;
@@ -236,7 +236,7 @@ CREATE POLICY "all_access" ON inbox.email_accounts FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.provider_presets FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.team_members FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.account_access FOR ALL USING (true);
-CREATE POLICY "all_access" ON inbox.labels FOR ALL USING (true);
+CREATE POLICY "all_access" ON labels FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.conversations FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.messages FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.conversation_labels FOR ALL USING (true);
