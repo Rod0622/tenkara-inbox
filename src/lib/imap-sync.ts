@@ -1,0 +1,418 @@
+import Imap from "imap";
+import { simpleParser, ParsedMail } from "mailparser";
+import { createServerClient } from "@/lib/supabase";
+
+// ── Types ────────────────────────────────────────────
+interface EmailAccount {
+  id: string;
+  email: string;
+  name: string;
+  provider: string;
+  imap_host: string;
+  imap_port: number;
+  imap_user: string;
+  imap_password: string;
+  imap_tls: boolean;
+  last_sync_uid: string | null;
+}
+
+interface ParsedEmail {
+  uid: number;
+  messageId: string | null;
+  inReplyTo: string | null;
+  references: string[];
+  fromName: string;
+  fromEmail: string;
+  toAddresses: string;
+  ccAddresses: string;
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+  snippet: string;
+  sentAt: Date;
+  hasAttachments: boolean;
+}
+
+interface SyncResult {
+  success: boolean;
+  newMessages: number;
+  newConversations: number;
+  errors: string[];
+  lastUid: number | null;
+}
+
+// ── Main sync function ───────────────────────────────
+export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
+  const supabase = createServerClient();
+  const result: SyncResult = {
+    success: false,
+    newMessages: 0,
+    newConversations: 0,
+    errors: [],
+    lastUid: null,
+  };
+
+  try {
+    // 1. Get account credentials
+    const { data: account, error: accError } = await supabase
+      .from("email_accounts")
+      .select("*")
+      .eq("id", accountId)
+      .single();
+
+    if (accError || !account) {
+      result.errors.push("Account not found");
+      return result;
+    }
+
+    // 2. Connect to IMAP and fetch emails
+    const emails = await fetchEmailsViaImap(account as EmailAccount);
+
+    if (emails.length === 0) {
+      result.success = true;
+      await supabase
+        .from("email_accounts")
+        .update({ last_sync_at: new Date().toISOString(), sync_error: null })
+        .eq("id", accountId);
+      return result;
+    }
+
+    // 3. Process each email - thread into conversations and store
+    for (const email of emails) {
+      try {
+        // Check if message already exists (dedupe)
+        const existingCheck = await supabase
+          .from("messages")
+          .select("id")
+          .eq("provider_message_id", `${accountId}:${email.uid}`)
+          .maybeSingle();
+
+        if (existingCheck.data) continue; // Already synced
+
+        // Find or create conversation
+        const conversationId = await findOrCreateConversation(
+          supabase, accountId, email
+        );
+
+        // Insert message
+        const { error: msgError } = await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          provider_message_id: `${accountId}:${email.uid}`,
+          from_name: email.fromName,
+          from_email: email.fromEmail,
+          to_addresses: email.toAddresses,
+          cc_addresses: email.ccAddresses,
+          subject: email.subject,
+          body_text: email.bodyText,
+          body_html: email.bodyHtml,
+          snippet: email.snippet,
+          is_outbound: isOutbound(email.fromEmail, account.email),
+          has_attachments: email.hasAttachments,
+          sent_at: email.sentAt.toISOString(),
+        });
+
+        if (msgError) {
+          result.errors.push(`Message ${email.uid}: ${msgError.message}`);
+          continue;
+        }
+
+        // Update conversation with latest message info
+        await supabase
+          .from("conversations")
+          .update({
+            preview: email.snippet || email.bodyText?.slice(0, 200),
+            last_message_at: email.sentAt.toISOString(),
+            is_unread: !isOutbound(email.fromEmail, account.email),
+          })
+          .eq("id", conversationId);
+
+        result.newMessages++;
+        result.lastUid = Math.max(result.lastUid || 0, email.uid);
+      } catch (emailErr: any) {
+        result.errors.push(`Email ${email.uid}: ${emailErr.message}`);
+      }
+    }
+
+    // 4. Update account sync state
+    await supabase
+      .from("email_accounts")
+      .update({
+        last_sync_at: new Date().toISOString(),
+        last_sync_uid: result.lastUid?.toString() || account.last_sync_uid,
+        sync_error: result.errors.length > 0 ? result.errors[0] : null,
+      })
+      .eq("id", accountId);
+
+    result.success = true;
+  } catch (err: any) {
+    result.errors.push(err.message);
+
+    // Update account with error
+    const supabase2 = createServerClient();
+    await supabase2
+      .from("email_accounts")
+      .update({ sync_error: err.message })
+      .eq("id", accountId);
+  }
+
+  return result;
+}
+
+// ── IMAP Connection & Fetch ──────────────────────────
+function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
+  return new Promise((resolve, reject) => {
+    const emails: ParsedEmail[] = [];
+    const lastUid = account.last_sync_uid ? parseInt(account.last_sync_uid) : 0;
+
+    const imap = new Imap({
+      user: account.imap_user || account.email,
+      password: account.imap_password,
+      host: account.imap_host,
+      port: account.imap_port || 993,
+      tls: account.imap_tls !== false,
+      tlsOptions: { rejectUnauthorized: false },
+      connTimeout: 8000,
+      authTimeout: 8000,
+    });
+
+    imap.once("ready", () => {
+      imap.openBox("INBOX", true, (err, box) => {
+        if (err) {
+          imap.end();
+          return reject(new Error(`Failed to open INBOX: ${err.message}`));
+        }
+
+        // Determine which messages to fetch
+        let searchCriteria: any[];
+        if (lastUid > 0) {
+          // Fetch only new messages since last sync
+          searchCriteria = [["UID", `${lastUid + 1}:*`]];
+        } else {
+          // First sync - fetch last 50 messages
+          const total = box.messages.total;
+          const start = Math.max(1, total - 49);
+          searchCriteria = [["SEQUENCE", `${start}:*`]];
+        }
+
+        // Search for messages
+        imap.search(searchCriteria, (searchErr, uids) => {
+          if (searchErr) {
+            imap.end();
+            return reject(new Error(`Search failed: ${searchErr.message}`));
+          }
+
+          if (!uids || uids.length === 0) {
+            imap.end();
+            return resolve([]);
+          }
+
+          // Filter out UIDs we've already seen
+          const newUids = lastUid > 0 ? uids.filter(u => u > lastUid) : uids;
+          if (newUids.length === 0) {
+            imap.end();
+            return resolve([]);
+          }
+
+          // Limit to 100 per sync run to stay within timeout
+          const fetchUids = newUids.slice(-100);
+
+          const fetch = imap.fetch(fetchUids, {
+            bodies: "",
+            struct: true,
+          });
+
+          fetch.on("message", (msg, seqno) => {
+            let uid = 0;
+            let rawBuffer = Buffer.alloc(0);
+
+            msg.on("attributes", (attrs) => {
+              uid = attrs.uid;
+            });
+
+            msg.on("body", (stream) => {
+              const chunks: Buffer[] = [];
+              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              stream.on("end", () => {
+                rawBuffer = Buffer.concat(chunks);
+              });
+            });
+
+            msg.once("end", async () => {
+              try {
+                const parsed = await simpleParser(rawBuffer);
+                emails.push(parseMail(parsed, uid));
+              } catch (parseErr: any) {
+                // Skip unparseable emails
+                console.error(`Parse error for UID ${uid}:`, parseErr.message);
+              }
+            });
+          });
+
+          fetch.once("error", (fetchErr) => {
+            imap.end();
+            reject(new Error(`Fetch error: ${fetchErr.message}`));
+          });
+
+          fetch.once("end", () => {
+            // Wait a tick for all parsing to complete
+            setTimeout(() => {
+              imap.end();
+              // Sort by UID ascending
+              emails.sort((a, b) => a.uid - b.uid);
+              resolve(emails);
+            }, 500);
+          });
+        });
+      });
+    });
+
+    imap.once("error", (err: Error) => {
+      reject(new Error(`IMAP connection error: ${err.message}`));
+    });
+
+    imap.once("end", () => {
+      // Connection ended
+    });
+
+    // Set a timeout for the entire operation
+    const timeout = setTimeout(() => {
+      try { imap.end(); } catch {}
+      reject(new Error("IMAP sync timed out (8s)"));
+    }, 8000);
+
+    imap.once("ready", () => clearTimeout(timeout));
+
+    imap.connect();
+  });
+}
+
+// ── Parse email from mailparser ──────────────────────
+function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
+  const fromAddr = parsed.from?.value?.[0];
+  const toAddrs = parsed.to
+    ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to])
+        .flatMap((t) => t.value.map((v) => v.address))
+        .filter(Boolean)
+        .join(", ")
+    : "";
+  const ccAddrs = parsed.cc
+    ? (Array.isArray(parsed.cc) ? parsed.cc : [parsed.cc])
+        .flatMap((c) => c.value.map((v) => v.address))
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
+  const bodyText = parsed.text || "";
+  const bodyHtml = parsed.html || "";
+  const snippet = bodyText.replace(/\s+/g, " ").trim().slice(0, 200);
+
+  const references = parsed.references
+    ? Array.isArray(parsed.references)
+      ? parsed.references
+      : [parsed.references]
+    : [];
+
+  return {
+    uid,
+    messageId: parsed.messageId || null,
+    inReplyTo: parsed.inReplyTo || null,
+    references,
+    fromName: fromAddr?.name || fromAddr?.address || "Unknown",
+    fromEmail: fromAddr?.address || "",
+    toAddresses: toAddrs,
+    ccAddresses: ccAddrs,
+    subject: parsed.subject || "(No Subject)",
+    bodyText,
+    bodyHtml: typeof bodyHtml === "string" ? bodyHtml : "",
+    snippet,
+    sentAt: parsed.date || new Date(),
+    hasAttachments: (parsed.attachments?.length || 0) > 0,
+  };
+}
+
+// ── Conversation threading ───────────────────────────
+async function findOrCreateConversation(
+  supabase: any,
+  accountId: string,
+  email: ParsedEmail
+): Promise<string> {
+  // Strategy 1: Match by In-Reply-To header
+  if (email.inReplyTo) {
+    const { data: existingMsg } = await supabase
+      .from("messages")
+      .select("conversation_id")
+      .or(`provider_message_id.eq.${email.inReplyTo}`)
+      .limit(1)
+      .maybeSingle();
+
+    // Also search in snippet/subject match for the same thread
+  }
+
+  // Strategy 2: Match by References headers
+  if (email.references.length > 0) {
+    // Check if any referenced message exists in our DB
+    for (const ref of email.references) {
+      const { data: refMsg } = await supabase
+        .from("messages")
+        .select("conversation_id")
+        .like("provider_message_id", `%${ref}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (refMsg?.conversation_id) {
+        return refMsg.conversation_id;
+      }
+    }
+  }
+
+  // Strategy 3: Match by normalized subject + email account
+  const normalizedSubject = normalizeSubject(email.subject);
+  if (normalizedSubject) {
+    const { data: subjectMatch } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("email_account_id", accountId)
+      .eq("subject", normalizedSubject)
+      .gte("last_message_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order("last_message_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (subjectMatch?.id) {
+      return subjectMatch.id;
+    }
+  }
+
+  // Strategy 4: Create new conversation
+  const { data: newConvo, error } = await supabase
+    .from("conversations")
+    .insert({
+      email_account_id: accountId,
+      thread_id: email.messageId || `uid:${email.uid}`,
+      subject: normalizedSubject || email.subject,
+      from_name: email.fromName,
+      from_email: email.fromEmail,
+      preview: email.snippet,
+      is_unread: true,
+      status: "open",
+      last_message_at: email.sentAt.toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`Create conversation failed: ${error.message}`);
+
+  return newConvo.id;
+}
+
+// ── Helpers ──────────────────────────────────────────
+function normalizeSubject(subject: string): string {
+  return subject
+    .replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "")
+    .replace(/^(Re|Fwd|Fw|RE|FW|FWD)\[\d+\]:\s*/gi, "")
+    .trim();
+}
+
+function isOutbound(fromEmail: string, accountEmail: string): boolean {
+  return fromEmail.toLowerCase() === accountEmail.toLowerCase();
+}

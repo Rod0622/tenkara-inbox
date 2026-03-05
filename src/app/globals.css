@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --ink: #0B0E11;
+  --ink-50: #12161B;
+  --ink-100: #181D24;
+  --ink-200: #1E242C;
+  --ink-300: #262D37;
+  --ink-400: #484F58;
+  --ink-500: #7D8590;
+  --ink-600: #E6EDF3;
+  --mint: #4ADE80;
+  --mint-dim: rgba(74,222,128,0.12);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--ink);
+  color: var(--ink-600);
+  overflow: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink-200); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-400); }
+
+/* Selection */
+::selection {
+  background: rgba(74, 222, 128, 0.25);
+  color: white;
+}
