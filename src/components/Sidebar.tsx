@@ -210,7 +210,9 @@ export default function Sidebar({
 
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
-          const unread = mbConvos.filter((c) => c.is_unread).length;
+          // Team space only shows unassigned — count only unassigned unread
+          const unassignedConvos = mbConvos.filter((c) => !c.assignee_id);
+          const unread = unassignedConvos.filter((c) => c.is_unread).length;
           const isExpanded = expandedAccounts.has(mb.id);
           const accountFolders = getFoldersForAccount(mb.id);
           const inboxFolder = getInboxFolder(mb.id);
@@ -243,10 +245,10 @@ export default function Sidebar({
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
                     const isFolderActive = activeFolder === folder.id;
-                    // Count emails in Inbox folder (all account emails live here)
+                    // Count only unassigned unread for the Inbox folder
                     const folderUnread =
                       folder.name === "Inbox"
-                        ? mbConvos.filter((c) => c.is_unread).length
+                        ? unassignedConvos.filter((c) => c.is_unread).length
                         : 0;
 
                     return (

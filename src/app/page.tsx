@@ -38,9 +38,12 @@ export default function InboxPage() {
       filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
     }
 
-    // Team Space view: mailbox selected = show all for that account
+    // Team Space view: mailbox selected = show UNASSIGNED conversations only
+    // Assigned conversations live in the assignee's personal inbox
     if (activeMailbox) {
-      filtered = conversations.filter((c) => c.email_account_id === activeMailbox);
+      filtered = conversations.filter(
+        (c) => c.email_account_id === activeMailbox && !c.assignee_id
+      );
     }
 
     // Search filter
