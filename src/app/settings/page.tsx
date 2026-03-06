@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
-  Globe, Loader2, Eye, EyeOff, X
+  Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -40,6 +40,7 @@ const TABS = [
   { id: "accounts", label: "Accounts", icon: Mail },
   { id: "team", label: "Team Members", icon: Users },
   { id: "labels", label: "Labels", icon: Tag },
+  { id: "rules", label: "Rules", icon: Zap },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -92,6 +93,7 @@ export default function SettingsPage() {
         {activeTab === "accounts" && <AccountsTab onConnect={() => setShowConnectModal(true)} />}
         {activeTab === "team" && <TeamTab />}
         {activeTab === "labels" && <LabelsTab />}
+        {activeTab === "rules" && <RulesTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -758,47 +760,581 @@ function TeamTab() {
   );
 }
 
+// ── Color Picker Palette ────────────────────────────
+const LABEL_COLORS = [
+  "#4ADE80", "#39D2C0", "#58A6FF", "#BC8CFF", "#F5D547",
+  "#F0883E", "#F85149", "#7D8590", "#FF6B6B", "#48BFE3",
+  "#64DFDF", "#6930C3", "#E0AAFF", "#FFD166", "#06D6A0",
+];
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {LABEL_COLORS.map((c) => (
+        <button
+          key={c}
+          onClick={() => onChange(c)}
+          className="w-6 h-6 rounded-md transition-all hover:scale-110 flex items-center justify-center"
+          style={{ background: c, outline: value === c ? "2px solid #E6EDF3" : "none", outlineOffset: "2px" }}
+        >
+          {value === c && <CheckCircle size={12} className="text-[#0B0E11]" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Labels Tab ───────────────────────────────────────
 function LabelsTab() {
   const [labels, setLabels] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [newLabel, setNewLabel] = useState({ name: "", color: "#58A6FF" });
+  const [editLabel, setEditLabel] = useState({ name: "", color: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    supabase
-      .from("labels")
-      .select("*")
-      .order("sort_order")
-      .then(({ data }) => {
-        setLabels(data || []);
-        setLoading(false);
+  useEffect(() => { fetchLabels(); }, []);
+
+  const fetchLabels = async () => {
+    const { data } = await supabase.from("labels").select("*").order("sort_order");
+    setLabels(data || []);
+    setLoading(false);
+  };
+
+  const handleAdd = async () => {
+    if (!newLabel.name.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newLabel),
       });
-  }, []);
+      const data = await res.json();
+      if (res.ok) {
+        setNewLabel({ name: "", color: "#58A6FF" });
+        setShowAdd(false);
+        fetchLabels();
+      } else {
+        setError(data.error);
+      }
+    } catch { setError("Network error"); }
+    setSaving(false);
+  };
+
+  const handleUpdate = async (id: string) => {
+    if (!editLabel.name.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/labels", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name: editLabel.name, color: editLabel.color }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEditingId(null);
+        fetchLabels();
+      } else {
+        setError(data.error);
+      }
+    } catch { setError("Network error"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete label "${name}"? It will be removed from all conversations.`)) return;
+    try {
+      const res = await fetch(`/api/labels?id=${id}`, { method: "DELETE" });
+      if (res.ok) fetchLabels();
+    } catch { /* ignore */ }
+  };
+
+  const startEditing = (l: any) => {
+    setEditingId(l.id);
+    setEditLabel({ name: l.name, color: l.color });
+    setError("");
+  };
 
   return (
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Labels</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Organize conversations with labels</p>
+          <p className="text-sm text-[#7D8590] mt-1">Create and manage labels to organize conversations</p>
         </div>
+        <button
+          onClick={() => { setShowAdd(true); setError(""); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+        >
+          <Plus size={16} /> New Label
+        </button>
       </div>
+
+      {/* Add new label form */}
+      {showAdd && (
+        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
+          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">New Label</div>
+          <div className="flex items-start gap-3 mb-3">
+            <div className="flex-1">
+              <input
+                value={newLabel.name}
+                onChange={(e) => setNewLabel((p) => ({ ...p, name: e.target.value }))}
+                placeholder="Label name..."
+                autoFocus
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+              />
+            </div>
+            <span
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-semibold whitespace-nowrap flex-shrink-0"
+              style={{ background: `${newLabel.color}1F`, color: newLabel.color }}
+            >
+              <span className="w-2 h-2 rounded-full" style={{ background: newLabel.color }} />
+              {newLabel.name || "Preview"}
+            </span>
+          </div>
+          <div className="mb-3">
+            <div className="text-[10px] text-[#484F58] mb-1.5">Color</div>
+            <ColorPicker value={newLabel.color} onChange={(c) => setNewLabel((p) => ({ ...p, color: c }))} />
+          </div>
+          {error && <div className="text-[#F85149] text-xs mb-2">{error}</div>}
+          <div className="flex gap-2">
+            <button onClick={() => { setShowAdd(false); setError(""); }} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+            <button
+              onClick={handleAdd}
+              disabled={saving || !newLabel.name.trim()}
+              className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
+            >
+              {saving ? "Creating..." : "Create Label"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
           {labels.map((l) => (
-            <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C]">
-              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: l.color }} />
-              <span className="text-sm font-medium flex-1">{l.name}</span>
-              <span
-                className="text-[11px] font-semibold px-2 py-0.5 rounded"
-                style={{ background: l.bg_color, color: l.color }}
-              >
-                {l.name}
-              </span>
+            <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group">
+              {editingId === l.id ? (
+                /* Editing mode */
+                <div className="flex-1 space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    <input
+                      value={editLabel.name}
+                      onChange={(e) => setEditLabel((p) => ({ ...p, name: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(l.id); if (e.key === "Escape") setEditingId(null); }}
+                      autoFocus
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                    />
+                    <span
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold whitespace-nowrap"
+                      style={{ background: `${editLabel.color}1F`, color: editLabel.color }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: editLabel.color }} />
+                      {editLabel.name || "Preview"}
+                    </span>
+                  </div>
+                  <ColorPicker value={editLabel.color} onChange={(c) => setEditLabel((p) => ({ ...p, color: c }))} />
+                  {error && <div className="text-[#F85149] text-xs">{error}</div>}
+                  <div className="flex gap-2">
+                    <button onClick={() => { setEditingId(null); setError(""); }} className="px-3 py-1 rounded text-xs text-[#7D8590] border border-[#1E242C]">Cancel</button>
+                    <button
+                      onClick={() => handleUpdate(l.id)}
+                      disabled={saving || !editLabel.name.trim()}
+                      className="px-3 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
+                    >
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Display mode */
+                <>
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: l.color }} />
+                  <span className="text-sm font-medium flex-1">{l.name}</span>
+                  <span
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded"
+                    style={{ background: l.bg_color, color: l.color }}
+                  >
+                    {l.name}
+                  </span>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => startEditing(l)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+                      title="Edit"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(l.id, l.name)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
+
+          {labels.length === 0 && !showAdd && (
+            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+              <Tag className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No labels yet</h3>
+              <p className="text-sm text-[#7D8590] mb-4">Create labels to organize your conversations</p>
+              <button
+                onClick={() => setShowAdd(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
+              >
+                <Plus size={16} /> Create First Label
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Rules Tab ───────────────────────────────────────
+const CONDITION_FIELDS = [
+  { value: "subject", label: "Subject" },
+  { value: "from_email", label: "From Email" },
+  { value: "from_name", label: "From Name" },
+  { value: "to_addresses", label: "To / CC" },
+  { value: "body_text", label: "Body" },
+];
+
+const CONDITION_OPERATORS = [
+  { value: "contains", label: "Contains" },
+  { value: "not_contains", label: "Does not contain" },
+  { value: "equals", label: "Equals" },
+  { value: "starts_with", label: "Starts with" },
+  { value: "ends_with", label: "Ends with" },
+];
+
+const ACTION_TYPES = [
+  { value: "add_label", label: "Add label" },
+  { value: "remove_label", label: "Remove label" },
+  { value: "assign_to", label: "Assign to" },
+  { value: "mark_starred", label: "Star conversation" },
+  { value: "mark_read", label: "Mark as read" },
+  { value: "set_status", label: "Set status" },
+];
+
+function RulesTab() {
+  const [rules, setRules] = useState<any[]>([]);
+  const [labels, setLabels] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const emptyRule = {
+    name: "",
+    condition_field: "subject",
+    condition_operator: "contains",
+    condition_value: "",
+    action_type: "add_label",
+    action_value: "",
+  };
+
+  const [newRule, setNewRule] = useState(emptyRule);
+  const [editRule, setEditRule] = useState(emptyRule);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/rules").then((r) => r.json()),
+      supabase.from("labels").select("*").order("sort_order"),
+      supabase.from("team_members").select("*").eq("is_active", true),
+    ]).then(([rulesData, labelsRes, membersRes]) => {
+      setRules(rulesData.rules || []);
+      setLabels(labelsRes.data || []);
+      setMembers(membersRes.data || []);
+      setLoading(false);
+    });
+  }, []);
+
+  const fetchRules = async () => {
+    const res = await fetch("/api/rules");
+    const data = await res.json();
+    setRules(data.rules || []);
+  };
+
+  // Get display name for action_value
+  const getActionValueLabel = (type: string, value: string) => {
+    if (type === "add_label" || type === "remove_label") {
+      return labels.find((l) => l.id === value)?.name || value;
+    }
+    if (type === "assign_to") {
+      return members.find((m) => m.id === value)?.name || value;
+    }
+    if (type === "set_status") return value;
+    return "";
+  };
+
+  // Render the action_value selector based on action_type
+  const renderActionValueInput = (actionType: string, value: string, onChange: (v: string) => void) => {
+    if (actionType === "add_label" || actionType === "remove_label") {
+      return (
+        <select value={value} onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select label...</option>
+          {labels.map((l) => (
+            <option key={l.id} value={l.id}>{l.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (actionType === "assign_to") {
+      return (
+        <select value={value} onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select member...</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (actionType === "set_status") {
+      return (
+        <select value={value} onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+          <option value="snoozed">Snoozed</option>
+        </select>
+      );
+    }
+    return null; // star/read don't need a value
+  };
+
+  const needsActionValue = (type: string) => ["add_label", "remove_label", "assign_to", "set_status"].includes(type);
+
+  const handleAdd = async () => {
+    if (!newRule.name.trim() || !newRule.condition_value.trim()) return;
+    if (needsActionValue(newRule.action_type) && !newRule.action_value) return;
+    setSaving(true); setError("");
+    try {
+      const res = await fetch("/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newRule),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNewRule(emptyRule);
+        setShowAdd(false);
+        fetchRules();
+      } else { setError(data.error); }
+    } catch { setError("Network error"); }
+    setSaving(false);
+  };
+
+  const handleUpdate = async (id: string) => {
+    setSaving(true); setError("");
+    try {
+      const res = await fetch("/api/rules", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...editRule }),
+      });
+      if (res.ok) { setEditingId(null); fetchRules(); }
+      else { const d = await res.json(); setError(d.error); }
+    } catch { setError("Network error"); }
+    setSaving(false);
+  };
+
+  const handleToggle = async (id: string, isActive: boolean) => {
+    await fetch("/api/rules", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, is_active: !isActive }),
+    });
+    fetchRules();
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete rule "${name}"?`)) return;
+    await fetch(`/api/rules?id=${id}`, { method: "DELETE" });
+    fetchRules();
+  };
+
+  const RuleForm = ({ rule, setRule, onSave, onCancel, saveLabel }: {
+    rule: typeof emptyRule; setRule: (r: typeof emptyRule) => void;
+    onSave: () => void; onCancel: () => void; saveLabel: string;
+  }) => (
+    <div className="space-y-3">
+      <input
+        value={rule.name}
+        onChange={(e) => setRule({ ...rule, name: e.target.value })}
+        placeholder="Rule name (e.g. 'Auto-label RFQ emails')"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+      />
+
+      {/* Condition */}
+      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">When (condition)</div>
+        <div className="flex gap-2 flex-wrap">
+          <select value={rule.condition_field} onChange={(e) => setRule({ ...rule, condition_field: e.target.value })}
+            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+            {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+          <select value={rule.condition_operator} onChange={(e) => setRule({ ...rule, condition_operator: e.target.value })}
+            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+            {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <input
+            value={rule.condition_value}
+            onChange={(e) => setRule({ ...rule, condition_value: e.target.value })}
+            placeholder="Value to match..."
+            className="flex-1 min-w-[150px] px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+          />
+        </div>
+      </div>
+
+      {/* Action */}
+      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Then (action)</div>
+        <div className="flex gap-2 flex-wrap">
+          <select value={rule.action_type} onChange={(e) => setRule({ ...rule, action_type: e.target.value, action_value: "" })}
+            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+            {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+          {needsActionValue(rule.action_type) && renderActionValueInput(
+            rule.action_type,
+            rule.action_value,
+            (v) => setRule({ ...rule, action_value: v })
+          )}
+        </div>
+      </div>
+
+      {error && <div className="text-[#F85149] text-xs">{error}</div>}
+
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+        <button onClick={onSave} disabled={saving || !rule.name.trim() || !rule.condition_value.trim()}
+          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          {saving ? "Saving..." : saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Rules</h1>
+          <p className="text-sm text-[#7D8590] mt-1">Automate actions on incoming emails based on conditions</p>
+        </div>
+        <button
+          onClick={() => { setShowAdd(true); setError(""); setNewRule(emptyRule); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+        >
+          <Plus size={16} /> New Rule
+        </button>
+      </div>
+
+      {/* Add new rule */}
+      {showAdd && (
+        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
+          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">New Rule</div>
+          <RuleForm
+            rule={newRule}
+            setRule={setNewRule}
+            onSave={handleAdd}
+            onCancel={() => { setShowAdd(false); setError(""); }}
+            saveLabel="Create Rule"
+          />
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <div className="space-y-2">
+          {rules.map((r) => (
+            <div key={r.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
+              {editingId === r.id ? (
+                <RuleForm
+                  rule={editRule}
+                  setRule={setEditRule}
+                  onSave={() => handleUpdate(r.id)}
+                  onCancel={() => { setEditingId(null); setError(""); }}
+                  saveLabel="Save Changes"
+                />
+              ) : (
+                <div className="flex items-start gap-3">
+                  {/* Toggle */}
+                  <button
+                    onClick={() => handleToggle(r.id, r.is_active)}
+                    className={`mt-0.5 w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
+                      r.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
+                  </button>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-[#E6EDF3] mb-1">{r.name}</div>
+                    <div className="text-[11px] text-[#7D8590] leading-relaxed">
+                      <span className="text-[#484F58]">When</span>{" "}
+                      <span className="text-[#58A6FF] font-medium">{CONDITION_FIELDS.find((f) => f.value === r.condition_field)?.label}</span>{" "}
+                      <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o) => o.value === r.condition_operator)?.label?.toLowerCase()}</span>{" "}
+                      <span className="text-[#E6EDF3] font-medium">"{r.condition_value}"</span>{" "}
+                      <span className="text-[#484F58]">→</span>{" "}
+                      <span className="text-[#4ADE80] font-medium">{ACTION_TYPES.find((a) => a.value === r.action_type)?.label}</span>
+                      {r.action_value && (
+                        <span className="text-[#BC8CFF] font-medium"> {getActionValueLabel(r.action_type, r.action_value)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => { setEditingId(r.id); setEditRule({ name: r.name, condition_field: r.condition_field, condition_operator: r.condition_operator, condition_value: r.condition_value, action_type: r.action_type, action_value: r.action_value }); setError(""); }}
+                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(r.id, r.name)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {rules.length === 0 && !showAdd && (
+            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+              <Zap className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No rules yet</h3>
+              <p className="text-sm text-[#7D8590] mb-4">Create rules to auto-label, assign, or organize emails</p>
+              <button
+                onClick={() => setShowAdd(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
+              >
+                <Plus size={16} /> Create First Rule
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

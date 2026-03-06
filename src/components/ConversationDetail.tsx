@@ -6,7 +6,7 @@ import {
   ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
   Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus,
 } from "lucide-react";
-import { useConversationDetail } from "@/lib/hooks";
+import { useConversationDetail, useLabels } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
@@ -532,6 +532,94 @@ function ActivityItem({
   );
 }
 
+// ── Label Picker (add/remove labels on thread) ──────
+function LabelPicker({
+  conversationId,
+  currentLabels,
+  onToggle,
+}: {
+  conversationId: string;
+  currentLabels: { label_id: string; label?: any }[];
+  onToggle: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const allLabels = useLabels();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const currentLabelIds = new Set(currentLabels.map((cl) => cl.label_id));
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const handleToggleLabel = async (labelId: string) => {
+    const isAdding = !currentLabelIds.has(labelId);
+    try {
+      if (isAdding) {
+        await fetch("/api/conversations/labels", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId, labelId }),
+        });
+      } else {
+        await fetch("/api/conversations/labels", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId, labelId }),
+        });
+      }
+      onToggle();
+    } catch (err) {
+      console.error("Label toggle failed:", err);
+    }
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24] transition-all"
+      >
+        <Tag size={12} />
+        <span>Labels</span>
+        <ChevronDown size={10} className="text-[#484F58]" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in">
+          <div className="px-3 py-2 border-b border-[#1E242C]">
+            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Toggle labels</div>
+          </div>
+          {allLabels.map((label) => {
+            const isActive = currentLabelIds.has(label.id);
+            return (
+              <button
+                key={label.id}
+                onClick={() => handleToggleLabel(label.id)}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[#1E242C] transition-colors"
+              >
+                <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all ${
+                  isActive ? "border-transparent" : "border-[#484F58]"
+                }`} style={isActive ? { background: label.color } : {}}>
+                  {isActive && <Check size={10} className="text-[#0B0E11]" />}
+                </div>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: label.color }} />
+                <span className={isActive ? "text-[#E6EDF3] font-medium" : "text-[#7D8590]"}>{label.name}</span>
+              </button>
+            );
+          })}
+          {allLabels.length === 0 && (
+            <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">No labels — create some in Settings</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
   conversation: convo, currentUser, teamMembers,
@@ -671,6 +759,26 @@ export default function ConversationDetail({
           <div className="flex items-center gap-2 flex-wrap text-xs">
             <span className="text-[#7D8590]">{convo.from_name}</span>
             <span className="text-[#484F58]">&lt;{convo.from_email}&gt;</span>
+          </div>
+          {/* Labels row */}
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {(convo.labels || []).map((cl) => cl.label && (
+              <span
+                key={cl.label_id || cl.label?.id}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
+                style={{ background: cl.label.bg_color, color: cl.label.color }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: cl.label.color }} />
+                {cl.label.name}
+              </span>
+            ))}
+            <LabelPicker
+              conversationId={convo.id}
+              currentLabels={convo.labels || []}
+              onToggle={() => {
+                // Trigger a refetch — the realtime subscription handles this
+              }}
+            />
           </div>
         </div>
 
