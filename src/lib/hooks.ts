@@ -79,7 +79,7 @@ export function useConversations(accountId: string | null) {
 
     const { data, error } = await query;
     if (error) console.error("Fetch conversations error:", error);
-    setConversations(data || []);
+    setConversations((data || []) as Conversation[]);
     setLoading(false);
   }, [accountId]);
 
