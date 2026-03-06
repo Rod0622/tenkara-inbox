@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Reply, Forward, Archive, Mail, User, Folder, Plus, Check, Send,
-  ChevronDown, X, AtSign, MessageSquare,
+  ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
 } from "lucide-react";
 import { useConversationDetail } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
@@ -22,11 +22,13 @@ function Avatar({ initials, color, size = 28 }: { initials: string; color: strin
 // ── Assign Dropdown ──────────────────────────────────
 function AssignDropdown({
   currentAssignee,
+  currentUser,
   teamMembers,
   onAssign,
   conversationId,
 }: {
   currentAssignee: TeamMember | null | undefined;
+  currentUser: TeamMember | null;
   teamMembers: TeamMember[];
   onAssign: (conversationId: string, assigneeId: string | null) => Promise<void>;
   conversationId: string;
@@ -48,7 +50,6 @@ function AssignDropdown({
   const handleAssign = async (memberId: string | null) => {
     setAssigning(true);
     try {
-      // Call the assign API
       await fetch("/api/conversations/assign", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -65,26 +66,41 @@ function AssignDropdown({
     setOpen(false);
   };
 
+  const isAssignedToMe = currentAssignee?.id === currentUser?.id;
+
   return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={assigning}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
-      >
-        {currentAssignee ? (
-          <>
-            <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
-            <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
-          </>
-        ) : (
-          <>
-            <User size={14} className="text-[#484F58]" />
-            <span className="text-[#7D8590]">Assign to...</span>
-          </>
-        )}
-        <ChevronDown size={12} className="text-[#484F58] ml-1" />
-      </button>
+    <div className="relative flex" ref={dropdownRef}>
+      {/* Primary button: Assign to me (or show current assignee) */}
+      {currentAssignee ? (
+        <button
+          onClick={() => setOpen(!open)}
+          disabled={assigning}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
+        >
+          <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
+          <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
+          <ChevronDown size={12} className="text-[#484F58] ml-1" />
+        </button>
+      ) : (
+        <div className="flex">
+          {/* Main button: one-click assign to me */}
+          <button
+            onClick={() => currentUser && handleAssign(currentUser.id)}
+            disabled={assigning}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all border-r-0"
+          >
+            <User size={14} className="text-[#4ADE80]" />
+            <span className="text-[#E6EDF3]">{assigning ? "Assigning..." : "Assign to me"}</span>
+          </button>
+          {/* Dropdown arrow for other members */}
+          <button
+            onClick={() => setOpen(!open)}
+            className="flex items-center px-1.5 py-1.5 rounded-r-lg border border-[#1E242C] bg-[#12161B] hover:bg-[#181D24] transition-all"
+          >
+            <ChevronDown size={12} className="text-[#484F58]" />
+          </button>
+        </div>
+      )}
 
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in">
@@ -109,21 +125,26 @@ function AssignDropdown({
           {teamMembers
             .filter((m) => m.is_active !== false)
             .map((member) => {
-              const isCurrentAssignee = currentAssignee?.id === member.id;
+              const isCurrent = currentAssignee?.id === member.id;
               return (
                 <button
                   key={member.id}
                   onClick={() => handleAssign(member.id)}
                   className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] transition-colors ${
-                    isCurrentAssignee ? "text-[#4ADE80]" : "text-[#E6EDF3]"
+                    isCurrent ? "text-[#4ADE80]" : "text-[#E6EDF3]"
                   }`}
                 >
                   <Avatar initials={member.initials} color={member.color} size={20} />
                   <div className="flex-1 text-left">
-                    <div className="font-medium">{member.name}</div>
+                    <div className="font-medium">
+                      {member.name}
+                      {member.id === currentUser?.id && (
+                        <span className="text-[10px] text-[#484F58] ml-1">(me)</span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-[#484F58]">{member.department}</div>
                   </div>
-                  {isCurrentAssignee && <Check size={14} className="text-[#4ADE80]" />}
+                  {isCurrent && <Check size={14} className="text-[#4ADE80]" />}
                 </button>
               );
             })}
@@ -443,6 +464,50 @@ export default function ConversationDetail({
     setSending(false);
   };
 
+  const handleToggleRead = async () => {
+    try {
+      await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_unread: !convo.is_unread,
+        }),
+      });
+    } catch (err) {
+      console.error("Toggle read failed:", err);
+    }
+  };
+
+  const handleToggleStar = async () => {
+    try {
+      await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_starred: !convo.is_starred,
+        }),
+      });
+    } catch (err) {
+      console.error("Toggle star failed:", err);
+    }
+  };
+
+  // Mark as read when conversation is opened
+  useEffect(() => {
+    if (convo?.id && convo.is_unread) {
+      fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_unread: false,
+        }),
+      }).catch(() => {});
+    }
+  }, [convo?.id]);
+
   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
     { id: "notes", label: "Notes", count: notes.length },
@@ -467,11 +532,31 @@ export default function ConversationDetail({
         <div className="flex items-center gap-2 shrink-0">
           <AssignDropdown
             currentAssignee={assignee}
+            currentUser={currentUser}
             teamMembers={teamMembers}
             onAssign={onAssign}
             conversationId={convo.id}
           />
           <div className="flex gap-1">
+            {/* Star */}
+            <button
+              onClick={handleToggleStar}
+              title={convo.is_starred ? "Unstar" : "Star"}
+              className={`w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24] transition-all ${
+                convo.is_starred ? "text-[#F5D547]" : "text-[#7D8590]"
+              }`}
+            >
+              <Star size={16} fill={convo.is_starred ? "#F5D547" : "none"} />
+            </button>
+            {/* Mark unread/read */}
+            <button
+              onClick={handleToggleRead}
+              title={convo.is_unread ? "Mark as read" : "Mark as unread"}
+              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] transition-all"
+            >
+              {convo.is_unread ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+            {/* Reply, Forward, Archive */}
             {[
               { icon: Reply, title: "Reply" },
               { icon: Forward, title: "Forward" },
