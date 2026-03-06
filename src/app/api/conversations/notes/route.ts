@@ -1,63 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
+import { getServerSession } from "next-auth";
 
-// POST — Add label to conversation
+// POST /api/conversations/notes — create a note
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { conversationId, labelId, actorId } = await req.json();
-  if (!conversationId || !labelId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-
   const supabase = createServerClient();
-  const { error } = await supabase
-    .from("conversation_labels")
-    .upsert({ conversation_id: conversationId, label_id: labelId });
+  const body = await req.json();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Accept both camelCase and snake_case
+  const conversationId = body.conversation_id || body.conversationId;
+  const text = body.text;
 
-  // Get label name for activity log
-  const { data: label } = await supabase.from("labels").select("name").eq("id", labelId).single();
+  if (!conversationId || !text?.trim()) {
+    return NextResponse.json(
+      { error: "conversation_id and text are required" },
+      { status: 400 }
+    );
+  }
 
+  // Get the current user to set as author
+  // Try to find the team member from session
+  let authorId = body.author_id;
+
+  if (!authorId) {
+    // Get first admin as fallback — ideally you'd get this from session
+    const { data: members } = await supabase
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true)
+      .limit(1);
+
+    authorId = members?.[0]?.id;
+  }
+
+  if (!authorId) {
+    return NextResponse.json({ error: "Could not determine author" }, { status: 400 });
+  }
+
+  const { data: note, error } = await supabase
+    .from("notes")
+    .insert({
+      conversation_id: conversationId,
+      author_id: authorId,
+      text: text.trim(),
+    })
+    .select("*, author:team_members(*)")
+    .single();
+
+  if (error) {
+    console.error("Create note error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Log activity
   await supabase.from("activity_log").insert({
     conversation_id: conversationId,
-    actor_id: actorId || null,
-    action: "label_added",
-    details: { label_id: labelId, label_name: label?.name || "Unknown" },
+    actor_id: authorId,
+    action: "note_added",
+    details: { note_id: note?.id, preview: text.trim().slice(0, 80) },
   });
 
-  return NextResponse.json({ success: true }, { status: 201 });
+  return NextResponse.json({ note });
 }
 
-// DELETE — Remove label from conversation
-export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { conversationId, labelId, actorId } = await req.json();
-  if (!conversationId || !labelId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-
+// GET /api/conversations/notes?conversation_id=xxx
+export async function GET(req: NextRequest) {
   const supabase = createServerClient();
+  const conversationId = req.nextUrl.searchParams.get("conversation_id");
 
-  // Get label name before deleting
-  const { data: label } = await supabase.from("labels").select("name").eq("id", labelId).single();
+  if (!conversationId) {
+    return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
+  }
 
-  const { error } = await supabase
-    .from("conversation_labels")
-    .delete()
+  const { data: notes, error } = await supabase
+    .from("notes")
+    .select("*, author:team_members(*)")
     .eq("conversation_id", conversationId)
-    .eq("label_id", labelId);
+    .order("created_at", { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
-  await supabase.from("activity_log").insert({
-    conversation_id: conversationId,
-    actor_id: actorId || null,
-    action: "label_removed",
-    details: { label_id: labelId, label_name: label?.name || "Unknown" },
-  });
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ notes: notes || [] });
 }

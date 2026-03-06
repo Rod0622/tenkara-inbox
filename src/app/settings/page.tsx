@@ -459,17 +459,87 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 function TeamTab() {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteData, setInviteData] = useState({ email: "", name: "", role: "member", department: "Uncategorized" });
+  const [inviting, setInviting] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const DEPARTMENTS = ["Operations", "Management", "Dev", "Sales", "Support", "Uncategorized"];
 
   useEffect(() => {
-    supabase
-      .from("team_members")
-      .select("*")
-      .order("created_at")
-      .then(({ data }) => {
-        setMembers(data || []);
-        setLoading(false);
-      });
+    fetchMembers();
   }, []);
+
+  const fetchMembers = async () => {
+    const { data } = await supabase.from("team_members").select("*").order("created_at");
+    setMembers(data || []);
+    setLoading(false);
+  };
+
+  const handleInvite = async () => {
+    if (!inviteData.email.trim() || !inviteData.name.trim()) return;
+    setInviting(true);
+    setInviteResult(null);
+
+    try {
+      const res = await fetch("/api/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(inviteData),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setInviteResult({ success: true, message: data.message });
+        setInviteData({ email: "", name: "", role: "member", department: "Uncategorized" });
+        fetchMembers();
+        setTimeout(() => {
+          setShowInvite(false);
+          setInviteResult(null);
+        }, 3000);
+      } else {
+        setInviteResult({ success: false, message: data.error });
+      }
+    } catch {
+      setInviteResult({ success: false, message: "Network error" });
+    }
+    setInviting(false);
+  };
+
+  const handleUpdateMember = async (id: string, update: any) => {
+    try {
+      const res = await fetch("/api/invite", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member_id: id, ...update }),
+      });
+      if (res.ok) {
+        fetchMembers();
+        setEditingId(null);
+      }
+    } catch {
+      console.error("Update failed");
+    }
+  };
+
+  const handleDeactivate = async (id: string, name: string) => {
+    if (!confirm(`Deactivate ${name}? They will no longer be able to sign in.`)) return;
+    try {
+      const res = await fetch("/api/invite", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member_id: id }),
+      });
+      if (res.ok) fetchMembers();
+    } catch {
+      console.error("Deactivate failed");
+    }
+  };
+
+  const handleReactivate = async (id: string) => {
+    await handleUpdateMember(id, { is_active: true });
+  };
 
   return (
     <div className="max-w-3xl mx-auto p-8">
@@ -478,14 +548,116 @@ function TeamTab() {
           <h1 className="text-2xl font-bold tracking-tight">Team Members</h1>
           <p className="text-sm text-[#7D8590] mt-1">Manage who has access to the shared inbox</p>
         </div>
+        <button
+          onClick={() => { setShowInvite(true); setInviteResult(null); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+        >
+          <Plus size={16} /> Invite Member
+        </button>
       </div>
+
+      {/* Invite Modal */}
+      {showInvite && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold">Invite Team Member</h2>
+              <button onClick={() => setShowInvite(false)} className="text-[#484F58] hover:text-[#7D8590]">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Email Address</label>
+                <input
+                  type="email"
+                  value={inviteData.email}
+                  onChange={(e) => setInviteData((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="teammate@trytenkara.com"
+                  className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Full Name</label>
+                <input
+                  value={inviteData.name}
+                  onChange={(e) => setInviteData((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Jane Doe"
+                  className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Role</label>
+                  <select
+                    value={inviteData.role}
+                    onChange={(e) => setInviteData((p) => ({ ...p, role: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                  >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Department</label>
+                  <select
+                    value={inviteData.department}
+                    onChange={(e) => setInviteData((p) => ({ ...p, department: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                  >
+                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {inviteResult && (
+                <div className={`px-3 py-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                  inviteResult.success
+                    ? "bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-[#4ADE80]"
+                    : "bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-[#F85149]"
+                }`}>
+                  {inviteResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+                  {inviteResult.message}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowInvite(false)}
+                  className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:bg-[#1E242C] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleInvite}
+                  disabled={inviting || !inviteData.email.trim() || !inviteData.name.trim()}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                    inviting || !inviteData.email.trim() || !inviteData.name.trim()
+                      ? "bg-[#1E242C] text-[#484F58]"
+                      : "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3BC96E]"
+                  }`}
+                >
+                  {inviting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  {inviting ? "Sending Invite..." : "Send Invitation"}
+                </button>
+              </div>
+
+              <p className="text-[10px] text-[#484F58] text-center leading-relaxed">
+                An email invitation will be sent. On first sign-in, they choose their own password.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
-          {members.map((m) => (
-            <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C]">
+          {/* Active members */}
+          {members.filter((m) => m.is_active !== false).map((m) => (
+            <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group">
               <div
                 className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[#0B0E11] flex-shrink-0"
                 style={{ background: m.color }}
@@ -493,15 +665,93 @@ function TeamTab() {
                 {m.initials}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{m.name}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{m.name}</span>
+                  {!m.password_hash && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(245,213,71,0.12)] text-[#F5D547] uppercase tracking-wider">
+                      Pending
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-[#7D8590]">{m.email}</div>
               </div>
-              <span className="text-[10px] font-medium text-[#484F58] bg-[#1E242C] px-2 py-1 rounded">{m.department}</span>
-              <span className={`text-[10px] font-bold px-2 py-1 rounded ${
-                m.role === "admin" ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]" : "bg-[#1E242C] text-[#7D8590]"
-              }`}>{m.role}</span>
+
+              {editingId === m.id ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    defaultValue={m.department}
+                    onChange={(e) => handleUpdateMember(m.id, { department: e.target.value })}
+                    className="px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none"
+                  >
+                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <select
+                    defaultValue={m.role}
+                    onChange={(e) => handleUpdateMember(m.id, { role: e.target.value })}
+                    className="px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none"
+                  >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button onClick={() => setEditingId(null)} className="text-[#484F58] hover:text-[#7D8590]">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <span className="text-[10px] font-medium text-[#484F58] bg-[#1E242C] px-2 py-1 rounded">{m.department}</span>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded ${
+                    m.role === "admin" ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]" : "bg-[#1E242C] text-[#7D8590]"
+                  }`}>{m.role}</span>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setEditingId(m.id)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+                      title="Edit"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDeactivate(m.id, m.name)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+                      title="Deactivate"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
+
+          {/* Deactivated members */}
+          {members.filter((m) => m.is_active === false).length > 0 && (
+            <>
+              <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest pt-4 pb-1 px-1">
+                Deactivated
+              </div>
+              {members.filter((m) => m.is_active === false).map((m) => (
+                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] opacity-50">
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[#0B0E11] flex-shrink-0"
+                    style={{ background: m.color }}
+                  >
+                    {m.initials}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{m.name}</div>
+                    <div className="text-xs text-[#7D8590]">{m.email}</div>
+                  </div>
+                  <button
+                    onClick={() => handleReactivate(m.id)}
+                    className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-[#1E242C] text-[#7D8590] hover:text-[#4ADE80] hover:bg-[rgba(74,222,128,0.08)] transition-all"
+                  >
+                    Reactivate
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

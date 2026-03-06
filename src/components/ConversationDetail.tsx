@@ -426,6 +426,7 @@ const ACTIVITY_CONFIG: Record<string, { icon: any; color: string; label: string 
   reply_sent: { icon: Send, color: "#4ADE80", label: "Reply sent" },
   email_composed: { icon: MailPlus, color: "#58A6FF", label: "Email sent" },
   email_received: { icon: Mail, color: "#BC8CFF", label: "Email received" },
+  viewed: { icon: Eye, color: "#58A6FF", label: "Viewed" },
 };
 
 function ActivityItem({
@@ -555,17 +556,34 @@ export default function ConversationDetail({
     setNewTaskText("");
   }, [convo?.id]);
 
-  // Mark as read when conversation is opened
+  // Mark as read when conversation is opened + log viewed activity
   useEffect(() => {
-    if (convo?.id && convo.is_unread) {
-      fetch("/api/conversations/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: convo.id,
-          is_unread: false,
-        }),
-      }).catch(() => {});
+    if (convo?.id) {
+      // Log that this user viewed the conversation
+      if (currentUser?.id) {
+        fetch("/api/conversations/activity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: convo.id,
+            actor_id: currentUser.id,
+            action: "viewed",
+            details: {},
+          }),
+        }).catch(() => {});
+      }
+
+      if (convo.is_unread) {
+        fetch("/api/conversations/status", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: convo.id,
+            is_unread: false,
+            actor_id: currentUser?.id,
+          }),
+        }).catch(() => {});
+      }
     }
   }, [convo?.id]);
 

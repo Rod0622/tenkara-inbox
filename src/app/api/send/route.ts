@@ -1,87 +1,153 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import nodemailer from "nodemailer";
 
-// POST /api/conversations/tasks — create a task
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
-  const conversationId = body.conversation_id || body.conversationId;
-  const text = body.text;
-  const assigneeId = body.assignee_id || body.assigneeId || null;
-  const dueDate = body.due_date || body.dueDate || null;
+  // Two modes:
+  // 1. Reply: { conversation_id, body }
+  // 2. Compose: { account_id, to, cc, subject, body }
+  const isReply = !!body.conversation_id;
 
-  if (!conversationId || !text?.trim()) {
-    return NextResponse.json(
-      { error: "conversation_id and text are required" },
-      { status: 400 }
-    );
-  }
+  try {
+    let accountId: string;
+    let to: string;
+    let cc: string = body.cc || "";
+    let subject: string;
+    let emailBody: string = body.body;
+    let conversationId: string | null = body.conversation_id || null;
 
-  const { data: task, error } = await supabase
-    .from("tasks")
-    .insert({
-      conversation_id: conversationId,
-      text: text.trim(),
-      assignee_id: assigneeId,
-      due_date: dueDate,
-      is_done: false,
-    })
-    .select("*, assignee:team_members(*)")
-    .single();
+    if (isReply) {
+      // Get conversation to find account and recipient
+      const { data: convo, error: convoErr } = await supabase
+        .from("conversations")
+        .select("*")
+        .eq("id", body.conversation_id)
+        .single();
 
-  if (error) {
-    console.error("Create task error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+      if (convoErr || !convo) {
+        return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+      }
 
-  // Log activity
-  await supabase.from("activity_log").insert({
-    conversation_id: conversationId,
-    actor_id: assigneeId || null,
-    action: "task_created",
-    details: { task_id: task?.id, text: text.trim().slice(0, 80) },
-  });
+      accountId = convo.email_account_id;
+      to = convo.from_email;
+      subject = `Re: ${convo.subject}`;
+    } else {
+      // Compose mode
+      accountId = body.account_id;
+      to = body.to;
+      subject = body.subject;
 
-  return NextResponse.json({ task });
-}
+      if (!accountId || !to || !subject) {
+        return NextResponse.json(
+          { error: "account_id, to, and subject are required for compose" },
+          { status: 400 }
+        );
+      }
+    }
 
-// PATCH /api/conversations/tasks — toggle a task
-export async function PATCH(req: NextRequest) {
-  const supabase = createServerClient();
-  const body = await req.json();
+    // Get account SMTP settings
+    const { data: account, error: accErr } = await supabase
+      .from("email_accounts")
+      .select("*")
+      .eq("id", accountId)
+      .single();
 
-  const taskId = body.task_id || body.taskId;
-  const isDone = body.is_done ?? body.isDone;
-  const actorId = body.actor_id || null;
+    if (accErr || !account) {
+      return NextResponse.json({ error: "Email account not found" }, { status: 404 });
+    }
 
-  if (!taskId || isDone === undefined) {
-    return NextResponse.json(
-      { error: "task_id and is_done are required" },
-      { status: 400 }
-    );
-  }
-
-  const { data: task, error } = await supabase
-    .from("tasks")
-    .update({ is_done: isDone })
-    .eq("id", taskId)
-    .select("*, assignee:team_members(*)")
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Log activity
-  if (task?.conversation_id) {
-    await supabase.from("activity_log").insert({
-      conversation_id: task.conversation_id,
-      actor_id: actorId,
-      action: isDone ? "task_completed" : "task_reopened",
-      details: { task_id: taskId, text: task.text?.slice(0, 80) },
+    // Create SMTP transport
+    const transport = nodemailer.createTransport({
+      host: account.smtp_host,
+      port: account.smtp_port || 587,
+      secure: account.smtp_port === 465,
+      auth: {
+        user: account.smtp_user || account.imap_user || account.email,
+        pass: account.smtp_password || account.imap_password,
+      },
+      tls: { rejectUnauthorized: false },
     });
-  }
 
-  return NextResponse.json({ task });
+    // Send the email
+    const info = await transport.sendMail({
+      from: `"${account.name}" <${account.email}>`,
+      to,
+      cc: cc || undefined,
+      subject,
+      text: emailBody,
+      html: emailBody.replace(/\n/g, "<br>"),
+    });
+
+    // If compose (no existing conversation), create one
+    if (!isReply) {
+      const { data: newConvo } = await supabase
+        .from("conversations")
+        .insert({
+          email_account_id: accountId,
+          thread_id: info.messageId || `sent:${Date.now()}`,
+          subject: subject.replace(/^Re:\s*/i, ""),
+          from_name: account.name,
+          from_email: account.email,
+          preview: emailBody.slice(0, 200),
+          is_unread: false,
+          status: "open",
+          last_message_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      conversationId = newConvo?.id || null;
+    }
+
+    // Store sent message locally
+    if (conversationId) {
+      await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        provider_message_id: info.messageId || `sent:${Date.now()}`,
+        from_name: account.name,
+        from_email: account.email,
+        to_addresses: to,
+        cc_addresses: cc,
+        subject,
+        body_text: emailBody,
+        body_html: emailBody.replace(/\n/g, "<br>"),
+        snippet: emailBody.slice(0, 200),
+        is_outbound: true,
+        has_attachments: false,
+        sent_at: new Date().toISOString(),
+      });
+
+      // Update conversation
+      await supabase
+        .from("conversations")
+        .update({
+          preview: emailBody.slice(0, 200),
+          last_message_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId);
+
+      // Log activity
+      await supabase.from("activity_log").insert({
+        conversation_id: conversationId,
+        actor_id: body.actor_id || null,
+        action: isReply ? "reply_sent" : "email_composed",
+        details: { to, subject, preview: emailBody.slice(0, 80) },
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      messageId: info.messageId,
+      conversationId,
+    });
+  } catch (err: any) {
+    console.error("Send email error:", err);
+    return NextResponse.json(
+      { error: err.message || "Failed to send email" },
+      { status: 500 }
+    );
+  }
 }

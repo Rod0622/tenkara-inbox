@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
@@ -216,7 +216,11 @@ function FilterPanel({
                   : "bg-[#1E242C] text-[#7D8590] hover:bg-[#242930]"
               }`}
             >
-              {m.initials}
+              <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0"
+                style={{ background: filters.assignedTo === m.id ? "#0B0E11" : m.color, color: filters.assignedTo === m.id ? "#4ADE80" : "#0B0E11" }}>
+                {m.initials}
+              </span>
+              {m.name}
             </button>
           ))}
         </div>
@@ -262,10 +266,11 @@ function FilterPanel({
 
 // ── Main ConversationList ────────────────────────────
 export default function ConversationList({
-  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery, teamMembers,
+  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery, teamMembers, onBulkAction,
 }: ConversationListProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const hasActiveFilters =
     filters.dateRange !== "all" ||
@@ -338,6 +343,41 @@ export default function ConversationList({
 
   const grouped = useMemo(() => groupByDate(filteredConversations), [filteredConversations]);
 
+  // Clean up selected IDs when conversations change
+  useEffect(() => {
+    const validIds = new Set(filteredConversations.map((c) => c.id));
+    setSelectedIds((prev) => {
+      const cleaned = new Set([...prev].filter((id) => validIds.has(id)));
+      return cleaned.size !== prev.size ? cleaned : prev;
+    });
+  }, [filteredConversations]);
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedIds.size === filteredConversations.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredConversations.map((c) => c.id)));
+    }
+  };
+
+  const handleBulkAction = async (action: string, payload?: any) => {
+    if (!onBulkAction || selectedIds.size === 0) return;
+    await onBulkAction(Array.from(selectedIds), action, payload);
+    setSelectedIds(new Set());
+  };
+
+  const isSelecting = selectedIds.size > 0;
+
   return (
     <div className="w-[360px] min-w-[360px] h-full bg-[#12161B] border-r border-[#1E242C] flex flex-col overflow-hidden">
       {/* Search + Filter toggle */}
@@ -365,6 +405,70 @@ export default function ConversationList({
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {isSelecting && (
+        <div className="px-3 pb-2 animate-fade-in">
+          <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-[#161B22] border border-[#1E242C]">
+            <button
+              onClick={selectAll}
+              className="flex items-center gap-1.5 text-[11px] font-medium text-[#E6EDF3] hover:text-[#4ADE80] transition-colors mr-1"
+            >
+              <div className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center transition-all ${
+                selectedIds.size === filteredConversations.length
+                  ? "border-[#4ADE80] bg-[#4ADE80]"
+                  : "border-[#484F58]"
+              }`}>
+                {selectedIds.size === filteredConversations.length && (
+                  <Check size={9} className="text-[#0B0E11]" />
+                )}
+              </div>
+              <span className="text-[#4ADE80] tabular-nums">{selectedIds.size}</span>
+            </button>
+
+            <div className="w-px h-4 bg-[#1E242C] mx-0.5" />
+
+            <button
+              onClick={() => handleBulkAction("star")}
+              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F5D547] transition-all"
+              title="Star selected"
+            >
+              <Star size={13} />
+            </button>
+            <button
+              onClick={() => handleBulkAction("mark_unread")}
+              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#BC8CFF] transition-all"
+              title="Mark as unread"
+            >
+              <MailOpen size={13} />
+            </button>
+            <button
+              onClick={() => handleBulkAction("archive")}
+              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#58A6FF] transition-all"
+              title="Archive selected"
+            >
+              <Archive size={13} />
+            </button>
+            <button
+              onClick={() => handleBulkAction("delete")}
+              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149] transition-all"
+              title="Delete selected"
+            >
+              <Trash2 size={13} />
+            </button>
+
+            <div className="flex-1" />
+
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="p-1 rounded text-[#484F58] hover:text-[#7D8590] transition-colors"
+              title="Clear selection"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Filter panel */}
       {showFilters && (
         <FilterPanel
@@ -384,19 +488,34 @@ export default function ConversationList({
             </div>
             {convos.map((c) => {
               const isActive = activeConvo?.id === c.id;
+              const isSelected = selectedIds.has(c.id);
               const assignee = c.assignee || teamMembers.find((t) => t.id === c.assignee_id);
               const labels = c.labels?.map((cl) => cl.label).filter(Boolean) || [];
 
               return (
-                <button
+                <div
                   key={c.id}
-                  onClick={() => setActiveConvo(c)}
-                  className={`relative flex gap-2.5 p-2.5 mb-0.5 rounded-lg w-full text-left transition-all ${
-                    isActive ? "bg-[#1E242C]" : "hover:bg-[#181D24]"
+                  className={`relative flex gap-2 p-2.5 mb-0.5 rounded-lg w-full text-left transition-all cursor-pointer group ${
+                    isActive ? "bg-[#1E242C]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[#181D24]"
                   }`}
+                  onClick={() => setActiveConvo(c)}
                 >
+                  {/* Checkbox */}
+                  <div
+                    className={`flex-shrink-0 mt-1 transition-all ${isSelecting ? "w-5 opacity-100" : "w-0 opacity-0 group-hover:w-5 group-hover:opacity-100"}`}
+                    onClick={(e) => toggleSelect(c.id, e)}
+                  >
+                    <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-[#4ADE80] bg-[#4ADE80]"
+                        : "border-[#484F58] hover:border-[#7D8590]"
+                    }`}>
+                      {isSelected && <Check size={10} className="text-[#0B0E11]" />}
+                    </div>
+                  </div>
+
                   {/* Unread dot */}
-                  {c.is_unread && (
+                  {c.is_unread && !isSelecting && (
                     <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-[#4ADE80]" />
                   )}
 
@@ -434,7 +553,7 @@ export default function ConversationList({
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

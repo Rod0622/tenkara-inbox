@@ -158,6 +158,7 @@ export interface ConversationListProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   teamMembers: TeamMember[];
+  onBulkAction?: (ids: string[], action: string, payload?: any) => Promise<void>;
 }
 
 export interface ConversationDetailProps {

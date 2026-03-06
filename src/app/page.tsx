@@ -96,6 +96,33 @@ export default function InboxPage() {
     refetch();
   };
 
+  // Bulk action handler
+  const handleBulkAction = async (ids: string[], action: string, payload?: any) => {
+    try {
+      const res = await fetch("/api/conversations/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids,
+          action,
+          actor_id: currentUser?.id,
+          ...payload,
+        }),
+      });
+      if (res.ok) {
+        refetch();
+        // If active conversation was in the bulk action, clear it
+        if (activeConvo && ids.includes(activeConvo.id)) {
+          if (action === "archive" || action === "delete") {
+            setActiveConvo(null);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Bulk action failed:", err);
+    }
+  };
+
   const isComposing = activeView === "compose";
 
   if (status === "loading") {
@@ -138,6 +165,7 @@ export default function InboxPage() {
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
             teamMembers={teamMembers}
+            onBulkAction={handleBulkAction}
           />
 
           <ConversationDetail

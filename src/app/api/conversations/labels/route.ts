@@ -1,68 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 
-// PATCH /api/conversations/status — update read/star/flag status
-export async function PATCH(req: NextRequest) {
+// POST — Add label to conversation
+export async function POST(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { conversationId, labelId, actorId } = await req.json();
+  if (!conversationId || !labelId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+
   const supabase = createServerClient();
-  const body = await req.json();
+  const { error } = await supabase
+    .from("conversation_labels")
+    .upsert({ conversation_id: conversationId, label_id: labelId });
 
-  const conversationId = body.conversation_id || body.conversationId;
-  const actorId = body.actor_id;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (!conversationId) {
-    return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
-  }
+  // Get label name for activity log
+  const { data: label } = await supabase.from("labels").select("name").eq("id", labelId).single();
 
-  // Build update object from provided fields
-  const update: any = {};
-  if (body.is_unread !== undefined) update.is_unread = body.is_unread;
-  if (body.is_starred !== undefined) update.is_starred = body.is_starred;
-  if (body.status !== undefined) update.status = body.status;
+  await supabase.from("activity_log").insert({
+    conversation_id: conversationId,
+    actor_id: actorId || null,
+    action: "label_added",
+    details: { label_id: labelId, label_name: label?.name || "Unknown" },
+  });
 
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
-  }
+  return NextResponse.json({ success: true }, { status: 201 });
+}
 
-  const { data, error } = await supabase
-    .from("conversations")
-    .update(update)
-    .eq("id", conversationId)
-    .select()
-    .single();
+// DELETE — Remove label from conversation
+export async function DELETE(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const { conversationId, labelId, actorId } = await req.json();
+  if (!conversationId || !labelId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
 
-  // Log activity for each changed field
-  const logEntries: any[] = [];
-  if (body.is_starred !== undefined) {
-    logEntries.push({
-      conversation_id: conversationId,
-      actor_id: actorId || null,
-      action: body.is_starred ? "starred" : "unstarred",
-      details: {},
-    });
-  }
-  if (body.is_unread !== undefined) {
-    logEntries.push({
-      conversation_id: conversationId,
-      actor_id: actorId || null,
-      action: body.is_unread ? "marked_unread" : "marked_read",
-      details: {},
-    });
-  }
-  if (body.status !== undefined) {
-    logEntries.push({
-      conversation_id: conversationId,
-      actor_id: actorId || null,
-      action: "status_changed",
-      details: { status: body.status },
-    });
-  }
-  if (logEntries.length > 0) {
-    await supabase.from("activity_log").insert(logEntries);
-  }
+  const supabase = createServerClient();
 
-  return NextResponse.json({ conversation: data });
+  // Get label name before deleting
+  const { data: label } = await supabase.from("labels").select("name").eq("id", labelId).single();
+
+  const { error } = await supabase
+    .from("conversation_labels")
+    .delete()
+    .eq("conversation_id", conversationId)
+    .eq("label_id", labelId);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await supabase.from("activity_log").insert({
+    conversation_id: conversationId,
+    actor_id: actorId || null,
+    action: "label_removed",
+    details: { label_id: labelId, label_name: label?.name || "Unknown" },
+  });
+
+  return NextResponse.json({ success: true });
 }
