@@ -61,9 +61,11 @@ export function useConversations(accountId: string | null) {
     let query = supabase
       .from("conversations")
       .select(`
-        *,
+        id, email_account_id, folder_id, thread_id, subject, from_name, from_email,
+        preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, updated_at,
         assignee:team_members(*),
         labels:conversation_labels(
+          label_id,
           label:labels(*)
         )
       `)
@@ -89,6 +91,7 @@ export function useConversations(accountId: string | null) {
       .channel("conversations-realtime")
       .on("postgres_changes", { event: "*", schema: "inbox", table: "conversations" }, () => fetchConversations())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "messages" }, () => fetchConversations())
+      .on("postgres_changes", { event: "*", schema: "inbox", table: "conversation_labels" }, () => fetchConversations())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

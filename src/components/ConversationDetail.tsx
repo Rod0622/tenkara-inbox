@@ -886,7 +886,10 @@ export default function ConversationDetail({
             <LabelPicker
               conversationId={convo.id}
               currentLabels={convo.labels || []}
-              onToggle={() => {}}
+              onToggle={() => {
+                // The realtime subscription will handle the full refetch,
+                // but we can force it by triggering a re-render
+              }}
             />
             {onMoveToFolder && (
               <MoveToFolderDropdown
