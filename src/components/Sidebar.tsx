@@ -5,7 +5,7 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import {
   Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus,
-  ChevronRight, FolderPlus, MoreHorizontal, Trash2,
+  ChevronRight, FolderPlus, MoreHorizontal, Trash2, PenSquare,
 } from "lucide-react";
 import type { SidebarProps } from "@/types";
 
@@ -35,9 +35,6 @@ export default function Sidebar({
   // Personal counts: only conversations assigned to the current user
   const myConvos = conversations.filter((c) => c.assignee_id === currentUser?.id);
   const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
-
-  // Total unread across all accounts (for account-level badges)
-  const totalUnreadCount = conversations.filter((c) => c.is_unread).length;
 
   useEffect(() => {
     fetchFolders();
@@ -115,26 +112,41 @@ export default function Sidebar({
   const getFoldersForAccount = (accountId: string) =>
     folders.filter((f) => f.email_account_id === accountId).sort((a, b) => a.sort_order - b.sort_order);
 
+  // Find the "Inbox" system folder for an account
+  const getInboxFolder = (accountId: string) =>
+    folders.find((f) => f.email_account_id === accountId && f.is_system && f.name === "Inbox");
+
   return (
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
-      {/* Logo + Sync */}
-      <div className="p-4 pb-3 border-b border-[#161B22] flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
-          T
+      {/* Logo + Compose + Sync */}
+      <div className="p-4 pb-3 border-b border-[#161B22]">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
+            T
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
+            <div className="text-[10px] text-[#484F58] uppercase tracking-widest">Shared Inbox</div>
+          </div>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
+              syncing ? "text-[#4ADE80]" : "text-[#484F58] hover:text-[#4ADE80] hover:bg-[#12161B]"
+            }`}
+            title="Sync emails"
+          >
+            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+          </button>
         </div>
-        <div className="flex-1">
-          <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
-          <div className="text-[10px] text-[#484F58] uppercase tracking-widest">Shared Inbox</div>
-        </div>
+
+        {/* Compose button */}
         <button
-          onClick={handleSync}
-          disabled={syncing}
-          className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
-            syncing ? "text-[#4ADE80]" : "text-[#484F58] hover:text-[#4ADE80] hover:bg-[#12161B]"
-          }`}
-          title="Sync emails"
+          onClick={() => setActiveView("compose")}
+          className="flex items-center justify-center gap-2 w-full py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[13px] font-bold hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
         >
-          <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+          <PenSquare size={14} />
+          <span>Compose</span>
         </button>
       </div>
 
@@ -176,7 +188,7 @@ export default function Sidebar({
         })}
       </div>
 
-      {/* Email Accounts (shared team spaces) with Folders */}
+      {/* Team Spaces (Email Accounts) with Folders */}
       <div className="px-2 pt-3 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
@@ -199,49 +211,44 @@ export default function Sidebar({
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
           const unread = mbConvos.filter((c) => c.is_unread).length;
-          const isActive = activeMailbox === mb.id && !activeFolder;
           const isExpanded = expandedAccounts.has(mb.id);
           const accountFolders = getFoldersForAccount(mb.id);
+          const inboxFolder = getInboxFolder(mb.id);
 
           return (
             <div key={mb.id} className="mb-0.5">
-              <div className="flex items-center group">
-                <button
-                  onClick={() => toggleAccount(mb.id)}
-                  className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] shrink-0"
-                >
-                  <ChevronRight
-                    size={12}
-                    className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                  />
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveMailbox(mb.id);
-                    setActiveView("inbox");
-                    setActiveFolder(null);
-                  }}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] font-medium transition-all flex-1 min-w-0 text-left ${
-                    isActive ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
-                  }`}
-                >
-                  <span className="text-[15px] shrink-0">{mb.icon || "📬"}</span>
-                  <span className="flex-1 truncate">{mb.name}</span>
-                  {unread > 0 && (
-                    <span
-                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center shrink-0"
-                      style={{ background: mb.color || "#4ADE80" }}
-                    >
-                      {unread}
-                    </span>
-                  )}
-                </button>
-              </div>
+              {/* Account row — clicking ONLY toggles expand/collapse */}
+              <button
+                onClick={() => toggleAccount(mb.id)}
+                className="flex items-center gap-1 px-1 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left text-[#7D8590] hover:bg-[#12161B] group"
+              >
+                <ChevronRight
+                  size={12}
+                  className={`transition-transform text-[#484F58] shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                />
+                <span className="text-[15px] shrink-0">{mb.icon || "📬"}</span>
+                <span className="flex-1 truncate ml-1">{mb.name}</span>
+                {unread > 0 && (
+                  <span
+                    className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center shrink-0"
+                    style={{ background: mb.color || "#4ADE80" }}
+                  >
+                    {unread}
+                  </span>
+                )}
+              </button>
 
+              {/* Folders (collapsible) */}
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
                     const isFolderActive = activeFolder === folder.id;
+                    // Count emails in Inbox folder (all account emails live here)
+                    const folderUnread =
+                      folder.name === "Inbox"
+                        ? mbConvos.filter((c) => c.is_unread).length
+                        : 0;
+
                     return (
                       <div key={folder.id} className="flex items-center group/folder">
                         <button
@@ -258,7 +265,17 @@ export default function Sidebar({
                         >
                           <span className="text-[13px] shrink-0">{folder.icon}</span>
                           <span className="flex-1 truncate">{folder.name}</span>
+                          {folderUnread > 0 && (
+                            <span
+                              className="min-w-[16px] h-[16px] rounded-full px-1 text-[#0B0E11] text-[10px] font-bold flex items-center justify-center shrink-0"
+                              style={{ background: mb.color || "#4ADE80" }}
+                            >
+                              {folderUnread}
+                            </span>
+                          )}
                         </button>
+
+                        {/* Folder actions (only for non-system folders) */}
                         {!folder.is_system && (
                           <div className="relative">
                             <button
@@ -286,6 +303,8 @@ export default function Sidebar({
                       </div>
                     );
                   })}
+
+                  {/* Add folder input */}
                   {addingFolder === mb.id ? (
                     <div className="flex items-center gap-1 px-1.5 py-1 mt-0.5">
                       <input

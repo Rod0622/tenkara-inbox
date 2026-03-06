@@ -21,6 +21,7 @@ export default function InboxPage() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Fetch ALL conversations (no mailbox filter for now - we filter client-side)
   const { conversations, loading } = useConversations(activeMailbox);
 
   const currentUser = useMemo(
@@ -29,14 +30,20 @@ export default function InboxPage() {
   );
 
   // Filter conversations based on context:
-  // - Top-level Inbox/Tasks/Sent = personal (assigned to me only)
-  // - Team Space (activeMailbox set) = all conversations for that account
+  // - Personal Inbox (no mailbox) = assigned to me
+  // - Team Space folder "Inbox" (activeMailbox set) = all for that account
+  // - Other folders = would filter by folder_id (future)
   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
     // Personal view: no mailbox selected = show only my assigned conversations
     if (!activeMailbox && currentUser) {
       filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+    }
+
+    // Team Space view: mailbox selected = show all for that account
+    if (activeMailbox) {
+      filtered = conversations.filter((c) => c.email_account_id === activeMailbox);
     }
 
     // Search filter
