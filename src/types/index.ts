@@ -116,6 +116,21 @@ export interface SlackNotification {
   blocks?: any[];
 }
 
+export interface ActivityLog {
+  id: string;
+  conversation_id: string;
+  actor_id: string | null;
+  action: string;
+  details: Record<string, any>;
+  created_at: string;
+  actor?: {
+    id: string;
+    name: string;
+    initials: string;
+    color: string;
+  };
+}
+
 // ── Supabase Realtime Payload ────────────────────────
 
 export interface RealtimePayload<T> {
@@ -152,7 +167,7 @@ export interface ConversationDetailProps {
   onAddNote: (conversationId: string, text: string) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
   onAddTask: (conversationId: string, text: string, assigneeId?: string) => Promise<void>;
-  onAssign: (conversationId: string, assigneeId: string | null) => Promise<void>;
+  onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string) => Promise<void>;
 }
 

@@ -1,37 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
-// PATCH /api/conversations/status — update read/star/flag status
-export async function PATCH(req: NextRequest) {
+// GET /api/conversations/activity?conversation_id=xxx
+export async function GET(req: NextRequest) {
   const supabase = createServerClient();
-  const body = await req.json();
-
-  const conversationId = body.conversation_id || body.conversationId;
+  const conversationId = req.nextUrl.searchParams.get("conversation_id");
 
   if (!conversationId) {
     return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
   }
 
-  // Build update object from provided fields
-  const update: any = {};
-  if (body.is_unread !== undefined) update.is_unread = body.is_unread;
-  if (body.is_starred !== undefined) update.is_starred = body.is_starred;
-  if (body.status !== undefined) update.status = body.status;
+  const { data: activities, error } = await supabase
+    .from("activity_log")
+    .select("*, actor:team_members(id, name, initials, color)")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(100);
 
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ activities: activities || [] });
+}
+
+// POST /api/conversations/activity — log an activity event
+export async function POST(req: NextRequest) {
+  const supabase = createServerClient();
+  const body = await req.json();
+
+  const { conversation_id, actor_id, action, details } = body;
+
+  if (!conversation_id || !action) {
+    return NextResponse.json(
+      { error: "conversation_id and action are required" },
+      { status: 400 }
+    );
   }
 
   const { data, error } = await supabase
-    .from("conversations")
-    .update(update)
-    .eq("id", conversationId)
-    .select()
+    .from("activity_log")
+    .insert({
+      conversation_id,
+      actor_id: actor_id || null,
+      action,
+      details: details || {},
+    })
+    .select("*, actor:team_members(id, name, initials, color)")
     .single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ conversation: data });
+  return NextResponse.json({ activity: data });
 }

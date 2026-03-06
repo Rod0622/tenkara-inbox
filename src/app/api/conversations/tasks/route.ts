@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { getServerSession } from "next-auth";
 
-// POST /api/conversations/tasks — create a task
+// POST /api/conversations/notes — create a note
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
+  // Accept both camelCase and snake_case
   const conversationId = body.conversation_id || body.conversationId;
   const text = body.text;
-  const assigneeId = body.assignee_id || body.assigneeId || null;
-  const dueDate = body.due_date || body.dueDate || null;
 
   if (!conversationId || !text?.trim()) {
     return NextResponse.json(
@@ -18,51 +18,69 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { data: task, error } = await supabase
-    .from("tasks")
+  // Get the current user to set as author
+  // Try to find the team member from session
+  let authorId = body.author_id;
+
+  if (!authorId) {
+    // Get first admin as fallback — ideally you'd get this from session
+    const { data: members } = await supabase
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true)
+      .limit(1);
+
+    authorId = members?.[0]?.id;
+  }
+
+  if (!authorId) {
+    return NextResponse.json({ error: "Could not determine author" }, { status: 400 });
+  }
+
+  const { data: note, error } = await supabase
+    .from("notes")
     .insert({
       conversation_id: conversationId,
+      author_id: authorId,
       text: text.trim(),
-      assignee_id: assigneeId,
-      due_date: dueDate,
-      is_done: false,
     })
-    .select("*, assignee:team_members(*)")
+    .select("*, author:team_members(*)")
     .single();
 
   if (error) {
-    console.error("Create task error:", error);
+    console.error("Create note error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ task });
+  // Log activity
+  await supabase.from("activity_log").insert({
+    conversation_id: conversationId,
+    actor_id: authorId,
+    action: "note_added",
+    details: { note_id: note?.id, preview: text.trim().slice(0, 80) },
+  });
+
+  return NextResponse.json({ note });
 }
 
-// PATCH /api/conversations/tasks — toggle a task
-export async function PATCH(req: NextRequest) {
+// GET /api/conversations/notes?conversation_id=xxx
+export async function GET(req: NextRequest) {
   const supabase = createServerClient();
-  const body = await req.json();
+  const conversationId = req.nextUrl.searchParams.get("conversation_id");
 
-  const taskId = body.task_id || body.taskId;
-  const isDone = body.is_done ?? body.isDone;
-
-  if (!taskId || isDone === undefined) {
-    return NextResponse.json(
-      { error: "task_id and is_done are required" },
-      { status: 400 }
-    );
+  if (!conversationId) {
+    return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
   }
 
-  const { data: task, error } = await supabase
-    .from("tasks")
-    .update({ is_done: isDone })
-    .eq("id", taskId)
-    .select("*, assignee:team_members(*)")
-    .single();
+  const { data: notes, error } = await supabase
+    .from("notes")
+    .select("*, author:team_members(*)")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ task });
+  return NextResponse.json({ notes: notes || [] });
 }

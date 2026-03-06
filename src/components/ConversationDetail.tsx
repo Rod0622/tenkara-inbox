@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Reply, Forward, Archive, Mail, User, Folder, Plus, Check, Send,
   ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
+  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus,
 } from "lucide-react";
 import { useConversationDetail } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
@@ -50,15 +51,18 @@ function AssignDropdown({
   const handleAssign = async (memberId: string | null) => {
     setAssigning(true);
     try {
-      await fetch("/api/conversations/assign", {
+      const res = await fetch("/api/conversations/assign", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: conversationId,
           assignee_id: memberId,
+          actor_id: currentUser?.id,
         }),
       });
-      await onAssign(conversationId, memberId);
+      const result = await res.json();
+      // Pass the full updated conversation back so parent can update local state
+      await onAssign(conversationId, memberId, result.conversation);
     } catch (err) {
       console.error("Assign failed:", err);
     }
@@ -404,6 +408,129 @@ function TeamChat({
   );
 }
 
+// ── Activity Timeline Item ──────────────────────────
+const ACTIVITY_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
+  assigned: { icon: UserPlus, color: "#4ADE80", label: "Assigned" },
+  unassigned: { icon: UserMinus, color: "#F85149", label: "Unassigned" },
+  label_added: { icon: Tag, color: "#58A6FF", label: "Label added" },
+  label_removed: { icon: Tag, color: "#7D8590", label: "Label removed" },
+  starred: { icon: Star, color: "#F5D547", label: "Starred" },
+  unstarred: { icon: Star, color: "#484F58", label: "Unstarred" },
+  marked_read: { icon: Eye, color: "#7D8590", label: "Marked as read" },
+  marked_unread: { icon: EyeOff, color: "#BC8CFF", label: "Marked as unread" },
+  status_changed: { icon: Circle, color: "#39D2C0", label: "Status changed" },
+  note_added: { icon: StickyNote, color: "#4ADE80", label: "Note added" },
+  task_created: { icon: Plus, color: "#58A6FF", label: "Task created" },
+  task_completed: { icon: CheckCircle, color: "#4ADE80", label: "Task completed" },
+  task_reopened: { icon: Circle, color: "#F0883E", label: "Task reopened" },
+  reply_sent: { icon: Send, color: "#4ADE80", label: "Reply sent" },
+  email_composed: { icon: MailPlus, color: "#58A6FF", label: "Email sent" },
+  email_received: { icon: Mail, color: "#BC8CFF", label: "Email received" },
+};
+
+function ActivityItem({
+  activity,
+  isLast,
+  teamMembers,
+}: {
+  activity: any;
+  isLast: boolean;
+  teamMembers: TeamMember[];
+}) {
+  const config = ACTIVITY_CONFIG[activity.action] || {
+    icon: Clock,
+    color: "#484F58",
+    label: activity.action.replace(/_/g, " "),
+  };
+  const Icon = config.icon;
+  const actor = activity.actor;
+  const details = activity.details || {};
+
+  // Build description
+  let description = "";
+  switch (activity.action) {
+    case "assigned": {
+      const assignee = teamMembers.find((m) => m.id === details.assignee_id);
+      description = assignee ? `to ${assignee.name}` : "";
+      break;
+    }
+    case "unassigned": {
+      const prev = teamMembers.find((m) => m.id === details.previous_assignee_id);
+      description = prev ? `from ${prev.name}` : "";
+      break;
+    }
+    case "label_added":
+    case "label_removed":
+      description = details.label_name || "";
+      break;
+    case "status_changed":
+      description = details.status || "";
+      break;
+    case "note_added":
+    case "task_created":
+    case "task_completed":
+    case "task_reopened":
+      description = details.text || details.preview || "";
+      break;
+    case "reply_sent":
+    case "email_composed":
+      description = details.to ? `to ${details.to}` : "";
+      break;
+    default:
+      description = "";
+  }
+
+  const timeStr = new Date(activity.created_at).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="flex gap-3 relative">
+      {/* Timeline line */}
+      {!isLast && (
+        <div className="absolute left-[13px] top-[28px] bottom-0 w-[1.5px] bg-[#1E242C]" />
+      )}
+
+      {/* Icon bubble */}
+      <div
+        className="w-[28px] h-[28px] rounded-full flex items-center justify-center flex-shrink-0 z-10"
+        style={{ background: `${config.color}15`, border: `1.5px solid ${config.color}30` }}
+      >
+        <Icon size={13} style={{ color: config.color }} />
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 pb-4 min-w-0">
+        <div className="flex items-baseline gap-1.5 flex-wrap">
+          <span className="text-[12px] font-semibold" style={{ color: config.color }}>
+            {config.label}
+          </span>
+          {description && (
+            <span className="text-[11px] text-[#7D8590] truncate max-w-[200px]">
+              {description}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {actor && (
+            <>
+              <Avatar initials={actor.initials} color={actor.color} size={14} />
+              <span className="text-[10px] font-medium" style={{ color: actor.color }}>
+                {actor.name}
+              </span>
+              <span className="text-[10px] text-[#484F58]">·</span>
+            </>
+          )}
+          <span className="text-[10px] text-[#484F58]">{timeStr}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
   conversation: convo, currentUser, teamMembers,
@@ -417,7 +544,7 @@ export default function ConversationDetail({
   const [newTaskText, setNewTaskText] = useState("");
   const [showTaskInput, setShowTaskInput] = useState(false);
 
-  const { notes, tasks, messages } = useConversationDetail(convo?.id || null);
+  const { notes, tasks, messages, activities } = useConversationDetail(convo?.id || null);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -512,6 +639,7 @@ export default function ConversationDetail({
     { id: "messages", label: "Messages", count: messages.length },
     { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
+    { id: "activity", label: "Activity", count: activities.length },
   ];
 
   return (
@@ -785,6 +913,23 @@ export default function ConversationDetail({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Activity tab */}
+        {activeTab === "activity" && (
+          <div className="space-y-0.5">
+            {activities.length === 0 && (
+              <div className="text-center py-10 text-[#484F58] text-sm">
+                No activity recorded yet
+              </div>
+            )}
+            {activities.map((act: any, idx: number) => {
+              const isLast = idx === activities.length - 1;
+              return (
+                <ActivityItem key={act.id} activity={act} isLast={isLast} teamMembers={teamMembers} />
+              );
+            })}
           </div>
         )}
       </div>

@@ -62,7 +62,9 @@ function formatTime(dateStr: string): string {
 
 // ── Filter Panel ─────────────────────────────────────
 interface Filters {
-  dateRange: "all" | "today" | "yesterday" | "week" | "month";
+  dateRange: "all" | "today" | "yesterday" | "week" | "month" | "custom";
+  dateFrom: string; // ISO date string, e.g. "2026-03-01"
+  dateTo: string;
   assignedTo: string | null; // team member id or null for any
   unreadOnly: boolean;
   starredOnly: boolean;
@@ -71,6 +73,8 @@ interface Filters {
 
 const defaultFilters: Filters = {
   dateRange: "all",
+  dateFrom: "",
+  dateTo: "",
   assignedTo: null,
   unreadOnly: false,
   starredOnly: false,
@@ -88,6 +92,14 @@ function FilterPanel({
   teamMembers: TeamMember[];
   onClose: () => void;
 }) {
+  const handlePresetClick = (preset: string) => {
+    if (preset === "custom") {
+      setFilters({ ...filters, dateRange: "custom" });
+    } else {
+      setFilters({ ...filters, dateRange: preset as any, dateFrom: "", dateTo: "" });
+    }
+  };
+
   return (
     <div className="p-3 border-b border-[#1E242C] bg-[#0D1117] animate-fade-in">
       <div className="flex items-center justify-between mb-2">
@@ -105,22 +117,23 @@ function FilterPanel({
         </div>
       </div>
 
-      {/* Date Range */}
+      {/* Date Range — Presets */}
       <div className="mb-2.5">
         <div className="text-[10px] font-semibold text-[#484F58] mb-1 flex items-center gap-1">
           <Calendar size={10} /> Date
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 mb-1.5">
           {[
             { value: "all", label: "All" },
             { value: "today", label: "Today" },
             { value: "yesterday", label: "Yesterday" },
             { value: "week", label: "This Week" },
             { value: "month", label: "This Month" },
+            { value: "custom", label: "Custom" },
           ].map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setFilters({ ...filters, dateRange: opt.value as any })}
+              onClick={() => handlePresetClick(opt.value)}
               className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
                 filters.dateRange === opt.value
                   ? "bg-[#4ADE80] text-[#0B0E11]"
@@ -131,6 +144,40 @@ function FilterPanel({
             </button>
           ))}
         </div>
+
+        {/* Custom Date Range Inputs */}
+        {filters.dateRange === "custom" && (
+          <div className="flex items-center gap-2 mt-1.5 animate-fade-in">
+            <div className="flex-1">
+              <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">From</label>
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+              />
+            </div>
+            <div className="text-[#484F58] text-[10px] pt-3">→</div>
+            <div className="flex-1">
+              <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">To</label>
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+              />
+            </div>
+            {(filters.dateFrom || filters.dateTo) && (
+              <button
+                onClick={() => setFilters({ ...filters, dateFrom: "", dateTo: "" })}
+                className="pt-3 text-[#484F58] hover:text-[#F85149] transition-colors"
+                title="Clear dates"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Assigned To */}
@@ -225,14 +272,27 @@ export default function ConversationList({
     filters.assignedTo !== null ||
     filters.unreadOnly ||
     filters.starredOnly ||
-    filters.fromEmail !== "";
+    filters.fromEmail !== "" ||
+    filters.dateFrom !== "" ||
+    filters.dateTo !== "";
 
   // Apply filters
   const filteredConversations = useMemo(() => {
     let result = conversations;
 
     // Date range
-    if (filters.dateRange !== "all") {
+    if (filters.dateRange === "custom") {
+      if (filters.dateFrom) {
+        const from = new Date(filters.dateFrom);
+        from.setHours(0, 0, 0, 0);
+        result = result.filter((c) => new Date(c.last_message_at) >= from);
+      }
+      if (filters.dateTo) {
+        const to = new Date(filters.dateTo);
+        to.setHours(23, 59, 59, 999);
+        result = result.filter((c) => new Date(c.last_message_at) <= to);
+      }
+    } else if (filters.dateRange !== "all") {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       let cutoff: Date;

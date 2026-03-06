@@ -81,6 +81,23 @@ export default function InboxPage() {
     return filtered;
   }, [conversations, activeMailbox, activeView, currentUser, searchQuery, accountEmails]);
 
+  // Wrap assignConversation to update local state optimistically
+  const handleAssign = async (conversationId: string, assigneeId: string | null, updatedConversation?: any) => {
+    // Optimistically update the active conversation
+    if (activeConvo && activeConvo.id === conversationId) {
+      const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
+      setActiveConvo({
+        ...activeConvo,
+        assignee_id: assigneeId,
+        assignee: updatedConversation?.assignee || newAssignee || undefined,
+      } as Conversation);
+    }
+    // Refetch the full list to stay in sync
+    refetch();
+  };
+
+  const isComposing = activeView === "compose";
+
   if (status === "loading") {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-[#0B0E11]">
@@ -90,8 +107,6 @@ export default function InboxPage() {
   }
 
   if (!session) redirect("/login");
-
-  const isComposing = activeView === "compose";
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
@@ -132,7 +147,7 @@ export default function InboxPage() {
             onAddNote={actions.addNote}
             onToggleTask={actions.toggleTask}
             onAddTask={actions.addTask}
-            onAssign={actions.assignConversation}
+            onAssign={handleAssign}
             onSendReply={actions.sendReply}
           />
         </>

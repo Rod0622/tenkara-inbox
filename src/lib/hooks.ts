@@ -92,31 +92,37 @@ export function useConversationDetail(conversationId: string | null) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
 
   const fetchDetail = useCallback(async () => {
     if (!conversationId) {
       setNotes([]);
       setTasks([]);
       setMessages([]);
+      setActivities([]);
       return;
     }
 
-    const [notesRes, tasksRes, msgsRes] = await Promise.all([
+    const [notesRes, tasksRes, msgsRes, actRes] = await Promise.all([
       supabase.from("notes").select("*, author:team_members(*)")
         .eq("conversation_id", conversationId).order("created_at"),
       supabase.from("tasks").select("*, assignee:team_members(*)")
         .eq("conversation_id", conversationId).order("created_at"),
       supabase.from("messages").select("*")
         .eq("conversation_id", conversationId).order("sent_at"),
+      supabase.from("activity_log").select("*, actor:team_members(id, name, initials, color)")
+        .eq("conversation_id", conversationId).order("created_at", { ascending: false }).limit(100),
     ]);
 
     if (notesRes.error) console.error("Notes fetch error:", notesRes.error);
     if (tasksRes.error) console.error("Tasks fetch error:", tasksRes.error);
     if (msgsRes.error) console.error("Messages fetch error:", msgsRes.error);
+    if (actRes.error) console.error("Activity fetch error:", actRes.error);
 
     setNotes(notesRes.data || []);
     setTasks(tasksRes.data || []);
     setMessages(msgsRes.data || []);
+    setActivities(actRes.data || []);
   }, [conversationId]);
 
   useEffect(() => {
@@ -128,12 +134,13 @@ export function useConversationDetail(conversationId: string | null) {
       .on("postgres_changes", { event: "*", schema: "inbox", table: "notes", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "tasks", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "messages", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
+      .on("postgres_changes", { event: "*", schema: "inbox", table: "activity_log", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [conversationId, fetchDetail]);
 
-  return { notes, tasks, messages, refetch: fetchDetail };
+  return { notes, tasks, messages, activities, refetch: fetchDetail };
 }
 
 // ── Actions ──────────────────────────────────────────
