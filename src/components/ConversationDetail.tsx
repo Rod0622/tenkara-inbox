@@ -393,14 +393,18 @@ export default function ConversationDetail({
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
+  const [newTaskText, setNewTaskText] = useState("");
+  const [showTaskInput, setShowTaskInput] = useState(false);
 
   const { notes, tasks, messages } = useConversationDetail(convo?.id || null);
 
   useEffect(() => {
     setActiveTab("messages");
     setShowNoteInput(false);
+    setShowTaskInput(false);
     setReplyText("");
     setNoteText("");
+    setNewTaskText("");
   }, [convo?.id]);
 
   if (!convo) {
@@ -423,9 +427,6 @@ export default function ConversationDetail({
     setNoteText("");
     setShowNoteInput(false);
   };
-
-  const [newTaskText, setNewTaskText] = useState("");
-  const [showTaskInput, setShowTaskInput] = useState(false);
 
   const handleAddTask = async () => {
     if (!newTaskText.trim()) return;
