@@ -557,7 +557,13 @@ function LabelPicker({
   const [open, setOpen] = useState(false);
   const allLabels = useLabels();
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const currentLabelIds = new Set(currentLabels.map((cl) => cl.label_id));
+  // Local state so the UI updates instantly
+  const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
+
+  // Sync local state when props change
+  useEffect(() => {
+    setLocalLabelIds(new Set(currentLabels.map((cl) => cl.label_id)));
+  }, [currentLabels]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -568,7 +574,16 @@ function LabelPicker({
   }, [open]);
 
   const handleToggleLabel = async (labelId: string) => {
-    const isAdding = !currentLabelIds.has(labelId);
+    const isAdding = !localLabelIds.has(labelId);
+
+    // Optimistic update
+    setLocalLabelIds((prev) => {
+      const next = new Set(prev);
+      if (isAdding) next.add(labelId);
+      else next.delete(labelId);
+      return next;
+    });
+
     try {
       if (isAdding) {
         await fetch("/api/conversations/labels", {
@@ -585,6 +600,13 @@ function LabelPicker({
       }
       onToggle();
     } catch (err) {
+      // Revert on error
+      setLocalLabelIds((prev) => {
+        const next = new Set(prev);
+        if (isAdding) next.delete(labelId);
+        else next.add(labelId);
+        return next;
+      });
       console.error("Label toggle failed:", err);
     }
   };
@@ -606,7 +628,7 @@ function LabelPicker({
             <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Toggle labels</div>
           </div>
           {allLabels.map((label) => {
-            const isActive = currentLabelIds.has(label.id);
+            const isActive = localLabelIds.has(label.id);
             return (
               <button
                 key={label.id}

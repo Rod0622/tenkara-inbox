@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
+import { runRulesForMessage } from "@/lib/rule-engine";
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -136,6 +137,20 @@ export async function POST(req: NextRequest) {
         action: isReply ? "reply_sent" : "email_composed",
         details: { to, subject, preview: emailBody.slice(0, 80) },
       });
+
+      // Run outgoing rules against this sent message
+      try {
+        await runRulesForMessage(conversationId, {
+          conversation_id: conversationId,
+          subject: subject,
+          from_email: account.email,
+          from_name: account.name,
+          to_addresses: to,
+          body_text: emailBody,
+        }, "outgoing");
+      } catch (ruleErr: any) {
+        console.error("Rule engine error on send:", ruleErr.message);
+      }
     }
 
     return NextResponse.json({
