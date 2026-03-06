@@ -120,7 +120,7 @@ export default function ConversationDetail({
         <span className="text-[#161B22]">|</span>
         <div className="flex items-center gap-1 text-[#7D8590]">
           <Folder size={14} />
-          <span>{convo.mailbox_id}</span>
+          <span>{convo.email_account_id}</span>
         </div>
       </div>
 
