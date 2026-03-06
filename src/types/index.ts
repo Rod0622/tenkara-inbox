@@ -53,7 +53,7 @@ export interface Label {
 }
 
 export interface ConversationLabel {
-  conversation_id: string;
+  conversation_id?: string;
   label_id: string;
   label?: Label;
 }
