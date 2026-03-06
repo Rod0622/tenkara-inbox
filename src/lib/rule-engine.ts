@@ -1,14 +1,30 @@
 import { createServerClient } from "@/lib/supabase";
 
+interface Condition {
+  field: string;
+  operator: string;
+  value: string;
+}
+
+interface Action {
+  type: string;
+  value: string;
+}
+
 interface RuleRow {
   id: string;
   name: string;
   is_active: boolean;
-  condition_field: string;
-  condition_operator: string;
-  condition_value: string;
-  action_type: string;
-  action_value: string;
+  trigger_type: string;
+  match_mode: "all" | "any" | "none";
+  conditions: Condition[];
+  actions: Action[];
+  // Legacy single fields (fallback)
+  condition_field?: string;
+  condition_operator?: string;
+  condition_value?: string;
+  action_type?: string;
+  action_value?: string;
 }
 
 interface MessageContext {
@@ -20,133 +36,107 @@ interface MessageContext {
   body_text: string;
 }
 
-// Evaluate a single condition against a message
-function evaluateCondition(
-  fieldValue: string,
-  operator: string,
-  conditionValue: string
-): boolean {
-  const field = (fieldValue || "").toLowerCase();
-  const value = (conditionValue || "").toLowerCase();
-
-  switch (operator) {
-    case "contains":
-      return field.includes(value);
-    case "not_contains":
-      return !field.includes(value);
-    case "equals":
-      return field === value;
-    case "starts_with":
-      return field.startsWith(value);
-    case "ends_with":
-      return field.endsWith(value);
-    default:
-      return false;
-  }
-}
-
-// Get the field value from the message context
 function getFieldValue(msg: MessageContext, field: string): string {
   switch (field) {
-    case "subject":
-      return msg.subject || "";
-    case "from_email":
-      return msg.from_email || "";
-    case "from_name":
-      return msg.from_name || "";
-    case "to_addresses":
-      return msg.to_addresses || "";
-    case "body_text":
-      return msg.body_text || "";
-    default:
-      return "";
+    case "subject": return msg.subject || "";
+    case "from_email": return msg.from_email || "";
+    case "from_name": return msg.from_name || "";
+    case "to_addresses": return msg.to_addresses || "";
+    case "body_text": return msg.body_text || "";
+    default: return "";
   }
 }
 
-// Execute a single rule action
+function evaluateCondition(fieldValue: string, operator: string, conditionValue: string): boolean {
+  const field = (fieldValue || "").toLowerCase();
+  const value = (conditionValue || "").toLowerCase();
+  switch (operator) {
+    case "contains": return field.includes(value);
+    case "not_contains": return !field.includes(value);
+    case "equals": return field === value;
+    case "starts_with": return field.startsWith(value);
+    case "ends_with": return field.endsWith(value);
+    default: return false;
+  }
+}
+
+function evaluateConditions(
+  msg: MessageContext,
+  conditions: Condition[],
+  matchMode: "all" | "any" | "none"
+): boolean {
+  if (conditions.length === 0) return false;
+
+  const results = conditions.map((c) => {
+    const fieldValue = getFieldValue(msg, c.field);
+    return evaluateCondition(fieldValue, c.operator, c.value);
+  });
+
+  switch (matchMode) {
+    case "all": return results.every(Boolean);
+    case "any": return results.some(Boolean);
+    case "none": return results.every((r) => !r);
+    default: return false;
+  }
+}
+
 async function executeAction(
   supabase: any,
   conversationId: string,
-  actionType: string,
-  actionValue: string
+  action: Action
 ): Promise<string | null> {
   try {
-    switch (actionType) {
+    switch (action.type) {
       case "add_label": {
-        if (!actionValue) return null;
-        await supabase
-          .from("conversation_labels")
-          .upsert({ conversation_id: conversationId, label_id: actionValue });
-        return `Added label`;
+        if (!action.value) return null;
+        await supabase.from("conversation_labels")
+          .upsert({ conversation_id: conversationId, label_id: action.value });
+        return "Added label";
       }
-
       case "remove_label": {
-        if (!actionValue) return null;
-        await supabase
-          .from("conversation_labels")
-          .delete()
-          .eq("conversation_id", conversationId)
-          .eq("label_id", actionValue);
-        return `Removed label`;
+        if (!action.value) return null;
+        await supabase.from("conversation_labels")
+          .delete().eq("conversation_id", conversationId).eq("label_id", action.value);
+        return "Removed label";
       }
-
       case "assign_to": {
-        if (!actionValue) return null;
-        // Assign clears folder_id (goes to personal inbox)
-        await supabase
-          .from("conversations")
-          .update({ assignee_id: actionValue, folder_id: null })
-          .eq("id", conversationId);
-        return `Assigned to ${actionValue}`;
+        if (!action.value) return null;
+        await supabase.from("conversations")
+          .update({ assignee_id: action.value, folder_id: null }).eq("id", conversationId);
+        return `Assigned`;
       }
-
       case "mark_starred": {
-        await supabase
-          .from("conversations")
-          .update({ is_starred: true })
-          .eq("id", conversationId);
-        return `Starred`;
+        await supabase.from("conversations")
+          .update({ is_starred: true }).eq("id", conversationId);
+        return "Starred";
       }
-
       case "mark_read": {
-        await supabase
-          .from("conversations")
-          .update({ is_unread: false })
-          .eq("id", conversationId);
-        return `Marked as read`;
+        await supabase.from("conversations")
+          .update({ is_unread: false }).eq("id", conversationId);
+        return "Marked as read";
       }
-
       case "move_to_folder": {
-        if (!actionValue) return null;
-        await supabase
-          .from("conversations")
-          .update({ folder_id: actionValue })
-          .eq("id", conversationId);
-        return `Moved to folder`;
+        if (!action.value) return null;
+        await supabase.from("conversations")
+          .update({ folder_id: action.value }).eq("id", conversationId);
+        return "Moved to folder";
       }
-
       case "set_status": {
-        if (!actionValue) return null;
-        await supabase
-          .from("conversations")
-          .update({ status: actionValue })
-          .eq("id", conversationId);
-        return `Set status to ${actionValue}`;
+        if (!action.value) return null;
+        await supabase.from("conversations")
+          .update({ status: action.value }).eq("id", conversationId);
+        return `Set status to ${action.value}`;
       }
-
-      default:
-        return null;
+      default: return null;
     }
   } catch (err: any) {
-    console.error(`Rule action ${actionType} failed:`, err.message);
+    console.error(`Rule action ${action.type} failed:`, err.message);
     return null;
   }
 }
 
 /**
  * Run all active rules against a message/conversation.
- * Call this after a new message is synced or a conversation is created.
- * @param triggerType - 'incoming', 'outgoing', or 'user_action'
  */
 export async function runRulesForMessage(
   conversationId: string,
@@ -157,7 +147,6 @@ export async function runRulesForMessage(
   const result = { matched: 0, actions: [] as string[] };
 
   try {
-    // Fetch all active rules matching the trigger type
     const { data: rules, error } = await supabase
       .from("rules")
       .select("*")
@@ -168,34 +157,48 @@ export async function runRulesForMessage(
     if (error || !rules || rules.length === 0) return result;
 
     for (const rule of rules as RuleRow[]) {
-      const fieldValue = getFieldValue(msg, rule.condition_field);
-      const matches = evaluateCondition(fieldValue, rule.condition_operator, rule.condition_value);
+      // Build conditions array — support both new JSONB and legacy single fields
+      let conditions: Condition[] = [];
+      if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) {
+        conditions = rule.conditions;
+      } else if (rule.condition_field && rule.condition_operator) {
+        conditions = [{ field: rule.condition_field, operator: rule.condition_operator, value: rule.condition_value || "" }];
+      }
+
+      // Build actions array
+      let ruleActions: Action[] = [];
+      if (rule.actions && Array.isArray(rule.actions) && rule.actions.length > 0) {
+        ruleActions = rule.actions;
+      } else if (rule.action_type) {
+        ruleActions = [{ type: rule.action_type, value: rule.action_value || "" }];
+      }
+
+      const matchMode = rule.match_mode || "all";
+      const matches = evaluateConditions(msg, conditions, matchMode);
 
       if (matches) {
         result.matched++;
-        const actionResult = await executeAction(
-          supabase,
-          conversationId,
-          rule.action_type,
-          rule.action_value
-        );
 
-        if (actionResult) {
-          result.actions.push(`${rule.name}: ${actionResult}`);
-
-          // Log to activity_log
-          await supabase.from("activity_log").insert({
-            conversation_id: conversationId,
-            actor_id: null,
-            action: "rule_executed",
-            details: {
-              rule_id: rule.id,
-              rule_name: rule.name,
-              action_type: rule.action_type,
-              action_value: rule.action_value,
-            },
-          });
+        for (const action of ruleActions) {
+          const actionResult = await executeAction(supabase, conversationId, action);
+          if (actionResult) {
+            result.actions.push(`${rule.name}: ${actionResult}`);
+          }
         }
+
+        // Log to activity_log
+        await supabase.from("activity_log").insert({
+          conversation_id: conversationId,
+          actor_id: null,
+          action: "rule_executed",
+          details: {
+            rule_id: rule.id,
+            rule_name: rule.name,
+            match_mode: matchMode,
+            conditions_count: conditions.length,
+            actions_count: ruleActions.length,
+          },
+        });
       }
     }
   } catch (err: any) {

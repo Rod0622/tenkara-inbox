@@ -1033,10 +1033,13 @@ const ACTION_TYPES = [
 ];
 
 const TRIGGER_TYPES = [
-  { value: "incoming", label: "Incoming", icon: "📥", description: "When a new email arrives" },
-  { value: "outgoing", label: "Outgoing", icon: "📤", description: "When an email is sent" },
-  { value: "user_action", label: "User Action", icon: "👤", description: "When a user performs an action" },
+  { value: "incoming", label: "Incoming", icon: "📥", description: "Runs when a new email arrives" },
+  { value: "outgoing", label: "Outgoing", icon: "📤", description: "Runs when an email is sent" },
+  { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action" },
 ];
+
+interface RuleCondition { field: string; operator: string; value: string; }
+interface RuleAction { type: string; value: string; }
 
 function RulesTab() {
   const [rules, setRules] = useState<any[]>([]);
@@ -1050,18 +1053,11 @@ function RulesTab() {
   const [saving, setSaving] = useState(false);
   const [activeTrigger, setActiveTrigger] = useState("incoming");
 
-  const emptyRule = {
-    name: "",
-    trigger_type: "incoming",
-    condition_field: "subject",
-    condition_operator: "contains",
-    condition_value: "",
-    action_type: "add_label",
-    action_value: "",
-  };
-
-  const [newRule, setNewRule] = useState(emptyRule);
-  const [editRule, setEditRule] = useState(emptyRule);
+  // Form state — kept at this level so nested inputs don't lose focus
+  const [formName, setFormName] = useState("");
+  const [formMatchMode, setFormMatchMode] = useState<"all" | "any" | "none">("all");
+  const [formConditions, setFormConditions] = useState<RuleCondition[]>([{ field: "subject", operator: "contains", value: "" }]);
+  const [formActions, setFormActions] = useState<RuleAction[]>([{ type: "add_label", value: "" }]);
 
   useEffect(() => {
     Promise.all([
@@ -1084,88 +1080,56 @@ function RulesTab() {
     setRules(data.rules || []);
   };
 
-  // Get display name for action_value
-  const getActionValueLabel = (type: string, value: string) => {
-    if (type === "add_label" || type === "remove_label") {
-      return labels.find((l) => l.id === value)?.name || value;
-    }
-    if (type === "assign_to") {
-      return members.find((m) => m.id === value)?.name || value;
-    }
-    if (type === "move_to_folder") {
-      const folder = allFolders.find((f) => f.id === value);
-      return folder ? `${folder.icon} ${folder.name}` : value;
-    }
-    if (type === "set_status") return value;
-    return "";
+  const resetForm = () => {
+    setFormName("");
+    setFormMatchMode("all");
+    setFormConditions([{ field: "subject", operator: "contains", value: "" }]);
+    setFormActions([{ type: "add_label", value: "" }]);
+    setError("");
   };
 
-  // Render the action_value selector based on action_type
-  const renderActionValueInput = (actionType: string, value: string, onChange: (v: string) => void) => {
-    if (actionType === "add_label" || actionType === "remove_label") {
-      return (
-        <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-          <option value="">Select label...</option>
-          {labels.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
-          ))}
-        </select>
-      );
+  const loadRuleIntoForm = (r: any) => {
+    setFormName(r.name || "");
+    setFormMatchMode(r.match_mode || "all");
+    // Load conditions from JSONB or legacy fields
+    if (r.conditions?.length) {
+      setFormConditions(r.conditions);
+    } else if (r.condition_field) {
+      setFormConditions([{ field: r.condition_field, operator: r.condition_operator, value: r.condition_value || "" }]);
+    } else {
+      setFormConditions([{ field: "subject", operator: "contains", value: "" }]);
     }
-    if (actionType === "assign_to") {
-      return (
-        <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-          <option value="">Select member...</option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      );
+    // Load actions from JSONB or legacy fields
+    if (r.actions?.length) {
+      setFormActions(r.actions);
+    } else if (r.action_type) {
+      setFormActions([{ type: r.action_type, value: r.action_value || "" }]);
+    } else {
+      setFormActions([{ type: "add_label", value: "" }]);
     }
-    if (actionType === "set_status") {
-      return (
-        <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="snoozed">Snoozed</option>
-        </select>
-      );
-    }
-    if (actionType === "move_to_folder") {
-      return (
-        <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-          <option value="">Select folder...</option>
-          {allFolders.map((f) => (
-            <option key={f.id} value={f.id}>{f.icon} {f.name}</option>
-          ))}
-        </select>
-      );
-    }
-    return null; // star/read don't need a value
+    setError("");
   };
-
-  const needsActionValue = (type: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder"].includes(type);
 
   const handleAdd = async () => {
-    if (!newRule.name.trim() || !newRule.condition_value.trim()) return;
-    if (needsActionValue(newRule.action_type) && !newRule.action_value) return;
+    if (!formName.trim() || formConditions.some((c) => !c.value.trim())) return;
+    const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder"].includes(t);
+    if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
     try {
       const res = await fetch("/api/rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...newRule, trigger_type: activeTrigger }),
+        body: JSON.stringify({
+          name: formName,
+          trigger_type: activeTrigger,
+          match_mode: formMatchMode,
+          conditions: formConditions,
+          actions: formActions,
+        }),
       });
       const data = await res.json();
-      if (res.ok) {
-        setNewRule(emptyRule);
-        setShowAdd(false);
-        fetchRules();
-      } else { setError(data.error); }
+      if (res.ok) { resetForm(); setShowAdd(false); fetchRules(); }
+      else { setError(data.error); }
     } catch { setError("Network error"); }
     setSaving(false);
   };
@@ -1176,20 +1140,22 @@ function RulesTab() {
       const res = await fetch("/api/rules", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...editRule }),
+        body: JSON.stringify({
+          id,
+          name: formName,
+          match_mode: formMatchMode,
+          conditions: formConditions,
+          actions: formActions,
+        }),
       });
-      if (res.ok) { setEditingId(null); fetchRules(); }
+      if (res.ok) { setEditingId(null); resetForm(); fetchRules(); }
       else { const d = await res.json(); setError(d.error); }
     } catch { setError("Network error"); }
     setSaving(false);
   };
 
   const handleToggle = async (id: string, isActive: boolean) => {
-    await fetch("/api/rules", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, is_active: !isActive }),
-    });
+    await fetch("/api/rules", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, is_active: !isActive }) });
     fetchRules();
   };
 
@@ -1199,66 +1165,184 @@ function RulesTab() {
     fetchRules();
   };
 
-  const RuleForm = ({ rule, setRule, onSave, onCancel, saveLabel }: {
-    rule: typeof emptyRule; setRule: (r: typeof emptyRule) => void;
-    onSave: () => void; onCancel: () => void; saveLabel: string;
-  }) => (
+  // Condition helpers
+  const updateCondition = (idx: number, patch: Partial<RuleCondition>) => {
+    setFormConditions((prev) => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+  };
+  const addCondition = () => {
+    setFormConditions((prev) => [...prev, { field: "subject", operator: "contains", value: "" }]);
+  };
+  const removeCondition = (idx: number) => {
+    if (formConditions.length <= 1) return;
+    setFormConditions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // Action helpers
+  const updateAction = (idx: number, patch: Partial<RuleAction>) => {
+    setFormActions((prev) => prev.map((a, i) => i === idx ? { ...a, ...patch } : a));
+  };
+  const addAction = () => {
+    setFormActions((prev) => [...prev, { type: "add_label", value: "" }]);
+  };
+  const removeAction = (idx: number) => {
+    if (formActions.length <= 1) return;
+    setFormActions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // Action value selector
+  const renderActionValue = (action: RuleAction, idx: number) => {
+    const t = action.type;
+    if (t === "add_label" || t === "remove_label") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select label...</option>
+          {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      );
+    }
+    if (t === "assign_to") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select member...</option>
+          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      );
+    }
+    if (t === "move_to_folder") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select folder...</option>
+          {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
+        </select>
+      );
+    }
+    if (t === "set_status") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+          <option value="snoozed">Snoozed</option>
+        </select>
+      );
+    }
+    return null;
+  };
+
+  const getActionLabel = (type: string, value: string) => {
+    if (type === "add_label" || type === "remove_label") return labels.find((l) => l.id === value)?.name || "";
+    if (type === "assign_to") return members.find((m) => m.id === value)?.name || "";
+    if (type === "move_to_folder") { const f = allFolders.find((f) => f.id === value); return f ? `${f.icon} ${f.name}` : ""; }
+    if (type === "set_status") return value;
+    return "";
+  };
+
+  // ── Render the form (used for both add and edit) ────
+  const renderForm = (isEdit: boolean, ruleId?: string) => (
     <div className="space-y-3">
+      {/* Rule name */}
       <input
-        value={rule.name}
-        onChange={(e) => setRule({ ...rule, name: e.target.value })}
+        value={formName}
+        onChange={(e) => setFormName(e.target.value)}
         placeholder="Rule name (e.g. 'Auto-label RFQ emails')"
         className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
       />
 
-      {/* Condition */}
+      {/* Conditions */}
       <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">When (condition)</div>
-        <div className="flex gap-2 flex-wrap">
-          <select value={rule.condition_field} onChange={(e) => setRule({ ...rule, condition_field: e.target.value })}
-            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-            {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+        <div className="flex items-center gap-2 mb-2">
+          <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Conditions</div>
+          <div className="flex-1" />
+          <select
+            value={formMatchMode}
+            onChange={(e) => setFormMatchMode(e.target.value as any)}
+            className="px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-[10px] font-semibold text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+          >
+            <option value="all">All must match</option>
+            <option value="any">At least one matches</option>
+            <option value="none">None must match</option>
           </select>
-          <select value={rule.condition_operator} onChange={(e) => setRule({ ...rule, condition_operator: e.target.value })}
-            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-            {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <input
-            value={rule.condition_value}
-            onChange={(e) => setRule({ ...rule, condition_value: e.target.value })}
-            placeholder="Value to match..."
-            className="flex-1 min-w-[150px] px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
-          />
         </div>
+
+        {formConditions.map((cond, idx) => (
+          <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
+            <select value={cond.field} onChange={(e) => updateCondition(idx, { field: e.target.value })}
+              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+            <select value={cond.operator} onChange={(e) => updateCondition(idx, { operator: e.target.value })}
+              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <input
+              value={cond.value}
+              onChange={(e) => updateCondition(idx, { value: e.target.value })}
+              placeholder="Value..."
+              className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+            />
+            <button onClick={() => removeCondition(idx)} disabled={formConditions.length <= 1}
+              className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove">
+              <Trash2 size={12} />
+            </button>
+          </div>
+        ))}
+        <button onClick={addCondition}
+          className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold mt-1 transition-colors">
+          <Plus size={11} /> Add condition
+        </button>
       </div>
 
-      {/* Action */}
+      {/* Actions */}
       <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Then (action)</div>
-        <div className="flex gap-2 flex-wrap">
-          <select value={rule.action_type} onChange={(e) => setRule({ ...rule, action_type: e.target.value, action_value: "" })}
-            className="px-2.5 py-2 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-            {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-          </select>
-          {needsActionValue(rule.action_type) && renderActionValueInput(
-            rule.action_type,
-            rule.action_value,
-            (v) => setRule({ ...rule, action_value: v })
-          )}
-        </div>
+        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Actions</div>
+
+        {formActions.map((act, idx) => (
+          <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
+            <select value={act.type} onChange={(e) => updateAction(idx, { type: e.target.value, value: "" })}
+              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+            {renderActionValue(act, idx)}
+            <button onClick={() => removeAction(idx)} disabled={formActions.length <= 1}
+              className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove">
+              <Trash2 size={12} />
+            </button>
+          </div>
+        ))}
+        <button onClick={addAction}
+          className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold mt-1 transition-colors">
+          <Plus size={11} /> Add action
+        </button>
       </div>
 
       {error && <div className="text-[#F85149] text-xs">{error}</div>}
 
       <div className="flex gap-2">
-        <button onClick={onCancel} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !rule.name.trim() || !rule.condition_value.trim()}
+        <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
+          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+        <button onClick={() => isEdit && ruleId ? handleUpdate(ruleId) : handleAdd()}
+          disabled={saving || !formName.trim()}
           className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
-          {saving ? "Saving..." : saveLabel}
+          {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Rule"}
         </button>
       </div>
     </div>
   );
+
+  // ── Get summary text for a rule ─────────────────────
+  const getRuleSummary = (r: any) => {
+    const conds: RuleCondition[] = r.conditions?.length ? r.conditions : r.condition_field ? [{ field: r.condition_field, operator: r.condition_operator, value: r.condition_value }] : [];
+    const acts: RuleAction[] = r.actions?.length ? r.actions : r.action_type ? [{ type: r.action_type, value: r.action_value }] : [];
+    const mode = r.match_mode || "all";
+    const modeLabel = mode === "all" ? "All" : mode === "any" ? "Any" : "None";
+
+    return { conds, acts, modeLabel };
+  };
+
+  const filteredRules = rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger);
 
   return (
     <div className="max-w-3xl mx-auto p-8">
@@ -1268,7 +1352,7 @@ function RulesTab() {
           <p className="text-sm text-[#7D8590] mt-1">Automate actions based on email events</p>
         </div>
         <button
-          onClick={() => { setShowAdd(true); setError(""); setNewRule({ ...emptyRule, trigger_type: activeTrigger }); }}
+          onClick={() => { resetForm(); setShowAdd(true); }}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
         >
           <Plus size={16} /> New Rule
@@ -1280,22 +1364,12 @@ function RulesTab() {
         {TRIGGER_TYPES.map((t) => {
           const count = rules.filter((r) => (r.trigger_type || "incoming") === t.value).length;
           return (
-            <button
-              key={t.value}
-              onClick={() => setActiveTrigger(t.value)}
+            <button key={t.value} onClick={() => setActiveTrigger(t.value)}
               className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-[12px] font-semibold transition-all ${
-                activeTrigger === t.value
-                  ? "bg-[#1E242C] text-[#E6EDF3] shadow-sm"
-                  : "text-[#7D8590] hover:text-[#E6EDF3]"
-              }`}
-            >
-              <span>{t.icon}</span>
-              <span>{t.label}</span>
-              {count > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  activeTrigger === t.value ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#1E242C] text-[#484F58]"
-                }`}>{count}</span>
-              )}
+                activeTrigger === t.value ? "bg-[#1E242C] text-[#E6EDF3] shadow-sm" : "text-[#7D8590] hover:text-[#E6EDF3]"
+              }`}>
+              <span>{t.icon}</span><span>{t.label}</span>
+              {count > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${activeTrigger === t.value ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#1E242C] text-[#484F58]"}`}>{count}</span>}
             </button>
           );
         })}
@@ -1305,19 +1379,13 @@ function RulesTab() {
         {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.description}
       </div>
 
-      {/* Add new rule */}
+      {/* Add form */}
       {showAdd && (
         <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
           <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">
             New {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label} Rule
           </div>
-          <RuleForm
-            rule={newRule}
-            setRule={setNewRule}
-            onSave={handleAdd}
-            onCancel={() => { setShowAdd(false); setError(""); }}
-            saveLabel="Create Rule"
-          />
+          {renderForm(false)}
         </div>
       )}
 
@@ -1325,71 +1393,73 @@ function RulesTab() {
         <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
-          {rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger).map((r) => (
-            <div key={r.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
-              {editingId === r.id ? (
-                <RuleForm
-                  rule={editRule}
-                  setRule={setEditRule}
-                  onSave={() => handleUpdate(r.id)}
-                  onCancel={() => { setEditingId(null); setError(""); }}
-                  saveLabel="Save Changes"
-                />
-              ) : (
-                <div className="flex items-start gap-3">
-                  {/* Toggle */}
-                  <button
-                    onClick={() => handleToggle(r.id, r.is_active)}
-                    className={`mt-0.5 w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
-                      r.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
-                    }`}
-                  >
-                    <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
-                  </button>
+          {filteredRules.map((r) => {
+            const { conds, acts, modeLabel } = getRuleSummary(r);
 
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-[#E6EDF3] mb-1">{r.name}</div>
-                    <div className="text-[11px] text-[#7D8590] leading-relaxed">
-                      <span className="text-[#484F58]">When</span>{" "}
-                      <span className="text-[#58A6FF] font-medium">{CONDITION_FIELDS.find((f) => f.value === r.condition_field)?.label}</span>{" "}
-                      <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o) => o.value === r.condition_operator)?.label?.toLowerCase()}</span>{" "}
-                      <span className="text-[#E6EDF3] font-medium">"{r.condition_value}"</span>{" "}
-                      <span className="text-[#484F58]">→</span>{" "}
-                      <span className="text-[#4ADE80] font-medium">{ACTION_TYPES.find((a) => a.value === r.action_type)?.label}</span>
-                      {r.action_value && (
-                        <span className="text-[#BC8CFF] font-medium"> {getActionValueLabel(r.action_type, r.action_value)}</span>
-                      )}
+            return (
+              <div key={r.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
+                {editingId === r.id ? (
+                  renderForm(true, r.id)
+                ) : (
+                  <div className="flex items-start gap-3">
+                    {/* Toggle */}
+                    <button onClick={() => handleToggle(r.id, r.is_active)}
+                      className={`mt-0.5 w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${r.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"}`}>
+                      <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
+                    </button>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-[#E6EDF3] mb-1">{r.name}</div>
+
+                      {/* Conditions summary */}
+                      <div className="text-[11px] text-[#7D8590] leading-relaxed mb-0.5">
+                        <span className="text-[10px] font-bold text-[#484F58] bg-[#1E242C] px-1.5 py-0.5 rounded mr-1">{modeLabel}</span>
+                        {conds.map((c, i) => (
+                          <span key={i}>
+                            {i > 0 && <span className="text-[#484F58]"> · </span>}
+                            <span className="text-[#58A6FF]">{CONDITION_FIELDS.find((f) => f.value === c.field)?.label}</span>{" "}
+                            <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
+                            <span className="text-[#E6EDF3]">"{c.value}"</span>
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Actions summary */}
+                      <div className="text-[11px]">
+                        <span className="text-[#484F58]">→ </span>
+                        {acts.map((a, i) => (
+                          <span key={i}>
+                            {i > 0 && <span className="text-[#484F58]">, </span>}
+                            <span className="text-[#4ADE80]">{ACTION_TYPES.find((at) => at.value === a.type)?.label}</span>
+                            {a.value && <span className="text-[#BC8CFF]"> {getActionLabel(a.type, a.value)}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => { setEditingId(r.id); loadRuleIntoForm(r); }}
+                        className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all">
+                        <Edit2 size={13} />
+                      </button>
+                      <button onClick={() => handleDelete(r.id, r.name)}
+                        className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all">
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
+                )}
+              </div>
+            );
+          })}
 
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => { setEditingId(r.id); setEditRule({ name: r.name, trigger_type: r.trigger_type || "incoming", condition_field: r.condition_field, condition_operator: r.condition_operator, condition_value: r.condition_value, action_type: r.action_type, action_value: r.action_value }); setError(""); }}
-                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
-                    >
-                      <Edit2 size={13} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(r.id, r.name)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger).length === 0 && !showAdd && (
+          {filteredRules.length === 0 && !showAdd && (
             <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
               <Zap className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label?.toLowerCase()} rules yet</h3>
               <p className="text-sm text-[#7D8590] mb-4">Create rules to auto-label, assign, or organize emails</p>
-              <button
-                onClick={() => { setShowAdd(true); setNewRule({ ...emptyRule, trigger_type: activeTrigger }); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
-              >
+              <button onClick={() => { resetForm(); setShowAdd(true); }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
                 <Plus size={16} /> Create First Rule
               </button>
             </div>
