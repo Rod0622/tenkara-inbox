@@ -428,6 +428,20 @@ export default function ConversationDetail({
     setNewTaskText("");
   }, [convo?.id]);
 
+  // Mark as read when conversation is opened
+  useEffect(() => {
+    if (convo?.id && convo.is_unread) {
+      fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_unread: false,
+        }),
+      }).catch(() => {});
+    }
+  }, [convo?.id]);
+
   if (!convo) {
     return (
       <div className="flex-1 flex items-center justify-center flex-col gap-4 text-[#484F58] bg-[#0B0E11]">
@@ -493,20 +507,6 @@ export default function ConversationDetail({
       console.error("Toggle star failed:", err);
     }
   };
-
-  // Mark as read when conversation is opened
-  useEffect(() => {
-    if (convo?.id && convo.is_unread) {
-      fetch("/api/conversations/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: convo.id,
-          is_unread: false,
-        }),
-      }).catch(() => {});
-    }
-  }, [convo?.id]);
 
   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
