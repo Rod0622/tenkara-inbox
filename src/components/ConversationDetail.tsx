@@ -26,7 +26,7 @@ export default function ConversationDetail({
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
 
-  const { notes, tasks } = useConversationDetail(convo?.id || null);
+  const { notes, tasks, messages } = useConversationDetail(convo?.id || null);
 
   // Reset on conversation change
   useEffect(() => {
