@@ -33,8 +33,14 @@ export default function Sidebar({
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
 
   // Personal counts: only conversations assigned to the current user
-  const myConvos = conversations.filter((c) => c.assignee_id === currentUser?.id);
+  const accountEmails = new Set(mailboxes.map((a: any) => a.email?.toLowerCase()));
+  const isOutbound = (c: any) => accountEmails.has(c.from_email?.toLowerCase());
+
+  const myConvos = conversations.filter(
+    (c) => c.assignee_id === currentUser?.id && !isOutbound(c)
+  );
   const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
+  const mySentCount = conversations.filter((c) => isOutbound(c)).length;
 
   useEffect(() => {
     fetchFolders();
@@ -160,7 +166,7 @@ export default function Sidebar({
         {[
           { id: "inbox", label: "Inbox", icon: Inbox, count: myUnreadCount },
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: 0 },
-          { id: "sent", label: "Sent", icon: Send, count: 0 },
+          { id: "sent", label: "Sent", icon: Send, count: mySentCount },
         ].map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id && !activeMailbox && !activeFolder;
@@ -210,8 +216,8 @@ export default function Sidebar({
 
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
-          // Team space only shows unassigned — count only unassigned unread
-          const unassignedConvos = mbConvos.filter((c) => !c.assignee_id);
+          // Team space only shows unassigned inbound
+          const unassignedConvos = mbConvos.filter((c) => !c.assignee_id && !isOutbound(c));
           const unread = unassignedConvos.filter((c) => c.is_unread).length;
           const isExpanded = expandedAccounts.has(mb.id);
           const accountFolders = getFoldersForAccount(mb.id);

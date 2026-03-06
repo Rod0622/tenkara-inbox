@@ -29,20 +29,41 @@ export default function InboxPage() {
     [teamMembers, session]
   );
 
+  // Build a set of connected account emails for outbound detection
+  const accountEmails = useMemo(
+    () => new Set(emailAccounts.map((a) => a.email?.toLowerCase())),
+    [emailAccounts]
+  );
+
+  const isOutboundConvo = (c: Conversation) =>
+    accountEmails.has(c.from_email?.toLowerCase());
+
   // Filter conversations based on context
   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
-    // Personal view: no mailbox selected = show only my assigned conversations
     if (!activeMailbox && currentUser) {
-      filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+      if (activeView === "sent") {
+        // Personal Sent: outbound conversations from any account
+        filtered = conversations.filter((c) => isOutboundConvo(c));
+      } else if (activeView === "inbox") {
+        // Personal Inbox: assigned to me, excluding outbound-only threads
+        filtered = conversations.filter(
+          (c) => c.assignee_id === currentUser.id && !isOutboundConvo(c)
+        );
+      } else {
+        // Tasks or other personal views
+        filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+      }
     }
 
-    // Team Space view: mailbox selected = show UNASSIGNED conversations only
-    // Assigned conversations live in the assignee's personal inbox
     if (activeMailbox) {
+      // Team Space: unassigned inbound conversations only
       filtered = conversations.filter(
-        (c) => c.email_account_id === activeMailbox && !c.assignee_id
+        (c) =>
+          c.email_account_id === activeMailbox &&
+          !c.assignee_id &&
+          !isOutboundConvo(c)
       );
     }
 
@@ -58,7 +79,7 @@ export default function InboxPage() {
     }
 
     return filtered;
-  }, [conversations, activeMailbox, currentUser, searchQuery]);
+  }, [conversations, activeMailbox, activeView, currentUser, searchQuery, accountEmails]);
 
   if (status === "loading") {
     return (
