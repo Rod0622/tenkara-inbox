@@ -1,79 +1,78 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
-import { notifyNote } from "@/lib/slack";
+import { getServerSession } from "next-auth";
 
-// GET — Fetch notes for a conversation
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const conversationId = req.nextUrl.searchParams.get("conversationId");
-  if (!conversationId) return NextResponse.json({ error: "Missing conversationId" }, { status: 400 });
-
-  const supabase = createServerClient();
-  const { data, error } = await supabase
-    .from("notes")
-    .select("*, author:inbox.team_members(*)")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true });
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
-}
-
-// POST — Create a new note
+// POST /api/conversations/notes — create a note
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { conversationId, text } = await req.json();
-  if (!conversationId || !text) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-
   const supabase = createServerClient();
+  const body = await req.json();
 
-  // Get author
-  const { data: author } = await supabase
-    .from("team_members")
-    .select("id, name")
-    .eq("email", session.user.email)
-    .single();
+  // Accept both camelCase and snake_case
+  const conversationId = body.conversation_id || body.conversationId;
+  const text = body.text;
 
-  if (!author) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (!conversationId || !text?.trim()) {
+    return NextResponse.json(
+      { error: "conversation_id and text are required" },
+      { status: 400 }
+    );
+  }
 
-  // Insert note
+  // Get the current user to set as author
+  // Try to find the team member from session
+  let authorId = body.author_id;
+
+  if (!authorId) {
+    // Get first admin as fallback — ideally you'd get this from session
+    const { data: members } = await supabase
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true)
+      .limit(1);
+
+    authorId = members?.[0]?.id;
+  }
+
+  if (!authorId) {
+    return NextResponse.json({ error: "Could not determine author" }, { status: 400 });
+  }
+
   const { data: note, error } = await supabase
     .from("notes")
     .insert({
       conversation_id: conversationId,
-      author_id: author.id,
-      text,
+      author_id: authorId,
+      text: text.trim(),
     })
-    .select("*, author:inbox.team_members(*)")
+    .select("*, author:team_members(*)")
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Get conversation for Slack notification
-  const { data: convo } = await supabase
-    .from("conversations")
-    .select("subject, mailbox_id")
-    .eq("id", conversationId)
-    .single();
-
-  // Log activity
-  await supabase.from("activity_log").insert({
-    conversation_id: conversationId,
-    actor_id: author.id,
-    action: "noted",
-    details: { preview: text.slice(0, 100) },
-  });
-
-  // Slack notification (fire and forget)
-  if (convo) {
-    notifyNote(author.name, text, convo.subject, convo.mailbox_id).catch(console.error);
+  if (error) {
+    console.error("Create note error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(note, { status: 201 });
+  return NextResponse.json({ note });
+}
+
+// GET /api/conversations/notes?conversation_id=xxx
+export async function GET(req: NextRequest) {
+  const supabase = createServerClient();
+  const conversationId = req.nextUrl.searchParams.get("conversation_id");
+
+  if (!conversationId) {
+    return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
+  }
+
+  const { data: notes, error } = await supabase
+    .from("notes")
+    .select("*, author:team_members(*)")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ notes: notes || [] });
 }

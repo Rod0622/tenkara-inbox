@@ -94,7 +94,12 @@ export function useConversationDetail(conversationId: string | null) {
   const [messages, setMessages] = useState<any[]>([]);
 
   const fetchDetail = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId) {
+      setNotes([]);
+      setTasks([]);
+      setMessages([]);
+      return;
+    }
 
     const [notesRes, tasksRes, msgsRes] = await Promise.all([
       supabase.from("notes").select("*, author:team_members(*)")
@@ -104,6 +109,10 @@ export function useConversationDetail(conversationId: string | null) {
       supabase.from("messages").select("*")
         .eq("conversation_id", conversationId).order("sent_at"),
     ]);
+
+    if (notesRes.error) console.error("Notes fetch error:", notesRes.error);
+    if (tasksRes.error) console.error("Tasks fetch error:", tasksRes.error);
+    if (msgsRes.error) console.error("Messages fetch error:", msgsRes.error);
 
     setNotes(notesRes.data || []);
     setTasks(tasksRes.data || []);
@@ -130,43 +139,89 @@ export function useConversationDetail(conversationId: string | null) {
 // ── Actions ──────────────────────────────────────────
 export function useActions() {
   const addNote = async (conversationId: string, text: string) => {
-    await fetch("/api/conversations/notes", {
+    const res = await fetch("/api/conversations/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, text }),
+      body: JSON.stringify({ conversation_id: conversationId, text }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Add note failed:", err);
+    }
   };
 
   const addTask = async (conversationId: string, text: string, assigneeId?: string, dueDate?: string) => {
-    await fetch("/api/conversations/tasks", {
+    const res = await fetch("/api/conversations/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, text, assigneeId, dueDate }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        text,
+        assignee_id: assigneeId,
+        due_date: dueDate,
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Add task failed:", err);
+    }
   };
 
   const toggleTask = async (taskId: string, isDone: boolean) => {
-    await fetch("/api/conversations/tasks", {
+    const res = await fetch("/api/conversations/tasks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId, isDone }),
+      body: JSON.stringify({ task_id: taskId, is_done: isDone }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Toggle task failed:", err);
+    }
   };
 
   const assignConversation = async (conversationId: string, assigneeId: string | null) => {
-    await fetch("/api/conversations/assign", {
+    // The ConversationDetail component already calls the API directly,
+    // so this just needs to trigger a refetch via realtime.
+    // But if called directly, it should work too:
+    const res = await fetch("/api/conversations/assign", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, assigneeId }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        assignee_id: assigneeId,
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Assign failed:", err);
+    }
   };
 
   const sendReply = async (conversationId: string, body: string) => {
-    await fetch("/api/gmail/send", {
+    const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, body }),
+      body: JSON.stringify({ conversation_id: conversationId, body }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Send reply failed:", err);
+    }
+  };
+
+  const sendEmail = async (params: {
+    account_id: string;
+    to: string;
+    cc?: string;
+    subject: string;
+    body: string;
+  }) => {
+    const res = await fetch("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    return res.json();
   };
 
   const syncEmails = async (accountId?: string) => {
@@ -187,5 +242,5 @@ export function useActions() {
     return res.json();
   };
 
-  return { addNote, addTask, toggleTask, assignConversation, sendReply, syncEmails, askAi };
+  return { addNote, addTask, toggleTask, assignConversation, sendReply, sendEmail, syncEmails, askAi };
 }

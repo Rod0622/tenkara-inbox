@@ -424,6 +424,16 @@ export default function ConversationDetail({
     setShowNoteInput(false);
   };
 
+  const [newTaskText, setNewTaskText] = useState("");
+  const [showTaskInput, setShowTaskInput] = useState(false);
+
+  const handleAddTask = async () => {
+    if (!newTaskText.trim()) return;
+    await onAddTask(convo.id, newTaskText.trim());
+    setNewTaskText("");
+    setShowTaskInput(false);
+  };
+
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
     setSending(true);
@@ -645,9 +655,48 @@ export default function ConversationDetail({
               </div>
             ))}
 
-            {tasks.length === 0 && (
+            {tasks.length === 0 && !showTaskInput && (
               <div className="text-center py-10 text-[#484F58] text-sm">
                 No tasks for this conversation
+              </div>
+            )}
+
+            {/* Add task */}
+            {!showTaskInput ? (
+              <button
+                onClick={() => setShowTaskInput(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] text-xs font-medium hover:bg-[#181D24] transition-all mt-2"
+              >
+                <Plus size={14} /> New task
+              </button>
+            ) : (
+              <div className="p-3 rounded-xl bg-[#12161B] border border-[#4ADE80] mt-2">
+                <input
+                  value={newTaskText}
+                  onChange={(e) => setNewTaskText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddTask();
+                    if (e.key === "Escape") { setShowTaskInput(false); setNewTaskText(""); }
+                  }}
+                  placeholder="What needs to be done?"
+                  autoFocus
+                  className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58] mb-2"
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setShowTaskInput(false); setNewTaskText(""); }}
+                    className="px-3 py-1.5 rounded text-[#7D8590] text-xs border border-[#1E242C]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddTask}
+                    disabled={!newTaskText.trim()}
+                    className="px-3.5 py-1.5 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold"
+                  >
+                    Add Task
+                  </button>
+                </div>
               </div>
             )}
           </div>

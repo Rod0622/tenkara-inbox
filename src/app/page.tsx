@@ -7,6 +7,7 @@ import { useTeamMembers, useEmailAccounts, useConversations, useActions } from "
 import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
 import ConversationDetail from "@/components/ConversationDetail";
+import ComposeEmail from "@/components/ComposeEmail";
 import AISidebar from "@/components/AISidebar";
 import type { Conversation } from "@/types";
 
@@ -21,18 +22,14 @@ export default function InboxPage() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Fetch ALL conversations (no mailbox filter for now - we filter client-side)
-  const { conversations, loading } = useConversations(activeMailbox);
+  const { conversations, loading, refetch } = useConversations(activeMailbox);
 
   const currentUser = useMemo(
     () => teamMembers.find((m) => m.email === session?.user?.email) || null,
     [teamMembers, session]
   );
 
-  // Filter conversations based on context:
-  // - Personal Inbox (no mailbox) = assigned to me
-  // - Team Space folder "Inbox" (activeMailbox set) = all for that account
-  // - Other folders = would filter by folder_id (future)
+  // Filter conversations based on context
   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
@@ -70,6 +67,8 @@ export default function InboxPage() {
 
   if (!session) redirect("/login");
 
+  const isComposing = activeView === "compose";
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
       <Sidebar
@@ -82,25 +81,38 @@ export default function InboxPage() {
         currentUser={currentUser}
       />
 
-      <ConversationList
-        conversations={displayConversations}
-        activeConvo={activeConvo}
-        setActiveConvo={setActiveConvo}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        teamMembers={teamMembers}
-      />
+      {isComposing ? (
+        // Compose view replaces the list + detail
+        <ComposeEmail
+          onClose={() => setActiveView("inbox")}
+          onSent={() => {
+            refetch();
+            setActiveView("inbox");
+          }}
+        />
+      ) : (
+        <>
+          <ConversationList
+            conversations={displayConversations}
+            activeConvo={activeConvo}
+            setActiveConvo={setActiveConvo}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            teamMembers={teamMembers}
+          />
 
-      <ConversationDetail
-        conversation={activeConvo}
-        currentUser={currentUser}
-        teamMembers={teamMembers}
-        onAddNote={actions.addNote}
-        onToggleTask={actions.toggleTask}
-        onAddTask={actions.addTask}
-        onAssign={actions.assignConversation}
-        onSendReply={actions.sendReply}
-      />
+          <ConversationDetail
+            conversation={activeConvo}
+            currentUser={currentUser}
+            teamMembers={teamMembers}
+            onAddNote={actions.addNote}
+            onToggleTask={actions.toggleTask}
+            onAddTask={actions.addTask}
+            onAssign={actions.assignConversation}
+            onSendReply={actions.sendReply}
+          />
+        </>
+      )}
 
       {/* Kara AI — self-contained floating button + slide-out panel */}
       <AISidebar conversation={activeConvo} />
