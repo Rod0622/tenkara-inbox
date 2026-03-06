@@ -41,6 +41,17 @@ interface SyncResult {
   lastUid: number | null;
 }
 
+// ── Gmail detection ──────────────────────────────────
+function isGmailAccount(account: EmailAccount): boolean {
+  return (
+    account.provider?.toLowerCase() === "gmail" ||
+    account.imap_host?.toLowerCase().includes("gmail") ||
+    account.imap_host?.toLowerCase().includes("imap.google") ||
+    account.email?.toLowerCase().endsWith("@gmail.com") ||
+    account.email?.toLowerCase().endsWith("@googlemail.com")
+  );
+}
+
 // ── Main sync function ───────────────────────────────
 export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
   const supabase = createServerClient();
@@ -163,6 +174,7 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
   return new Promise((resolve, reject) => {
     const emails: ParsedEmail[] = [];
     const lastUid = account.last_sync_uid ? parseInt(account.last_sync_uid) : 0;
+    const gmail = isGmailAccount(account);
 
     const imap = new Imap({
       user: account.imap_user || account.email,
@@ -182,84 +194,55 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
           return reject(new Error(`Failed to open INBOX: ${err.message}`));
         }
 
-        // Determine which messages to fetch
+        // Build search criteria based on provider and sync state
         let searchCriteria: any[];
-        if (lastUid > 0) {
-          searchCriteria = [["UID", `${lastUid + 1}:*`]];
+
+        if (gmail) {
+          // Gmail: use X-GM-RAW to filter to Primary category only
+          if (lastUid > 0) {
+            // Incremental sync: primary emails after last UID
+            searchCriteria = [
+              ["UID", `${lastUid + 1}:*`],
+              ["X-GM-RAW", "category:primary"],
+            ];
+          } else {
+            // First sync: primary emails only
+            searchCriteria = [["X-GM-RAW", "category:primary"]];
+          }
         } else {
-          // First sync - fetch last 50 messages using ALL
-          searchCriteria = ["ALL"];
+          // Non-Gmail: standard IMAP search (all inbox messages)
+          if (lastUid > 0) {
+            searchCriteria = [["UID", `${lastUid + 1}:*`]];
+          } else {
+            searchCriteria = ["ALL"];
+          }
         }
 
         // Search for messages
         imap.search(searchCriteria, (searchErr, uids) => {
           if (searchErr) {
+            // Fallback: if X-GM-RAW fails (some Gmail setups), retry without it
+            if (gmail && searchErr.message?.includes("X-GM-RAW")) {
+              console.warn("X-GM-RAW not supported, falling back to ALL");
+              const fallbackCriteria: any[] = lastUid > 0
+                ? [["UID", `${lastUid + 1}:*`]]
+                : ["ALL"];
+              
+              imap.search(fallbackCriteria, (fallbackErr, fallbackUids) => {
+                if (fallbackErr) {
+                  imap.end();
+                  return reject(new Error(`Search failed: ${fallbackErr.message}`));
+                }
+                processUids(imap, fallbackUids || [], lastUid, emails, resolve, reject);
+              });
+              return;
+            }
+
             imap.end();
             return reject(new Error(`Search failed: ${searchErr.message}`));
           }
 
-          if (!uids || uids.length === 0) {
-            imap.end();
-            return resolve([]);
-          }
-
-          // Filter out UIDs we've already seen
-          const newUids = lastUid > 0 ? uids.filter(u => u > lastUid) : uids;
-          if (newUids.length === 0) {
-            imap.end();
-            return resolve([]);
-          }
-
-         // First sync: take last 50. Incremental: take last 100.
-          const limit = lastUid > 0 ? 100 : 50;
-          const fetchUids = newUids.slice(-limit);
-
-          const fetch = imap.fetch(fetchUids, {
-            bodies: "",
-            struct: true,
-          });
-
-          fetch.on("message", (msg, seqno) => {
-            let uid = 0;
-            let rawBuffer = Buffer.alloc(0);
-
-            msg.on("attributes", (attrs) => {
-              uid = attrs.uid;
-            });
-
-            msg.on("body", (stream) => {
-              const chunks: Buffer[] = [];
-              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-              stream.on("end", () => {
-                rawBuffer = Buffer.concat(chunks);
-              });
-            });
-
-            msg.once("end", async () => {
-              try {
-                const parsed = await simpleParser(rawBuffer);
-                emails.push(parseMail(parsed, uid));
-              } catch (parseErr: any) {
-                // Skip unparseable emails
-                console.error(`Parse error for UID ${uid}:`, parseErr.message);
-              }
-            });
-          });
-
-          fetch.once("error", (fetchErr) => {
-            imap.end();
-            reject(new Error(`Fetch error: ${fetchErr.message}`));
-          });
-
-          fetch.once("end", () => {
-            // Wait a tick for all parsing to complete
-            setTimeout(() => {
-              imap.end();
-              // Sort by UID ascending
-              emails.sort((a, b) => a.uid - b.uid);
-              resolve(emails);
-            }, 500);
-          });
+          processUids(imap, uids || [], lastUid, emails, resolve, reject);
         });
       });
     });
@@ -281,6 +264,77 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
     imap.once("ready", () => clearTimeout(timeout));
 
     imap.connect();
+  });
+}
+
+// ── Process fetched UIDs ─────────────────────────────
+function processUids(
+  imap: Imap,
+  uids: number[],
+  lastUid: number,
+  emails: ParsedEmail[],
+  resolve: (value: ParsedEmail[]) => void,
+  reject: (reason: Error) => void
+) {
+  if (!uids || uids.length === 0) {
+    imap.end();
+    return resolve([]);
+  }
+
+  // Filter out UIDs we've already seen
+  const newUids = lastUid > 0 ? uids.filter(u => u > lastUid) : uids;
+  if (newUids.length === 0) {
+    imap.end();
+    return resolve([]);
+  }
+
+  // First sync: take last 50. Incremental: take last 100.
+  const limit = lastUid > 0 ? 100 : 50;
+  const fetchUids = newUids.slice(-limit);
+
+  const fetch = imap.fetch(fetchUids, {
+    bodies: "",
+    struct: true,
+  });
+
+  fetch.on("message", (msg, seqno) => {
+    let uid = 0;
+    let rawBuffer = Buffer.alloc(0);
+
+    msg.on("attributes", (attrs) => {
+      uid = attrs.uid;
+    });
+
+    msg.on("body", (stream) => {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.on("end", () => {
+        rawBuffer = Buffer.concat(chunks);
+      });
+    });
+
+    msg.once("end", async () => {
+      try {
+        const parsed = await simpleParser(rawBuffer);
+        emails.push(parseMail(parsed, uid));
+      } catch (parseErr: any) {
+        console.error(`Parse error for UID ${uid}:`, parseErr.message);
+      }
+    });
+  });
+
+  fetch.once("error", (fetchErr) => {
+    imap.end();
+    reject(new Error(`Fetch error: ${fetchErr.message}`));
+  });
+
+  fetch.once("end", () => {
+    // Wait a tick for all parsing to complete
+    setTimeout(() => {
+      imap.end();
+      emails.sort((a, b) => a.uid - b.uid);
+      resolve(emails);
+    }, 500);
   });
 }
 
@@ -348,7 +402,6 @@ async function findOrCreateConversation(
 
   // Strategy 2: Match by References headers
   if (email.references.length > 0) {
-    // Check if any referenced message exists in our DB
     for (const ref of email.references) {
       const { data: refMsg } = await supabase
         .from("messages")
