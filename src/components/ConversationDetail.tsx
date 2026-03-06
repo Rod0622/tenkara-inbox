@@ -31,7 +31,7 @@ function AssignDropdown({
   currentAssignee: TeamMember | null | undefined;
   currentUser: TeamMember | null;
   teamMembers: TeamMember[];
-  onAssign: (conversationId: string, assigneeId: string | null) => Promise<void>;
+  onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   conversationId: string;
 }) {
   const [open, setOpen] = useState(false);
