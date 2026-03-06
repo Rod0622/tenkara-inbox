@@ -31,6 +31,7 @@ interface ParsedEmail {
   snippet: string;
   sentAt: Date;
   hasAttachments: boolean;
+  gmailLabels: string[];
 }
 
 interface SyncResult {
@@ -51,6 +52,18 @@ function isGmailAccount(account: EmailAccount): boolean {
     account.email?.toLowerCase().endsWith("@googlemail.com")
   );
 }
+
+// Non-primary Gmail categories to filter out
+const GMAIL_NON_PRIMARY_CATEGORIES = [
+  "promotions",
+  "social",
+  "updates",
+  "forums",
+  "category_promotions",
+  "category_social",
+  "category_updates",
+  "category_forums",
+];
 
 // ── Main sync function ───────────────────────────────
 export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
@@ -76,6 +89,8 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       return result;
     }
 
+    const gmail = isGmailAccount(account as EmailAccount);
+
     // 2. Connect to IMAP and fetch emails
     const emails = await fetchEmailsViaImap(account as EmailAccount);
 
@@ -88,8 +103,29 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       return result;
     }
 
-    // 3. Process each email - thread into conversations and store
-    for (const email of emails) {
+    // 3. Filter to primary inbox for Gmail accounts (post-fetch filtering)
+    let filteredEmails = emails;
+    if (gmail) {
+      filteredEmails = emails.filter((email) => {
+        // If we got Gmail labels, check them
+        if (email.gmailLabels.length > 0) {
+          const labelsLower = email.gmailLabels.map((l) => l.toLowerCase());
+          // Exclude if any non-primary category label is present
+          const isNonPrimary = labelsLower.some((label) =>
+            GMAIL_NON_PRIMARY_CATEGORIES.some((cat) => label.includes(cat))
+          );
+          return !isNonPrimary;
+        }
+        // No labels info — include by default
+        return true;
+      });
+      console.log(
+        `Gmail filter: ${emails.length} total → ${filteredEmails.length} primary`
+      );
+    }
+
+    // 4. Process each email - thread into conversations and store
+    for (const email of filteredEmails) {
       try {
         // Check if message already exists (dedupe)
         const existingCheck = await supabase
@@ -144,12 +180,16 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       }
     }
 
-    // 4. Update account sync state
+    // 5. Update account sync state
+    // Use highest UID from ALL fetched emails (not just filtered)
+    // so incremental sync doesn't re-fetch filtered-out messages
+    const highestUid = emails.reduce((max, e) => Math.max(max, e.uid), 0);
+
     await supabase
       .from("email_accounts")
       .update({
         last_sync_at: new Date().toISOString(),
-        last_sync_uid: result.lastUid?.toString() || account.last_sync_uid,
+        last_sync_uid: (highestUid || result.lastUid)?.toString() || account.last_sync_uid,
         sync_error: result.errors.length > 0 ? result.errors[0] : null,
       })
       .eq("id", accountId);
@@ -183,8 +223,8 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
       port: account.imap_port || 993,
       tls: account.imap_tls !== false,
       tlsOptions: { rejectUnauthorized: false },
-      connTimeout: 8000,
-      authTimeout: 8000,
+      connTimeout: 10000,
+      authTimeout: 10000,
     });
 
     imap.once("ready", () => {
@@ -194,55 +234,102 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
           return reject(new Error(`Failed to open INBOX: ${err.message}`));
         }
 
-        // Build search criteria based on provider and sync state
+        // Standard IMAP search — works on all providers
         let searchCriteria: any[];
-
-        if (gmail) {
-          // Gmail: use X-GM-RAW to filter to Primary category only
-          if (lastUid > 0) {
-            // Incremental sync: primary emails after last UID
-            searchCriteria = [
-              ["UID", `${lastUid + 1}:*`],
-              ["X-GM-RAW", "category:primary"],
-            ];
-          } else {
-            // First sync: primary emails only
-            searchCriteria = [["X-GM-RAW", "category:primary"]];
-          }
+        if (lastUid > 0) {
+          searchCriteria = [["UID", `${lastUid + 1}:*`]];
         } else {
-          // Non-Gmail: standard IMAP search (all inbox messages)
-          if (lastUid > 0) {
-            searchCriteria = [["UID", `${lastUid + 1}:*`]];
-          } else {
-            searchCriteria = ["ALL"];
-          }
+          searchCriteria = ["ALL"];
         }
 
-        // Search for messages
         imap.search(searchCriteria, (searchErr, uids) => {
           if (searchErr) {
-            // Fallback: if X-GM-RAW fails (some Gmail setups), retry without it
-            if (gmail && searchErr.message?.includes("X-GM-RAW")) {
-              console.warn("X-GM-RAW not supported, falling back to ALL");
-              const fallbackCriteria: any[] = lastUid > 0
-                ? [["UID", `${lastUid + 1}:*`]]
-                : ["ALL"];
-              
-              imap.search(fallbackCriteria, (fallbackErr, fallbackUids) => {
-                if (fallbackErr) {
-                  imap.end();
-                  return reject(new Error(`Search failed: ${fallbackErr.message}`));
-                }
-                processUids(imap, fallbackUids || [], lastUid, emails, resolve, reject);
-              });
-              return;
-            }
-
             imap.end();
             return reject(new Error(`Search failed: ${searchErr.message}`));
           }
 
-          processUids(imap, uids || [], lastUid, emails, resolve, reject);
+          if (!uids || uids.length === 0) {
+            imap.end();
+            return resolve([]);
+          }
+
+          // Filter out UIDs we've already seen
+          const newUids = lastUid > 0 ? uids.filter((u) => u > lastUid) : uids;
+          if (newUids.length === 0) {
+            imap.end();
+            return resolve([]);
+          }
+
+          // First sync: take last 50. Incremental: take last 100.
+          const limit = lastUid > 0 ? 100 : 50;
+          const fetchUids = newUids.slice(-limit);
+
+          // For Gmail, also fetch X-GM-LABELS to enable post-fetch filtering
+          const fetchOptions: any = {
+            bodies: gmail ? ["HEADER", ""] : "",
+            struct: true,
+          };
+
+          const fetch = imap.fetch(fetchUids, fetchOptions);
+
+          fetch.on("message", (msg, seqno) => {
+            let uid = 0;
+            let rawBuffer = Buffer.alloc(0);
+            let headerBuffer = Buffer.alloc(0);
+
+            msg.on("attributes", (attrs) => {
+              uid = attrs.uid;
+            });
+
+            msg.on("body", (stream, info) => {
+              const chunks: Buffer[] = [];
+              stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              stream.on("end", () => {
+                const buf = Buffer.concat(chunks);
+                if (gmail && info.which === "HEADER") {
+                  headerBuffer = buf;
+                } else {
+                  rawBuffer = buf;
+                }
+              });
+            });
+
+            msg.once("end", async () => {
+              try {
+                const parsed = await simpleParser(rawBuffer.length > 0 ? rawBuffer : headerBuffer);
+                const email = parseMail(parsed, uid);
+
+                // Extract Gmail labels from X-GM-LABELS if available
+                if (gmail && headerBuffer.length > 0) {
+                  const headerStr = headerBuffer.toString("utf-8");
+                  const labelMatch = headerStr.match(/X-Gmail-Labels:\s*(.+)/i);
+                  if (labelMatch) {
+                    email.gmailLabels = labelMatch[1]
+                      .split(",")
+                      .map((l) => l.trim())
+                      .filter(Boolean);
+                  }
+                }
+
+                emails.push(email);
+              } catch (parseErr: any) {
+                console.error(`Parse error for UID ${uid}:`, parseErr.message);
+              }
+            });
+          });
+
+          fetch.once("error", (fetchErr) => {
+            imap.end();
+            reject(new Error(`Fetch error: ${fetchErr.message}`));
+          });
+
+          fetch.once("end", () => {
+            setTimeout(() => {
+              imap.end();
+              emails.sort((a, b) => a.uid - b.uid);
+              resolve(emails);
+            }, 500);
+          });
         });
       });
     });
@@ -251,90 +338,16 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
       reject(new Error(`IMAP connection error: ${err.message}`));
     });
 
-    imap.once("end", () => {
-      // Connection ended
-    });
+    imap.once("end", () => {});
 
-    // Set a timeout for the entire operation
     const timeout = setTimeout(() => {
       try { imap.end(); } catch {}
-      reject(new Error("IMAP sync timed out (8s)"));
-    }, 8000);
+      reject(new Error("IMAP sync timed out (10s)"));
+    }, 10000);
 
     imap.once("ready", () => clearTimeout(timeout));
 
     imap.connect();
-  });
-}
-
-// ── Process fetched UIDs ─────────────────────────────
-function processUids(
-  imap: Imap,
-  uids: number[],
-  lastUid: number,
-  emails: ParsedEmail[],
-  resolve: (value: ParsedEmail[]) => void,
-  reject: (reason: Error) => void
-) {
-  if (!uids || uids.length === 0) {
-    imap.end();
-    return resolve([]);
-  }
-
-  // Filter out UIDs we've already seen
-  const newUids = lastUid > 0 ? uids.filter(u => u > lastUid) : uids;
-  if (newUids.length === 0) {
-    imap.end();
-    return resolve([]);
-  }
-
-  // First sync: take last 50. Incremental: take last 100.
-  const limit = lastUid > 0 ? 100 : 50;
-  const fetchUids = newUids.slice(-limit);
-
-  const fetch = imap.fetch(fetchUids, {
-    bodies: "",
-    struct: true,
-  });
-
-  fetch.on("message", (msg, seqno) => {
-    let uid = 0;
-    let rawBuffer = Buffer.alloc(0);
-
-    msg.on("attributes", (attrs) => {
-      uid = attrs.uid;
-    });
-
-    msg.on("body", (stream) => {
-      const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.on("end", () => {
-        rawBuffer = Buffer.concat(chunks);
-      });
-    });
-
-    msg.once("end", async () => {
-      try {
-        const parsed = await simpleParser(rawBuffer);
-        emails.push(parseMail(parsed, uid));
-      } catch (parseErr: any) {
-        console.error(`Parse error for UID ${uid}:`, parseErr.message);
-      }
-    });
-  });
-
-  fetch.once("error", (fetchErr) => {
-    imap.end();
-    reject(new Error(`Fetch error: ${fetchErr.message}`));
-  });
-
-  fetch.once("end", () => {
-    // Wait a tick for all parsing to complete
-    setTimeout(() => {
-      imap.end();
-      emails.sort((a, b) => a.uid - b.uid);
-      resolve(emails);
-    }, 500);
   });
 }
 
@@ -379,6 +392,7 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
     snippet,
     sentAt: parsed.date || new Date(),
     hasAttachments: (parsed.attachments?.length || 0) > 0,
+    gmailLabels: [],
   };
 }
 
@@ -396,8 +410,6 @@ async function findOrCreateConversation(
       .or(`provider_message_id.eq.${email.inReplyTo}`)
       .limit(1)
       .maybeSingle();
-
-    // Also search in snippet/subject match for the same thread
   }
 
   // Strategy 2: Match by References headers
@@ -424,7 +436,10 @@ async function findOrCreateConversation(
       .select("id")
       .eq("email_account_id", accountId)
       .eq("subject", normalizedSubject)
-      .gte("last_message_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .gte(
+        "last_message_at",
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      )
       .order("last_message_at", { ascending: false })
       .limit(1)
       .maybeSingle();

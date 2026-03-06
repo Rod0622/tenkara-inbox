@@ -1,17 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
-import { Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus } from "lucide-react";
+import {
+  Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus,
+  ChevronRight, FolderPlus, MoreHorizontal, Trash2, Pencil,
+} from "lucide-react";
 import type { SidebarProps } from "@/types";
+
+interface Folder {
+  id: string;
+  email_account_id: string;
+  name: string;
+  icon: string;
+  color: string;
+  sort_order: number;
+  is_system: boolean;
+  parent_folder_id: string | null;
+}
 
 export default function Sidebar({
   activeMailbox, setActiveMailbox, activeView, setActiveView,
   mailboxes, conversations, currentUser,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [addingFolder, setAddingFolder] = useState<string | null>(null); // account id
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
+
   const unreadCount = conversations.filter((c) => c.is_unread).length;
+
+  // Fetch folders
+  useEffect(() => {
+    fetchFolders();
+  }, []);
+
+  const fetchFolders = async () => {
+    try {
+      const res = await fetch("/api/folders");
+      if (res.ok) {
+        const data = await res.json();
+        setFolders(data.folders || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch folders:", err);
+    }
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -23,14 +61,61 @@ export default function Sidebar({
       });
       const data = await res.json();
       console.log("Sync result:", data);
-      // Conversations will auto-update via Supabase Realtime
-      // or we can force a page reload
       window.location.reload();
     } catch (err) {
       console.error("Sync failed:", err);
     }
     setSyncing(false);
   };
+
+  const toggleAccount = (accountId: string) => {
+    setExpandedAccounts((prev) => {
+      const next = new Set(prev);
+      if (next.has(accountId)) {
+        next.delete(accountId);
+      } else {
+        next.add(accountId);
+      }
+      return next;
+    });
+  };
+
+  const handleCreateFolder = async (accountId: string) => {
+    if (!newFolderName.trim()) return;
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email_account_id: accountId,
+          name: newFolderName.trim(),
+        }),
+      });
+      if (res.ok) {
+        setNewFolderName("");
+        setAddingFolder(null);
+        fetchFolders();
+      }
+    } catch (err) {
+      console.error("Failed to create folder:", err);
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    try {
+      const res = await fetch(`/api/folders?id=${folderId}`, { method: "DELETE" });
+      if (res.ok) {
+        setFolderMenuOpen(null);
+        fetchFolders();
+        if (activeFolder === folderId) setActiveFolder(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete folder:", err);
+    }
+  };
+
+  const getFoldersForAccount = (accountId: string) =>
+    folders.filter((f) => f.email_account_id === accountId).sort((a, b) => a.sort_order - b.sort_order);
 
   return (
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
@@ -63,11 +148,15 @@ export default function Sidebar({
           { id: "sent", label: "Sent", icon: Send, count: 0 },
         ].map((item) => {
           const Icon = item.icon;
-          const isActive = activeView === item.id && !activeMailbox;
+          const isActive = activeView === item.id && !activeMailbox && !activeFolder;
           return (
             <button
               key={item.id}
-              onClick={() => { setActiveView(item.id); setActiveMailbox(null); }}
+              onClick={() => {
+                setActiveView(item.id);
+                setActiveMailbox(null);
+                setActiveFolder(null);
+              }}
               className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left ${
                 isActive ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
               }`}
@@ -84,7 +173,7 @@ export default function Sidebar({
         })}
       </div>
 
-      {/* Email Accounts */}
+      {/* Email Accounts with Folders */}
       <div className="px-2 pt-3 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
@@ -107,26 +196,145 @@ export default function Sidebar({
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
           const unread = mbConvos.filter((c) => c.is_unread).length;
-          const isActive = activeMailbox === mb.id;
+          const isActive = activeMailbox === mb.id && !activeFolder;
+          const isExpanded = expandedAccounts.has(mb.id);
+          const accountFolders = getFoldersForAccount(mb.id);
+
           return (
-            <button
-              key={mb.id}
-              onClick={() => { setActiveMailbox(mb.id); setActiveView("inbox"); }}
-              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left ${
-                isActive ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
-              }`}
-            >
-              <span className="text-[15px]">{mb.icon || "📬"}</span>
-              <span className="flex-1 truncate">{mb.name}</span>
-              {unread > 0 && (
-                <span
-                  className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center"
-                  style={{ background: mb.color || "#4ADE80" }}
+            <div key={mb.id} className="mb-0.5">
+              {/* Account row */}
+              <div className="flex items-center group">
+                {/* Expand toggle */}
+                <button
+                  onClick={() => toggleAccount(mb.id)}
+                  className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] shrink-0"
                 >
-                  {unread}
-                </span>
+                  <ChevronRight
+                    size={12}
+                    className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                  />
+                </button>
+
+                {/* Account button */}
+                <button
+                  onClick={() => {
+                    setActiveMailbox(mb.id);
+                    setActiveView("inbox");
+                    setActiveFolder(null);
+                  }}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] font-medium transition-all flex-1 min-w-0 text-left ${
+                    isActive ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
+                  }`}
+                >
+                  <span className="text-[15px] shrink-0">{mb.icon || "📬"}</span>
+                  <span className="flex-1 truncate">{mb.name}</span>
+                  {unread > 0 && (
+                    <span
+                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center shrink-0"
+                      style={{ background: mb.color || "#4ADE80" }}
+                    >
+                      {unread}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Folders (collapsible) */}
+              {isExpanded && (
+                <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
+                  {accountFolders.map((folder) => {
+                    const isFolderActive = activeFolder === folder.id;
+                    return (
+                      <div key={folder.id} className="flex items-center group/folder">
+                        <button
+                          onClick={() => {
+                            setActiveFolder(folder.id);
+                            setActiveMailbox(mb.id);
+                            setActiveView("inbox");
+                          }}
+                          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all flex-1 min-w-0 text-left ${
+                            isFolderActive
+                              ? "bg-[#1E242C] text-[#E6EDF3]"
+                              : "text-[#7D8590] hover:bg-[#12161B]"
+                          }`}
+                        >
+                          <span className="text-[13px] shrink-0">{folder.icon}</span>
+                          <span className="flex-1 truncate">{folder.name}</span>
+                        </button>
+
+                        {/* Folder actions (only for non-system folders) */}
+                        {!folder.is_system && (
+                          <div className="relative">
+                            <button
+                              onClick={() =>
+                                setFolderMenuOpen(
+                                  folderMenuOpen === folder.id ? null : folder.id
+                                )
+                              }
+                              className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                            >
+                              <MoreHorizontal size={12} />
+                            </button>
+
+                            {folderMenuOpen === folder.id && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setFolderMenuOpen(null)}
+                                />
+                                <div className="absolute right-0 top-5 z-50 w-32 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1">
+                                  <button
+                                    onClick={() => handleDeleteFolder(folder.id)}
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-[#F85149] hover:bg-[#1E242C] transition-colors"
+                                  >
+                                    <Trash2 size={11} />
+                                    Delete folder
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Add folder input */}
+                  {addingFolder === mb.id ? (
+                    <div className="flex items-center gap-1 px-1.5 py-1 mt-0.5">
+                      <input
+                        autoFocus
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleCreateFolder(mb.id);
+                          if (e.key === "Escape") {
+                            setAddingFolder(null);
+                            setNewFolderName("");
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!newFolderName.trim()) {
+                            setAddingFolder(null);
+                            setNewFolderName("");
+                          }
+                        }}
+                        placeholder="Folder name..."
+                        className="flex-1 bg-[#0B0E11] border border-[#1E242C] rounded px-1.5 py-0.5 text-[11px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]/40 min-w-0"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddingFolder(mb.id)}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-[#484F58] hover:text-[#4ADE80] transition-colors w-full text-left mt-0.5"
+                    >
+                      <FolderPlus size={11} />
+                      <span>New folder</span>
+                    </button>
+                  )}
+                </div>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
