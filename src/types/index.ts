@@ -10,6 +10,7 @@ export interface TeamMember {
   color: string;
   role: "admin" | "member";
   department: "Operations" | "Management" | "Dev" | "Sales" | "Support" | "Uncategorized";
+  is_active?: boolean;  // ← add this
   created_at: string;
 }
 

@@ -107,7 +107,7 @@ function AssignDropdown({
 
           {/* Team members */}
           {teamMembers
-            .filter((m) => m.is_active !== false)
+            
             .map((member) => {
               const isCurrentAssignee = currentAssignee?.id === member.id;
               return (
