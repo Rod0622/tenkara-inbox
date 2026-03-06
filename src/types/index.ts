@@ -24,7 +24,7 @@ export interface Mailbox {
 export interface Conversation {
   id: string;
   gmail_thread_id: string;
-  mailbox_id: string;
+  email_account_id: string;
   subject: string;
   from_name: string;
   from_email: string;
