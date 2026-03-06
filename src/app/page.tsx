@@ -20,6 +20,7 @@ export default function InboxPage() {
   const [activeMailbox, setActiveMailbox] = useState<string | null>(null);
   const [activeView, setActiveView] = useState("inbox");
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const { conversations, loading, refetch } = useConversations(activeMailbox);
@@ -29,7 +30,6 @@ export default function InboxPage() {
     [teamMembers, session]
   );
 
-  // Build a set of connected account emails for outbound detection
   const accountEmails = useMemo(
     () => new Set(emailAccounts.map((a) => a.email?.toLowerCase())),
     [emailAccounts]
@@ -42,32 +42,31 @@ export default function InboxPage() {
   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
-    if (!activeMailbox && currentUser) {
+    if (activeFolder) {
+      // Viewing a specific folder
+      filtered = conversations.filter((c) => c.folder_id === activeFolder);
+    } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
-        // Personal Sent: outbound conversations from any account
         filtered = conversations.filter((c) => isOutboundConvo(c));
       } else if (activeView === "inbox") {
-        // Personal Inbox: assigned to me, excluding outbound-only threads
+        // Personal Inbox: assigned to me
         filtered = conversations.filter(
           (c) => c.assignee_id === currentUser.id && !isOutboundConvo(c)
         );
       } else {
-        // Tasks or other personal views
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
       }
-    }
-
-    if (activeMailbox) {
-      // Team Space: unassigned inbound conversations only
+    } else if (activeMailbox) {
+      // Team Space: unassigned, no custom folder
       filtered = conversations.filter(
         (c) =>
           c.email_account_id === activeMailbox &&
           !c.assignee_id &&
+          !c.folder_id &&
           !isOutboundConvo(c)
       );
     }
 
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -79,43 +78,59 @@ export default function InboxPage() {
     }
 
     return filtered;
-  }, [conversations, activeMailbox, activeView, currentUser, searchQuery, accountEmails]);
+  }, [conversations, activeMailbox, activeFolder, activeView, currentUser, searchQuery, accountEmails]);
 
-  // Wrap assignConversation to update local state optimistically
   const handleAssign = async (conversationId: string, assigneeId: string | null, updatedConversation?: any) => {
-    // Optimistically update the active conversation
     if (activeConvo && activeConvo.id === conversationId) {
       const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
       setActiveConvo({
         ...activeConvo,
         assignee_id: assigneeId,
+        folder_id: assigneeId ? null : activeConvo.folder_id,
         assignee: updatedConversation?.assignee || newAssignee || undefined,
       } as Conversation);
     }
-    // Refetch the full list to stay in sync
     refetch();
   };
 
-  // Bulk action handler
-  const handleBulkAction = async (ids: string[], action: string, payload?: any) => {
+  const handleMoveToFolder = async (conversationIds: string[], folderId: string) => {
     try {
-      const res = await fetch("/api/conversations/bulk", {
-        method: "POST",
+      const res = await fetch("/api/conversations/move", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ids,
-          action,
+          conversation_ids: conversationIds,
+          folder_id: folderId,
           actor_id: currentUser?.id,
-          ...payload,
         }),
       });
       if (res.ok) {
         refetch();
-        // If active conversation was in the bulk action, clear it
+        if (activeConvo && conversationIds.includes(activeConvo.id)) {
+          setActiveConvo({ ...activeConvo, folder_id: folderId, assignee_id: null } as Conversation);
+        }
+      }
+    } catch (err) {
+      console.error("Move to folder failed:", err);
+    }
+  };
+
+  const handleBulkAction = async (ids: string[], action: string, payload?: any) => {
+    try {
+      if (action === "move_folder" && payload?.folder_id) {
+        await handleMoveToFolder(ids, payload.folder_id);
+        return;
+      }
+
+      const res = await fetch("/api/conversations/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, action, actor_id: currentUser?.id, ...payload }),
+      });
+      if (res.ok) {
+        refetch();
         if (activeConvo && ids.includes(activeConvo.id)) {
-          if (action === "archive" || action === "delete") {
-            setActiveConvo(null);
-          }
+          if (action === "archive" || action === "delete") setActiveConvo(null);
         }
       }
     } catch (err) {
@@ -142,19 +157,18 @@ export default function InboxPage() {
         setActiveMailbox={setActiveMailbox}
         activeView={activeView}
         setActiveView={setActiveView}
+        activeFolder={activeFolder}
+        setActiveFolder={setActiveFolder}
         mailboxes={emailAccounts}
         conversations={conversations}
         currentUser={currentUser}
+        onMoveToFolder={handleMoveToFolder}
       />
 
       {isComposing ? (
-        // Compose view replaces the list + detail
         <ComposeEmail
           onClose={() => setActiveView("inbox")}
-          onSent={() => {
-            refetch();
-            setActiveView("inbox");
-          }}
+          onSent={() => { refetch(); setActiveView("inbox"); }}
         />
       ) : (
         <>
@@ -177,11 +191,11 @@ export default function InboxPage() {
             onAddTask={actions.addTask}
             onAssign={handleAssign}
             onSendReply={actions.sendReply}
+            onMoveToFolder={handleMoveToFolder}
           />
         </>
       )}
 
-      {/* Kara AI — self-contained floating button + slide-out panel */}
       <AISidebar conversation={activeConvo} />
     </div>
   );

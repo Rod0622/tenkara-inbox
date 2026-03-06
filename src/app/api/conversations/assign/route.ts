@@ -27,7 +27,12 @@ export async function PATCH(req: NextRequest) {
   // assignee_id can be null to unassign
   const { data, error } = await supabase
     .from("conversations")
-    .update({ assignee_id: assignee_id || null })
+    .update({
+      assignee_id: assignee_id || null,
+      // When assigning: clear folder (goes to personal inbox)
+      // When unassigning: keep folder_id as-is (stays where it was)
+      ...(assignee_id ? { folder_id: null } : {}),
+    })
     .eq("id", conversation_id)
     .select("*, assignee:team_members(*)")
     .single();

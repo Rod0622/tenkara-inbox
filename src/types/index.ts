@@ -26,6 +26,7 @@ export interface Conversation {
   id: string;
   gmail_thread_id: string;
   email_account_id: string;
+  folder_id: string | null;
   subject: string;
   from_name: string;
   from_email: string;
@@ -139,6 +140,17 @@ export interface RealtimePayload<T> {
   old: T;
 }
 
+export interface Folder {
+  id: string;
+  email_account_id: string;
+  name: string;
+  icon: string;
+  color: string;
+  sort_order: number;
+  is_system: boolean;
+  parent_folder_id: string | null;
+}
+
 // ── Component Props ──────────────────────────────────
 
 export interface SidebarProps {
@@ -146,9 +158,12 @@ export interface SidebarProps {
   setActiveMailbox: (id: string | null) => void;
   activeView: string;
   setActiveView: (view: string) => void;
+  activeFolder: string | null;
+  setActiveFolder: (id: string | null) => void;
   mailboxes: Mailbox[];
   conversations: Conversation[];
   currentUser: TeamMember | null;
+  onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
 }
 
 export interface ConversationListProps {
@@ -170,6 +185,7 @@ export interface ConversationDetailProps {
   onAddTask: (conversationId: string, text: string, assigneeId?: string) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string) => Promise<void>;
+  onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
 }
 
 export interface AiSidebarProps {

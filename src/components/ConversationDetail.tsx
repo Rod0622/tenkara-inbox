@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Reply, Forward, Archive, Mail, User, Folder, Plus, Check, Send,
+  Reply, Forward, Archive, Mail, User, Folder, FolderOpen, Plus, Check, Send,
   ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
-  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus,
+  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap,
 } from "lucide-react";
-import { useConversationDetail, useLabels } from "@/lib/hooks";
+import { useConversationDetail, useLabels, useFolders } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
@@ -427,6 +427,12 @@ const ACTIVITY_CONFIG: Record<string, { icon: any; color: string; label: string 
   email_composed: { icon: MailPlus, color: "#58A6FF", label: "Email sent" },
   email_received: { icon: Mail, color: "#BC8CFF", label: "Email received" },
   viewed: { icon: Eye, color: "#58A6FF", label: "Viewed" },
+  moved_to_folder: { icon: FolderOpen, color: "#39D2C0", label: "Moved to folder" },
+  rule_executed: { icon: Zap, color: "#F5D547", label: "Rule executed" },
+  bulk_star: { icon: Star, color: "#F5D547", label: "Bulk starred" },
+  bulk_mark_unread: { icon: MailOpen, color: "#BC8CFF", label: "Bulk marked unread" },
+  bulk_archive: { icon: Archive, color: "#58A6FF", label: "Bulk archived" },
+  bulk_delete: { icon: Archive, color: "#F85149", label: "Bulk deleted" },
 };
 
 function ActivityItem({
@@ -476,6 +482,12 @@ function ActivityItem({
     case "reply_sent":
     case "email_composed":
       description = details.to ? `to ${details.to}` : "";
+      break;
+    case "moved_to_folder":
+      description = details.folder_name || "";
+      break;
+    case "rule_executed":
+      description = details.rule_name || "";
       break;
     default:
       description = "";
@@ -620,10 +632,87 @@ function LabelPicker({
   );
 }
 
+// ── Move to Folder Dropdown ─────────────────────────
+function MoveToFolderDropdown({
+  conversationId,
+  currentFolderId,
+  onMove,
+}: {
+  conversationId: string;
+  currentFolderId: string | null;
+  onMove: (conversationIds: string[], folderId: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const allFolders = useFolders();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const handleMove = async (folderId: string) => {
+    await onMove([conversationId], folderId);
+    setOpen(false);
+  };
+
+  // Group folders by email account
+  const grouped: Record<string, any[]> = {};
+  for (const f of allFolders) {
+    const key = f.email_account_id;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(f);
+  }
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24] transition-all"
+        title="Move to folder"
+      >
+        <FolderOpen size={12} />
+        <span>Move to</span>
+        <ChevronDown size={10} className="text-[#484F58]" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in max-h-[300px] overflow-y-auto">
+          <div className="px-3 py-2 border-b border-[#1E242C]">
+            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Move to folder</div>
+          </div>
+          {Object.values(grouped).flat().map((folder) => {
+            const isCurrent = folder.id === currentFolderId;
+            return (
+              <button
+                key={folder.id}
+                onClick={() => !isCurrent && handleMove(folder.id)}
+                className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] transition-colors ${
+                  isCurrent ? "text-[#4ADE80] bg-[rgba(74,222,128,0.06)]" : "text-[#7D8590] hover:bg-[#1E242C]"
+                }`}
+              >
+                <span className="text-[13px]">{folder.icon || "📁"}</span>
+                <span className="flex-1 text-left truncate">{folder.name}</span>
+                {isCurrent && <Check size={12} className="text-[#4ADE80]" />}
+              </button>
+            );
+          })}
+          {allFolders.length === 0 && (
+            <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">No folders — create some in the sidebar</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
   conversation: convo, currentUser, teamMembers,
-  onAddNote, onToggleTask, onAddTask, onAssign, onSendReply,
+  onAddNote, onToggleTask, onAddTask, onAssign, onSendReply, onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -775,10 +864,15 @@ export default function ConversationDetail({
             <LabelPicker
               conversationId={convo.id}
               currentLabels={convo.labels || []}
-              onToggle={() => {
-                // Trigger a refetch — the realtime subscription handles this
-              }}
+              onToggle={() => {}}
             />
+            {onMoveToFolder && (
+              <MoveToFolderDropdown
+                conversationId={convo.id}
+                currentFolderId={convo.folder_id}
+                onMove={onMoveToFolder}
+              />
+            )}
           </div>
         </div>
 

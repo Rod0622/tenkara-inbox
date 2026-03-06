@@ -1,6 +1,7 @@
 import Imap from "imap";
 import { simpleParser, ParsedMail } from "mailparser";
 import { createServerClient } from "@/lib/supabase";
+import { runRulesForMessage } from "@/lib/rule-engine";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -172,6 +173,20 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             is_unread: !isOutbound(email.fromEmail, account.email),
           })
           .eq("id", conversationId);
+
+        // Run rules engine against this message
+        try {
+          await runRulesForMessage(conversationId, {
+            conversation_id: conversationId,
+            subject: email.subject,
+            from_email: email.fromEmail,
+            from_name: email.fromName,
+            to_addresses: email.toAddresses,
+            body_text: email.bodyText,
+          });
+        } catch (ruleErr: any) {
+          console.error(`Rule engine error for ${email.uid}:`, ruleErr.message);
+        }
 
         result.newMessages++;
         result.lastUid = Math.max(result.lastUid || 0, email.uid);

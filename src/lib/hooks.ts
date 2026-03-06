@@ -42,6 +42,16 @@ export function useLabels() {
   return labels;
 }
 
+// ── Folders ─────────────────────────────────────────
+export function useFolders() {
+  const [folders, setFolders] = useState<any[]>([]);
+  useEffect(() => {
+    supabase.from("folders").select("*").order("sort_order")
+      .then(({ data }) => setFolders(data || []));
+  }, []);
+  return folders;
+}
+
 // ── Conversations with Realtime ──────────────────────
 export function useConversations(accountId: string | null) {
   const [conversations, setConversations] = useState<Conversation[]>([]);

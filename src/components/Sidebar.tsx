@@ -7,30 +7,20 @@ import {
   Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus,
   ChevronRight, FolderPlus, MoreHorizontal, Trash2, PenSquare,
 } from "lucide-react";
-import type { SidebarProps } from "@/types";
-
-interface Folder {
-  id: string;
-  email_account_id: string;
-  name: string;
-  icon: string;
-  color: string;
-  sort_order: number;
-  is_system: boolean;
-  parent_folder_id: string | null;
-}
+import type { SidebarProps, Folder } from "@/types";
 
 export default function Sidebar({
   activeMailbox, setActiveMailbox, activeView, setActiveView,
-  mailboxes, conversations, currentUser,
+  activeFolder, setActiveFolder,
+  mailboxes, conversations, currentUser, onMoveToFolder,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
-  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
   // Personal counts: only conversations assigned to the current user
   const accountEmails = new Set(mailboxes.map((a: any) => a.email?.toLowerCase()));
@@ -121,6 +111,27 @@ export default function Sidebar({
   // Find the "Inbox" system folder for an account
   const getInboxFolder = (accountId: string) =>
     folders.find((f) => f.email_account_id === accountId && f.is_system && f.name === "Inbox");
+
+  // Drag and drop handlers for folders
+  const handleDragOver = (e: React.DragEvent, folderId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverFolder(folderId);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverFolder(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, folderId: string) => {
+    e.preventDefault();
+    setDragOverFolder(null);
+    const conversationIds = e.dataTransfer.getData("text/conversation-ids");
+    if (conversationIds && onMoveToFolder) {
+      const ids = JSON.parse(conversationIds);
+      await onMoveToFolder(ids, folderId);
+    }
+  };
 
   return (
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
@@ -251,11 +262,9 @@ export default function Sidebar({
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
                     const isFolderActive = activeFolder === folder.id;
-                    // Count only unassigned unread for the Inbox folder
-                    const folderUnread =
-                      folder.name === "Inbox"
-                        ? unassignedConvos.filter((c) => c.is_unread).length
-                        : 0;
+                    // Count conversations in this folder
+                    const folderConvos = mbConvos.filter((c) => c.folder_id === folder.id);
+                    const folderUnread = folderConvos.filter((c) => c.is_unread).length;
 
                     return (
                       <div key={folder.id} className="flex items-center group/folder">
@@ -265,8 +274,13 @@ export default function Sidebar({
                             setActiveMailbox(mb.id);
                             setActiveView("inbox");
                           }}
+                          onDragOver={(e) => handleDragOver(e, folder.id)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, folder.id)}
                           className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all flex-1 min-w-0 text-left ${
-                            isFolderActive
+                            dragOverFolder === folder.id
+                              ? "bg-[rgba(74,222,128,0.15)] border border-[#4ADE80] border-dashed"
+                              : isFolderActive
                               ? "bg-[#1E242C] text-[#E6EDF3]"
                               : "text-[#7D8590] hover:bg-[#12161B]"
                           }`}

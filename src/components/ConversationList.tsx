@@ -495,6 +495,15 @@ export default function ConversationList({
               return (
                 <div
                   key={c.id}
+                  draggable
+                  onDragStart={(e) => {
+                    // If selected, drag all selected. Otherwise just this one.
+                    const dragIds = isSelected && selectedIds.size > 0
+                      ? Array.from(selectedIds)
+                      : [c.id];
+                    e.dataTransfer.setData("text/conversation-ids", JSON.stringify(dragIds));
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
                   className={`relative flex gap-2 p-2.5 mb-0.5 rounded-lg w-full text-left transition-all cursor-pointer group ${
                     isActive ? "bg-[#1E242C]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[#181D24]"
                   }`}
