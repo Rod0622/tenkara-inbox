@@ -185,13 +185,10 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
         // Determine which messages to fetch
         let searchCriteria: any[];
         if (lastUid > 0) {
-          // Fetch only new messages since last sync
           searchCriteria = [["UID", `${lastUid + 1}:*`]];
         } else {
-          // First sync - fetch last 50 messages
-          const total = box.messages.total;
-          const start = Math.max(1, total - 49);
-          searchCriteria = [["SEQUENCE", `${start}:*`]];
+          // First sync - fetch last 50 messages using ALL
+          searchCriteria = ["ALL"];
         }
 
         // Search for messages
@@ -213,8 +210,9 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
             return resolve([]);
           }
 
-          // Limit to 100 per sync run to stay within timeout
-          const fetchUids = newUids.slice(-100);
+         // First sync: take last 50. Incremental: take last 100.
+          const limit = lastUid > 0 ? 100 : 50;
+          const fetchUids = newUids.slice(-limit);
 
           const fetch = imap.fetch(fetchUids, {
             bodies: "",
