@@ -146,20 +146,23 @@ async function executeAction(
 /**
  * Run all active rules against a message/conversation.
  * Call this after a new message is synced or a conversation is created.
+ * @param triggerType - 'incoming', 'outgoing', or 'user_action'
  */
 export async function runRulesForMessage(
   conversationId: string,
-  msg: MessageContext
+  msg: MessageContext,
+  triggerType: "incoming" | "outgoing" | "user_action" = "incoming"
 ): Promise<{ matched: number; actions: string[] }> {
   const supabase = createServerClient();
   const result = { matched: 0, actions: [] as string[] };
 
   try {
-    // Fetch all active rules, ordered by sort_order
+    // Fetch all active rules matching the trigger type
     const { data: rules, error } = await supabase
       .from("rules")
       .select("*")
       .eq("is_active", true)
+      .eq("trigger_type", triggerType)
       .order("sort_order");
 
     if (error || !rules || rules.length === 0) return result;

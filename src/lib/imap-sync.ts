@@ -176,6 +176,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
         // Run rules engine against this message
         try {
+          const triggerType = isOutbound(email.fromEmail, account.email) ? "outgoing" : "incoming";
           await runRulesForMessage(conversationId, {
             conversation_id: conversationId,
             subject: email.subject,
@@ -183,7 +184,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             from_name: email.fromName,
             to_addresses: email.toAddresses,
             body_text: email.bodyText,
-          });
+          }, triggerType);
         } catch (ruleErr: any) {
           console.error(`Rule engine error for ${email.uid}:`, ruleErr.message);
         }

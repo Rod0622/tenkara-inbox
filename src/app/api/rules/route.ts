@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
-  const { name, is_active, condition_field, condition_operator, condition_value, action_type, action_value } = body;
+  const { name, is_active, trigger_type, condition_field, condition_operator, condition_value, action_type, action_value } = body;
 
   if (!name?.trim() || !condition_field || !condition_operator || !action_type) {
     return NextResponse.json({ error: "name, condition, and action are required" }, { status: 400 });
@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     .insert({
       name: name.trim(),
       is_active: is_active !== false,
+      trigger_type: trigger_type || "incoming",
       condition_field,
       condition_operator,
       condition_value: condition_value || "",
@@ -61,7 +62,7 @@ export async function PATCH(req: NextRequest) {
   const { id, ...fields } = body;
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  const allowed = ["name", "is_active", "condition_field", "condition_operator", "condition_value", "action_type", "action_value", "sort_order"];
+  const allowed = ["name", "is_active", "trigger_type", "condition_field", "condition_operator", "condition_value", "action_type", "action_value", "sort_order"];
   const update: any = {};
   for (const key of allowed) {
     if (fields[key] !== undefined) update[key] = fields[key];

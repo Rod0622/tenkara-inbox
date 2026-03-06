@@ -261,17 +261,28 @@ export default function Sidebar({
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
-                    const isFolderActive = activeFolder === folder.id;
-                    // Count conversations in this folder
-                    const folderConvos = mbConvos.filter((c) => c.folder_id === folder.id);
+                    const isFolderActive = (folder.is_system && folder.name === "Inbox")
+                      ? (activeMailbox === mb.id && !activeFolder)
+                      : activeFolder === folder.id;
+                    // Count conversations: system Inbox = unassigned with no folder_id, custom = matching folder_id
+                    const folderConvos = (folder.is_system && folder.name === "Inbox")
+                      ? unassignedConvos.filter((c) => !c.folder_id)
+                      : mbConvos.filter((c) => c.folder_id === folder.id);
                     const folderUnread = folderConvos.filter((c) => c.is_unread).length;
 
                     return (
                       <div key={folder.id} className="flex items-center group/folder">
                         <button
                           onClick={() => {
-                            setActiveFolder(folder.id);
-                            setActiveMailbox(mb.id);
+                            if (folder.is_system && folder.name === "Inbox") {
+                              // System Inbox: show unassigned team emails (no folder_id filter)
+                              setActiveFolder(null);
+                              setActiveMailbox(mb.id);
+                            } else {
+                              // Custom folder: filter by folder_id
+                              setActiveFolder(folder.id);
+                              setActiveMailbox(mb.id);
+                            }
                             setActiveView("inbox");
                           }}
                           onDragOver={(e) => handleDragOver(e, folder.id)}

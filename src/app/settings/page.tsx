@@ -1028,21 +1028,31 @@ const ACTION_TYPES = [
   { value: "assign_to", label: "Assign to" },
   { value: "mark_starred", label: "Star conversation" },
   { value: "mark_read", label: "Mark as read" },
+  { value: "move_to_folder", label: "Move to folder" },
   { value: "set_status", label: "Set status" },
+];
+
+const TRIGGER_TYPES = [
+  { value: "incoming", label: "Incoming", icon: "📥", description: "When a new email arrives" },
+  { value: "outgoing", label: "Outgoing", icon: "📤", description: "When an email is sent" },
+  { value: "user_action", label: "User Action", icon: "👤", description: "When a user performs an action" },
 ];
 
 function RulesTab() {
   const [rules, setRules] = useState<any[]>([]);
   const [labels, setLabels] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [allFolders, setAllFolders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [activeTrigger, setActiveTrigger] = useState("incoming");
 
   const emptyRule = {
     name: "",
+    trigger_type: "incoming",
     condition_field: "subject",
     condition_operator: "contains",
     condition_value: "",
@@ -1058,10 +1068,12 @@ function RulesTab() {
       fetch("/api/rules").then((r) => r.json()),
       supabase.from("labels").select("*").order("sort_order"),
       supabase.from("team_members").select("*").eq("is_active", true),
-    ]).then(([rulesData, labelsRes, membersRes]) => {
+      supabase.from("folders").select("*").order("sort_order"),
+    ]).then(([rulesData, labelsRes, membersRes, foldersRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
       setMembers(membersRes.data || []);
+      setAllFolders(foldersRes.data || []);
       setLoading(false);
     });
   }, []);
@@ -1079,6 +1091,10 @@ function RulesTab() {
     }
     if (type === "assign_to") {
       return members.find((m) => m.id === value)?.name || value;
+    }
+    if (type === "move_to_folder") {
+      const folder = allFolders.find((f) => f.id === value);
+      return folder ? `${folder.icon} ${folder.name}` : value;
     }
     if (type === "set_status") return value;
     return "";
@@ -1118,10 +1134,21 @@ function RulesTab() {
         </select>
       );
     }
+    if (actionType === "move_to_folder") {
+      return (
+        <select value={value} onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select folder...</option>
+          {allFolders.map((f) => (
+            <option key={f.id} value={f.id}>{f.icon} {f.name}</option>
+          ))}
+        </select>
+      );
+    }
     return null; // star/read don't need a value
   };
 
-  const needsActionValue = (type: string) => ["add_label", "remove_label", "assign_to", "set_status"].includes(type);
+  const needsActionValue = (type: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder"].includes(type);
 
   const handleAdd = async () => {
     if (!newRule.name.trim() || !newRule.condition_value.trim()) return;
@@ -1131,7 +1158,7 @@ function RulesTab() {
       const res = await fetch("/api/rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newRule),
+        body: JSON.stringify({ ...newRule, trigger_type: activeTrigger }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1235,23 +1262,55 @@ function RulesTab() {
 
   return (
     <div className="max-w-3xl mx-auto p-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Rules</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Automate actions on incoming emails based on conditions</p>
+          <p className="text-sm text-[#7D8590] mt-1">Automate actions based on email events</p>
         </div>
         <button
-          onClick={() => { setShowAdd(true); setError(""); setNewRule(emptyRule); }}
+          onClick={() => { setShowAdd(true); setError(""); setNewRule({ ...emptyRule, trigger_type: activeTrigger }); }}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
         >
           <Plus size={16} /> New Rule
         </button>
       </div>
 
+      {/* Trigger type tabs */}
+      <div className="flex gap-1 mb-6 p-1 rounded-lg bg-[#12161B] border border-[#1E242C]">
+        {TRIGGER_TYPES.map((t) => {
+          const count = rules.filter((r) => (r.trigger_type || "incoming") === t.value).length;
+          return (
+            <button
+              key={t.value}
+              onClick={() => setActiveTrigger(t.value)}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-[12px] font-semibold transition-all ${
+                activeTrigger === t.value
+                  ? "bg-[#1E242C] text-[#E6EDF3] shadow-sm"
+                  : "text-[#7D8590] hover:text-[#E6EDF3]"
+              }`}
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+              {count > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  activeTrigger === t.value ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#1E242C] text-[#484F58]"
+                }`}>{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="text-[11px] text-[#484F58] mb-4">
+        {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.description}
+      </div>
+
       {/* Add new rule */}
       {showAdd && (
         <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
-          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">New Rule</div>
+          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">
+            New {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label} Rule
+          </div>
           <RuleForm
             rule={newRule}
             setRule={setNewRule}
@@ -1266,7 +1325,7 @@ function RulesTab() {
         <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
-          {rules.map((r) => (
+          {rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger).map((r) => (
             <div key={r.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
               {editingId === r.id ? (
                 <RuleForm
@@ -1305,7 +1364,7 @@ function RulesTab() {
 
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => { setEditingId(r.id); setEditRule({ name: r.name, condition_field: r.condition_field, condition_operator: r.condition_operator, condition_value: r.condition_value, action_type: r.action_type, action_value: r.action_value }); setError(""); }}
+                      onClick={() => { setEditingId(r.id); setEditRule({ name: r.name, trigger_type: r.trigger_type || "incoming", condition_field: r.condition_field, condition_operator: r.condition_operator, condition_value: r.condition_value, action_type: r.action_type, action_value: r.action_value }); setError(""); }}
                       className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
                     >
                       <Edit2 size={13} />
@@ -1322,13 +1381,13 @@ function RulesTab() {
             </div>
           ))}
 
-          {rules.length === 0 && !showAdd && (
+          {rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger).length === 0 && !showAdd && (
             <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
               <Zap className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No rules yet</h3>
+              <h3 className="text-lg font-semibold mb-2">No {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label?.toLowerCase()} rules yet</h3>
               <p className="text-sm text-[#7D8590] mb-4">Create rules to auto-label, assign, or organize emails</p>
               <button
-                onClick={() => setShowAdd(true)}
+                onClick={() => { setShowAdd(true); setNewRule({ ...emptyRule, trigger_type: activeTrigger }); }}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
               >
                 <Plus size={16} /> Create First Rule

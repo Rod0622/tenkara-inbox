@@ -43,21 +43,23 @@ export default function InboxPage() {
     let filtered = conversations;
 
     if (activeFolder) {
-      // Viewing a specific folder
+      // Viewing a specific custom folder
       filtered = conversations.filter((c) => c.folder_id === activeFolder);
     } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
-        filtered = conversations.filter((c) => isOutboundConvo(c));
+        // Personal Sent: outbound, NOT moved to a folder
+        filtered = conversations.filter((c) => isOutboundConvo(c) && !c.folder_id);
       } else if (activeView === "inbox") {
-        // Personal Inbox: assigned to me
+        // Personal Inbox: assigned to me, NOT moved to a folder
         filtered = conversations.filter(
-          (c) => c.assignee_id === currentUser.id && !isOutboundConvo(c)
+          (c) => c.assignee_id === currentUser.id && !c.folder_id && !isOutboundConvo(c)
         );
       } else {
-        filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+        // Tasks or other personal views
+        filtered = conversations.filter((c) => c.assignee_id === currentUser.id && !c.folder_id);
       }
     } else if (activeMailbox) {
-      // Team Space: unassigned, no custom folder
+      // Team Space (system Inbox): unassigned, NO custom folder assigned
       filtered = conversations.filter(
         (c) =>
           c.email_account_id === activeMailbox &&
