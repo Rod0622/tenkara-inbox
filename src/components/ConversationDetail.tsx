@@ -107,7 +107,7 @@ function AssignDropdown({
 
           {/* Team members */}
           {teamMembers
-            
+            .filter((m) => m.is_active !== false)
             .map((member) => {
               const isCurrentAssignee = currentAssignee?.id === member.id;
               return (
@@ -182,7 +182,11 @@ function TeamChat({
 
     // Extract @mentions from input
     const mentionRegex = /@(\w+)/g;
-    const mentionNames = [...input.matchAll(mentionRegex)].map((m) => m[1].toLowerCase());
+    const mentionNames: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = mentionRegex.exec(input)) !== null) {
+      mentionNames.push(match[1].toLowerCase());
+    }
     const mentionIds = teamMembers
       .filter((m) =>
         mentionNames.some(
