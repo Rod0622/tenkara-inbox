@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Reply, Forward, Archive, Mail, User, Folder, Plus, Check, Send } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  Reply, Forward, Archive, Mail, User, Folder, Plus, Check, Send,
+  ChevronDown, X, AtSign, MessageSquare,
+} from "lucide-react";
 import { useConversationDetail } from "@/lib/hooks";
-import type { ConversationDetailProps } from "@/types";
+import type { ConversationDetailProps, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
   return (
@@ -16,6 +19,367 @@ function Avatar({ initials, color, size = 28 }: { initials: string; color: strin
   );
 }
 
+// ── Assign Dropdown ──────────────────────────────────
+function AssignDropdown({
+  currentAssignee,
+  teamMembers,
+  onAssign,
+  conversationId,
+}: {
+  currentAssignee: TeamMember | null | undefined;
+  teamMembers: TeamMember[];
+  onAssign: (conversationId: string, assigneeId: string | null) => Promise<void>;
+  conversationId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const handleAssign = async (memberId: string | null) => {
+    setAssigning(true);
+    try {
+      // Call the assign API
+      await fetch("/api/conversations/assign", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          assignee_id: memberId,
+        }),
+      });
+      await onAssign(conversationId, memberId);
+    } catch (err) {
+      console.error("Assign failed:", err);
+    }
+    setAssigning(false);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={assigning}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
+      >
+        {currentAssignee ? (
+          <>
+            <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
+            <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
+          </>
+        ) : (
+          <>
+            <User size={14} className="text-[#484F58]" />
+            <span className="text-[#7D8590]">Assign to...</span>
+          </>
+        )}
+        <ChevronDown size={12} className="text-[#484F58] ml-1" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in">
+          <div className="px-3 py-2 border-b border-[#1E242C]">
+            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+              Assign to team member
+            </div>
+          </div>
+
+          {/* Unassign option */}
+          {currentAssignee && (
+            <button
+              onClick={() => handleAssign(null)}
+              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#F85149] hover:bg-[#1E242C] transition-colors"
+            >
+              <X size={14} />
+              <span>Unassign</span>
+            </button>
+          )}
+
+          {/* Team members */}
+          {teamMembers
+            .filter((m) => m.is_active !== false)
+            .map((member) => {
+              const isCurrentAssignee = currentAssignee?.id === member.id;
+              return (
+                <button
+                  key={member.id}
+                  onClick={() => handleAssign(member.id)}
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] transition-colors ${
+                    isCurrentAssignee ? "text-[#4ADE80]" : "text-[#E6EDF3]"
+                  }`}
+                >
+                  <Avatar initials={member.initials} color={member.color} size={20} />
+                  <div className="flex-1 text-left">
+                    <div className="font-medium">{member.name}</div>
+                    <div className="text-[10px] text-[#484F58]">{member.department}</div>
+                  </div>
+                  {isCurrentAssignee && <Check size={14} className="text-[#4ADE80]" />}
+                </button>
+              );
+            })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Team Chat (Internal Comments) ────────────────────
+function TeamChat({
+  conversationId,
+  currentUser,
+  teamMembers,
+}: {
+  conversationId: string;
+  currentUser: TeamMember | null;
+  teamMembers: TeamMember[];
+}) {
+  const [comments, setComments] = useState<any[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch comments
+  useEffect(() => {
+    if (!conversationId) return;
+    fetchComments();
+    // Poll every 5 seconds for new comments (Realtime would be better, but this works)
+    const interval = setInterval(fetchComments, 5000);
+    return () => clearInterval(interval);
+  }, [conversationId]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [comments]);
+
+  const fetchComments = async () => {
+    try {
+      const res = await fetch(`/api/comments?conversation_id=${conversationId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setComments(data.comments || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch comments:", err);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || !currentUser) return;
+    setSending(true);
+
+    // Extract @mentions from input
+    const mentionRegex = /@(\w+)/g;
+    const mentionNames = [...input.matchAll(mentionRegex)].map((m) => m[1].toLowerCase());
+    const mentionIds = teamMembers
+      .filter((m) =>
+        mentionNames.some(
+          (name) =>
+            m.name.toLowerCase().includes(name) ||
+            m.initials.toLowerCase() === name
+        )
+      )
+      .map((m) => m.id);
+
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          author_id: currentUser.id,
+          body: input.trim(),
+          mentions: mentionIds,
+        }),
+      });
+      if (res.ok) {
+        setInput("");
+        fetchComments();
+      }
+    } catch (err) {
+      console.error("Failed to send comment:", err);
+    }
+    setSending(false);
+  };
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    // Check if user is typing @mention
+    const lastAt = value.lastIndexOf("@");
+    if (lastAt !== -1 && lastAt === value.length - 1) {
+      setShowMentions(true);
+      setMentionFilter("");
+    } else if (lastAt !== -1) {
+      const afterAt = value.slice(lastAt + 1);
+      if (!afterAt.includes(" ")) {
+        setShowMentions(true);
+        setMentionFilter(afterAt.toLowerCase());
+      } else {
+        setShowMentions(false);
+      }
+    } else {
+      setShowMentions(false);
+    }
+  };
+
+  const insertMention = (member: TeamMember) => {
+    const lastAt = input.lastIndexOf("@");
+    const before = input.slice(0, lastAt);
+    setInput(`${before}@${member.name} `);
+    setShowMentions(false);
+    inputRef.current?.focus();
+  };
+
+  const filteredMembers = teamMembers.filter(
+    (m) =>
+      m.id !== currentUser?.id &&
+      (mentionFilter === "" ||
+        m.name.toLowerCase().includes(mentionFilter) ||
+        m.initials.toLowerCase().includes(mentionFilter))
+  );
+
+  // Render comment body with highlighted @mentions
+  const renderCommentBody = (body: string) => {
+    const parts = body.split(/(@\w+(?:\s\w+)?)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("@")) {
+        return (
+          <span key={i} className="text-[#58A6FF] font-semibold">
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  return (
+    <div className="border-t border-[#1E242C] bg-[#0D1117] flex flex-col" style={{ maxHeight: "280px" }}>
+      {/* Chat header */}
+      <div className="px-4 py-2 border-b border-[#161B22] flex items-center gap-2 shrink-0">
+        <MessageSquare size={13} className="text-[#484F58]" />
+        <span className="text-[11px] font-semibold text-[#484F58] uppercase tracking-wider">
+          Team Chat
+        </span>
+        <span className="text-[10px] text-[#484F58] ml-1">
+          (internal — not visible to sender)
+        </span>
+      </div>
+
+      {/* Comments */}
+      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-[60px]">
+        {comments.length === 0 && (
+          <div className="text-center py-3 text-[11px] text-[#484F58]">
+            No team discussion yet. Start a conversation about this thread.
+          </div>
+        )}
+        {comments.map((comment: any) => (
+          <div key={comment.id} className="flex items-start gap-2 animate-fade-in">
+            <Avatar
+              initials={comment.author?.initials || "?"}
+              color={comment.author?.color || "#484F58"}
+              size={22}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline gap-1.5">
+                <span
+                  className="text-[11px] font-bold"
+                  style={{ color: comment.author?.color || "#7D8590" }}
+                >
+                  {comment.author?.name || "Unknown"}
+                </span>
+                <span className="text-[10px] text-[#484F58]">
+                  {new Date(comment.created_at).toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <div className="text-[12px] text-[#E6EDF3] leading-relaxed mt-0.5">
+                {renderCommentBody(comment.body)}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-3 py-2 border-t border-[#161B22] relative shrink-0">
+        {/* @mention dropdown */}
+        {showMentions && filteredMembers.length > 0 && (
+          <div className="absolute bottom-full left-3 mb-1 w-52 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1 z-50">
+            {filteredMembers.map((member) => (
+              <button
+                key={member.id}
+                onClick={() => insertMention(member)}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#1E242C] transition-colors"
+              >
+                <Avatar initials={member.initials} color={member.color} size={18} />
+                <span className="font-medium">{member.name}</span>
+                <span className="text-[#484F58] ml-auto">{member.department}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] focus-within:border-[#484F58] transition-colors">
+          <button
+            onClick={() => {
+              setInput(input + "@");
+              setShowMentions(true);
+              setMentionFilter("");
+              inputRef.current?.focus();
+            }}
+            className="text-[#484F58] hover:text-[#58A6FF] transition-colors shrink-0"
+            title="Mention a teammate"
+          >
+            <AtSign size={14} />
+          </button>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => handleInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+              if (e.key === "Escape") setShowMentions(false);
+            }}
+            placeholder="Chat with your team..."
+            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[12px] placeholder:text-[#484F58]"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || sending}
+            className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-all ${
+              input.trim() && !sending
+                ? "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73]"
+                : "text-[#484F58]"
+            }`}
+          >
+            <Send size={11} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
   conversation: convo, currentUser, teamMembers,
   onAddNote, onToggleTask, onAddTask, onAssign, onSendReply,
@@ -28,7 +392,6 @@ export default function ConversationDetail({
 
   const { notes, tasks, messages } = useConversationDetail(convo?.id || null);
 
-  // Reset on conversation change
   useEffect(() => {
     setActiveTab("messages");
     setShowNoteInput(false);
@@ -67,13 +430,13 @@ export default function ConversationDetail({
 
   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
-    { id: "notes", label: "Team Notes", count: notes.length },
+    { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
   ];
 
   return (
     <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
-      {/* Header */}
+      {/* Header with Assign */}
       <div className="px-5 py-3 border-b border-[#1E242C] flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-base font-bold text-[#E6EDF3] truncate tracking-tight mb-1">
@@ -84,43 +447,33 @@ export default function ConversationDetail({
             <span className="text-[#484F58]">&lt;{convo.from_email}&gt;</span>
           </div>
         </div>
-        <div className="flex gap-1">
-          {[
-            { icon: Reply, title: "Reply" },
-            { icon: Forward, title: "Forward" },
-            { icon: Archive, title: "Archive" },
-          ].map((btn, i) => {
-            const Icon = btn.icon;
-            return (
-              <button
-                key={i}
-                title={btn.title}
-                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] transition-all"
-              >
-                <Icon size={16} />
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* Assignment bar */}
-      <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3 text-xs">
-        <div className="flex items-center gap-1.5 text-[#7D8590]">
-          <User size={14} />
-          {assignee ? (
-            <span className="flex items-center gap-1">
-              <Avatar initials={assignee.initials} color={assignee.color} size={16} />
-              <span className="font-semibold" style={{ color: assignee.color }}>{assignee.name}</span>
-            </span>
-          ) : (
-            <span className="text-[#484F58] italic">Unassigned</span>
-          )}
-        </div>
-        <span className="text-[#161B22]">|</span>
-        <div className="flex items-center gap-1 text-[#7D8590]">
-          <Folder size={14} />
-          <span>{convo.email_account_id}</span>
+        {/* Action buttons + Assign */}
+        <div className="flex items-center gap-2 shrink-0">
+          <AssignDropdown
+            currentAssignee={assignee}
+            teamMembers={teamMembers}
+            onAssign={onAssign}
+            conversationId={convo.id}
+          />
+          <div className="flex gap-1">
+            {[
+              { icon: Reply, title: "Reply" },
+              { icon: Forward, title: "Forward" },
+              { icon: Archive, title: "Archive" },
+            ].map((btn, i) => {
+              const Icon = btn.icon;
+              return (
+                <button
+                  key={i}
+                  title={btn.title}
+                  className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] transition-all"
+                >
+                  <Icon size={16} />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -159,8 +512,8 @@ export default function ConversationDetail({
           <div
             key={msg.id}
             className={`mb-4 p-4 rounded-xl border animate-fade-in ${
-              msg.is_outbound 
-                ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]" 
+              msg.is_outbound
+                ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
                 : "bg-[#12161B] border-[#161B22]"
             }`}
           >
@@ -298,7 +651,7 @@ export default function ConversationDetail({
       </div>
 
       {/* Reply bar */}
-      <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B]">
+      <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B] shrink-0">
         <div className="flex items-end gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#1E242C] bg-[#0B0E11]">
           <textarea
             value={replyText}
@@ -325,6 +678,13 @@ export default function ConversationDetail({
           </button>
         </div>
       </div>
+
+      {/* Team Chat — always visible at bottom */}
+      <TeamChat
+        conversationId={convo.id}
+        currentUser={currentUser}
+        teamMembers={teamMembers}
+      />
     </div>
   );
 }

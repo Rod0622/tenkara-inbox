@@ -1,50 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
-import { notifyAssignment } from "@/lib/slack";
 
+// PATCH /api/conversations/assign — assign or unassign a conversation
 export async function PATCH(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { conversationId, assigneeId } = await req.json();
-  if (!conversationId) return NextResponse.json({ error: "Missing conversationId" }, { status: 400 });
-
   const supabase = createServerClient();
+  const body = await req.json();
 
-  // Update assignment
-  const { data: convo, error } = await supabase
+  const { conversation_id, assignee_id } = body;
+
+  if (!conversation_id) {
+    return NextResponse.json(
+      { error: "conversation_id is required" },
+      { status: 400 }
+    );
+  }
+
+  // assignee_id can be null to unassign
+  const { data, error } = await supabase
     .from("conversations")
-    .update({ assignee_id: assigneeId || null })
-    .eq("id", conversationId)
-    .select("*, assignee:team_members(*)")
+    .update({ assignee_id: assignee_id || null })
+    .eq("id", conversation_id)
+    .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
-  // Get assigner name
-  const { data: assigner } = await supabase
-    .from("team_members")
-    .select("id, name")
-    .eq("email", session.user.email)
-    .single();
-
-  // Log activity
-  if (assigner) {
+  // Log the assignment in activity log
+  if (assignee_id) {
     await supabase.from("activity_log").insert({
-      conversation_id: conversationId,
-      actor_id: assigner.id,
+      conversation_id,
+      actor_id: assignee_id,
       action: "assigned",
-      details: { assignee_id: assigneeId },
+      details: { assignee_id },
     });
   }
 
-  // Slack notification for assignment
-  if (convo?.assignee && assigner) {
-    // TODO: DM the assignee or post to their inbox channel
-    console.log(`${assigner.name} assigned ${convo.subject} to ${convo.assignee.name}`);
-  }
-
-  return NextResponse.json(convo);
+  return NextResponse.json({ conversation: data });
 }

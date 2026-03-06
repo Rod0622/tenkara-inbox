@@ -5,7 +5,7 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import {
   Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus,
-  ChevronRight, FolderPlus, MoreHorizontal, Trash2, Pencil,
+  ChevronRight, FolderPlus, MoreHorizontal, Trash2,
 } from "lucide-react";
 import type { SidebarProps } from "@/types";
 
@@ -28,13 +28,17 @@ export default function Sidebar({
   const [folders, setFolders] = useState<Folder[]>([]);
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [addingFolder, setAddingFolder] = useState<string | null>(null); // account id
+  const [addingFolder, setAddingFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
 
-  const unreadCount = conversations.filter((c) => c.is_unread).length;
+  // Personal counts: only conversations assigned to the current user
+  const myConvos = conversations.filter((c) => c.assignee_id === currentUser?.id);
+  const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
 
-  // Fetch folders
+  // Total unread across all accounts (for account-level badges)
+  const totalUnreadCount = conversations.filter((c) => c.is_unread).length;
+
   useEffect(() => {
     fetchFolders();
   }, []);
@@ -71,11 +75,8 @@ export default function Sidebar({
   const toggleAccount = (accountId: string) => {
     setExpandedAccounts((prev) => {
       const next = new Set(prev);
-      if (next.has(accountId)) {
-        next.delete(accountId);
-      } else {
-        next.add(accountId);
-      }
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
       return next;
     });
   };
@@ -86,10 +87,7 @@ export default function Sidebar({
       const res = await fetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email_account_id: accountId,
-          name: newFolderName.trim(),
-        }),
+        body: JSON.stringify({ email_account_id: accountId, name: newFolderName.trim() }),
       });
       if (res.ok) {
         setNewFolderName("");
@@ -140,10 +138,15 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Main nav */}
+      {/* Personal nav — shows only MY assigned items */}
       <div className="px-2 pt-2 flex flex-col gap-0.5">
+        <div className="px-2.5 pb-1">
+          <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
+            My Workspace
+          </span>
+        </div>
         {[
-          { id: "inbox", label: "Inbox", icon: Inbox, count: unreadCount },
+          { id: "inbox", label: "Inbox", icon: Inbox, count: myUnreadCount },
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: 0 },
           { id: "sent", label: "Sent", icon: Send, count: 0 },
         ].map((item) => {
@@ -173,11 +176,11 @@ export default function Sidebar({
         })}
       </div>
 
-      {/* Email Accounts with Folders */}
+      {/* Email Accounts (shared team spaces) with Folders */}
       <div className="px-2 pt-3 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
-            Email Accounts
+            Team Spaces
           </span>
           <Link href="/settings" className="text-[#484F58] hover:text-[#4ADE80] transition-colors">
             <Plus size={12} />
@@ -202,9 +205,7 @@ export default function Sidebar({
 
           return (
             <div key={mb.id} className="mb-0.5">
-              {/* Account row */}
               <div className="flex items-center group">
-                {/* Expand toggle */}
                 <button
                   onClick={() => toggleAccount(mb.id)}
                   className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] shrink-0"
@@ -214,8 +215,6 @@ export default function Sidebar({
                     className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
                   />
                 </button>
-
-                {/* Account button */}
                 <button
                   onClick={() => {
                     setActiveMailbox(mb.id);
@@ -239,7 +238,6 @@ export default function Sidebar({
                 </button>
               </div>
 
-              {/* Folders (collapsible) */}
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
@@ -261,27 +259,17 @@ export default function Sidebar({
                           <span className="text-[13px] shrink-0">{folder.icon}</span>
                           <span className="flex-1 truncate">{folder.name}</span>
                         </button>
-
-                        {/* Folder actions (only for non-system folders) */}
                         {!folder.is_system && (
                           <div className="relative">
                             <button
-                              onClick={() =>
-                                setFolderMenuOpen(
-                                  folderMenuOpen === folder.id ? null : folder.id
-                                )
-                              }
+                              onClick={() => setFolderMenuOpen(folderMenuOpen === folder.id ? null : folder.id)}
                               className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] opacity-0 group-hover/folder:opacity-100 transition-opacity"
                             >
                               <MoreHorizontal size={12} />
                             </button>
-
                             {folderMenuOpen === folder.id && (
                               <>
-                                <div
-                                  className="fixed inset-0 z-40"
-                                  onClick={() => setFolderMenuOpen(null)}
-                                />
+                                <div className="fixed inset-0 z-40" onClick={() => setFolderMenuOpen(null)} />
                                 <div className="absolute right-0 top-5 z-50 w-32 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1">
                                   <button
                                     onClick={() => handleDeleteFolder(folder.id)}
@@ -298,8 +286,6 @@ export default function Sidebar({
                       </div>
                     );
                   })}
-
-                  {/* Add folder input */}
                   {addingFolder === mb.id ? (
                     <div className="flex items-center gap-1 px-1.5 py-1 mt-0.5">
                       <input
@@ -308,17 +294,9 @@ export default function Sidebar({
                         onChange={(e) => setNewFolderName(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleCreateFolder(mb.id);
-                          if (e.key === "Escape") {
-                            setAddingFolder(null);
-                            setNewFolderName("");
-                          }
+                          if (e.key === "Escape") { setAddingFolder(null); setNewFolderName(""); }
                         }}
-                        onBlur={() => {
-                          if (!newFolderName.trim()) {
-                            setAddingFolder(null);
-                            setNewFolderName("");
-                          }
-                        }}
+                        onBlur={() => { if (!newFolderName.trim()) { setAddingFolder(null); setNewFolderName(""); } }}
                         placeholder="Folder name..."
                         className="flex-1 bg-[#0B0E11] border border-[#1E242C] rounded px-1.5 py-0.5 text-[11px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]/40 min-w-0"
                       />

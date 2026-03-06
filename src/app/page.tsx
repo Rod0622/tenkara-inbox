@@ -20,20 +20,38 @@ export default function InboxPage() {
   const [activeView, setActiveView] = useState("inbox");
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAI, setShowAI] = useState(true);
 
   const { conversations, loading } = useConversations(activeMailbox);
 
-  const filteredConvos = useMemo(() => {
-    if (!searchQuery.trim()) return conversations;
-    const q = searchQuery.toLowerCase();
-    return conversations.filter(
-      (c) =>
-        c.subject?.toLowerCase().includes(q) ||
-        c.from_name?.toLowerCase().includes(q) ||
-        c.preview?.toLowerCase().includes(q)
-    );
-  }, [conversations, searchQuery]);
+  const currentUser = useMemo(
+    () => teamMembers.find((m) => m.email === session?.user?.email) || null,
+    [teamMembers, session]
+  );
+
+  // Filter conversations based on context:
+  // - Top-level Inbox/Tasks/Sent = personal (assigned to me only)
+  // - Team Space (activeMailbox set) = all conversations for that account
+  const displayConversations = useMemo(() => {
+    let filtered = conversations;
+
+    // Personal view: no mailbox selected = show only my assigned conversations
+    if (!activeMailbox && currentUser) {
+      filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+    }
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (c) =>
+          c.subject?.toLowerCase().includes(q) ||
+          c.from_name?.toLowerCase().includes(q) ||
+          c.preview?.toLowerCase().includes(q)
+      );
+    }
+
+    return filtered;
+  }, [conversations, activeMailbox, currentUser, searchQuery]);
 
   if (status === "loading") {
     return (
@@ -44,8 +62,6 @@ export default function InboxPage() {
   }
 
   if (!session) redirect("/login");
-
-  const currentUser = teamMembers.find((m) => m.email === session.user?.email) || null;
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
@@ -60,7 +76,7 @@ export default function InboxPage() {
       />
 
       <ConversationList
-        conversations={filteredConvos}
+        conversations={displayConversations}
         activeConvo={activeConvo}
         setActiveConvo={setActiveConvo}
         searchQuery={searchQuery}
@@ -79,18 +95,8 @@ export default function InboxPage() {
         onSendReply={actions.sendReply}
       />
 
-      <button
-        onClick={() => setShowAI(!showAI)}
-        className="fixed bottom-4 z-10 w-9 h-9 rounded-xl border border-[#1E242C] bg-[#12161B] text-[#4ADE80] flex items-center justify-center cursor-pointer shadow-lg hover:bg-[#181D24] transition-all"
-        style={{ right: showAI ? 292 : 16 }}
-        title="Toggle Kara AI"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L14.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-        </svg>
-      </button>
-
-      {showAI && <AISidebar conversation={activeConvo} />}
+      {/* Kara AI — self-contained floating button + slide-out panel */}
+      <AISidebar conversation={activeConvo} />
     </div>
   );
 }
