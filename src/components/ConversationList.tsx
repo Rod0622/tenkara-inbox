@@ -347,7 +347,7 @@ export default function ConversationList({
   useEffect(() => {
     const validIds = new Set(filteredConversations.map((c) => c.id));
     setSelectedIds((prev) => {
-      const cleaned = new Set([...prev].filter((id) => validIds.has(id)));
+      const cleaned = new Set(Array.from(prev).filter((id) => validIds.has(id)));
       return cleaned.size !== prev.size ? cleaned : prev;
     });
   }, [filteredConversations]);
