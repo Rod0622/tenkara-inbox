@@ -78,7 +78,7 @@ export async function fetchGraphEmails(
   let nextLink: string | null = url;
 
   while (nextLink) {
-    const res = await fetch(nextLink, {
+    const res: Response = await fetch(nextLink, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
