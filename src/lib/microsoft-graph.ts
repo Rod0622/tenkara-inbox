@@ -334,18 +334,20 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
           .eq("id", conversationId);
 
         // Run rules
-        try {
-          const triggerType = isOutbound ? "outgoing" : "incoming";
-          await runRulesForMessage(conversationId, {
-            conversation_id: conversationId,
+        if (conversationId) {
+          try {
+            const triggerType = isOutbound ? "outgoing" : "incoming";
+            await runRulesForMessage(conversationId, {
+              conversation_id: conversationId,
             subject: email.subject || "",
             from_email: email.from?.emailAddress?.address || "",
             from_name: email.from?.emailAddress?.name || "",
             to_addresses: toAddresses,
             body_text: bodyText,
           }, triggerType as any);
-        } catch (ruleErr: any) {
-          console.error("Rule engine error:", ruleErr.message);
+          } catch (ruleErr: any) {
+            console.error("Rule engine error:", ruleErr.message);
+          }
         }
 
         result.newMessages++;
