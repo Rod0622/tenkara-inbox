@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { syncEmailAccount } from "@/lib/imap-sync";
+import { syncMicrosoftAccount } from "@/lib/microsoft-graph";
 import { createServerClient } from "@/lib/supabase";
+
+// Providers that use Microsoft Graph instead of IMAP
+const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
 
 // POST /api/sync — Sync one or all email accounts
 export async function POST(req: NextRequest) {
@@ -17,14 +21,26 @@ export async function POST(req: NextRequest) {
 
     // If specific account, sync just that one
     if (accountId) {
-      const result = await syncEmailAccount(accountId);
-      return NextResponse.json(result);
+      // Get the account to determine provider
+      const { data: account } = await supabase
+        .from("email_accounts")
+        .select("provider")
+        .eq("id", accountId)
+        .single();
+
+      if (account && MICROSOFT_PROVIDERS.includes(account.provider)) {
+        const result = await syncMicrosoftAccount(accountId);
+        return NextResponse.json(result);
+      } else {
+        const result = await syncEmailAccount(accountId);
+        return NextResponse.json(result);
+      }
     }
 
     // Otherwise sync all active accounts
     const { data: accounts } = await supabase
       .from("email_accounts")
-      .select("id")
+      .select("id, provider")
       .eq("is_active", true);
 
     if (!accounts || accounts.length === 0) {
@@ -33,8 +49,17 @@ export async function POST(req: NextRequest) {
 
     const results = [];
     for (const account of accounts) {
-      const result = await syncEmailAccount(account.id);
-      results.push({ accountId: account.id, ...result });
+      try {
+        if (MICROSOFT_PROVIDERS.includes(account.provider)) {
+          const result = await syncMicrosoftAccount(account.id);
+          results.push({ accountId: account.id, provider: account.provider, ...result });
+        } else {
+          const result = await syncEmailAccount(account.id);
+          results.push({ accountId: account.id, provider: account.provider, ...result });
+        }
+      } catch (err: any) {
+        results.push({ accountId: account.id, provider: account.provider, success: false, errors: [err.message] });
+      }
     }
 
     return NextResponse.json({

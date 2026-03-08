@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 import { runRulesForMessage } from "@/lib/rule-engine";
+import { sendGraphEmail } from "@/lib/microsoft-graph";
+
+const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -60,27 +63,51 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email account not found" }, { status: 404 });
     }
 
-    // Create SMTP transport
-    const transport = nodemailer.createTransport({
-      host: account.smtp_host,
-      port: account.smtp_port || 587,
-      secure: account.smtp_port === 465,
-      auth: {
-        user: account.smtp_user || account.imap_user || account.email,
-        pass: account.smtp_password || account.imap_password,
-      },
-      tls: { rejectUnauthorized: false },
-    });
+    // Send via Graph API or SMTP depending on provider
+    let messageId: string | undefined;
 
-    // Send the email
-    const info = await transport.sendMail({
-      from: `"${account.name}" <${account.email}>`,
-      to,
-      cc: cc || undefined,
-      subject,
-      text: emailBody,
-      html: emailBody.replace(/\n/g, "<br>"),
-    });
+    if (MICROSOFT_PROVIDERS.includes(account.provider)) {
+      // Microsoft Graph API
+      const graphResult = await sendGraphEmail(
+        account.email,
+        to,
+        subject,
+        emailBody,
+        cc || undefined
+      );
+
+      if (!graphResult.success) {
+        return NextResponse.json(
+          { error: graphResult.error || "Failed to send via Microsoft Graph" },
+          { status: 500 }
+        );
+      }
+
+      messageId = `graph:${Date.now()}`;
+    } else {
+      // Traditional SMTP
+      const transport = nodemailer.createTransport({
+        host: account.smtp_host,
+        port: account.smtp_port || 587,
+        secure: account.smtp_port === 465,
+        auth: {
+          user: account.smtp_user || account.imap_user || account.email,
+          pass: account.smtp_password || account.imap_password,
+        },
+        tls: { rejectUnauthorized: false },
+      });
+
+      const info = await transport.sendMail({
+        from: `"${account.name}" <${account.email}>`,
+        to,
+        cc: cc || undefined,
+        subject,
+        text: emailBody,
+        html: emailBody.replace(/\n/g, "<br>"),
+      });
+
+      messageId = info.messageId;
+    }
 
     // If compose (no existing conversation), create one
     if (!isReply) {
@@ -88,7 +115,7 @@ export async function POST(req: NextRequest) {
         .from("conversations")
         .insert({
           email_account_id: accountId,
-          thread_id: info.messageId || `sent:${Date.now()}`,
+          thread_id: messageId || `sent:${Date.now()}`,
           subject: subject.replace(/^Re:\s*/i, ""),
           from_name: account.name,
           from_email: account.email,
@@ -107,7 +134,7 @@ export async function POST(req: NextRequest) {
     if (conversationId) {
       await supabase.from("messages").insert({
         conversation_id: conversationId,
-        provider_message_id: info.messageId || `sent:${Date.now()}`,
+        provider_message_id: messageId || `sent:${Date.now()}`,
         from_name: account.name,
         from_email: account.email,
         to_addresses: to,
@@ -155,7 +182,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      messageId: info.messageId,
+      messageId,
       conversationId,
     });
   } catch (err: any) {
