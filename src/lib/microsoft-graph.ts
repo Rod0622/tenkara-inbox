@@ -67,7 +67,9 @@ export async function fetchGraphEmails(
 ): Promise<GraphMessage[]> {
   const token = await getGraphToken();
 
-  let url = `${GRAPH_BASE}/users/${userEmail}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId,parentFolderId`;
+  // Per-page size (Graph max is 1000, but 50 is safe for body content)
+  const pageSize = Math.min(top, 50);
+  let url = `${GRAPH_BASE}/users/${userEmail}/messages?$top=${pageSize}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId,parentFolderId`;
 
   // Only fetch emails since last sync
   if (sinceDateTime) {
@@ -177,8 +179,10 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
     }
 
     // 2. Fetch emails from Graph
+    // First sync: fetch up to 500 emails. Incremental: fetch up to 100.
     const sinceDateTime = account.last_sync_at || undefined;
-    const emails = await fetchGraphEmails(account.email, sinceDateTime, 50);
+    const fetchLimit = sinceDateTime ? 100 : 500;
+    const emails = await fetchGraphEmails(account.email, sinceDateTime, fetchLimit);
 
     if (emails.length === 0) {
       // Update sync timestamp even if no new emails
