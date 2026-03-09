@@ -175,7 +175,7 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
 
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
-    const BATCH_SIZE = 25;
+    const BATCH_SIZE = 10;
     const token = await getGraphToken();
     let emails: GraphMessage[];
 
@@ -183,9 +183,9 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
       // Incremental sync
       emails = await fetchGraphEmails(account.email, account.last_sync_at, BATCH_SIZE);
     } else {
-      // Initial bulk sync with skip offset
+      // Initial bulk sync with skip offset — fetch minimal fields to save time
       const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
-      const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${skipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId,parentFolderId`;
+      const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${skipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId`;
 
       const res: Response = await fetch(pageUrl, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
@@ -260,9 +260,7 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
           result.newConversations++;
         }
 
-        const bodyText = email.body?.contentType === "text"
-          ? email.body.content
-          : (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        const bodyText = email.bodyPreview || (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
         const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
@@ -272,9 +270,9 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
           from_email: email.from?.emailAddress?.address || "",
           to_addresses: toAddr, cc_addresses: ccAddr,
           subject: email.subject || "(No Subject)",
-          body_text: bodyText.slice(0, 50000),
-          body_html: email.body?.contentType === "html" ? (email.body.content || "").slice(0, 100000) : null,
-          snippet: (email.bodyPreview || bodyText).slice(0, 200),
+          body_text: bodyText.slice(0, 5000),
+          body_html: null,
+          snippet: bodyText.slice(0, 200),
           is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
           sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
         });
