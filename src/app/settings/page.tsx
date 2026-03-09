@@ -15,16 +15,13 @@ const supabase = createBrowserClient();
 
 // ── Provider definitions matching the DB presets ─────
 const PROVIDERS = [
+  { id: "microsoft_oauth", name: "Microsoft 365 / GoDaddy Email", icon: "🟠", color: "#D83B01",
+    imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
+    help: "Connects via Microsoft Graph API. Just enter the email address — no password needed." },
   { id: "gmail", name: "Gmail or Google Workspace", icon: "🔵", color: "#4285F4",
     imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 587,
     help: "Requires an App Password. Go to myaccount.google.com → Security → 2-Step Verification → App Passwords → Generate one for 'Mail'." },
-  { id: "microsoft", name: "Office 365", icon: "🟠", color: "#D83B01",
-    imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
-    help: "Use your full email address as username and your regular password." },
-  { id: "godaddy", name: "GoDaddy (Microsoft-hosted)", icon: "🟢", color: "#00A4A6",
-    imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
-    help: "GoDaddy email is hosted on Microsoft 365. Use your full email as username and your email password." },
-  { id: "outlook_com", name: "Outlook.com", icon: "🔷", color: "#0078D4",
+  { id: "outlook_com", name: "Outlook.com (personal)", icon: "🔷", color: "#0078D4",
     imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
     help: "Use your full Outlook.com email as username." },
   { id: "icloud", name: "iCloud", icon: "⚪", color: "#A2AAAD",
@@ -225,6 +222,11 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
   const handleSelectProvider = (provider: typeof PROVIDERS[0]) => {
     setSelectedProvider(provider);
+    if (provider.id === "microsoft_oauth") {
+      // Microsoft OAuth doesn't need IMAP/SMTP settings
+      setStep("credentials");
+      return;
+    }
     setFormData((prev) => ({
       ...prev,
       imap_host: provider.imap_host,
@@ -233,6 +235,38 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
       smtp_port: provider.smtp_port,
     }));
     setStep("credentials");
+  };
+
+  const handleConnectMicrosoft = async () => {
+    if (!formData.email) {
+      setError("Email address is required");
+      return;
+    }
+    setTesting(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/microsoft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email.trim(),
+          name: formData.name || formData.email.split("@")[0],
+        }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setSuccess(true);
+        setTimeout(() => onClose(), 1500);
+        window.location.reload();
+      } else {
+        setError(data.error || "Connection failed");
+      }
+    } catch {
+      setError("Network error — check your connection");
+    }
+    setTesting(false);
   };
 
   const handleConnect = async () => {
@@ -315,8 +349,71 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Credentials Form */}
-        {step === "credentials" && selectedProvider && (
+        {/* Microsoft OAuth - simple email-only form */}
+        {step === "credentials" && selectedProvider?.id === "microsoft_oauth" && (
+          <div className="p-6 space-y-4">
+            <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[#58A6FF] leading-relaxed">
+              {selectedProvider.help}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Display Name</label>
+              <input
+                value={formData.name}
+                onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. Bobber Labs, Support"
+                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Email Address</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
+                placeholder="info@yourcompany.com"
+                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+              />
+            </div>
+
+            {error && (
+              <div className="px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[#F85149]">
+                {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="px-3 py-2 rounded-lg bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-xs text-[#4ADE80] flex items-center gap-2">
+                <CheckCircle size={14} /> Connected successfully! Syncing emails...
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setStep("provider")}
+                className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:bg-[#1E242C] transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleConnectMicrosoft}
+                disabled={testing || !formData.email}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                  testing || !formData.email
+                    ? "bg-[#1E242C] text-[#484F58]"
+                    : "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3BC96E]"
+                }`}
+              >
+                {testing ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                {testing ? "Connecting..." : "Connect via Microsoft Graph"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Credentials Form (IMAP/SMTP providers) */}
+        {step === "credentials" && selectedProvider && selectedProvider.id !== "microsoft_oauth" && (
           <div className="p-6 space-y-4">
             {/* Provider help text */}
             <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[#58A6FF] leading-relaxed">

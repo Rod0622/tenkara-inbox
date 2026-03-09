@@ -73,7 +73,9 @@ export async function fetchGraphEmails(
 
   // Only fetch emails since last sync
   if (sinceDateTime) {
-    url += `&$filter=receivedDateTime ge ${sinceDateTime}`;
+    // Graph API requires format: yyyy-MM-ddTHH:mm:ssZ (no milliseconds)
+    const cleanDate = new Date(sinceDateTime).toISOString().replace(/\.\d{3}Z$/, "Z");
+    url += `&$filter=receivedDateTime ge ${cleanDate}`;
   }
 
   const messages: GraphMessage[] = [];
