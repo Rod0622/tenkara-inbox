@@ -157,230 +157,175 @@ export async function sendGraphEmail(
   return { success: true };
 }
 
-// ── Sync a Microsoft account ────────────────────────
+
+// ── Sync a Microsoft account (batch-friendly for 10s timeout) ──
 export async function syncMicrosoftAccount(accountId: string): Promise<{
   success: boolean;
   newMessages: number;
   newConversations: number;
   errors: string[];
+  hasMore?: boolean;
 }> {
   const supabase = createServerClient();
-  const result = { success: false, newMessages: 0, newConversations: 0, errors: [] as string[] };
+  const result = { success: false, newMessages: 0, newConversations: 0, errors: [] as string[], hasMore: false };
 
   try {
-    // 1. Get account
     const { data: account, error: accErr } = await supabase
-      .from("email_accounts")
-      .select("*")
-      .eq("id", accountId)
-      .single();
+      .from("email_accounts").select("*").eq("id", accountId).single();
 
-    if (accErr || !account) {
-      result.errors.push("Account not found");
-      return result;
+    if (accErr || !account) { result.errors.push("Account not found"); return result; }
+
+    const BATCH_SIZE = 25;
+    const token = await getGraphToken();
+    let emails: GraphMessage[];
+
+    if (account.last_sync_at) {
+      // Incremental sync
+      emails = await fetchGraphEmails(account.email, account.last_sync_at, BATCH_SIZE);
+    } else {
+      // Initial bulk sync with skip offset
+      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
+      const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${skipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId,parentFolderId`;
+
+      const res: Response = await fetch(pageUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`Graph API error: ${err.error?.message || res.statusText}`);
+      }
+      const data = await res.json();
+      emails = data.value || [];
+      result.hasMore = emails.length >= BATCH_SIZE;
     }
 
-    // 2. Fetch emails from Graph
-    // First sync: fetch up to 500 emails. Incremental: fetch up to 100.
-    const sinceDateTime = account.last_sync_at || undefined;
-    const fetchLimit = sinceDateTime ? 100 : 500;
-    const emails = await fetchGraphEmails(account.email, sinceDateTime, fetchLimit);
-
     if (emails.length === 0) {
-      // Update sync timestamp even if no new emails
-      await supabase
-        .from("email_accounts")
+      await supabase.from("email_accounts")
         .update({ last_sync_at: new Date().toISOString(), sync_error: null })
         .eq("id", accountId);
       result.success = true;
       return result;
     }
 
-    // 3. Process each email
-    // Import rule engine dynamically to avoid circular deps
-    const { runRulesForMessage } = await import("@/lib/rule-engine");
+    // Skip rules during bulk initial sync to save time
+    const isInitialSync = !account.last_sync_at;
+    let runRulesFn: any = null;
+    if (!isInitialSync) {
+      const mod = await import("@/lib/rule-engine");
+      runRulesFn = mod.runRulesForMessage;
+    }
 
     for (const email of emails) {
       try {
-        // Check if message already exists (dedupe by internetMessageId)
         const msgId = email.internetMessageId || email.id;
-        const { data: existing } = await supabase
-          .from("messages")
-          .select("id")
-          .eq("provider_message_id", `ms:${msgId}`)
-          .maybeSingle();
-
+        const { data: existing } = await supabase.from("messages")
+          .select("id").eq("provider_message_id", `ms:${msgId}`).maybeSingle();
         if (existing) continue;
 
-        // Determine if outbound
         const isOutbound = email.from?.emailAddress?.address?.toLowerCase() === account.email.toLowerCase();
-
-        // Filter out non-inbox folders for inbound (skip Sent, Drafts, Junk, etc)
-        // We only want Inbox emails for inbound sync
-        if (!isOutbound) {
-          // Microsoft folder names can vary, but parentFolderId helps
-          // We'll accept all inbound for now and let rules handle categorization
-        }
-
-        // Find or create conversation by Graph conversationId
         let conversationId: string | null = null;
 
+        // Thread by Graph conversationId
         if (email.conversationId) {
-          const { data: existingConvo } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("thread_id", `ms:${email.conversationId}`)
-            .eq("email_account_id", accountId)
-            .maybeSingle();
+          const { data: c } = await supabase.from("conversations").select("id")
+            .eq("thread_id", `ms:${email.conversationId}`).eq("email_account_id", accountId).maybeSingle();
+          if (c) conversationId = c.id;
+        }
 
-          if (existingConvo) {
-            conversationId = existingConvo.id;
+        // Thread by subject
+        if (!conversationId) {
+          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+          if (subj) {
+            const { data: m } = await supabase.from("conversations").select("id")
+              .eq("email_account_id", accountId).eq("subject", subj)
+              .gte("last_message_at", new Date(Date.now() - 30*24*60*60*1000).toISOString())
+              .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+            if (m) conversationId = m.id;
           }
         }
 
-        // Also try subject matching
+        // Create conversation
         if (!conversationId) {
-          const normalizedSubject = (email.subject || "")
-            .replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "")
-            .trim();
-
-          if (normalizedSubject) {
-            const { data: subjectMatch } = await supabase
-              .from("conversations")
-              .select("id")
-              .eq("email_account_id", accountId)
-              .eq("subject", normalizedSubject)
-              .gte("last_message_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-              .order("last_message_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            if (subjectMatch) {
-              conversationId = subjectMatch.id;
-            }
-          }
-        }
-
-        // Create new conversation if needed
-        if (!conversationId) {
-          const normalizedSubject = (email.subject || "")
-            .replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "")
-            .trim() || "(No Subject)";
-
-          const { data: newConvo, error: convoErr } = await supabase
-            .from("conversations")
-            .insert({
-              email_account_id: accountId,
-              thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
-              subject: normalizedSubject,
-              from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
-              from_email: email.from?.emailAddress?.address || "",
-              preview: (email.bodyPreview || "").slice(0, 200),
-              is_unread: !isOutbound,
-              status: "open",
-              last_message_at: email.receivedDateTime || new Date().toISOString(),
-            })
-            .select("id")
-            .single();
-
-          if (convoErr) {
-            result.errors.push(`Create conversation: ${convoErr.message}`);
-            continue;
-          }
-
-          conversationId = newConvo.id;
+          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+          const { data: nc, error: ce } = await supabase.from("conversations").insert({
+            email_account_id: accountId,
+            thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
+            subject: subj,
+            from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
+            from_email: email.from?.emailAddress?.address || "",
+            preview: (email.bodyPreview || "").slice(0, 200),
+            is_unread: !isOutbound, status: "open",
+            last_message_at: email.receivedDateTime || new Date().toISOString(),
+          }).select("id").single();
+          if (ce) { result.errors.push(ce.message); continue; }
+          conversationId = nc.id;
           result.newConversations++;
         }
 
-        // Extract text from body
         const bodyText = email.body?.contentType === "text"
           ? email.body.content
           : (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
+        const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
-        // Store message
-        const toAddresses = (email.toRecipients || [])
-          .map((r) => r.emailAddress?.address)
-          .filter(Boolean)
-          .join(", ");
-
-        const ccAddresses = (email.ccRecipients || [])
-          .map((r) => r.emailAddress?.address)
-          .filter(Boolean)
-          .join(", ");
-
-        const { error: msgErr } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          provider_message_id: `ms:${msgId}`,
+        const { error: me } = await supabase.from("messages").insert({
+          conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
           from_name: email.from?.emailAddress?.name || "Unknown",
           from_email: email.from?.emailAddress?.address || "",
-          to_addresses: toAddresses,
-          cc_addresses: ccAddresses,
+          to_addresses: toAddr, cc_addresses: ccAddr,
           subject: email.subject || "(No Subject)",
           body_text: bodyText.slice(0, 50000),
           body_html: email.body?.contentType === "html" ? (email.body.content || "").slice(0, 100000) : null,
           snippet: (email.bodyPreview || bodyText).slice(0, 200),
-          is_outbound: isOutbound,
-          has_attachments: email.hasAttachments || false,
+          is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
           sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
         });
+        if (me) { result.errors.push(me.message); continue; }
 
-        if (msgErr) {
-          result.errors.push(`Message ${email.id}: ${msgErr.message}`);
-          continue;
-        }
+        await supabase.from("conversations").update({
+          preview: (email.bodyPreview || bodyText).slice(0, 200),
+          last_message_at: email.receivedDateTime || new Date().toISOString(),
+          is_unread: !isOutbound,
+        }).eq("id", conversationId);
 
-        // Update conversation
-        await supabase
-          .from("conversations")
-          .update({
-            preview: (email.bodyPreview || bodyText).slice(0, 200),
-            last_message_at: email.receivedDateTime || new Date().toISOString(),
-            is_unread: !isOutbound,
-          })
-          .eq("id", conversationId);
-
-        // Run rules
-        if (conversationId) {
+        if (runRulesFn && conversationId) {
           try {
-            const triggerType = isOutbound ? "outgoing" : "incoming";
-            await runRulesForMessage(conversationId, {
-              conversation_id: conversationId,
-            subject: email.subject || "",
-            from_email: email.from?.emailAddress?.address || "",
-            from_name: email.from?.emailAddress?.name || "",
-            to_addresses: toAddresses,
-            body_text: bodyText,
-          }, triggerType as any);
-          } catch (ruleErr: any) {
-            console.error("Rule engine error:", ruleErr.message);
-          }
+            await runRulesFn(conversationId, {
+              conversation_id: conversationId, subject: email.subject || "",
+              from_email: email.from?.emailAddress?.address || "",
+              from_name: email.from?.emailAddress?.name || "",
+              to_addresses: toAddr, body_text: bodyText,
+            }, isOutbound ? "outgoing" : "incoming");
+          } catch (re: any) { console.error("Rule error:", re.message); }
         }
 
         result.newMessages++;
-      } catch (emailErr: any) {
-        result.errors.push(`Email ${email.id}: ${emailErr.message}`);
-      }
+      } catch (ee: any) { result.errors.push(ee.message); }
     }
 
-    // 4. Update sync state
-    await supabase
-      .from("email_accounts")
-      .update({
+    // Update sync state
+    if (isInitialSync) {
+      const skip = (parseInt(account.last_sync_uid || "0") || 0) + emails.length;
+      if (result.hasMore) {
+        await supabase.from("email_accounts").update({
+          last_sync_uid: skip.toString(),
+          sync_error: result.errors.length > 0 ? result.errors[0] : null,
+        }).eq("id", accountId);
+      } else {
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(), last_sync_uid: skip.toString(), sync_error: null,
+        }).eq("id", accountId);
+      }
+    } else {
+      await supabase.from("email_accounts").update({
         last_sync_at: new Date().toISOString(),
         sync_error: result.errors.length > 0 ? result.errors[0] : null,
-      })
-      .eq("id", accountId);
+      }).eq("id", accountId);
+    }
 
     result.success = true;
   } catch (err: any) {
     result.errors.push(err.message);
-
-    // Update account with error
-    const supabase2 = createServerClient();
-    await supabase2
-      .from("email_accounts")
-      .update({ sync_error: err.message })
-      .eq("id", accountId);
+    const s2 = createServerClient();
+    await s2.from("email_accounts").update({ sync_error: err.message }).eq("id", accountId);
   }
 
   return result;
