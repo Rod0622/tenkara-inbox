@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import type { TaskStatus } from "@/types";
+import type { Task, TaskStatus } from "@/types";
 
 function normalizeAssigneeIds(body: any): string[] {
   const raw = body.assignee_ids ?? body.assigneeIds ?? body.assignee_id ?? body.assigneeId;
@@ -12,7 +12,7 @@ function normalizeAssigneeIds(body: any): string[] {
   return [];
 }
 
-function normalizeTask(task: any) {
+function normalizeTask(task: any): Task {
   const assignees = task?.task_assignees?.map((entry: any) => entry.team_member).filter(Boolean)
     || (task?.assignee ? [task.assignee] : []);
 
@@ -20,7 +20,7 @@ function normalizeTask(task: any) {
     ...task,
     status: task?.status || (task?.is_done ? "completed" : "todo"),
     assignees,
-  };
+  } as Task;
 }
 
 function isMissingJoinError(error: any) {
@@ -28,7 +28,7 @@ function isMissingJoinError(error: any) {
   return error?.code === "42P01" || message.includes("task_assignees") || message.includes("could not find");
 }
 
-async function selectTaskById(supabase: any, taskId: string) {
+async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select("*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members(*))")
@@ -47,7 +47,7 @@ async function selectTaskById(supabase: any, taskId: string) {
   return normalizeTask(fallback.data);
 }
 
-async function selectAllTasks(supabase: any) {
+async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select("*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members(*))")
@@ -66,8 +66,8 @@ async function selectAllTasks(supabase: any) {
   return (fallback.data || []).map(normalizeTask);
 }
 
-function matchesAssignee(task: any, assigneeId: string) {
-  const ids = task.assignees?.map((member: any) => member.id) || [];
+function matchesAssignee(task: Task, assigneeId: string) {
+  const ids = task.assignees?.map((member) => member.id) || [];
   return ids.includes(assigneeId) || task.assignee_id === assigneeId;
 }
 
@@ -77,13 +77,13 @@ export async function GET(req: NextRequest) {
     const assigneeId = req.nextUrl.searchParams.get("assignee_id");
     const scope = req.nextUrl.searchParams.get("scope") || "mine";
 
-    let tasks = await selectAllTasks(supabase);
+    let tasks: Task[] = await selectAllTasks(supabase);
 
     if (scope === "mine" && assigneeId) {
-      tasks = tasks.filter((task) => matchesAssignee(task, assigneeId));
+      tasks = tasks.filter((task: Task) => matchesAssignee(task, assigneeId));
     }
 
-    tasks.sort((a: any, b: any) => {
+    tasks.sort((a: Task, b: Task) => {
       const aDone = a.status === "completed" ? 1 : 0;
       const bDone = b.status === "completed" ? 1 : 0;
       if (aDone !== bDone) return aDone - bDone;
