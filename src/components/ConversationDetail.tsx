@@ -742,6 +742,8 @@ export default function ConversationDetail({
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
+  const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
   const [showTaskInput, setShowTaskInput] = useState(false);
 
   const { notes, tasks, messages, activities } = useConversationDetail(convo?.id || null);
@@ -753,6 +755,8 @@ export default function ConversationDetail({
     setReplyText("");
     setNoteText("");
     setNewTaskText("");
+    setNewTaskAssigneeIds([]);
+    setNewTaskDueDate("");
   }, [convo?.id]);
 
   // Mark as read when conversation is opened + log viewed activity
@@ -800,6 +804,13 @@ export default function ConversationDetail({
 
   const assignee = convo.assignee || teamMembers.find((t) => t.id === convo.assignee_id);
 
+  const getTaskAssignees = (task: any) =>
+    task.assignees?.length
+      ? task.assignees
+      : task.assignee
+        ? [task.assignee]
+        : [];
+
   const handleAddNote = async () => {
     if (!noteText.trim()) return;
     await onAddNote(convo.id, noteText.trim());
@@ -809,8 +820,15 @@ export default function ConversationDetail({
 
   const handleAddTask = async () => {
     if (!newTaskText.trim()) return;
-    await onAddTask(convo.id, newTaskText.trim());
+    await onAddTask(
+      convo.id,
+      newTaskText.trim(),
+      newTaskAssigneeIds,
+      newTaskDueDate || undefined
+    );
     setNewTaskText("");
+    setNewTaskAssigneeIds([]);
+    setNewTaskDueDate("");
     setShowTaskInput(false);
   };
 
@@ -1099,13 +1117,17 @@ export default function ConversationDetail({
                   <div className={`text-[13px] font-medium ${task.is_done ? "text-[#484F58] line-through" : "text-[#E6EDF3]"}`}>
                     {task.text}
                   </div>
-                  <div className="flex gap-2 mt-1 text-[11px]">
-                    {task.assignee && (
-                      <span className="flex items-center gap-1" style={{ color: task.assignee.color }}>
-                        <Avatar initials={task.assignee.initials} color={task.assignee.color} size={14} />
-                        {task.assignee.name}
+                  <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
+                    {getTaskAssignees(task).map((member: TeamMember) => (
+                      <span
+                        key={member.id}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[rgba(88,166,255,0.1)]"
+                        style={{ color: member.color }}
+                      >
+                        <Avatar initials={member.initials} color={member.color} size={14} />
+                        {member.name}
                       </span>
-                    )}
+                    ))}
                     {task.due_date && (
                       <span className="text-[#F5D547]">Due: {task.due_date}</span>
                     )}
@@ -1135,15 +1157,62 @@ export default function ConversationDetail({
                   onChange={(e) => setNewTaskText(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAddTask();
-                    if (e.key === "Escape") { setShowTaskInput(false); setNewTaskText(""); }
+                    if (e.key === "Escape") {
+                      setShowTaskInput(false);
+                      setNewTaskText("");
+                      setNewTaskAssigneeIds([]);
+                      setNewTaskDueDate("");
+                    }
                   }}
                   placeholder="What needs to be done?"
                   autoFocus
-                  className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58] mb-2"
+                  className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58] mb-3"
                 />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className="text-[11px] font-semibold text-[#7D8590] mb-2">Assign to</div>
+                    <div className="max-h-32 overflow-y-auto rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1.5">
+                      {teamMembers.filter((member) => member.is_active !== false).map((member) => {
+                        const checked = newTaskAssigneeIds.includes(member.id);
+                        return (
+                          <label key={member.id} className="flex items-center gap-2 text-[12px] text-[#E6EDF3] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setNewTaskAssigneeIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev, member.id]
+                                    : prev.filter((id) => id !== member.id)
+                                );
+                              }}
+                              className="rounded border-[#484F58] bg-[#12161B] text-[#4ADE80] focus:ring-[#4ADE80]"
+                            />
+                            <Avatar initials={member.initials} color={member.color} size={16} />
+                            <span>{member.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#7D8590] mb-2">Due date</label>
+                    <input
+                      type="date"
+                      value={newTaskDueDate}
+                      onChange={(e) => setNewTaskDueDate(e.target.value)}
+                      className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                    />
+                  </div>
+                </div>
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => { setShowTaskInput(false); setNewTaskText(""); }}
+                    onClick={() => {
+                      setShowTaskInput(false);
+                      setNewTaskText("");
+                      setNewTaskAssigneeIds([]);
+                      setNewTaskDueDate("");
+                    }}
                     className="px-3 py-1.5 rounded text-[#7D8590] text-xs border border-[#1E242C]"
                   >
                     Cancel
@@ -1217,3 +1286,5 @@ export default function ConversationDetail({
     </div>
   );
 }
+
+

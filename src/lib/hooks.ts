@@ -6,53 +6,67 @@ import type { Conversation, TeamMember, Label, Note, Task } from "@/types";
 
 const supabase = createBrowserClient();
 
-// ── Team Members ─────────────────────────────────────
 export function useTeamMembers() {
   const [members, setMembers] = useState<TeamMember[]>([]);
+
   useEffect(() => {
-    supabase.from("team_members").select("*").eq("is_active", true)
+    supabase
+      .from("team_members")
+      .select("*")
+      .eq("is_active", true)
       .then(({ data }) => setMembers(data || []));
   }, []);
+
   return members;
 }
 
-// ── Email Accounts (replaces old "mailboxes") ────────
 export function useEmailAccounts() {
   const [accounts, setAccounts] = useState<any[]>([]);
+
   useEffect(() => {
-    supabase.from("email_accounts").select("*").eq("is_active", true)
+    supabase
+      .from("email_accounts")
+      .select("*")
+      .eq("is_active", true)
       .order("created_at")
       .then(({ data }) => setAccounts(data || []));
   }, []);
+
   return accounts;
 }
 
-// Keep old name for compatibility
 export function useMailboxes() {
   return useEmailAccounts();
 }
 
-// ── Labels ───────────────────────────────────────────
 export function useLabels() {
   const [labels, setLabels] = useState<Label[]>([]);
+
   useEffect(() => {
-    supabase.from("labels").select("*").order("sort_order")
+    supabase
+      .from("labels")
+      .select("*")
+      .order("sort_order")
       .then(({ data }) => setLabels(data || []));
   }, []);
+
   return labels;
 }
 
-// ── Folders ─────────────────────────────────────────
 export function useFolders() {
   const [folders, setFolders] = useState<any[]>([]);
+
   useEffect(() => {
-    supabase.from("folders").select("*").order("sort_order")
+    supabase
+      .from("folders")
+      .select("*")
+      .order("sort_order")
       .then(({ data }) => setFolders(data || []));
   }, []);
+
   return folders;
 }
 
-// ── Conversations with Realtime ──────────────────────
 export function useConversations(accountId: string | null) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +100,6 @@ export function useConversations(accountId: string | null) {
   useEffect(() => {
     fetchConversations();
 
-    // Realtime subscription
     const channel = supabase
       .channel("conversations-realtime")
       .on("postgres_changes", { event: "*", schema: "inbox", table: "conversations" }, () => fetchConversations())
@@ -94,13 +107,14 @@ export function useConversations(accountId: string | null) {
       .on("postgres_changes", { event: "*", schema: "inbox", table: "conversation_labels" }, () => fetchConversations())
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchConversations]);
 
   return { conversations, loading, refetch: fetchConversations };
 }
 
-// ── Conversation Detail ──────────────────────────────
 export function useConversationDetail(conversationId: string | null) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -117,14 +131,27 @@ export function useConversationDetail(conversationId: string | null) {
     }
 
     const [notesRes, tasksRes, msgsRes, actRes] = await Promise.all([
-      supabase.from("notes").select("*, author:team_members(*)")
-        .eq("conversation_id", conversationId).order("created_at"),
-      supabase.from("tasks").select("*, assignee:team_members(*)")
-        .eq("conversation_id", conversationId).order("created_at"),
-      supabase.from("messages").select("*")
-        .eq("conversation_id", conversationId).order("sent_at"),
-      supabase.from("activity_log").select("*, actor:team_members(id, name, initials, color)")
-        .eq("conversation_id", conversationId).order("created_at", { ascending: false }).limit(100),
+      supabase
+        .from("notes")
+        .select("*, author:team_members(*)")
+        .eq("conversation_id", conversationId)
+        .order("created_at"),
+      supabase
+        .from("tasks")
+        .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
+        .eq("conversation_id", conversationId)
+        .order("created_at"),
+      supabase
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .order("sent_at"),
+      supabase
+        .from("activity_log")
+        .select("*, actor:team_members(id, name, initials, color)")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(100),
     ]);
 
     if (notesRes.error) console.error("Notes fetch error:", notesRes.error);
@@ -133,7 +160,14 @@ export function useConversationDetail(conversationId: string | null) {
     if (actRes.error) console.error("Activity fetch error:", actRes.error);
 
     setNotes(notesRes.data || []);
-    setTasks(tasksRes.data || []);
+    setTasks(
+      ((tasksRes.data || []) as any[]).map((task) => ({
+        ...task,
+        assignees:
+          task.task_assignees?.map((entry: any) => entry.team_member).filter(Boolean) ||
+          (task.assignee ? [task.assignee] : []),
+      }))
+    );
     setMessages(msgsRes.data || []);
     setActivities(actRes.data || []);
   }, [conversationId]);
@@ -146,17 +180,19 @@ export function useConversationDetail(conversationId: string | null) {
       .channel(`detail-${conversationId}`)
       .on("postgres_changes", { event: "*", schema: "inbox", table: "notes", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "tasks", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
+      .on("postgres_changes", { event: "*", schema: "inbox", table: "task_assignees" }, () => fetchDetail())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "messages", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .on("postgres_changes", { event: "*", schema: "inbox", table: "activity_log", filter: `conversation_id=eq.${conversationId}` }, () => fetchDetail())
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversationId, fetchDetail]);
 
   return { notes, tasks, messages, activities, refetch: fetchDetail };
 }
 
-// ── Actions ──────────────────────────────────────────
 export function useActions() {
   const addNote = async (conversationId: string, text: string) => {
     const res = await fetch("/api/conversations/notes", {
@@ -164,23 +200,25 @@ export function useActions() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: conversationId, text }),
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Add note failed:", err);
     }
   };
 
-  const addTask = async (conversationId: string, text: string, assigneeId?: string, dueDate?: string) => {
+  const addTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => {
     const res = await fetch("/api/conversations/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         conversation_id: conversationId,
         text,
-        assignee_id: assigneeId,
+        assignee_ids: assigneeIds || [],
         due_date: dueDate,
       }),
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Add task failed:", err);
@@ -193,6 +231,7 @@ export function useActions() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ task_id: taskId, is_done: isDone }),
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Toggle task failed:", err);
@@ -200,9 +239,6 @@ export function useActions() {
   };
 
   const assignConversation = async (conversationId: string, assigneeId: string | null) => {
-    // The ConversationDetail component already calls the API directly,
-    // so this just needs to trigger a refetch via realtime.
-    // But if called directly, it should work too:
     const res = await fetch("/api/conversations/assign", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -211,6 +247,7 @@ export function useActions() {
         assignee_id: assigneeId,
       }),
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Assign failed:", err);
@@ -223,6 +260,7 @@ export function useActions() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversation_id: conversationId, body }),
     });
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Send reply failed:", err);

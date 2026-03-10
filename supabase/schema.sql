@@ -165,6 +165,13 @@ CREATE TABLE inbox.tasks (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE inbox.task_assignees (
+  task_id UUID REFERENCES inbox.tasks(id) ON DELETE CASCADE,
+  team_member_id UUID REFERENCES inbox.team_members(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (task_id, team_member_id)
+);
+
 -- ── Activity Log ─────────────────────────────────────
 CREATE TABLE inbox.activity_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,6 +187,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE inbox.conversations;
 ALTER PUBLICATION supabase_realtime ADD TABLE inbox.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE inbox.notes;
 ALTER PUBLICATION supabase_realtime ADD TABLE inbox.tasks;
+ALTER PUBLICATION supabase_realtime ADD TABLE inbox.task_assignees;
 ALTER PUBLICATION supabase_realtime ADD TABLE inbox.conversation_labels;
 
 -- ── Auto-update timestamps ───────────────────────────
@@ -230,6 +238,7 @@ ALTER TABLE inbox.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.conversation_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inbox.task_assignees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbox.activity_log ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "all_access" ON inbox.email_accounts FOR ALL USING (true);
@@ -242,4 +251,7 @@ CREATE POLICY "all_access" ON inbox.messages FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.conversation_labels FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.notes FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.tasks FOR ALL USING (true);
+CREATE POLICY "all_access" ON inbox.task_assignees FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.activity_log FOR ALL USING (true);
+
+

@@ -114,9 +114,13 @@ function buildContext(convo: Conversation): string {
   if (convo.tasks?.length) {
     parts.push(`\nTasks:`);
     convo.tasks.forEach((t) => {
-      parts.push(`- [${t.is_done ? "✓" : "○"}] ${t.text} (assigned: ${t.assignee?.name || "unassigned"}, due: ${t.due_date || "no date"})`);
+      const assignees = t.assignees?.length
+        ? t.assignees.map((member) => member.name).join(", ")
+        : t.assignee?.name || "unassigned";
+      parts.push(`- [${t.is_done ? "✓" : "○"}] ${t.text} (assigned: ${assignees}, due: ${t.due_date || "no date"})`);
     });
   }
 
   return parts.join("\n");
 }
+

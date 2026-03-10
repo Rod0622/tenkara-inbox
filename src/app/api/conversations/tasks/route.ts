@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
-// POST /api/conversations/tasks — create a task
+function normalizeAssigneeIds(body: any): string[] {
+  const raw = body.assignee_ids ?? body.assigneeIds ?? body.assignee_id ?? body.assigneeId;
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter((value) => typeof value === "string" && value.trim());
+  }
+  if (typeof raw === "string" && raw.trim()) return [raw.trim()];
+  return [];
+}
+
+// POST /api/conversations/tasks - create a task
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
   const conversationId = body.conversation_id || body.conversationId;
   const text = body.text;
-  const assigneeId = body.assignee_id || body.assigneeId || null;
+  const assigneeIds = normalizeAssigneeIds(body);
   const dueDate = body.due_date || body.dueDate || null;
+  const primaryAssigneeId = assigneeIds[0] || null;
 
   if (!conversationId || !text?.trim()) {
     return NextResponse.json(
@@ -23,30 +34,52 @@ export async function POST(req: NextRequest) {
     .insert({
       conversation_id: conversationId,
       text: text.trim(),
-      assignee_id: assigneeId,
+      assignee_id: primaryAssigneeId,
       due_date: dueDate,
       is_done: false,
     })
-    .select("*, assignee:team_members(*)")
+    .select("*")
     .single();
 
-  if (error) {
+  if (error || !task) {
     console.error("Create task error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Failed to create task" }, { status: 500 });
   }
 
-  // Log activity
+  if (assigneeIds.length > 0) {
+    const { error: assigneeError } = await supabase
+      .from("task_assignees")
+      .insert(assigneeIds.map((teamMemberId) => ({ task_id: task.id, team_member_id: teamMemberId })));
+
+    if (assigneeError) {
+      console.error("Task assignee insert error:", assigneeError);
+      await supabase.from("tasks").delete().eq("id", task.id);
+      return NextResponse.json({ error: assigneeError.message }, { status: 500 });
+    }
+  }
+
+  const { data: fullTask } = await supabase
+    .from("tasks")
+    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
+    .eq("id", task.id)
+    .single();
+
   await supabase.from("activity_log").insert({
     conversation_id: conversationId,
-    actor_id: assigneeId || null,
+    actor_id: primaryAssigneeId,
     action: "task_created",
-    details: { task_id: task?.id, text: text.trim().slice(0, 80) },
+    details: {
+      task_id: task.id,
+      text: text.trim().slice(0, 80),
+      assignee_ids: assigneeIds,
+      due_date: dueDate,
+    },
   });
 
-  return NextResponse.json({ task });
+  return NextResponse.json({ task: fullTask || task });
 }
 
-// PATCH /api/conversations/tasks — toggle a task
+// PATCH /api/conversations/tasks - toggle a task
 export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
@@ -66,14 +99,13 @@ export async function PATCH(req: NextRequest) {
     .from("tasks")
     .update({ is_done: isDone })
     .eq("id", taskId)
-    .select("*, assignee:team_members(*)")
+    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
     .single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Log activity
   if (task?.conversation_id) {
     await supabase.from("activity_log").insert({
       conversation_id: task.conversation_id,

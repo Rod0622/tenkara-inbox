@@ -78,6 +78,11 @@ export interface Task {
   created_at: string;
   // Joined
   assignee?: TeamMember;
+  assignees?: TeamMember[];
+  task_assignees?: {
+    team_member_id: string;
+    team_member?: TeamMember;
+  }[];
 }
 
 export interface GmailMessage {
@@ -182,7 +187,7 @@ export interface ConversationDetailProps {
   teamMembers: TeamMember[];
   onAddNote: (conversationId: string, text: string) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
-  onAddTask: (conversationId: string, text: string, assigneeId?: string) => Promise<void>;
+  onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
