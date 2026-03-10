@@ -734,7 +734,7 @@ function MoveToFolderDropdown({
 // ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
   conversation: convo, currentUser, teamMembers,
-  onAddNote, onToggleTask, onAddTask, onAssign, onSendReply, onMoveToFolder,
+  onAddNote, onToggleTask, onAddTask, onUpdateTask, onAssign, onSendReply, onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -1096,45 +1096,60 @@ export default function ConversationDetail({
         {/* Tasks tab */}
         {activeTab === "tasks" && (
           <div>
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className={`flex items-start gap-2.5 p-3 mb-2 rounded-lg bg-[#12161B] border border-[#161B22] transition-opacity ${
-                  task.is_done ? "opacity-50" : ""
-                }`}
-              >
-                <button
-                  onClick={() => onToggleTask(task.id, !task.is_done)}
-                  className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 border-2 transition-all ${
-                    task.is_done
-                      ? "border-[#4ADE80] bg-[rgba(74,222,128,0.12)]"
-                      : "border-[#484F58]"
+            {tasks.map((task) => {
+              const taskStatus = task.status || (task.is_done ? "completed" : "todo");
+              return (
+                <div
+                  key={task.id}
+                  className={`flex items-start gap-2.5 p-3 mb-2 rounded-lg bg-[#12161B] border border-[#161B22] transition-opacity ${
+                    taskStatus === "completed" ? "opacity-60" : ""
                   }`}
                 >
-                  {task.is_done && <Check size={12} className="text-[#4ADE80]" />}
-                </button>
-                <div className="flex-1">
-                  <div className={`text-[13px] font-medium ${task.is_done ? "text-[#484F58] line-through" : "text-[#E6EDF3]"}`}>
-                    {task.text}
+                  <button
+                    onClick={() => onToggleTask(task.id, taskStatus !== "completed")}
+                    className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 border-2 transition-all ${
+                      taskStatus === "completed"
+                        ? "border-[#4ADE80] bg-[rgba(74,222,128,0.12)]"
+                        : "border-[#484F58]"
+                    }`}
+                  >
+                    {taskStatus === "completed" && <Check size={12} className="text-[#4ADE80]" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-[13px] font-medium ${taskStatus === "completed" ? "text-[#484F58] line-through" : "text-[#E6EDF3]"}`}>
+                      {task.text}
+                    </div>
+                    <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
+                      {getTaskAssignees(task).map((member: TeamMember) => (
+                        <span
+                          key={member.id}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[rgba(88,166,255,0.1)]"
+                          style={{ color: member.color }}
+                        >
+                          <Avatar initials={member.initials} color={member.color} size={14} />
+                          {member.name}
+                        </span>
+                      ))}
+                      {task.due_date && (
+                        <span className="inline-flex items-center gap-1 text-[#F5D547] bg-[rgba(245,213,71,0.1)] rounded-full px-2 py-0.5">
+                          <Clock size={11} />
+                          {task.due_date}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
-                    {getTaskAssignees(task).map((member: TeamMember) => (
-                      <span
-                        key={member.id}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[rgba(88,166,255,0.1)]"
-                        style={{ color: member.color }}
-                      >
-                        <Avatar initials={member.initials} color={member.color} size={14} />
-                        {member.name}
-                      </span>
-                    ))}
-                    {task.due_date && (
-                      <span className="text-[#F5D547]">Due: {task.due_date}</span>
-                    )}
-                  </div>
+                  <select
+                    value={taskStatus}
+                    onChange={(e) => onUpdateTask(task.id, { status: e.target.value as any })}
+                    className="w-[130px] rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 py-1.5 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                  >
+                    <option value="todo">To do</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="completed">Completed</option>
+                  </select>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {tasks.length === 0 && !showTaskInput && (
               <div className="text-center py-10 text-[#484F58] text-sm">
@@ -1197,12 +1212,15 @@ export default function ConversationDetail({
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-[#7D8590] mb-2">Due date</label>
-                    <input
-                      type="date"
-                      value={newTaskDueDate}
-                      onChange={(e) => setNewTaskDueDate(e.target.value)}
-                      className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
-                    />
+                    <div className="flex items-center gap-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 focus-within:border-[#4ADE80]">
+                      <Clock size={14} className="text-[#F5D547]" />
+                      <input
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="w-full bg-transparent text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 justify-end">

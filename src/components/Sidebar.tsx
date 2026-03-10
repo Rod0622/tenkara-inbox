@@ -12,7 +12,7 @@ import type { SidebarProps, Folder } from "@/types";
 export default function Sidebar({
   activeMailbox, setActiveMailbox, activeView, setActiveView,
   activeFolder, setActiveFolder,
-  mailboxes, conversations, currentUser, onMoveToFolder,
+  mailboxes, conversations, currentUser, taskCount = 0, onMoveToFolder,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -165,6 +165,17 @@ export default function Sidebar({
           <PenSquare size={14} />
           <span>Compose</span>
         </button>
+        <button
+          onClick={() => {
+            setActiveView("new-task");
+            setActiveMailbox(null);
+            setActiveFolder(null);
+          }}
+          className="flex items-center justify-center gap-2 w-full py-2 mt-2 rounded-lg border border-[#1E242C] bg-[#12161B] text-[#E6EDF3] text-[13px] font-semibold hover:bg-[#181D24] transition-all"
+        >
+          <CheckSquare size={14} />
+          <span>New Task</span>
+        </button>
       </div>
 
       {/* Personal nav — shows only MY assigned items */}
@@ -176,11 +187,11 @@ export default function Sidebar({
         </div>
         {[
           { id: "inbox", label: "Inbox", icon: Inbox, count: myUnreadCount },
-          { id: "tasks", label: "Tasks", icon: CheckSquare, count: 0 },
+          { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount },
         ].map((item) => {
           const Icon = item.icon;
-          const isActive = activeView === item.id && !activeMailbox && !activeFolder;
+          const isActive = (activeView === item.id || (item.id === "tasks" && activeView === "new-task")) && !activeMailbox && !activeFolder;
           return (
             <button
               key={item.id}
@@ -409,3 +420,4 @@ export default function Sidebar({
     </div>
   );
 }
+

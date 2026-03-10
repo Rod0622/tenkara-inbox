@@ -117,10 +117,12 @@ function buildContext(convo: Conversation): string {
       const assignees = t.assignees?.length
         ? t.assignees.map((member) => member.name).join(", ")
         : t.assignee?.name || "unassigned";
-      parts.push(`- [${t.is_done ? "✓" : "○"}] ${t.text} (assigned: ${assignees}, due: ${t.due_date || "no date"})`);
+      parts.push(`- [${t.status === "completed" ? "✓" : t.status === "in_progress" ? "~" : "○"}] ${t.text} (status: ${t.status || "todo"}, assigned: ${assignees}, due: ${t.due_date || "no date"})`);
     });
   }
 
   return parts.join("\n");
 }
+
+
 

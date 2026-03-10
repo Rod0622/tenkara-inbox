@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
-import { useTeamMembers, useEmailAccounts, useConversations, useActions } from "@/lib/hooks";
+import { useActions, useConversations, useEmailAccounts, useTasks, useTeamMembers } from "@/lib/hooks";
 import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
 import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
 import AISidebar from "@/components/AISidebar";
-import type { Conversation } from "@/types";
+import TaskBoard from "@/components/TaskBoard";
+import type { Conversation, TaskStatus } from "@/types";
 
 export default function InboxPage() {
   const { data: session, status } = useSession();
@@ -23,43 +24,39 @@ export default function InboxPage() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { conversations, loading, refetch } = useConversations(activeMailbox);
+  const { conversations, refetch } = useConversations(activeMailbox);
 
   const currentUser = useMemo(
     () => teamMembers.find((m) => m.email === session?.user?.email) || null,
     [teamMembers, session]
   );
 
+  const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
+
   const accountEmails = useMemo(
     () => new Set(emailAccounts.map((a) => a.email?.toLowerCase())),
     [emailAccounts]
   );
 
-  const isOutboundConvo = (c: Conversation) =>
-    accountEmails.has(c.from_email?.toLowerCase());
+  const isOutboundConvo = (c: Conversation) => accountEmails.has(c.from_email?.toLowerCase());
+  const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
 
-  // Filter conversations based on context
   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
     if (activeFolder) {
-      // Viewing a specific custom folder
       filtered = conversations.filter((c) => c.folder_id === activeFolder);
     } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
-        // Personal Sent: outbound, NOT moved to a folder
         filtered = conversations.filter((c) => isOutboundConvo(c) && !c.folder_id);
       } else if (activeView === "inbox") {
-        // Personal Inbox: assigned to me, NOT moved to a folder
         filtered = conversations.filter(
           (c) => c.assignee_id === currentUser.id && !c.folder_id && !isOutboundConvo(c)
         );
       } else {
-        // Tasks or other personal views
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id && !c.folder_id);
       }
     } else if (activeMailbox) {
-      // Team Space (system Inbox): unassigned, NO custom folder assigned
       filtered = conversations.filter(
         (c) =>
           c.email_account_id === activeMailbox &&
@@ -140,6 +137,24 @@ export default function InboxPage() {
     }
   };
 
+  const handleAddTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => {
+    await actions.addTask(conversationId, text, assigneeIds, dueDate);
+    await Promise.all([refetch(), refetchTasks()]);
+  };
+
+  const handleToggleTask = async (taskId: string, isDone: boolean) => {
+    await actions.toggleTask(taskId, isDone);
+    await Promise.all([refetch(), refetchTasks()]);
+  };
+
+  const handleUpdateTask = async (
+    taskId: string,
+    updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }
+  ) => {
+    await actions.updateTask(taskId, updates);
+    await Promise.all([refetch(), refetchTasks()]);
+  };
+
   const isComposing = activeView === "compose";
 
   if (status === "loading") {
@@ -164,14 +179,20 @@ export default function InboxPage() {
         mailboxes={emailAccounts}
         conversations={conversations}
         currentUser={currentUser}
+        taskCount={personalTasks.filter((task) => task.status !== "completed").length}
         onMoveToFolder={handleMoveToFolder}
       />
 
       {isComposing ? (
         <ComposeEmail
           onClose={() => setActiveView("inbox")}
-          onSent={() => { refetch(); setActiveView("inbox"); }}
+          onSent={() => {
+            refetch();
+            setActiveView("inbox");
+          }}
         />
+      ) : isTaskView ? (
+        <TaskBoard currentUser={currentUser} teamMembers={teamMembers} onTasksChanged={refetchTasks} autoOpenComposer={activeView === "new-task"} />
       ) : (
         <>
           <ConversationList
@@ -189,8 +210,9 @@ export default function InboxPage() {
             currentUser={currentUser}
             teamMembers={teamMembers}
             onAddNote={actions.addNote}
-            onToggleTask={actions.toggleTask}
-            onAddTask={actions.addTask}
+            onToggleTask={handleToggleTask}
+            onAddTask={handleAddTask}
+            onUpdateTask={handleUpdateTask}
             onAssign={handleAssign}
             onSendReply={actions.sendReply}
             onMoveToFolder={handleMoveToFolder}
@@ -198,7 +220,9 @@ export default function InboxPage() {
         </>
       )}
 
-      <AISidebar conversation={activeConvo} />
+      {!isComposing && !isTaskView && <AISidebar conversation={activeConvo} />}
     </div>
   );
 }
+
+

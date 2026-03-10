@@ -2,9 +2,46 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createBrowserClient } from "@/lib/supabase";
-import type { Conversation, TeamMember, Label, Note, Task } from "@/types";
+import type { Conversation, TeamMember, Label, Note, Task, TaskStatus } from "@/types";
 
 const supabase = createBrowserClient();
+
+function normalizeTask(task: any): Task {
+  const assignees = task?.task_assignees?.map((entry: any) => entry.team_member).filter(Boolean)
+    || (task?.assignee ? [task.assignee] : []);
+
+  return {
+    ...task,
+    status: task?.status || (task?.is_done ? "completed" : "todo"),
+    assignees,
+  } as Task;
+}
+
+async function fetchConversationTasks(conversationId: string) {
+  const primary = await supabase
+    .from("tasks")
+    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
+    .eq("conversation_id", conversationId)
+    .order("created_at");
+
+  if (!primary.error) {
+    return (primary.data || []).map(normalizeTask);
+  }
+
+  console.warn("Task join fetch fell back to legacy query:", primary.error.message);
+
+  const fallback = await supabase
+    .from("tasks")
+    .select("*, assignee:team_members(*)")
+    .eq("conversation_id", conversationId)
+    .order("created_at");
+
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
+  return (fallback.data || []).map(normalizeTask);
+}
 
 export function useTeamMembers() {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -130,17 +167,13 @@ export function useConversationDetail(conversationId: string | null) {
       return;
     }
 
-    const [notesRes, tasksRes, msgsRes, actRes] = await Promise.all([
+    const [notesRes, tasksData, msgsRes, actRes] = await Promise.all([
       supabase
         .from("notes")
         .select("*, author:team_members(*)")
         .eq("conversation_id", conversationId)
         .order("created_at"),
-      supabase
-        .from("tasks")
-        .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
-        .eq("conversation_id", conversationId)
-        .order("created_at"),
+      fetchConversationTasks(conversationId),
       supabase
         .from("messages")
         .select("*")
@@ -155,25 +188,17 @@ export function useConversationDetail(conversationId: string | null) {
     ]);
 
     if (notesRes.error) console.error("Notes fetch error:", notesRes.error);
-    if (tasksRes.error) console.error("Tasks fetch error:", tasksRes.error);
     if (msgsRes.error) console.error("Messages fetch error:", msgsRes.error);
     if (actRes.error) console.error("Activity fetch error:", actRes.error);
 
     setNotes(notesRes.data || []);
-    setTasks(
-      ((tasksRes.data || []) as any[]).map((task) => ({
-        ...task,
-        assignees:
-          task.task_assignees?.map((entry: any) => entry.team_member).filter(Boolean) ||
-          (task.assignee ? [task.assignee] : []),
-      }))
-    );
+    setTasks(tasksData);
     setMessages(msgsRes.data || []);
     setActivities(actRes.data || []);
   }, [conversationId]);
 
   useEffect(() => {
-    fetchDetail();
+    fetchDetail().catch((error) => console.error("Conversation detail fetch error:", error));
     if (!conversationId) return;
 
     const channel = supabase
@@ -193,6 +218,41 @@ export function useConversationDetail(conversationId: string | null) {
   return { notes, tasks, messages, activities, refetch: fetchDetail };
 }
 
+export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "mine") {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchTasks = useCallback(async () => {
+    if (scope === "mine" && !assigneeId) {
+      setTasks([]);
+      setLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams({ scope });
+    if (assigneeId) params.set("assignee_id", assigneeId);
+
+    const res = await fetch(`/api/tasks?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      console.error("Fetch tasks failed:", data);
+      setTasks([]);
+      setLoading(false);
+      return;
+    }
+
+    setTasks(data.tasks || []);
+    setLoading(false);
+  }, [assigneeId, scope]);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  return { tasks, loading, refetch: fetchTasks };
+}
+
 export function useActions() {
   const addNote = async (conversationId: string, text: string) => {
     const res = await fetch("/api/conversations/notes", {
@@ -208,7 +268,7 @@ export function useActions() {
   };
 
   const addTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => {
-    const res = await fetch("/api/conversations/tasks", {
+    const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -216,6 +276,7 @@ export function useActions() {
         text,
         assignee_ids: assigneeIds || [],
         due_date: dueDate,
+        status: "todo",
       }),
     });
 
@@ -225,17 +286,29 @@ export function useActions() {
     }
   };
 
-  const toggleTask = async (taskId: string, isDone: boolean) => {
-    const res = await fetch("/api/conversations/tasks", {
+  const updateTask = async (
+    taskId: string,
+    updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }
+  ) => {
+    const res = await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: taskId, is_done: isDone }),
+      body: JSON.stringify({
+        task_id: taskId,
+        status: updates.status,
+        due_date: updates.dueDate,
+        assignee_ids: updates.assigneeIds,
+      }),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      console.error("Toggle task failed:", err);
+      console.error("Update task failed:", err);
     }
+  };
+
+  const toggleTask = async (taskId: string, isDone: boolean) => {
+    await updateTask(taskId, { status: isDone ? "completed" : "todo" });
   };
 
   const assignConversation = async (conversationId: string, assigneeId: string | null) => {
@@ -300,5 +373,5 @@ export function useActions() {
     return res.json();
   };
 
-  return { addNote, addTask, toggleTask, assignConversation, sendReply, sendEmail, syncEmails, askAi };
+  return { addNote, addTask, updateTask, toggleTask, assignConversation, sendReply, sendEmail, syncEmails, askAi };
 }

@@ -160,6 +160,7 @@ CREATE TABLE inbox.tasks (
   text TEXT NOT NULL,
   assignee_id UUID REFERENCES inbox.team_members(id),
   is_done BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'todo' CHECK (status IN ('todo','in_progress','completed')),
   due_date DATE,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -253,5 +254,6 @@ CREATE POLICY "all_access" ON inbox.notes FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.tasks FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.task_assignees FOR ALL USING (true);
 CREATE POLICY "all_access" ON inbox.activity_log FOR ALL USING (true);
+
 
 

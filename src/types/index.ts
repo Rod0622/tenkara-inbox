@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════════════
-// TENKARA INBOX — Type Definitions
-// ═══════════════════════════════════════════════════════
+export type TaskStatus = "todo" | "in_progress" | "completed";
 
 export interface TeamMember {
   id: string;
@@ -10,7 +8,7 @@ export interface TeamMember {
   color: string;
   role: "admin" | "member";
   department: "Operations" | "Management" | "Dev" | "Sales" | "Support" | "Uncategorized";
-  is_active?: boolean;  // ← add this
+  is_active?: boolean;
   created_at: string;
 }
 
@@ -37,7 +35,6 @@ export interface Conversation {
   status: "open" | "closed" | "snoozed";
   last_message_at: string;
   created_at: string;
-  // Joined data
   labels?: ConversationLabel[];
   notes?: Note[];
   tasks?: Task[];
@@ -64,25 +61,31 @@ export interface Note {
   author_id: string;
   text: string;
   created_at: string;
-  // Joined
   author?: TeamMember;
 }
 
 export interface Task {
   id: string;
-  conversation_id: string;
+  conversation_id: string | null;
   text: string;
   assignee_id: string | null;
   is_done: boolean;
+  status: TaskStatus;
   due_date: string | null;
   created_at: string;
-  // Joined
+  updated_at?: string;
   assignee?: TeamMember;
   assignees?: TeamMember[];
   task_assignees?: {
     team_member_id: string;
     team_member?: TeamMember;
   }[];
+  conversation?: {
+    id: string;
+    subject: string;
+    from_name?: string;
+    from_email?: string;
+  } | null;
 }
 
 export interface GmailMessage {
@@ -96,8 +99,6 @@ export interface GmailMessage {
   date: string;
   snippet: string;
 }
-
-// ── API Request/Response Types ───────────────────────
 
 export interface AiRequest {
   conversation: Conversation;
@@ -137,8 +138,6 @@ export interface ActivityLog {
   };
 }
 
-// ── Supabase Realtime Payload ────────────────────────
-
 export interface RealtimePayload<T> {
   eventType: "INSERT" | "UPDATE" | "DELETE";
   new: T;
@@ -156,8 +155,6 @@ export interface Folder {
   parent_folder_id: string | null;
 }
 
-// ── Component Props ──────────────────────────────────
-
 export interface SidebarProps {
   activeMailbox: string | null;
   setActiveMailbox: (id: string | null) => void;
@@ -168,6 +165,7 @@ export interface SidebarProps {
   mailboxes: Mailbox[];
   conversations: Conversation[];
   currentUser: TeamMember | null;
+  taskCount?: number;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
 }
 
@@ -188,6 +186,7 @@ export interface ConversationDetailProps {
   onAddNote: (conversationId: string, text: string) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
   onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => Promise<void>;
+  onUpdateTask: (taskId: string, updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
