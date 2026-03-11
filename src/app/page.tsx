@@ -3,7 +3,14 @@
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
-import { useActions, useConversations, useEmailAccounts, useFolders, useTasks, useTeamMembers } from "@/lib/hooks";
+import {
+  useActions,
+  useConversations,
+  useEmailAccounts,
+  useFolders,
+  useTasks,
+  useTeamMembers,
+} from "@/lib/hooks";
 import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
 import ConversationDetail from "@/components/ConversationDetail";
@@ -35,41 +42,38 @@ export default function InboxPage() {
   const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
 
   const accountEmails = useMemo(
-    () => new Set(emailAccounts.map((a) => a.email?.toLowerCase())),
+    () => new Set(emailAccounts.map((a) => a.email?.toLowerCase()).filter(Boolean)),
     [emailAccounts]
   );
 
-  const isOutboundConvo = (c: Conversation) => accountEmails.has(c.from_email?.toLowerCase());
+  const isOutboundConvo = (c: Conversation) =>
+    accountEmails.has(c.from_email?.toLowerCase?.() || "");
+
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
 
-   const displayConversations = useMemo(() => {
+  const displayConversations = useMemo(() => {
     let filtered = conversations;
 
     const selectedFolder = activeFolder
-      ? folders.find((folder) => folder.id === activeFolder)
+      ? folders.find((folder: any) => folder.id === activeFolder)
       : null;
 
     if (activeMailbox && selectedFolder) {
-      const isSystemInbox =
-        selectedFolder.is_system &&
-        String(selectedFolder.name || "").toLowerCase() === "inbox";
-
-      const isSystemSent =
-        selectedFolder.is_system &&
-        String(selectedFolder.name || "").toLowerCase() === "sent";
+      const folderName = String(selectedFolder.name || "").toLowerCase();
+      const isSystemInbox = selectedFolder.is_system && folderName === "inbox";
+      const isSystemSent = selectedFolder.is_system && folderName === "sent";
 
       if (isSystemInbox) {
         filtered = conversations.filter(
           (c) =>
             c.email_account_id === activeMailbox &&
-            !isOutboundConvo(c) &&
             (c.folder_id === null || c.folder_id === selectedFolder.id)
         );
       } else if (isSystemSent) {
         filtered = conversations.filter(
           (c) =>
             c.email_account_id === activeMailbox &&
-            isOutboundConvo(c)
+            c.folder_id === selectedFolder.id
         );
       } else {
         filtered = conversations.filter(
@@ -78,8 +82,8 @@ export default function InboxPage() {
             c.folder_id === selectedFolder.id
         );
       }
-    } else if (activeFolder) {
-      filtered = conversations.filter((c) => c.folder_id === activeFolder);
+    } else if (activeMailbox) {
+      filtered = conversations.filter((c) => c.email_account_id === activeMailbox);
     } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
         filtered = conversations.filter((c) => isOutboundConvo(c));
@@ -90,12 +94,6 @@ export default function InboxPage() {
       } else {
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
       }
-    } else if (activeMailbox) {
-      filtered = conversations.filter(
-        (c) =>
-          c.email_account_id === activeMailbox &&
-          !isOutboundConvo(c)
-      );
     }
 
     if (searchQuery.trim()) {
@@ -119,9 +117,13 @@ export default function InboxPage() {
     currentUser,
     searchQuery,
     accountEmails,
-  ]); 
+  ]);
 
-  const handleAssign = async (conversationId: string, assigneeId: string | null, updatedConversation?: any) => {
+  const handleAssign = async (
+    conversationId: string,
+    assigneeId: string | null,
+    updatedConversation?: any
+  ) => {
     if (activeConvo && activeConvo.id === conversationId) {
       const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
       setActiveConvo({
@@ -145,10 +147,16 @@ export default function InboxPage() {
           actor_id: currentUser?.id,
         }),
       });
+
       if (res.ok) {
         refetch();
+
         if (activeConvo && conversationIds.includes(activeConvo.id)) {
-          setActiveConvo({ ...activeConvo, folder_id: folderId, assignee_id: null } as Conversation);
+          setActiveConvo({
+            ...activeConvo,
+            folder_id: folderId,
+            assignee_id: null,
+          } as Conversation);
         }
       }
     } catch (err) {
@@ -168,10 +176,14 @@ export default function InboxPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, action, actor_id: currentUser?.id, ...payload }),
       });
+
       if (res.ok) {
         refetch();
+
         if (activeConvo && ids.includes(activeConvo.id)) {
-          if (action === "archive" || action === "delete") setActiveConvo(null);
+          if (action === "archive" || action === "delete") {
+            setActiveConvo(null);
+          }
         }
       }
     } catch (err) {
@@ -179,7 +191,12 @@ export default function InboxPage() {
     }
   };
 
-  const handleAddTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => {
+  const handleAddTask = async (
+    conversationId: string,
+    text: string,
+    assigneeIds?: string[],
+    dueDate?: string
+  ) => {
     await actions.addTask(conversationId, text, assigneeIds, dueDate);
     await Promise.all([refetch(), refetchTasks()]);
   };
@@ -200,10 +217,11 @@ export default function InboxPage() {
   const openConversationFromTask = (conversationId: string) => {
     const match = conversations.find((conversation) => conversation.id === conversationId);
     if (!match) return;
+
     setActiveConvo(match);
     setActiveView("inbox");
-    setActiveMailbox(null);
-    setActiveFolder(null);
+    setActiveMailbox(match.email_account_id || null);
+    setActiveFolder(match.folder_id || null);
     setSearchQuery("");
   };
 
@@ -217,7 +235,9 @@ export default function InboxPage() {
     );
   }
 
-  if (!session) redirect("/login");
+  if (!session) {
+    redirect("/login");
+  }
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">

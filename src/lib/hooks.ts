@@ -141,32 +141,48 @@ export function useConversations(accountId: string | null) {
   const [loading, setLoading] = useState(true);
 
   const fetchConversations = useCallback(async () => {
+    setLoading(true);
+
     let query = supabase
       .from("conversations")
       .select(`
-        id, email_account_id, folder_id, thread_id, subject, from_name, from_email,
-        preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, updated_at,
-        assignee:team_members!tasks_assignee_id_fkey(*),
+        id,
+        email_account_id,
+        folder_id,
+        thread_id,
+        subject,
+        from_name,
+        from_email,
+        preview,
+        is_unread,
+        is_starred,
+        assignee_id,
+        status,
+        last_message_at,
+        created_at,
+        updated_at,
+        assignee:team_members!conversations_assignee_id_fkey(*),
         labels:conversation_labels(
           label_id,
           label:labels(*)
         )
       `)
-      .eq("status", "open")
       .order("last_message_at", { ascending: false })
-      .limit(100);
+      .limit(300);
 
     if (accountId) {
       query = query.eq("email_account_id", accountId);
     }
 
     const { data, error } = await query;
+
     if (error) {
       console.error("Fetch conversations error:", error);
       setConversations([]);
     } else {
       setConversations((data || []) as unknown as Conversation[]);
     }
+
     setLoading(false);
   }, [accountId]);
 
@@ -175,9 +191,21 @@ export function useConversations(accountId: string | null) {
 
     const channel = supabase
       .channel("conversations-realtime")
-      .on("postgres_changes", { event: "*", schema: "inbox", table: "conversations" }, () => fetchConversations())
-      .on("postgres_changes", { event: "*", schema: "inbox", table: "messages" }, () => fetchConversations())
-      .on("postgres_changes", { event: "*", schema: "inbox", table: "conversation_labels" }, () => fetchConversations())
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "inbox", table: "conversations" },
+        () => fetchConversations()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "inbox", table: "messages" },
+        () => fetchConversations()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "inbox", table: "conversation_labels" },
+        () => fetchConversations()
+      )
       .subscribe();
 
     return () => {
