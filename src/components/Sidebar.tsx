@@ -379,15 +379,10 @@ export default function Sidebar({
                       <div key={folder.id} className="flex items-center group/folder">
                         <button
                           onClick={() => {
-                            if (folder.is_system && folder.name === "Inbox") {
-                              setActiveFolder(null);
-                              setActiveMailbox(mb.id);
-                            } else {
-                              setActiveFolder(folder.id);
-                              setActiveMailbox(mb.id);
-                            }
-                            setActiveView("inbox");
-                          }}
+                          setActiveFolder(folder.id);
+                          setActiveMailbox(mb.id);
+                          setActiveView("inbox");
+                        }}
                           onDragOver={(e) => handleDragOver(e, folder.id)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, folder.id)}

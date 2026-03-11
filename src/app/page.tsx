@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
-import { useActions, useConversations, useEmailAccounts, useTasks, useTeamMembers } from "@/lib/hooks";
+import { useActions, useConversations, useEmailAccounts, useFolders, useTasks, useTeamMembers } from "@/lib/hooks";
 import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
 import ConversationDetail from "@/components/ConversationDetail";
@@ -16,6 +16,7 @@ export default function InboxPage() {
   const { data: session, status } = useSession();
   const teamMembers = useTeamMembers();
   const emailAccounts = useEmailAccounts();
+  const folders = useFolders();
   const actions = useActions();
 
   const [activeMailbox, setActiveMailbox] = useState<string | null>(null);
@@ -41,26 +42,58 @@ export default function InboxPage() {
   const isOutboundConvo = (c: Conversation) => accountEmails.has(c.from_email?.toLowerCase());
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
 
-  const displayConversations = useMemo(() => {
+   const displayConversations = useMemo(() => {
     let filtered = conversations;
 
-    if (activeFolder) {
+    const selectedFolder = activeFolder
+      ? folders.find((folder) => folder.id === activeFolder)
+      : null;
+
+    if (activeMailbox && selectedFolder) {
+      const isSystemInbox =
+        selectedFolder.is_system &&
+        String(selectedFolder.name || "").toLowerCase() === "inbox";
+
+      const isSystemSent =
+        selectedFolder.is_system &&
+        String(selectedFolder.name || "").toLowerCase() === "sent";
+
+      if (isSystemInbox) {
+        filtered = conversations.filter(
+          (c) =>
+            c.email_account_id === activeMailbox &&
+            !isOutboundConvo(c) &&
+            (c.folder_id === null || c.folder_id === selectedFolder.id)
+        );
+      } else if (isSystemSent) {
+        filtered = conversations.filter(
+          (c) =>
+            c.email_account_id === activeMailbox &&
+            isOutboundConvo(c)
+        );
+      } else {
+        filtered = conversations.filter(
+          (c) =>
+            c.email_account_id === activeMailbox &&
+            c.folder_id === selectedFolder.id
+        );
+      }
+    } else if (activeFolder) {
       filtered = conversations.filter((c) => c.folder_id === activeFolder);
     } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
-        filtered = conversations.filter((c) => isOutboundConvo(c) && !c.folder_id);
+        filtered = conversations.filter((c) => isOutboundConvo(c));
       } else if (activeView === "inbox") {
         filtered = conversations.filter(
-          (c) => c.assignee_id === currentUser.id && !c.folder_id && !isOutboundConvo(c)
+          (c) => c.assignee_id === currentUser.id && !isOutboundConvo(c)
         );
       } else {
-        filtered = conversations.filter((c) => c.assignee_id === currentUser.id && !c.folder_id);
+        filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
       }
-        } else if (activeMailbox) {
+    } else if (activeMailbox) {
       filtered = conversations.filter(
         (c) =>
           c.email_account_id === activeMailbox &&
-          !c.folder_id &&
           !isOutboundConvo(c)
       );
     }
@@ -71,12 +104,22 @@ export default function InboxPage() {
         (c) =>
           c.subject?.toLowerCase().includes(q) ||
           c.from_name?.toLowerCase().includes(q) ||
+          c.from_email?.toLowerCase().includes(q) ||
           c.preview?.toLowerCase().includes(q)
       );
     }
 
     return filtered;
-  }, [conversations, activeMailbox, activeFolder, activeView, currentUser, searchQuery, accountEmails]);
+  }, [
+    conversations,
+    folders,
+    activeMailbox,
+    activeFolder,
+    activeView,
+    currentUser,
+    searchQuery,
+    accountEmails,
+  ]); 
 
   const handleAssign = async (conversationId: string, assigneeId: string | null, updatedConversation?: any) => {
     if (activeConvo && activeConvo.id === conversationId) {
