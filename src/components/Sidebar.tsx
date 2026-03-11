@@ -48,22 +48,22 @@ function QuickCreateMenu({
   }, [open]);
 
   return (
-    <div className="flex gap-2" ref={ref}>
+    <div className="flex items-center gap-1.5" ref={ref}>
       <button
         onClick={onCompose}
-        className="flex-1 h-10 rounded-lg bg-[#4ADE80] text-[#0B0E11] flex items-center justify-center hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
+        className="w-7 h-7 rounded-md flex items-center justify-center bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
         title="Compose email"
       >
-        <Plus size={18} />
+        <Plus size={14} />
       </button>
 
       <div className="relative">
         <button
           onClick={() => setOpen((value) => !value)}
-          className="h-10 w-10 rounded-lg border border-[#1E242C] bg-[#12161B] text-[#E6EDF3] flex items-center justify-center hover:bg-[#181D24] transition-all"
+          className="w-7 h-7 rounded-md flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#12161B] transition-all"
           title="More quick actions"
         >
-          <ChevronDown size={16} />
+          <ChevronDown size={14} />
         </button>
 
         {open && (
@@ -236,35 +236,37 @@ export default function Sidebar({
   return (
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
       <div className="p-4 pb-3 border-b border-[#161B22]">
-        <div className="flex items-center gap-2.5 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
-            T
-          </div>
-          <div className="flex-1">
-            <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
-            <div className="text-[10px] text-[#484F58] uppercase tracking-widest">Shared Inbox</div>
-          </div>
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
-              syncing ? "text-[#4ADE80]" : "text-[#484F58] hover:text-[#4ADE80] hover:bg-[#12161B]"
-            }`}
-            title="Sync emails"
-          >
-            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
-          </button>
-        </div>
+  <div className="flex items-center gap-2.5">
+    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
+      T
+    </div>
 
-        <QuickCreateMenu
-          onCompose={() => setActiveView("compose")}
-          onNewTask={() => {
-            setActiveView("new-task");
-            setActiveMailbox(null);
-            setActiveFolder(null);
-          }}
-        />
-      </div>
+    <div className="flex-1 min-w-0">
+      <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
+      <div className="text-[10px] text-[#484F58] uppercase tracking-widest">Shared Inbox</div>
+    </div>
+
+    <button
+      onClick={handleSync}
+      disabled={syncing}
+      className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
+        syncing ? "text-[#4ADE80]" : "text-[#484F58] hover:text-[#4ADE80] hover:bg-[#12161B]"
+      }`}
+      title="Sync emails"
+    >
+      <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+    </button>
+
+    <QuickCreateMenu
+      onCompose={() => setActiveView("compose")}
+      onNewTask={() => {
+        setActiveView("new-task");
+        setActiveMailbox(null);
+        setActiveFolder(null);
+      }}
+    />
+  </div>
+</div>
 
       <div className="px-2 pt-2 flex flex-col gap-0.5">
         <div className="px-2.5 pb-1">
