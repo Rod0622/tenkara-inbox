@@ -155,6 +155,16 @@ export default function InboxPage() {
     await Promise.all([refetch(), refetchTasks()]);
   };
 
+  const openConversationFromTask = (conversationId: string) => {
+    const match = conversations.find((conversation) => conversation.id === conversationId);
+    if (!match) return;
+    setActiveConvo(match);
+    setActiveView("inbox");
+    setActiveMailbox(null);
+    setActiveFolder(null);
+    setSearchQuery("");
+  };
+
   const isComposing = activeView === "compose";
 
   if (status === "loading") {
@@ -192,7 +202,13 @@ export default function InboxPage() {
           }}
         />
       ) : isTaskView ? (
-        <TaskBoard currentUser={currentUser} teamMembers={teamMembers} onTasksChanged={refetchTasks} autoOpenComposer={activeView === "new-task"} />
+        <TaskBoard
+          currentUser={currentUser}
+          teamMembers={teamMembers}
+          onTasksChanged={refetchTasks}
+          autoOpenComposer={activeView === "new-task"}
+          onOpenConversation={openConversationFromTask}
+        />
       ) : (
         <>
           <ConversationList
@@ -224,5 +240,3 @@ export default function InboxPage() {
     </div>
   );
 }
-
-

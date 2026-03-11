@@ -1,18 +1,122 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import {
-  Inbox, Send, CheckSquare, Settings, LogOut, RefreshCw, Plus,
-  ChevronRight, FolderPlus, MoreHorizontal, Trash2, PenSquare,
+  Inbox,
+  Send,
+  CheckSquare,
+  Settings,
+  LogOut,
+  RefreshCw,
+  Plus,
+  ChevronRight,
+  FolderPlus,
+  MoreHorizontal,
+  Trash2,
+  PenSquare,
+  ChevronDown,
+  MailPlus,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 
+function QuickCreateMenu({
+  onCompose,
+  onNewTask,
+}: {
+  onCompose: () => void;
+  onNewTask: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    if (open) {
+      document.addEventListener("mousedown", handleClick);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [open]);
+
+  return (
+    <div className="flex gap-2" ref={ref}>
+      <button
+        onClick={onCompose}
+        className="flex-1 h-10 rounded-lg bg-[#4ADE80] text-[#0B0E11] flex items-center justify-center hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
+        title="Compose email"
+      >
+        <Plus size={18} />
+      </button>
+
+      <div className="relative">
+        <button
+          onClick={() => setOpen((value) => !value)}
+          className="h-10 w-10 rounded-lg border border-[#1E242C] bg-[#12161B] text-[#E6EDF3] flex items-center justify-center hover:bg-[#181D24] transition-all"
+          title="More quick actions"
+        >
+          <ChevronDown size={16} />
+        </button>
+
+        {open && (
+          <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-[#1E242C] bg-[#161B22] shadow-2xl shadow-black/40 py-1 z-50">
+            <button
+              onClick={() => {
+                onCompose();
+                setOpen(false);
+              }}
+              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+            >
+              <PenSquare size={14} className="text-[#4ADE80]" />
+              Compose email
+            </button>
+
+            <button
+              onClick={() => {
+                onNewTask();
+                setOpen(false);
+              }}
+              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+            >
+              <CheckSquare size={14} className="text-[#58A6FF]" />
+              New task
+            </button>
+
+            <Link
+              href="/settings"
+              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+              onClick={() => setOpen(false)}
+            >
+              <MailPlus size={14} className="text-[#F5D547]" />
+              Add shared account
+            </Link>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Sidebar({
-  activeMailbox, setActiveMailbox, activeView, setActiveView,
-  activeFolder, setActiveFolder,
-  mailboxes, conversations, currentUser, taskCount = 0, onMoveToFolder,
+  activeMailbox,
+  setActiveMailbox,
+  activeView,
+  setActiveView,
+  activeFolder,
+  setActiveFolder,
+  mailboxes,
+  conversations,
+  currentUser,
+  taskCount = 0,
+  onMoveToFolder,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -22,7 +126,6 @@ export default function Sidebar({
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
-  // Personal counts: only conversations assigned to the current user
   const accountEmails = new Set(mailboxes.map((a: any) => a.email?.toLowerCase()));
   const isOutbound = (c: any) => accountEmails.has(c.from_email?.toLowerCase());
 
@@ -106,13 +209,10 @@ export default function Sidebar({
   };
 
   const getFoldersForAccount = (accountId: string) =>
-    folders.filter((f) => f.email_account_id === accountId).sort((a, b) => a.sort_order - b.sort_order);
+    folders
+      .filter((f) => f.email_account_id === accountId)
+      .sort((a, b) => a.sort_order - b.sort_order);
 
-  // Find the "Inbox" system folder for an account
-  const getInboxFolder = (accountId: string) =>
-    folders.find((f) => f.email_account_id === accountId && f.is_system && f.name === "Inbox");
-
-  // Drag and drop handlers for folders
   const handleDragOver = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -135,7 +235,6 @@ export default function Sidebar({
 
   return (
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
-      {/* Logo + Compose + Sync */}
       <div className="p-4 pb-3 border-b border-[#161B22]">
         <div className="flex items-center gap-2.5 mb-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
@@ -157,41 +256,34 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Compose button */}
-        <button
-          onClick={() => setActiveView("compose")}
-          className="flex items-center justify-center gap-2 w-full py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[13px] font-bold hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
-        >
-          <PenSquare size={14} />
-          <span>Compose</span>
-        </button>
-        <button
-          onClick={() => {
+        <QuickCreateMenu
+          onCompose={() => setActiveView("compose")}
+          onNewTask={() => {
             setActiveView("new-task");
             setActiveMailbox(null);
             setActiveFolder(null);
           }}
-          className="flex items-center justify-center gap-2 w-full py-2 mt-2 rounded-lg border border-[#1E242C] bg-[#12161B] text-[#E6EDF3] text-[13px] font-semibold hover:bg-[#181D24] transition-all"
-        >
-          <CheckSquare size={14} />
-          <span>New Task</span>
-        </button>
+        />
       </div>
 
-      {/* Personal nav — shows only MY assigned items */}
       <div className="px-2 pt-2 flex flex-col gap-0.5">
         <div className="px-2.5 pb-1">
           <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
             My Workspace
           </span>
         </div>
+
         {[
           { id: "inbox", label: "Inbox", icon: Inbox, count: myUnreadCount },
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount },
         ].map((item) => {
           const Icon = item.icon;
-          const isActive = (activeView === item.id || (item.id === "tasks" && activeView === "new-task")) && !activeMailbox && !activeFolder;
+          const isActive =
+            (activeView === item.id || (item.id === "tasks" && activeView === "new-task")) &&
+            !activeMailbox &&
+            !activeFolder;
+
           return (
             <button
               key={item.id}
@@ -216,7 +308,6 @@ export default function Sidebar({
         })}
       </div>
 
-      {/* Team Spaces (Email Accounts) with Folders */}
       <div className="px-2 pt-3 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
           <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
@@ -238,23 +329,22 @@ export default function Sidebar({
 
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
-          // Team space only shows unassigned inbound
           const unassignedConvos = mbConvos.filter((c) => !c.assignee_id && !isOutbound(c));
           const unread = unassignedConvos.filter((c) => c.is_unread).length;
           const isExpanded = expandedAccounts.has(mb.id);
           const accountFolders = getFoldersForAccount(mb.id);
-          const inboxFolder = getInboxFolder(mb.id);
 
           return (
             <div key={mb.id} className="mb-0.5">
-              {/* Account row — clicking ONLY toggles expand/collapse */}
               <button
                 onClick={() => toggleAccount(mb.id)}
                 className="flex items-center gap-1 px-1 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left text-[#7D8590] hover:bg-[#12161B] group"
               >
                 <ChevronRight
                   size={12}
-                  className={`transition-transform text-[#484F58] shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                  className={`transition-transform text-[#484F58] shrink-0 ${
+                    isExpanded ? "rotate-90" : ""
+                  }`}
                 />
                 <span className="text-[15px] shrink-0">{mb.icon || "📬"}</span>
                 <span className="flex-1 truncate ml-1">{mb.name}</span>
@@ -268,17 +358,19 @@ export default function Sidebar({
                 )}
               </button>
 
-              {/* Folders (collapsible) */}
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
-                    const isFolderActive = (folder.is_system && folder.name === "Inbox")
-                      ? (activeMailbox === mb.id && !activeFolder)
-                      : activeFolder === folder.id;
-                    // Count conversations: system Inbox = unassigned with no folder_id, custom = matching folder_id
-                    const folderConvos = (folder.is_system && folder.name === "Inbox")
-                      ? unassignedConvos.filter((c) => !c.folder_id)
-                      : mbConvos.filter((c) => c.folder_id === folder.id);
+                    const isFolderActive =
+                      folder.is_system && folder.name === "Inbox"
+                        ? activeMailbox === mb.id && !activeFolder
+                        : activeFolder === folder.id;
+
+                    const folderConvos =
+                      folder.is_system && folder.name === "Inbox"
+                        ? unassignedConvos.filter((c) => !c.folder_id)
+                        : mbConvos.filter((c) => c.folder_id === folder.id);
+
                     const folderUnread = folderConvos.filter((c) => c.is_unread).length;
 
                     return (
@@ -286,11 +378,9 @@ export default function Sidebar({
                         <button
                           onClick={() => {
                             if (folder.is_system && folder.name === "Inbox") {
-                              // System Inbox: show unassigned team emails (no folder_id filter)
                               setActiveFolder(null);
                               setActiveMailbox(mb.id);
                             } else {
-                              // Custom folder: filter by folder_id
                               setActiveFolder(folder.id);
                               setActiveMailbox(mb.id);
                             }
@@ -303,8 +393,8 @@ export default function Sidebar({
                             dragOverFolder === folder.id
                               ? "bg-[rgba(74,222,128,0.15)] border border-[#4ADE80] border-dashed"
                               : isFolderActive
-                              ? "bg-[#1E242C] text-[#E6EDF3]"
-                              : "text-[#7D8590] hover:bg-[#12161B]"
+                                ? "bg-[#1E242C] text-[#E6EDF3]"
+                                : "text-[#7D8590] hover:bg-[#12161B]"
                           }`}
                         >
                           <span className="text-[13px] shrink-0">{folder.icon}</span>
@@ -319,18 +409,23 @@ export default function Sidebar({
                           )}
                         </button>
 
-                        {/* Folder actions (only for non-system folders) */}
                         {!folder.is_system && (
                           <div className="relative">
                             <button
-                              onClick={() => setFolderMenuOpen(folderMenuOpen === folder.id ? null : folder.id)}
+                              onClick={() =>
+                                setFolderMenuOpen(folderMenuOpen === folder.id ? null : folder.id)
+                              }
                               className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] opacity-0 group-hover/folder:opacity-100 transition-opacity"
                             >
                               <MoreHorizontal size={12} />
                             </button>
+
                             {folderMenuOpen === folder.id && (
                               <>
-                                <div className="fixed inset-0 z-40" onClick={() => setFolderMenuOpen(null)} />
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setFolderMenuOpen(null)}
+                                />
                                 <div className="absolute right-0 top-5 z-50 w-32 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1">
                                   <button
                                     onClick={() => handleDeleteFolder(folder.id)}
@@ -348,7 +443,6 @@ export default function Sidebar({
                     );
                   })}
 
-                  {/* Add folder input */}
                   {addingFolder === mb.id ? (
                     <div className="flex items-center gap-1 px-1.5 py-1 mt-0.5">
                       <input
@@ -357,9 +451,17 @@ export default function Sidebar({
                         onChange={(e) => setNewFolderName(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleCreateFolder(mb.id);
-                          if (e.key === "Escape") { setAddingFolder(null); setNewFolderName(""); }
+                          if (e.key === "Escape") {
+                            setAddingFolder(null);
+                            setNewFolderName("");
+                          }
                         }}
-                        onBlur={() => { if (!newFolderName.trim()) { setAddingFolder(null); setNewFolderName(""); } }}
+                        onBlur={() => {
+                          if (!newFolderName.trim()) {
+                            setAddingFolder(null);
+                            setNewFolderName("");
+                          }
+                        }}
                         placeholder="Folder name..."
                         className="flex-1 bg-[#0B0E11] border border-[#1E242C] rounded px-1.5 py-0.5 text-[11px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]/40 min-w-0"
                       />
@@ -380,7 +482,6 @@ export default function Sidebar({
         })}
       </div>
 
-      {/* Settings */}
       <div className="px-2 pb-1">
         <Link
           href="/settings"
@@ -391,7 +492,6 @@ export default function Sidebar({
         </Link>
       </div>
 
-      {/* User */}
       <div className="p-2 border-t border-[#161B22]">
         <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md">
           {currentUser && (
@@ -420,4 +520,3 @@ export default function Sidebar({
     </div>
   );
 }
-

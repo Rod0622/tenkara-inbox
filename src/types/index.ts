@@ -85,6 +85,7 @@ export interface Task {
     subject: string;
     from_name?: string;
     from_email?: string;
+    email_account_id?: string;
   } | null;
 }
 

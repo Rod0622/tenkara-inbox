@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Reply, Forward, Archive, Mail, User, Folder, FolderOpen, Plus, Check, Send,
   ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
-  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap,
+  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap, Trash2,
 } from "lucide-react";
 import { useConversationDetail, useLabels, useFolders } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
@@ -420,9 +420,10 @@ const ACTIVITY_CONFIG: Record<string, { icon: any; color: string; label: string 
   marked_unread: { icon: EyeOff, color: "#BC8CFF", label: "Marked as unread" },
   status_changed: { icon: Circle, color: "#39D2C0", label: "Status changed" },
   note_added: { icon: StickyNote, color: "#4ADE80", label: "Note added" },
-  task_created: { icon: Plus, color: "#58A6FF", label: "Task created" },
+    task_created: { icon: Plus, color: "#58A6FF", label: "Task created" },
   task_completed: { icon: CheckCircle, color: "#4ADE80", label: "Task completed" },
   task_reopened: { icon: Circle, color: "#F0883E", label: "Task reopened" },
+  task_deleted: { icon: Trash2, color: "#F85149", label: "Task deleted" },
   reply_sent: { icon: Send, color: "#4ADE80", label: "Reply sent" },
   email_composed: { icon: MailPlus, color: "#58A6FF", label: "Email sent" },
   email_received: { icon: Mail, color: "#BC8CFF", label: "Email received" },
@@ -746,7 +747,7 @@ export default function ConversationDetail({
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
   const [showTaskInput, setShowTaskInput] = useState(false);
 
-  const { notes, tasks, messages, activities } = useConversationDetail(convo?.id || null);
+  const { notes, tasks, messages, activities, refetch: refetchDetail } = useConversationDetail(convo?.id || null);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -819,18 +820,22 @@ export default function ConversationDetail({
   };
 
   const handleAddTask = async () => {
-    if (!newTaskText.trim()) return;
-    await onAddTask(
-      convo.id,
-      newTaskText.trim(),
-      newTaskAssigneeIds,
-      newTaskDueDate || undefined
-    );
-    setNewTaskText("");
-    setNewTaskAssigneeIds([]);
-    setNewTaskDueDate("");
-    setShowTaskInput(false);
-  };
+  if (!convo || !newTaskText.trim()) return;
+
+  await onAddTask(
+    convo.id,
+    newTaskText.trim(),
+    newTaskAssigneeIds.length > 0 ? newTaskAssigneeIds : currentUser?.id ? [currentUser.id] : [],
+    newTaskDueDate || undefined
+  );
+
+  await refetchDetail();
+  setActiveTab("tasks");
+  setNewTaskText("");
+  setNewTaskAssigneeIds([]);
+  setNewTaskDueDate("");
+  setShowTaskInput(false);
+};
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
