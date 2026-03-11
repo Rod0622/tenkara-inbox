@@ -56,11 +56,10 @@ export default function InboxPage() {
       } else {
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id && !c.folder_id);
       }
-    } else if (activeMailbox) {
+        } else if (activeMailbox) {
       filtered = conversations.filter(
         (c) =>
           c.email_account_id === activeMailbox &&
-          !c.assignee_id &&
           !c.folder_id &&
           !isOutboundConvo(c)
       );
