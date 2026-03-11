@@ -18,30 +18,31 @@ function normalizeTask(task: any): Task {
   } as Task;
 }
 
+function taskMatchesAssignee(task: Task, assigneeId: string) {
+  const assigneeIds = task.assignees?.map((member) => member.id) || [];
+  return assigneeIds.includes(assigneeId) || task.assignee_id === assigneeId;
+}
+
+async function fetchTasksFromApi(params: Record<string, string | null | undefined>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) search.set(key, value);
+  });
+
+  const res = await fetch(`/api/tasks?${search.toString()}`, { cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data?.error || "Failed to fetch tasks");
+  }
+
+  return (data.tasks || []) as Task[];
+}
+
 async function fetchConversationTasks(conversationId: string) {
-  const primary = await supabase
-    .from("tasks")
-    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
-    .eq("conversation_id", conversationId)
-    .order("created_at");
-
-  if (!primary.error) {
-    return (primary.data || []).map(normalizeTask);
-  }
-
-  console.warn("Task join fetch fell back to legacy query:", primary.error.message);
-
-  const fallback = await supabase
-    .from("tasks")
-    .select("*, assignee:team_members(*)")
-    .eq("conversation_id", conversationId)
-    .order("created_at");
-
-  if (fallback.error) {
-    throw fallback.error;
-  }
-
-  return (fallback.data || []).map(normalizeTask);
+  // Server-backed fetch avoids browser-side RLS / relationship issues.
+  const tasks = await fetchTasksFromApi({ scope: "all" });
+  return tasks.filter((task) => task.conversation_id === conversationId);
 }
 
 export function useTeamMembers() {
@@ -51,8 +52,17 @@ export function useTeamMembers() {
     supabase
       .from("team_members")
       .select("*")
-      .eq("is_active", true)
-      .then(({ data }) => setMembers(data || []));
+      .order("created_at")
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Fetch team members error:", error);
+          setMembers([]);
+          return;
+        }
+
+        const activeMembers = (data || []).filter((member: any) => member.is_active !== false);
+        setMembers(activeMembers);
+      });
   }, []);
 
   return members;
@@ -67,7 +77,14 @@ export function useEmailAccounts() {
       .select("*")
       .eq("is_active", true)
       .order("created_at")
-      .then(({ data }) => setAccounts(data || []));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Fetch email accounts error:", error);
+          setAccounts([]);
+          return;
+        }
+        setAccounts(data || []);
+      });
   }, []);
 
   return accounts;
@@ -85,7 +102,14 @@ export function useLabels() {
       .from("labels")
       .select("*")
       .order("sort_order")
-      .then(({ data }) => setLabels(data || []));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Fetch labels error:", error);
+          setLabels([]);
+          return;
+        }
+        setLabels(data || []);
+      });
   }, []);
 
   return labels;
@@ -99,7 +123,14 @@ export function useFolders() {
       .from("folders")
       .select("*")
       .order("sort_order")
-      .then(({ data }) => setFolders(data || []));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Fetch folders error:", error);
+          setFolders([]);
+          return;
+        }
+        setFolders(data || []);
+      });
   }, []);
 
   return folders;
@@ -130,8 +161,12 @@ export function useConversations(accountId: string | null) {
     }
 
     const { data, error } = await query;
-    if (error) console.error("Fetch conversations error:", error);
-    setConversations((data || []) as unknown as Conversation[]);
+    if (error) {
+      console.error("Fetch conversations error:", error);
+      setConversations([]);
+    } else {
+      setConversations((data || []) as unknown as Conversation[]);
+    }
     setLoading(false);
   }, [accountId]);
 
@@ -283,27 +318,40 @@ export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "min
   const [loading, setLoading] = useState(true);
 
   const fetchTasks = useCallback(async () => {
-    if (scope === "mine" && !assigneeId) {
-      setTasks([]);
+    setLoading(true);
+
+    try {
+      // First try the normal API route.
+      const primary = await fetchTasksFromApi({
+        scope,
+        assignee_id: scope === "mine" ? assigneeId : undefined,
+      });
+
+      if (scope === "mine" && assigneeId) {
+        // Extra client-side safeguard for legacy rows / mixed assignee formats.
+        const filtered = primary.filter((task) => taskMatchesAssignee(task, assigneeId));
+        setTasks(filtered);
+      } else {
+        setTasks(primary);
+      }
+    } catch (error) {
+      console.error("Fetch tasks failed:", error);
+
+      // Last-resort fallback: fetch all and filter locally.
+      try {
+        const fallback = await fetchTasksFromApi({ scope: "all" });
+        if (scope === "mine" && assigneeId) {
+          setTasks(fallback.filter((task) => taskMatchesAssignee(task, assigneeId)));
+        } else {
+          setTasks(fallback);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback fetch tasks failed:", fallbackError);
+        setTasks([]);
+      }
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const params = new URLSearchParams({ scope });
-    if (assigneeId) params.set("assignee_id", assigneeId);
-
-    const res = await fetch(`/api/tasks?${params.toString()}`);
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      console.error("Fetch tasks failed:", data);
-      setTasks([]);
-      setLoading(false);
-      return;
-    }
-
-    setTasks(data.tasks || []);
-    setLoading(false);
   }, [assigneeId, scope]);
 
   useEffect(() => {
