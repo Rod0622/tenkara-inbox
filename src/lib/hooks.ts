@@ -146,7 +146,7 @@ export function useConversations(accountId: string | null) {
       .select(`
         id, email_account_id, folder_id, thread_id, subject, from_name, from_email,
         preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, updated_at,
-        assignee:team_members(*),
+        assignee:team_members!tasks_assignee_id_fkey(*),
         labels:conversation_labels(
           label_id,
           label:labels(*)

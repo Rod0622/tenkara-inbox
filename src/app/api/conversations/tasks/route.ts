@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
   const { data: fullTask } = await supabase
     .from("tasks")
-    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
+    .select("*, assignee:team_members!tasks_assignee_id_fkey(*), task_assignees(team_member_id, team_member:team_members(*))")
     .eq("id", task.id)
     .single();
 
@@ -99,7 +99,7 @@ export async function PATCH(req: NextRequest) {
     .from("tasks")
     .update({ is_done: isDone })
     .eq("id", taskId)
-    .select("*, assignee:team_members(*), task_assignees(team_member_id, team_member:team_members(*))")
+    .select("*, assignee:team_members!tasks_assignee_id_fkey(*), task_assignees(team_member_id, team_member:team_members(*))")
     .single();
 
   if (error) {

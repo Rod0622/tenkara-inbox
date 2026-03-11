@@ -34,7 +34,7 @@ export async function PATCH(req: NextRequest) {
       ...(assignee_id ? { folder_id: null } : {}),
     })
     .eq("id", conversation_id)
-    .select("*, assignee:team_members(*)")
+    .select("*, assignee:team_members!tasks_assignee_id_fkey(*)")
     .single();
 
   if (error) {

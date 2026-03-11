@@ -33,7 +33,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members(*))"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
     )
     .eq("id", taskId)
     .single();
@@ -42,7 +42,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
 
   const fallback = await supabase
     .from("tasks")
-    .select("*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email)")
+    .select("*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)")
     .eq("id", taskId)
     .single();
 
@@ -54,7 +54,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members(*))"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
     )
     .order("created_at", { ascending: false });
 
@@ -64,7 +64,9 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
 
   const fallback = await supabase
     .from("tasks")
-    .select("*, assignee:team_members(*), conversation:conversations(id, subject, from_name, from_email)")
+    .select(
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
+    )
     .order("created_at", { ascending: false });
 
   if (fallback.error) throw fallback.error;
@@ -171,12 +173,27 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const task = await selectTaskById(supabase, insert.data.id);
-    return NextResponse.json({ task });
-  } catch (error: any) {
-    console.error("POST /api/tasks failed:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+   async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
+  const primary = await supabase
+    .from("tasks")
+    .select(
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
+    )
+    .eq("id", taskId)
+    .single();
+
+  if (!primary.error) return normalizeTask(primary.data);
+
+  const fallback = await supabase
+    .from("tasks")
+    .select(
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
+    )
+    .eq("id", taskId)
+    .single();
+
+  if (fallback.error) throw fallback.error;
+  return normalizeTask(fallback.data);
 }
 
 export async function PATCH(req: NextRequest) {
