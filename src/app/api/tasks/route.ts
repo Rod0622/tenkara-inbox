@@ -3,12 +3,22 @@ import { createServerClient } from "@/lib/supabase";
 import type { Task, TaskStatus } from "@/types";
 
 function normalizeAssigneeIds(body: any): string[] {
-  const raw = body.assignee_ids ?? body.assigneeIds ?? body.assignee_id ?? body.assigneeId;
+  const raw =
+    body.assignee_ids ??
+    body.assigneeIds ??
+    body.assignee_id ??
+    body.assigneeId;
+
   if (!raw) return [];
+
   if (Array.isArray(raw)) {
     return raw.filter((value) => typeof value === "string" && value.trim());
   }
-  if (typeof raw === "string" && raw.trim()) return [raw.trim()];
+
+  if (typeof raw === "string" && raw.trim()) {
+    return [raw.trim()];
+  }
+
   return [];
 }
 
@@ -26,7 +36,14 @@ function normalizeTask(task: any): Task {
 
 function isMissingJoinError(error: any) {
   const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-  return error?.code === "42P01" || message.includes("task_assignees") || message.includes("could not find");
+  return (
+    error?.code === "42P01" ||
+    error?.code === "PGRST200" ||
+    error?.code === "PGRST201" ||
+    message.includes("task_assignees") ||
+    message.includes("could not find") ||
+    message.includes("more than one relationship was found")
+  );
 }
 
 async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
@@ -38,15 +55,22 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
     .eq("id", taskId)
     .single();
 
-  if (!primary.error) return normalizeTask(primary.data);
+  if (!primary.error) {
+    return normalizeTask(primary.data);
+  }
 
   const fallback = await supabase
     .from("tasks")
-    .select("*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)")
+    .select(
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
+    )
     .eq("id", taskId)
     .single();
 
-  if (fallback.error) throw fallback.error;
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
   return normalizeTask(fallback.data);
 }
 
@@ -69,7 +93,10 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
     )
     .order("created_at", { ascending: false });
 
-  if (fallback.error) throw fallback.error;
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
   return (fallback.data || []).map(normalizeTask);
 }
 
@@ -87,23 +114,25 @@ export async function GET(req: NextRequest) {
     let tasks: Task[] = await selectAllTasks(supabase);
 
     if (scope === "mine" && assigneeId) {
-      tasks = tasks.filter((task: Task) => matchesAssignee(task, assigneeId));
+      tasks = tasks.filter((task) => matchesAssignee(task, assigneeId));
     }
 
-    tasks.sort((a: Task, b: Task) => {
+    tasks.sort((a, b) => {
       const aDone = a.status === "completed" ? 1 : 0;
       const bDone = b.status === "completed" ? 1 : 0;
+
       if (aDone !== bDone) return aDone - bDone;
       if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
       if (a.due_date) return -1;
       if (b.due_date) return 1;
+
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
     return NextResponse.json({ tasks });
   } catch (error: any) {
     console.error("GET /api/tasks failed:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to fetch tasks" }, { status: 500 });
   }
 }
 
@@ -135,26 +164,44 @@ export async function POST(req: NextRequest) {
       payload.status = status;
     }
 
-    let insert = await supabase.from("tasks").insert(payload).select("*").single();
+    let insert = await supabase
+      .from("tasks")
+      .insert(payload)
+      .select("*")
+      .single();
 
-    if (insert.error && `${insert.error.message || ""}`.toLowerCase().includes("status")) {
+    if (
+      insert.error &&
+      `${insert.error.message || ""}`.toLowerCase().includes("status")
+    ) {
       delete payload.status;
       insert = await supabase.from("tasks").insert(payload).select("*").single();
     }
 
     if (insert.error || !insert.data) {
       console.error("POST /api/tasks insert failed:", insert.error);
-      return NextResponse.json({ error: insert.error?.message || "Failed to create task" }, { status: 500 });
+      return NextResponse.json(
+        { error: insert.error?.message || "Failed to create task" },
+        { status: 500 }
+      );
     }
 
     if (assigneeIds.length > 0) {
       const assigneeInsert = await supabase
         .from("task_assignees")
-        .insert(assigneeIds.map((teamMemberId) => ({ task_id: insert.data.id, team_member_id: teamMemberId })));
+        .insert(
+          assigneeIds.map((teamMemberId) => ({
+            task_id: insert.data.id,
+            team_member_id: teamMemberId,
+          }))
+        );
 
       if (assigneeInsert.error && !isMissingJoinError(assigneeInsert.error)) {
         console.error("POST /api/tasks assignee insert failed:", assigneeInsert.error);
-        return NextResponse.json({ error: assigneeInsert.error.message }, { status: 500 });
+        return NextResponse.json(
+          { error: assigneeInsert.error.message },
+          { status: 500 }
+        );
       }
     }
 
@@ -173,27 +220,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-   async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
-  const primary = await supabase
-    .from("tasks")
-    .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
-    )
-    .eq("id", taskId)
-    .single();
-
-  if (!primary.error) return normalizeTask(primary.data);
-
-  const fallback = await supabase
-    .from("tasks")
-    .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
-    )
-    .eq("id", taskId)
-    .single();
-
-  if (fallback.error) throw fallback.error;
-  return normalizeTask(fallback.data);
+    const task = await selectTaskById(supabase, insert.data.id);
+    return NextResponse.json({ task });
+  } catch (error: any) {
+    console.error("POST /api/tasks failed:", error);
+    return NextResponse.json({ error: error.message || "Failed to create task" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest) {
@@ -204,7 +236,7 @@ export async function PATCH(req: NextRequest) {
     const taskId = body.task_id || body.taskId;
     const status = body.status as TaskStatus | undefined;
     const dueDate = body.due_date ?? body.dueDate;
-    const text = body.text?.trim();
+    const text = typeof body.text === "string" ? body.text.trim() : undefined;
     const assigneeIds = body.assignee_ids || body.assigneeIds;
 
     if (!taskId) {
@@ -212,17 +244,35 @@ export async function PATCH(req: NextRequest) {
     }
 
     const update: any = {};
+
     if (status) {
       update.status = status;
       update.is_done = status === "completed";
     }
-    if (dueDate !== undefined) update.due_date = dueDate || null;
-    if (text) update.text = text;
-    if (Array.isArray(assigneeIds)) update.assignee_id = assigneeIds[0] || null;
 
-    let result = await supabase.from("tasks").update(update).eq("id", taskId).select("*").single();
+    if (dueDate !== undefined) {
+      update.due_date = dueDate || null;
+    }
 
-    if (result.error && `${result.error.message || ""}`.toLowerCase().includes("status")) {
+    if (text) {
+      update.text = text;
+    }
+
+    if (Array.isArray(assigneeIds)) {
+      update.assignee_id = assigneeIds[0] || null;
+    }
+
+    let result = await supabase
+      .from("tasks")
+      .update(update)
+      .eq("id", taskId)
+      .select("*")
+      .single();
+
+    if (
+      result.error &&
+      `${result.error.message || ""}`.toLowerCase().includes("status")
+    ) {
       delete update.status;
       result = await supabase.from("tasks").update(update).eq("id", taskId).select("*").single();
     }
@@ -233,12 +283,20 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (Array.isArray(assigneeIds)) {
-      const deleteRes = await supabase.from("task_assignees").delete().eq("task_id", taskId);
+      const deleteRes = await supabase
+        .from("task_assignees")
+        .delete()
+        .eq("task_id", taskId);
+
       if (!deleteRes.error || isMissingJoinError(deleteRes.error)) {
         if (assigneeIds.length > 0) {
-          const insertRes = await supabase
-            .from("task_assignees")
-            .insert(assigneeIds.map((teamMemberId: string) => ({ task_id: taskId, team_member_id: teamMemberId })));
+          const insertRes = await supabase.from("task_assignees").insert(
+            assigneeIds.map((teamMemberId: string) => ({
+              task_id: taskId,
+              team_member_id: teamMemberId,
+            }))
+          );
+
           if (insertRes.error && !isMissingJoinError(insertRes.error)) {
             console.error("PATCH /api/tasks assignee insert failed:", insertRes.error);
             return NextResponse.json({ error: insertRes.error.message }, { status: 500 });
@@ -251,7 +309,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ task });
   } catch (error: any) {
     console.error("PATCH /api/tasks failed:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to update task" }, { status: 500 });
   }
 }
 
@@ -259,6 +317,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const supabase = createServerClient();
     const body = await req.json().catch(() => ({}));
+
     const rawIds = body.task_ids || body.taskIds || body.ids || body.id;
     const taskIds = Array.isArray(rawIds)
       ? rawIds.filter((value) => typeof value === "string" && value.trim())
@@ -280,13 +339,21 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: selectError.message }, { status: 500 });
     }
 
-    const assigneeDelete = await supabase.from("task_assignees").delete().in("task_id", taskIds);
+    const assigneeDelete = await supabase
+      .from("task_assignees")
+      .delete()
+      .in("task_id", taskIds);
+
     if (assigneeDelete.error && !isMissingJoinError(assigneeDelete.error)) {
       console.error("DELETE /api/tasks assignee delete failed:", assigneeDelete.error);
       return NextResponse.json({ error: assigneeDelete.error.message }, { status: 500 });
     }
 
-    const { error: deleteError } = await supabase.from("tasks").delete().in("id", taskIds);
+    const { error: deleteError } = await supabase
+      .from("tasks")
+      .delete()
+      .in("id", taskIds);
+
     if (deleteError) {
       console.error("DELETE /api/tasks delete failed:", deleteError);
       return NextResponse.json({ error: deleteError.message }, { status: 500 });
@@ -311,6 +378,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, deleted_ids: taskIds });
   } catch (error: any) {
     console.error("DELETE /api/tasks failed:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to delete tasks" }, { status: 500 });
   }
 }
