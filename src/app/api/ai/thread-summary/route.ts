@@ -8,6 +8,26 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 
+type SummaryMessage = {
+  from_name?: string | null;
+  from_email?: string | null;
+  to_addresses?: string | null;
+  body_text?: string | null;
+  body_html?: string | null;
+  snippet?: string | null;
+  sent_at?: string | null;
+};
+
+type SummaryNote = {
+  text?: string | null;
+};
+
+type SummaryTask = {
+  text?: string | null;
+  status?: string | null;
+  is_done?: boolean | null;
+};
+
 function cleanText(value?: string | null) {
   return String(value || "")
     .replace(/\r/g, "")
@@ -32,11 +52,7 @@ function stripHtml(html?: string | null) {
     .trim();
 }
 
-function getMessageContent(msg: {
-  body_text?: string | null;
-  body_html?: string | null;
-  snippet?: string | null;
-}) {
+function getMessageContent(msg: SummaryMessage) {
   const textBody = cleanText(msg.body_text || "");
   if (textBody) return textBody;
 
@@ -55,17 +71,9 @@ function buildPrompt(params: {
   subject: string;
   fromName?: string | null;
   fromEmail?: string | null;
-  messages: Array<{
-    from_name?: string | null;
-    from_email?: string | null;
-    to_addresses?: string | null;
-    body_text?: string | null;
-    body_html?: string | null;
-    snippet?: string | null;
-    sent_at?: string | null;
-  }>;
-  notes: Array<{ text?: string | null }>;
-  tasks: Array<{ text?: string | null; status?: string | null; is_done?: boolean }>;
+  messages: SummaryMessage[];
+  notes: SummaryNote[];
+  tasks: SummaryTask[];
 }) {
   const messagesText = params.messages
     .slice(-12)
@@ -116,11 +124,11 @@ Rules:
 - Use only facts supported by the thread, notes, and tasks.
 - Do not invent facts.
 - If something is uncertain, leave it out.
-- Open action items should be things still needing action.
-- Completed items should be clearly done.
 - "intent" must be the single best-fit thread category.
 - "secondary_intents" should only include categories clearly supported by the thread.
 - "confidence" should reflect how certain the classification is.
+- Open action items should be things still needing action.
+- Completed items should be clearly done.
 - "status" should be short, like:
   "waiting for supplier"
   "waiting for internal decision"
@@ -313,11 +321,11 @@ export async function POST(req: NextRequest) {
     console.log("Calling Anthropic for thread summary...");
 
     const response = await anthropic.messages.create({
-  model: "claude-sonnet-4-6",
-  max_tokens: 700,
-  temperature: 0,
-  messages: [{ role: "user", content: prompt }],
-});
+      model: "claude-haiku-4-5",
+      max_tokens: 700,
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+    });
 
     console.log("Anthropic response received");
 
@@ -344,29 +352,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-        const payload = {
-          conversation_id: conversationId,
-          summary: {
-            overview: typeof parsed.overview === "string" ? parsed.overview : "",
-            status: typeof parsed.status === "string" ? parsed.status : "",
-            intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
-            confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
-            secondary_intents: Array.isArray(parsed.secondary_intents)
-              ? parsed.secondary_intents
-              : [],
-            open_action_items: Array.isArray(parsed.open_action_items)
-              ? parsed.open_action_items
-              : [],
-            completed_items: Array.isArray(parsed.completed_items)
-              ? parsed.completed_items
-              : [],
-            next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
-          },
-          source_message_count: messageCount,
-          last_message_at: conversation.last_message_at || null,
-          generated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+    const payload = {
+      conversation_id: conversationId,
+      summary: {
+        overview: typeof parsed.overview === "string" ? parsed.overview : "",
+        status: typeof parsed.status === "string" ? parsed.status : "",
+        intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
+        confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
+        secondary_intents: Array.isArray(parsed.secondary_intents)
+          ? parsed.secondary_intents
+          : [],
+        open_action_items: Array.isArray(parsed.open_action_items)
+          ? parsed.open_action_items
+          : [],
+        completed_items: Array.isArray(parsed.completed_items)
+          ? parsed.completed_items
+          : [],
+        next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
       },
       source_message_count: messageCount,
       last_message_at: conversation.last_message_at || null,
