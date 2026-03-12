@@ -7,7 +7,7 @@ import {
   Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap, Trash2,
   ExternalLink, GitBranch,
 } from "lucide-react";
-import { useConversationDetail, useLabels, useFolders, useRelatedThreads } from "@/lib/hooks";
+import { useConversationDetail, useLabels, useFolders, useRelatedThreads, useThreadSummary } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
@@ -756,6 +756,13 @@ const {
   loading: relatedThreadsLoading,
 } = useRelatedThreads(convo?.id || null);
 
+const {
+  summary: threadSummary,
+  loading: threadSummaryLoading,
+  generating: threadSummaryGenerating,
+  generateSummary,
+} = useThreadSummary(convo?.id || null);
+
   useEffect(() => {
     setActiveTab("messages");
     setShowNoteInput(false);
@@ -883,12 +890,13 @@ const {
   };
 
    const tabs = [
-    { id: "messages", label: "Messages", count: messages.length },
-    { id: "notes", label: "Notes", count: notes.length },
-    { id: "tasks", label: "Tasks", count: tasks.length },
-    { id: "activity", label: "Activity", count: activities.length },
-    { id: "related", label: "Related Threads", count: relatedThreads.length },
-  ];
+  { id: "messages", label: "Messages", count: messages.length },
+  { id: "notes", label: "Notes", count: notes.length },
+  { id: "tasks", label: "Tasks", count: tasks.length },
+  { id: "activity", label: "Activity", count: activities.length },
+  { id: "related", label: "Related Threads", count: relatedThreads.length },
+  { id: "summary", label: "Summary", count: 0 },
+];
 
   return (
     <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
@@ -1438,7 +1446,126 @@ const {
           </div>
         )}
       </div>
+{activeTab === "summary" && (
+  <div>
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <div>
+        <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
+        <div className="text-xs text-[#7D8590]">
+          AI-generated review of this conversation
+        </div>
+      </div>
 
+      <button
+        type="button"
+        onClick={() => generateSummary(true)}
+        disabled={threadSummaryGenerating}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
+      >
+        {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
+      </button>
+    </div>
+
+    {threadSummaryLoading && (
+      <div className="text-center py-10 text-[#484F58] text-sm">
+        Loading summary...
+      </div>
+    )}
+
+    {!threadSummaryLoading && !threadSummary && (
+      <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+        <div className="text-sm text-[#E6EDF3] mb-2">
+          No summary yet for this thread
+        </div>
+        <div className="text-xs text-[#7D8590] mb-4">
+          Generate a cached AI summary with status, action items, completed items, and next step.
+        </div>
+        <button
+          type="button"
+          onClick={() => generateSummary(false)}
+          disabled={threadSummaryGenerating}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[12px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60"
+        >
+          {threadSummaryGenerating ? "Generating..." : "Generate Summary"}
+        </button>
+      </div>
+    )}
+
+    {!threadSummaryLoading && threadSummary?.summary && (
+      <div className="space-y-3">
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Overview
+          </div>
+          <div className="text-sm text-[#E6EDF3] leading-6">
+            {threadSummary.summary.overview || "No overview available"}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Current Status
+          </div>
+          <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+            {threadSummary.summary.status || "Unknown"}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Open Action Items
+          </div>
+          {threadSummary.summary.open_action_items?.length > 0 ? (
+            <ul className="space-y-2">
+              {threadSummary.summary.open_action_items.map((item: string, index: number) => (
+                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-[#7D8590]">No open action items detected</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Completed Items
+          </div>
+          {threadSummary.summary.completed_items?.length > 0 ? (
+            <ul className="space-y-2">
+              {threadSummary.summary.completed_items.map((item: string, index: number) => (
+                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
+                  <span className="mt-1 text-[#4ADE80]">✓</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-[#7D8590]">No completed items detected</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Next Step
+          </div>
+          <div className="text-sm text-[#E6EDF3]">
+            {threadSummary.summary.next_step || "No next step identified"}
+          </div>
+        </div>
+
+        <div className="text-[11px] text-[#484F58] px-1">
+          Last generated:{" "}
+          {threadSummary.generated_at
+            ? new Date(threadSummary.generated_at).toLocaleString()
+            : "Unknown"}
+        </div>
+      </div>
+    )}
+  </div>
+)}
       {/* Reply bar */}
       <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B] shrink-0">
         <div className="flex items-end gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#1E242C] bg-[#0B0E11]">

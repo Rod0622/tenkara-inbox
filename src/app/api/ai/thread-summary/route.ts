@@ -1,0 +1,270 @@
+import { NextRequest, NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
+import { createServerClient } from "@/lib/supabase";
+
+export const dynamic = "force-dynamic";
+
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
+
+function cleanText(value?: string | null) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function truncate(value: string, max = 4000) {
+  if (value.length <= max) return value;
+  return value.slice(0, max) + "\n...[truncated]";
+}
+
+function buildPrompt(params: {
+  subject: string;
+  fromName?: string | null;
+  fromEmail?: string | null;
+  messages: Array<{
+    from_name?: string | null;
+    from_email?: string | null;
+    to_addresses?: string | null;
+    body?: string | null;
+    snippet?: string | null;
+    sent_at?: string | null;
+  }>;
+  notes: Array<{ text?: string | null }>;
+  tasks: Array<{ text?: string | null; status?: string | null; is_done?: boolean }>;
+}) {
+  const messagesText = params.messages
+    .slice(-12)
+    .map((msg, idx) => {
+      const body = cleanText(msg.body || msg.snippet || "");
+      return [
+        `Message ${idx + 1}`,
+        `From: ${msg.from_name || ""} <${msg.from_email || ""}>`,
+        `To: ${msg.to_addresses || ""}`,
+        `Sent: ${msg.sent_at || ""}`,
+        `Content:\n${truncate(body, 2500)}`,
+      ].join("\n");
+    })
+    .join("\n\n---\n\n");
+
+  const notesText =
+    params.notes.length > 0
+      ? params.notes.map((n, i) => `${i + 1}. ${cleanText(n.text || "")}`).join("\n")
+      : "None";
+
+  const tasksText =
+    params.tasks.length > 0
+      ? params.tasks
+          .map((t, i) => {
+            const done = t.status === "completed" || t.is_done;
+            return `${i + 1}. [${done ? "completed" : "open"}] ${cleanText(t.text || "")}`;
+          })
+          .join("\n")
+      : "None";
+
+  return `
+You are summarizing one operational email thread for a shared inbox.
+
+Return ONLY valid JSON with this exact shape:
+{
+  "overview": "short paragraph",
+  "status": "one short status label",
+  "open_action_items": ["item 1", "item 2"],
+  "completed_items": ["item 1", "item 2"],
+  "next_step": "single best next step"
+}
+
+Rules:
+- Be concise and operational.
+- Use only facts supported by the thread, notes, and tasks.
+- If something is uncertain, keep it out.
+- Open action items should be things still needing action.
+- Completed items should be clearly done.
+- "status" should be short, like:
+  "waiting for supplier"
+  "waiting for internal decision"
+  "quote received"
+  "ready to reply"
+  "in progress"
+
+Thread subject: ${params.subject}
+Conversation from: ${params.fromName || ""} <${params.fromEmail || ""}>
+
+Notes:
+${notesText}
+
+Tasks:
+${tasksText}
+
+Messages:
+${messagesText}
+`.trim();
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const supabase = createServerClient();
+    const conversationId = req.nextUrl.searchParams.get("conversation_id");
+
+    if (!conversationId) {
+      return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from("thread_summaries")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ summary: data || null });
+  } catch (error: any) {
+    console.error("GET /api/ai/thread-summary failed:", error);
+    return NextResponse.json({ error: error.message || "Failed to fetch summary" }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    if (!anthropic) {
+      return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured" }, { status: 500 });
+    }
+
+    const supabase = createServerClient();
+    const body = await req.json();
+    const conversationId = body.conversation_id;
+    const forceRefresh = Boolean(body.force_refresh);
+
+    if (!conversationId) {
+      return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
+    }
+
+    const { data: conversation, error: convoError } = await supabase
+      .from("conversations")
+      .select("id, subject, from_name, from_email, last_message_at")
+      .eq("id", conversationId)
+      .single();
+
+    if (convoError || !conversation) {
+      return NextResponse.json(
+        { error: convoError?.message || "Conversation not found" },
+        { status: 404 }
+      );
+    }
+
+    const { data: messages, error: messagesError } = await supabase
+      .from("messages")
+      .select("from_name, from_email, to_addresses, body, snippet, sent_at")
+      .eq("conversation_id", conversationId)
+      .order("sent_at", { ascending: true });
+
+    if (messagesError) {
+      return NextResponse.json({ error: messagesError.message }, { status: 500 });
+    }
+
+    const { data: notes, error: notesError } = await supabase
+      .from("notes")
+      .select("text")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+
+    if (notesError) {
+      return NextResponse.json({ error: notesError.message }, { status: 500 });
+    }
+
+    const { data: tasks, error: tasksError } = await supabase
+      .from("tasks")
+      .select("text, status, is_done")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+
+    if (tasksError) {
+      return NextResponse.json({ error: tasksError.message }, { status: 500 });
+    }
+
+    const messageCount = (messages || []).length;
+
+    if (!forceRefresh) {
+      const { data: existing } = await supabase
+        .from("thread_summaries")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .single();
+
+      if (
+        existing &&
+        existing.source_message_count === messageCount &&
+        String(existing.last_message_at || "") === String(conversation.last_message_at || "")
+      ) {
+        return NextResponse.json({ summary: existing, cached: true });
+      }
+    }
+
+    const prompt = buildPrompt({
+      subject: conversation.subject || "(No subject)",
+      fromName: conversation.from_name,
+      fromEmail: conversation.from_email,
+      messages: messages || [],
+      notes: notes || [],
+      tasks: tasks || [],
+    });
+
+    const response = await anthropic.messages.create({
+      model: "claude-3-5-haiku-latest",
+      max_tokens: 700,
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const text = response.content
+      .filter((item: any) => item.type === "text")
+      .map((item: any) => item.text)
+      .join("\n")
+      .trim();
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return NextResponse.json(
+        { error: "Model returned invalid JSON", raw: text },
+        { status: 500 }
+      );
+    }
+
+    const payload = {
+      conversation_id: conversationId,
+      summary: {
+        overview: parsed.overview || "",
+        status: parsed.status || "",
+        open_action_items: Array.isArray(parsed.open_action_items) ? parsed.open_action_items : [],
+        completed_items: Array.isArray(parsed.completed_items) ? parsed.completed_items : [],
+        next_step: parsed.next_step || "",
+      },
+      source_message_count: messageCount,
+      last_message_at: conversation.last_message_at || null,
+      generated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: saved, error: saveError } = await supabase
+      .from("thread_summaries")
+      .upsert(payload, { onConflict: "conversation_id" })
+      .select("*")
+      .single();
+
+    if (saveError) {
+      return NextResponse.json({ error: saveError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ summary: saved, cached: false });
+  } catch (error: any) {
+    console.error("POST /api/ai/thread-summary failed:", error);
+    return NextResponse.json({ error: error.message || "Failed to generate summary" }, { status: 500 });
+  }
+}

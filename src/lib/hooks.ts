@@ -400,6 +400,87 @@ const [loading, setLoading] = useState(false);
 };
 }
 
+export function useThreadSummary(conversationId: string | null) {
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  const fetchSummary = useCallback(async () => {
+    if (!conversationId) {
+      setSummary(null);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/ai/thread-summary?conversation_id=${conversationId}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.error("Fetch thread summary failed:", data);
+        setSummary(null);
+        return;
+      }
+
+      setSummary(data.summary || null);
+    } catch (error) {
+      console.error("Fetch thread summary crashed:", error);
+      setSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [conversationId]);
+
+  const generateSummary = useCallback(
+    async (forceRefresh = false) => {
+      if (!conversationId) return null;
+
+      setGenerating(true);
+      try {
+        const res = await fetch("/api/ai/thread-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            force_refresh: forceRefresh,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.error("Generate thread summary failed:", data);
+          return null;
+        }
+
+        setSummary(data.summary || null);
+        return data.summary || null;
+      } catch (error) {
+        console.error("Generate thread summary crashed:", error);
+        return null;
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [conversationId]
+  );
+
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
+
+  return {
+    summary,
+    loading,
+    generating,
+    fetchSummary,
+    generateSummary,
+  };
+}
+
 export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "mine") {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
