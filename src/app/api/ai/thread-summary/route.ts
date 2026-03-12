@@ -103,6 +103,9 @@ Return ONLY valid JSON with this exact shape:
 {
   "overview": "short paragraph",
   "status": "one short status label",
+  "intent": "one of: rfq, sample_request, pricing_negotiation, logistics, technical_question, order_followup, complaint_issue, general_inquiry",
+  "confidence": "one of: high, medium, low",
+  "secondary_intents": ["optional additional intents"],
   "open_action_items": ["item 1", "item 2"],
   "completed_items": ["item 1", "item 2"],
   "next_step": "single best next step"
@@ -115,6 +118,9 @@ Rules:
 - If something is uncertain, leave it out.
 - Open action items should be things still needing action.
 - Completed items should be clearly done.
+- "intent" must be the single best-fit thread category.
+- "secondary_intents" should only include categories clearly supported by the thread.
+- "confidence" should reflect how certain the classification is.
 - "status" should be short, like:
   "waiting for supplier"
   "waiting for internal decision"
@@ -341,11 +347,15 @@ export async function POST(req: NextRequest) {
     const payload = {
       conversation_id: conversationId,
       summary: {
-        overview: typeof parsed.overview === "string" ? parsed.overview : "",
-        status: typeof parsed.status === "string" ? parsed.status : "",
-        open_action_items: Array.isArray(parsed.open_action_items) ? parsed.open_action_items : [],
-        completed_items: Array.isArray(parsed.completed_items) ? parsed.completed_items : [],
-        next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
+  overview: typeof parsed.overview === "string" ? parsed.overview : "",
+  status: typeof parsed.status === "string" ? parsed.status : "",
+  intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
+  confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
+  secondary_intents: Array.isArray(parsed.secondary_intents) ? parsed.secondary_intents : [],
+  open_action_items: Array.isArray(parsed.open_action_items) ? parsed.open_action_items : [],
+  completed_items: Array.isArray(parsed.completed_items) ? parsed.completed_items : [],
+  next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
+},
       },
       source_message_count: messageCount,
       last_message_at: conversation.last_message_at || null,

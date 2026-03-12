@@ -1564,7 +1564,41 @@ const {
         </div>
       </div>
     )}
+  </div><div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+    Supplier Intent
   </div>
+
+  <div className="flex flex-wrap gap-2">
+    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+      {threadSummary.summary.intent
+        ? threadSummary.summary.intent.replace(/_/g, " ")
+        : "general inquiry"}
+    </span>
+
+    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+      Confidence: {threadSummary.summary.confidence || "medium"}
+    </span>
+  </div>
+
+  {threadSummary.summary.secondary_intents?.length > 0 && (
+    <div className="mt-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+        Secondary intents
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {threadSummary.summary.secondary_intents.map((intent: string, index: number) => (
+          <span
+            key={index}
+            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
+          >
+            {intent.replace(/_/g, " ")}
+          </span>
+        ))}
+      </div>
+    </div>
+  )}
+</div>
 )}
       {/* Reply bar */}
       <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B] shrink-0">
