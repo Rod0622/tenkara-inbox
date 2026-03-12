@@ -226,11 +226,29 @@ export async function GET(req: NextRequest) {
         folder: conversation.folder_id ? folderMap.get(conversation.folder_id) || null : null,
       }));
 
-    return NextResponse.json({
-      external_email: externalEmail,
-      shared_email: sharedEmail,
-      threads: relatedThreads,
-    });
+    const openThreads = relatedThreads.filter((t: any) => t.status !== "closed");
+const closedThreads = relatedThreads.filter((t: any) => t.status === "closed");
+
+const lastActivity =
+  relatedThreads.length > 0
+    ? relatedThreads
+        .map((t: any) => t.last_message_at)
+        .filter(Boolean)
+        .sort()
+        .reverse()[0]
+    : null;
+
+return NextResponse.json({
+  external_email: externalEmail,
+  shared_email: sharedEmail,
+  threads: relatedThreads,
+  summary: {
+    total_threads: relatedThreads.length,
+    open_threads: openThreads.length,
+    closed_threads: closedThreads.length,
+    last_activity: lastActivity,
+  },
+});
   } catch (error: any) {
     console.error("GET /api/conversations/by-contact failed:", error);
     return NextResponse.json(

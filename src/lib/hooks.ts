@@ -342,9 +342,10 @@ export function useConversationDetail(conversationId: string | null) {
 }
 export function useRelatedThreads(conversationId: string | null) {
   const [threads, setThreads] = useState<any[]>([]);
-  const [externalEmail, setExternalEmail] = useState<string | null>(null);
-  const [sharedEmail, setSharedEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+const [externalEmail, setExternalEmail] = useState<string | null>(null);
+const [sharedEmail, setSharedEmail] = useState<string | null>(null);
+const [summary, setSummary] = useState<any>(null);
+const [loading, setLoading] = useState(false);
 
   const fetchThreads = useCallback(async () => {
     if (!conversationId) {
@@ -374,6 +375,7 @@ export function useRelatedThreads(conversationId: string | null) {
       setThreads(data.threads || []);
       setExternalEmail(data.external_email || null);
       setSharedEmail(data.shared_email || null);
+      setSummary(data.summary || null);
     } catch (error) {
       console.error("Fetch related threads crashed:", error);
       setThreads([]);
@@ -389,12 +391,13 @@ export function useRelatedThreads(conversationId: string | null) {
   }, [fetchThreads]);
 
   return {
-    threads,
-    externalEmail,
-    sharedEmail,
-    loading,
-    refetch: fetchThreads,
-  };
+  threads,
+  externalEmail,
+  sharedEmail,
+  summary,
+  loading,
+  refetch: fetchThreads,
+};
 }
 
 export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "mine") {

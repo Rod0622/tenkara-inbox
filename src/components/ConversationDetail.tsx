@@ -752,6 +752,7 @@ export default function ConversationDetail({
 const {
   threads: relatedThreads,
   externalEmail,
+  summary,
   loading: relatedThreadsLoading,
 } = useRelatedThreads(convo?.id || null);
 
@@ -1279,7 +1280,43 @@ const {
 
         {/* Related Threads tab */}
         {activeTab === "related" && (
-          <div>
+          <div> {summary && (
+  <div className="mb-4 rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+    <div className="text-sm font-semibold text-[#E6EDF3] mb-2">
+      Supplier Contact
+    </div>
+
+    <div className="text-xs text-[#7D8590] mb-3">
+      {externalEmail}
+    </div>
+
+    <div className="flex flex-wrap gap-3 text-xs">
+      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
+        Threads: {summary.total_threads}
+      </span>
+
+      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#4ADE80]">
+        Open: {summary.open_threads}
+      </span>
+
+      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#F87171]">
+        Closed: {summary.closed_threads}
+      </span>
+
+      {summary.last_activity && (
+        <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
+          Last activity:{" "}
+          {new Date(summary.last_activity).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </span>
+      )}
+    </div>
+  </div>
+)}
             <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] px-4 py-3">
               <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
                 <GitBranch size={14} className="text-[#58A6FF]" />
