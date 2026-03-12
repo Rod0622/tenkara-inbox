@@ -15,6 +15,37 @@ function cleanText(value?: string | null) {
     .trim();
 }
 
+function stripHtml(html?: string | null) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function getMessageContent(msg: {
+  body_text?: string | null;
+  body_html?: string | null;
+  snippet?: string | null;
+}) {
+  const textBody = cleanText(msg.body_text || "");
+  if (textBody) return textBody;
+
+  const htmlBody = stripHtml(msg.body_html || "");
+  if (htmlBody) return htmlBody;
+
+  return cleanText(msg.snippet || "");
+}
+
 function truncate(value: string, max = 4000) {
   if (value.length <= max) return value;
   return value.slice(0, max) + "\n...[truncated]";
@@ -28,7 +59,8 @@ function buildPrompt(params: {
     from_name?: string | null;
     from_email?: string | null;
     to_addresses?: string | null;
-    body?: string | null;
+    body_text?: string | null;
+    body_html?: string | null;
     snippet?: string | null;
     sent_at?: string | null;
   }>;
@@ -38,13 +70,13 @@ function buildPrompt(params: {
   const messagesText = params.messages
     .slice(-12)
     .map((msg, idx) => {
-      const body = cleanText(msg.body || msg.snippet || "");
+      const content = getMessageContent(msg);
       return [
         `Message ${idx + 1}`,
         `From: ${msg.from_name || ""} <${msg.from_email || ""}>`,
         `To: ${msg.to_addresses || ""}`,
         `Sent: ${msg.sent_at || ""}`,
-        `Content:\n${truncate(body, 2500)}`,
+        `Content:\n${truncate(content, 2500)}`,
       ].join("\n");
     })
     .join("\n\n---\n\n");
@@ -203,7 +235,7 @@ export async function POST(req: NextRequest) {
 
     const { data: messages, error: messagesError } = await supabase
       .from("messages")
-      .select("from_name, from_email, to_addresses, body, snippet, sent_at")
+      .select("from_name, from_email, to_addresses, body_text, body_html, snippet, sent_at")
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: true });
 
