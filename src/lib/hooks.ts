@@ -340,6 +340,62 @@ export function useConversationDetail(conversationId: string | null) {
 
   return { notes, tasks, messages, activities, refetch: fetchDetail };
 }
+export function useRelatedThreads(conversationId: string | null) {
+  const [threads, setThreads] = useState<any[]>([]);
+  const [externalEmail, setExternalEmail] = useState<string | null>(null);
+  const [sharedEmail, setSharedEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchThreads = useCallback(async () => {
+    if (!conversationId) {
+      setThreads([]);
+      setExternalEmail(null);
+      setSharedEmail(null);
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch(
+        `/api/conversations/by-contact?conversation_id=${conversationId}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.error("Fetch related threads failed:", data);
+        setThreads([]);
+        setExternalEmail(null);
+        setSharedEmail(null);
+        return;
+      }
+
+      setThreads(data.threads || []);
+      setExternalEmail(data.external_email || null);
+      setSharedEmail(data.shared_email || null);
+    } catch (error) {
+      console.error("Fetch related threads crashed:", error);
+      setThreads([]);
+      setExternalEmail(null);
+      setSharedEmail(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    fetchThreads();
+  }, [fetchThreads]);
+
+  return {
+    threads,
+    externalEmail,
+    sharedEmail,
+    loading,
+    refetch: fetchThreads,
+  };
+}
 
 export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "mine") {
   const [tasks, setTasks] = useState<Task[]>([]);

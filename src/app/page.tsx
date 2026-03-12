@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { redirect } from "next/navigation";
+import { redirect, useSearchParams } from "next/navigation";
 import {
   useActions,
   useConversations,
@@ -21,6 +21,7 @@ import type { Conversation, TaskStatus } from "@/types";
 
 export default function InboxPage() {
   const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
   const teamMembers = useTeamMembers();
   const emailAccounts = useEmailAccounts();
   const folders = useFolders();
@@ -118,6 +119,29 @@ export default function InboxPage() {
     searchQuery,
     accountEmails,
   ]);
+
+    useEffect(() => {
+    const conversationId = searchParams.get("conversation");
+    const mailboxId = searchParams.get("mailbox");
+    const folderId = searchParams.get("folder");
+
+    if (mailboxId && activeMailbox !== mailboxId) {
+      setActiveMailbox(mailboxId);
+      setActiveView("inbox");
+    }
+
+    if (folderId !== null && activeFolder !== folderId) {
+      setActiveFolder(folderId || null);
+    }
+
+    if (!conversationId || conversations.length === 0) return;
+
+    const match = conversations.find((conversation) => conversation.id === conversationId);
+    if (match && activeConvo?.id !== match.id) {
+      setActiveConvo(match);
+      setActiveView("inbox");
+    }
+  }, [searchParams, conversations, activeConvo?.id, activeMailbox, activeFolder]);
 
   const handleAssign = async (
     conversationId: string,

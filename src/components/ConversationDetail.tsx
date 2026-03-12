@@ -5,8 +5,9 @@ import {
   Reply, Forward, Archive, Mail, User, Folder, FolderOpen, Plus, Check, Send,
   ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
   Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap, Trash2,
+  ExternalLink, GitBranch,
 } from "lucide-react";
-import { useConversationDetail, useLabels, useFolders } from "@/lib/hooks";
+import { useConversationDetail, useLabels, useFolders, useRelatedThreads } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
@@ -748,6 +749,11 @@ export default function ConversationDetail({
   const [showTaskInput, setShowTaskInput] = useState(false);
 
   const { notes, tasks, messages, activities, refetch: refetchDetail } = useConversationDetail(convo?.id || null);
+const {
+  threads: relatedThreads,
+  externalEmail,
+  loading: relatedThreadsLoading,
+} = useRelatedThreads(convo?.id || null);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -875,11 +881,12 @@ export default function ConversationDetail({
     }
   };
 
-  const tabs = [
+   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
     { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
     { id: "activity", label: "Activity", count: activities.length },
+    { id: "related", label: "Related Threads", count: relatedThreads.length },
   ];
 
   return (
@@ -1253,7 +1260,7 @@ export default function ConversationDetail({
           </div>
         )}
 
-        {/* Activity tab */}
+                {/* Activity tab */}
         {activeTab === "activity" && (
           <div className="space-y-0.5">
             {activities.length === 0 && (
@@ -1267,6 +1274,130 @@ export default function ConversationDetail({
                 <ActivityItem key={act.id} activity={act} isLast={isLast} teamMembers={teamMembers} />
               );
             })}
+          </div>
+        )}
+
+        {/* Related Threads tab */}
+        {activeTab === "related" && (
+          <div>
+            <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] px-4 py-3">
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
+                <GitBranch size={14} className="text-[#58A6FF]" />
+                Related threads in this shared account
+              </div>
+              <div className="mt-1 text-[11px] text-[#7D8590]">
+                {externalEmail
+                  ? `Showing threads where the outside contact is ${externalEmail}`
+                  : "We could not determine the outside contact for this thread."}
+              </div>
+            </div>
+
+            {relatedThreadsLoading && (
+              <div className="text-center py-10 text-[#484F58] text-sm">
+                Loading related threads...
+              </div>
+            )}
+
+            {!relatedThreadsLoading && relatedThreads.length === 0 && (
+              <div className="text-center py-10 text-[#484F58] text-sm">
+                No related threads found for this contact in this shared account
+              </div>
+            )}
+
+            {!relatedThreadsLoading &&
+              relatedThreads.map((thread: any) => {
+                const sameSubject =
+                  String(thread.subject || "").trim().toLowerCase() ===
+                  String(convo.subject || "").trim().toLowerCase();
+
+                const href = `/?conversation=${thread.id}&mailbox=${thread.email_account_id || ""}&folder=${thread.folder_id || ""}`;
+
+                return (
+                  <div
+                    key={thread.id}
+                    className="rounded-xl border border-[#1E242C] bg-[#12161B] p-3 mb-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          {thread.is_unread && (
+                            <span className="w-2 h-2 rounded-full bg-[#4ADE80]" />
+                          )}
+
+                          <div className="text-[13px] font-semibold text-[#E6EDF3] truncate">
+                            {thread.subject || "(No subject)"}
+                          </div>
+
+                          {sameSubject && (
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                              Possible duplicate
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-[11px] text-[#7D8590] mb-2 truncate">
+                          {thread.preview || "No preview available"}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
+                            Status: {thread.status || "open"}
+                          </span>
+
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
+                            Folder: {thread.folder?.name || "Inbox"}
+                          </span>
+
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
+                            Last activity:{" "}
+                            {thread.last_message_at
+                              ? new Date(thread.last_message_at).toLocaleString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })
+                              : "Unknown"}
+                          </span>
+                        </div>
+
+                        {(thread.labels || []).length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {thread.labels.map((cl: any) =>
+                              cl.label ? (
+                                <span
+                                  key={`${thread.id}-${cl.label_id || cl.label?.id}`}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
+                                  style={{
+                                    background: cl.label.bg_color,
+                                    color: cl.label.color,
+                                  }}
+                                >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ background: cl.label.color }}
+                                  />
+                                  {cl.label.name}
+                                </span>
+                              ) : null
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] transition-all shrink-0"
+                      >
+                        <ExternalLink size={13} />
+                        Open
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>
