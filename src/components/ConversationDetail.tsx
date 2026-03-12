@@ -889,14 +889,14 @@ const {
     }
   };
 
-   const tabs = [
-  { id: "messages", label: "Messages", count: messages.length },
-  { id: "notes", label: "Notes", count: notes.length },
-  { id: "tasks", label: "Tasks", count: tasks.length },
-  { id: "activity", label: "Activity", count: activities.length },
-  { id: "related", label: "Related Threads", count: relatedThreads.length },
-  { id: "summary", label: "Summary", count: 0 },
-];
+     const tabs = [
+      { id: "messages", label: "Messages", count: messages.length },
+      { id: "notes", label: "Notes", count: notes.length },
+      { id: "tasks", label: "Tasks", count: tasks.length },
+      { id: "activity", label: "Activity", count: activities.length },
+      { id: "related", label: "Related Threads", count: relatedThreads.length },
+      { id: "summary", label: "Summary", count: 0 },
+    ];
 
   return (
     <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
@@ -1447,7 +1447,7 @@ const {
         )}
       </div>
 {activeTab === "summary" && (
-  <div className="h-full overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-[#30363D]">
+  <div className="h-full overflow-y-auto pr-2">
     <div className="mb-3 flex items-center justify-between gap-2">
       <div>
         <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
@@ -1478,7 +1478,7 @@ const {
           No summary yet for this thread
         </div>
         <div className="text-xs text-[#7D8590] mb-4">
-          Generate a cached AI summary with status, action items, completed items, and next step.
+          Generate a cached AI summary with status, intent, action items, completed items, and next step.
         </div>
         <button
           type="button"
@@ -1509,6 +1509,42 @@ const {
           <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
             {threadSummary.summary.status || "Unknown"}
           </div>
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Supplier Intent
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+              {threadSummary.summary.intent
+                ? threadSummary.summary.intent.replace(/_/g, " ")
+                : "general inquiry"}
+            </span>
+
+            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+              Confidence: {threadSummary.summary.confidence || "medium"}
+            </span>
+          </div>
+
+          {threadSummary.summary.secondary_intents?.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                Secondary intents
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {threadSummary.summary.secondary_intents.map((intent: string, index: number) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
+                  >
+                    {intent.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
@@ -1564,41 +1600,7 @@ const {
         </div>
       </div>
     )}
-  </div><div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-    Supplier Intent
   </div>
-
-  <div className="flex flex-wrap gap-2">
-    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-      {threadSummary.summary.intent
-        ? threadSummary.summary.intent.replace(/_/g, " ")
-        : "general inquiry"}
-    </span>
-
-    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-      Confidence: {threadSummary.summary.confidence || "medium"}
-    </span>
-  </div>
-
-  {threadSummary.summary.secondary_intents?.length > 0 && (
-    <div className="mt-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-        Secondary intents
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {threadSummary.summary.secondary_intents.map((intent: string, index: number) => (
-          <span
-            key={index}
-            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
-          >
-            {intent.replace(/_/g, " ")}
-          </span>
-        ))}
-      </div>
-    </div>
-  )}
-</div>
 )}
       {/* Reply bar */}
       <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B] shrink-0">

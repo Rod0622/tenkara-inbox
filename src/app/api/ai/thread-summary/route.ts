@@ -344,18 +344,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const payload = {
-      conversation_id: conversationId,
-      summary: {
-  overview: typeof parsed.overview === "string" ? parsed.overview : "",
-  status: typeof parsed.status === "string" ? parsed.status : "",
-  intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
-  confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
-  secondary_intents: Array.isArray(parsed.secondary_intents) ? parsed.secondary_intents : [],
-  open_action_items: Array.isArray(parsed.open_action_items) ? parsed.open_action_items : [],
-  completed_items: Array.isArray(parsed.completed_items) ? parsed.completed_items : [],
-  next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
-},
+        const payload = {
+          conversation_id: conversationId,
+          summary: {
+            overview: typeof parsed.overview === "string" ? parsed.overview : "",
+            status: typeof parsed.status === "string" ? parsed.status : "",
+            intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
+            confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
+            secondary_intents: Array.isArray(parsed.secondary_intents)
+              ? parsed.secondary_intents
+              : [],
+            open_action_items: Array.isArray(parsed.open_action_items)
+              ? parsed.open_action_items
+              : [],
+            completed_items: Array.isArray(parsed.completed_items)
+              ? parsed.completed_items
+              : [],
+            next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
+          },
+          source_message_count: messageCount,
+          last_message_at: conversation.last_message_at || null,
+          generated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
       },
       source_message_count: messageCount,
       last_message_at: conversation.last_message_at || null,
