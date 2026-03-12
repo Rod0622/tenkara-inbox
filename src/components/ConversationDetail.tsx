@@ -1310,7 +1310,7 @@ const {
                   String(thread.subject || "").trim().toLowerCase() ===
                   String(convo.subject || "").trim().toLowerCase();
 
-                const href = `/?conversation=${thread.id}&mailbox=${thread.email_account_id || ""}&folder=${thread.folder_id || ""}`;
+                const href = "/";
 
                 return (
                   <div
@@ -1385,15 +1385,14 @@ const {
                         )}
                       </div>
 
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] transition-all shrink-0"
-                      >
-                        <ExternalLink size={13} />
-                        Open
-                      </a>
+                      <button
+  type="button"
+  onClick={() => window.open("/", "_blank", "noopener,noreferrer")}
+  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] transition-all shrink-0"
+>
+  <ExternalLink size={13} />
+  Open
+</button>
                     </div>
                   </div>
                 );

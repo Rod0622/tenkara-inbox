@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 function normalizeEmail(value?: string | null) {
   return String(value || "").trim().toLowerCase();
 }
