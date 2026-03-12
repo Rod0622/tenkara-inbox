@@ -79,7 +79,8 @@ Return ONLY valid JSON with this exact shape:
 Rules:
 - Be concise and operational.
 - Use only facts supported by the thread, notes, and tasks.
-- If something is uncertain, keep it out.
+- Do not invent facts.
+- If something is uncertain, leave it out.
 - Open action items should be things still needing action.
 - Completed items should be clearly done.
 - "status" should be short, like:
@@ -103,6 +104,32 @@ ${messagesText}
 `.trim();
 }
 
+function extractJsonObject(text: string) {
+  const trimmed = text.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // continue
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch?.[1]) {
+    try {
+      return JSON.parse(fencedMatch[1].trim());
+    } catch {
+      // continue
+    }
+  }
+
+  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (jsonMatch?.[0]) {
+    return JSON.parse(jsonMatch[0]);
+  }
+
+  throw new Error("Model returned invalid JSON");
+}
+
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClient();
@@ -116,23 +143,39 @@ export async function GET(req: NextRequest) {
       .from("thread_summaries")
       .select("*")
       .eq("conversation_id", conversationId)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
+    if (error) {
+      console.error("GET /api/ai/thread-summary select failed:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ summary: data || null });
   } catch (error: any) {
-    console.error("GET /api/ai/thread-summary failed:", error);
-    return NextResponse.json({ error: error.message || "Failed to fetch summary" }, { status: 500 });
+    console.error("GET /api/ai/thread-summary failed:", {
+      message: error?.message,
+      stack: error?.stack,
+      error,
+    });
+
+    return NextResponse.json(
+      { error: error?.message || "Failed to fetch summary" },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("THREAD SUMMARY INIT", {
+      hasAnthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    });
+
     if (!anthropic) {
-      return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured" }, { status: 500 });
+      return NextResponse.json(
+        { error: "ANTHROPIC_API_KEY is not configured" },
+        { status: 500 }
+      );
     }
 
     const supabase = createServerClient();
@@ -151,6 +194,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (convoError || !conversation) {
+      console.error("Conversation lookup failed:", convoError);
       return NextResponse.json(
         { error: convoError?.message || "Conversation not found" },
         { status: 404 }
@@ -164,6 +208,7 @@ export async function POST(req: NextRequest) {
       .order("sent_at", { ascending: true });
 
     if (messagesError) {
+      console.error("Messages lookup failed:", messagesError);
       return NextResponse.json({ error: messagesError.message }, { status: 500 });
     }
 
@@ -174,6 +219,7 @@ export async function POST(req: NextRequest) {
       .order("created_at", { ascending: true });
 
     if (notesError) {
+      console.error("Notes lookup failed:", notesError);
       return NextResponse.json({ error: notesError.message }, { status: 500 });
     }
 
@@ -184,23 +230,35 @@ export async function POST(req: NextRequest) {
       .order("created_at", { ascending: true });
 
     if (tasksError) {
+      console.error("Tasks lookup failed:", tasksError);
       return NextResponse.json({ error: tasksError.message }, { status: 500 });
     }
 
     const messageCount = (messages || []).length;
 
+    console.log("Generating thread summary", {
+      conversationId,
+      messageCount,
+      noteCount: (notes || []).length,
+      taskCount: (tasks || []).length,
+      forceRefresh,
+    });
+
     if (!forceRefresh) {
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from("thread_summaries")
         .select("*")
         .eq("conversation_id", conversationId)
-        .single();
+        .maybeSingle();
 
-      if (
+      if (existingError) {
+        console.error("Existing summary lookup failed:", existingError);
+      } else if (
         existing &&
         existing.source_message_count === messageCount &&
         String(existing.last_message_at || "") === String(conversation.last_message_at || "")
       ) {
+        console.log("Returning cached summary");
         return NextResponse.json({ summary: existing, cached: true });
       }
     }
@@ -214,6 +272,8 @@ export async function POST(req: NextRequest) {
       tasks: tasks || [],
     });
 
+    console.log("Calling Anthropic for thread summary...");
+
     const response = await anthropic.messages.create({
       model: "claude-3-5-haiku-latest",
       max_tokens: 700,
@@ -221,18 +281,27 @@ export async function POST(req: NextRequest) {
       messages: [{ role: "user", content: prompt }],
     });
 
+    console.log("Anthropic response received");
+
     const text = response.content
       .filter((item: any) => item.type === "text")
       .map((item: any) => item.text)
       .join("\n")
       .trim();
 
+    console.log("Raw model text:", text);
+
     let parsed: any;
     try {
-      parsed = JSON.parse(text);
-    } catch {
+      parsed = extractJsonObject(text);
+    } catch (parseError: any) {
+      console.error("Failed to parse model JSON:", {
+        rawText: text,
+        parseError: parseError?.message,
+      });
+
       return NextResponse.json(
-        { error: "Model returned invalid JSON", raw: text },
+        { error: "Model returned invalid JSON" },
         { status: 500 }
       );
     }
@@ -240,17 +309,23 @@ export async function POST(req: NextRequest) {
     const payload = {
       conversation_id: conversationId,
       summary: {
-        overview: parsed.overview || "",
-        status: parsed.status || "",
+        overview: typeof parsed.overview === "string" ? parsed.overview : "",
+        status: typeof parsed.status === "string" ? parsed.status : "",
         open_action_items: Array.isArray(parsed.open_action_items) ? parsed.open_action_items : [],
         completed_items: Array.isArray(parsed.completed_items) ? parsed.completed_items : [],
-        next_step: parsed.next_step || "",
+        next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
       },
       source_message_count: messageCount,
       last_message_at: conversation.last_message_at || null,
       generated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+
+    console.log("Saving summary payload to Supabase", {
+      conversationId,
+      source_message_count: messageCount,
+      last_message_at: conversation.last_message_at || null,
+    });
 
     const { data: saved, error: saveError } = await supabase
       .from("thread_summaries")
@@ -259,12 +334,22 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (saveError) {
+      console.error("Saving summary failed:", saveError);
       return NextResponse.json({ error: saveError.message }, { status: 500 });
     }
 
     return NextResponse.json({ summary: saved, cached: false });
   } catch (error: any) {
-    console.error("POST /api/ai/thread-summary failed:", error);
-    return NextResponse.json({ error: error.message || "Failed to generate summary" }, { status: 500 });
+    console.error("POST /api/ai/thread-summary failed:", {
+      message: error?.message,
+      name: error?.name,
+      stack: error?.stack,
+      error,
+    });
+
+    return NextResponse.json(
+      { error: error?.message || "Failed to generate summary" },
+      { status: 500 }
+    );
   }
 }
