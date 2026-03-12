@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
 import {
@@ -18,6 +18,25 @@ import ComposeEmail from "@/components/ComposeEmail";
 import AISidebar from "@/components/AISidebar";
 import TaskBoard from "@/components/TaskBoard";
 import type { Conversation, TaskStatus } from "@/types";
+
+function parseHashParams() {
+  if (typeof window === "undefined") {
+    return {
+      conversation: null as string | null,
+      mailbox: null as string | null,
+      folder: null as string | null,
+    };
+  }
+
+  const raw = window.location.hash.replace(/^#/, "");
+  const params = new URLSearchParams(raw);
+
+  return {
+    conversation: params.get("conversation"),
+    mailbox: params.get("mailbox"),
+    folder: params.get("folder"),
+  };
+}
 
 export default function InboxPage() {
   const { data: session, status } = useSession();
@@ -119,7 +138,36 @@ export default function InboxPage() {
     accountEmails,
   ]);
 
-    
+  useEffect(() => {
+    if (conversations.length === 0) return;
+
+    const { conversation, mailbox, folder } = parseHashParams();
+    if (!conversation) return;
+
+    if (mailbox) {
+      setActiveMailbox(mailbox);
+      setActiveView("inbox");
+    }
+
+    if (folder) {
+      setActiveFolder(folder);
+    } else if (mailbox) {
+      setActiveFolder(null);
+    }
+
+    const match = conversations.find((item) => item.id === conversation);
+    if (match) {
+      setActiveConvo(match);
+      setActiveView("inbox");
+
+      if (match.email_account_id) {
+        setActiveMailbox(match.email_account_id);
+      }
+      if (match.folder_id) {
+        setActiveFolder(match.folder_id);
+      }
+    }
+  }, [conversations]);
 
   const handleAssign = async (
     conversationId: string,
