@@ -1447,7 +1447,7 @@ const {
         )}
       </div>
 {activeTab === "summary" && (
-  <div>
+  <div className="h-full overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-[#30363D]">
     <div className="mb-3 flex items-center justify-between gap-2">
       <div>
         <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
