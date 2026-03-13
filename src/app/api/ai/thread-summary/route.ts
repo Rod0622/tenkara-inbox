@@ -116,7 +116,8 @@ Return ONLY valid JSON with this exact shape:
   "secondary_intents": ["optional additional intents"],
   "open_action_items": ["item 1", "item 2"],
   "completed_items": ["item 1", "item 2"],
-  "next_step": "single best next step"
+  "next_step": "single best next step",
+  "suggested_tasks": ["actionable task 1", "actionable task 2"]
 }
 
 Rules:

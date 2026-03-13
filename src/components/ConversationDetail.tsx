@@ -1,16 +1,47 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Reply, Forward, Archive, Mail, User, Folder, FolderOpen, Plus, Check, Send,
-  ChevronDown, X, AtSign, MessageSquare, Star, MailOpen, Eye, EyeOff, Flag,
-  Clock, Tag, UserPlus, UserMinus, CheckCircle, Circle, StickyNote, MailPlus, Zap, Trash2,
-  ExternalLink, GitBranch,
+  Archive,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  Circle,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Forward,
+  GitBranch,
+  Mail,
+  MessageSquare,
+  Plus,
+  Reply,
+  Send,
+  Star,
+  Tag,
+  Trash2,
+  User,
+  X,
 } from "lucide-react";
-import { useConversationDetail, useLabels, useFolders, useRelatedThreads, useThreadSummary } from "@/lib/hooks";
+import {
+  useConversationDetail,
+  useFolders,
+  useLabels,
+  useRelatedThreads,
+  useThreadSummary,
+} from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
-function Avatar({ initials, color, size = 28 }: { initials: string; color: string; size?: number }) {
+function Avatar({
+  initials,
+  color,
+  size = 28,
+}: {
+  initials: string;
+  color: string;
+  size?: number;
+}) {
   return (
     <div
       className="rounded-full flex items-center justify-center font-semibold text-[#0B0E11] flex-shrink-0"
@@ -21,7 +52,6 @@ function Avatar({ initials, color, size = 28 }: { initials: string; color: strin
   );
 }
 
-// ── Assign Dropdown ──────────────────────────────────
 function AssignDropdown({
   currentAssignee,
   currentUser,
@@ -32,21 +62,23 @@ function AssignDropdown({
   currentAssignee: TeamMember | null | undefined;
   currentUser: TeamMember | null;
   teamMembers: TeamMember[];
-  onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
+  onAssign: (
+    conversationId: string,
+    assigneeId: string | null,
+    updatedConversation?: any
+  ) => Promise<void>;
   conversationId: string;
 }) {
   const [open, setOpen] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    if (open) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    if (open) document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
   const handleAssign = async (memberId: string | null) => {
@@ -61,46 +93,41 @@ function AssignDropdown({
           actor_id: currentUser?.id,
         }),
       });
-      const result = await res.json();
-      // Pass the full updated conversation back so parent can update local state
+      const result = await res.json().catch(() => ({}));
       await onAssign(conversationId, memberId, result.conversation);
-    } catch (err) {
-      console.error("Assign failed:", err);
+    } catch (error) {
+      console.error("Assign failed:", error);
+    } finally {
+      setAssigning(false);
+      setOpen(false);
     }
-    setAssigning(false);
-    setOpen(false);
   };
 
-  const isAssignedToMe = currentAssignee?.id === currentUser?.id;
-
   return (
-    <div className="relative flex" ref={dropdownRef}>
-      {/* Primary button: Assign to me (or show current assignee) */}
+    <div className="relative" ref={ref}>
       {currentAssignee ? (
         <button
-          onClick={() => setOpen(!open)}
+          onClick={() => setOpen((v) => !v)}
           disabled={assigning}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
         >
           <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
           <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
-          <ChevronDown size={12} className="text-[#484F58] ml-1" />
+          <ChevronDown size={12} className="text-[#484F58]" />
         </button>
       ) : (
         <div className="flex">
-          {/* Main button: one-click assign to me */}
           <button
             onClick={() => currentUser && handleAssign(currentUser.id)}
             disabled={assigning}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all border-r-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg border border-[#1E242C] border-r-0 bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
           >
             <User size={14} className="text-[#4ADE80]" />
             <span className="text-[#E6EDF3]">{assigning ? "Assigning..." : "Assign to me"}</span>
           </button>
-          {/* Dropdown arrow for other members */}
           <button
-            onClick={() => setOpen(!open)}
-            className="flex items-center px-1.5 py-1.5 rounded-r-lg border border-[#1E242C] bg-[#12161B] hover:bg-[#181D24] transition-all"
+            onClick={() => setOpen((v) => !v)}
+            className="px-2 py-1.5 rounded-r-lg border border-[#1E242C] bg-[#12161B] hover:bg-[#181D24] transition-all"
           >
             <ChevronDown size={12} className="text-[#484F58]" />
           </button>
@@ -108,35 +135,33 @@ function AssignDropdown({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in">
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1">
           <div className="px-3 py-2 border-b border-[#1E242C]">
             <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
               Assign to team member
             </div>
           </div>
 
-          {/* Unassign option */}
           {currentAssignee && (
             <button
               onClick={() => handleAssign(null)}
-              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#F85149] hover:bg-[#1E242C] transition-colors"
+              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#F85149] hover:bg-[#1E242C]"
             >
               <X size={14} />
-              <span>Unassign</span>
+              Unassign
             </button>
           )}
 
-          {/* Team members */}
           {teamMembers
             .filter((m) => m.is_active !== false)
             .map((member) => {
-              const isCurrent = currentAssignee?.id === member.id;
+              const active = currentAssignee?.id === member.id;
               return (
                 <button
                   key={member.id}
                   onClick={() => handleAssign(member.id)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] transition-colors ${
-                    isCurrent ? "text-[#4ADE80]" : "text-[#E6EDF3]"
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] ${
+                    active ? "text-[#4ADE80]" : "text-[#E6EDF3]"
                   }`}
                 >
                   <Avatar initials={member.initials} color={member.color} size={20} />
@@ -149,7 +174,7 @@ function AssignDropdown({
                     </div>
                     <div className="text-[10px] text-[#484F58]">{member.department}</div>
                   </div>
-                  {isCurrent && <Check size={14} className="text-[#4ADE80]" />}
+                  {active && <Check size={14} className="text-[#4ADE80]" />}
                 </button>
               );
             })}
@@ -159,7 +184,177 @@ function AssignDropdown({
   );
 }
 
-// ── Team Chat (Internal Comments) ────────────────────
+function LabelPicker({
+  conversationId,
+  currentLabels,
+  onToggle,
+}: {
+  conversationId: string;
+  currentLabels: { label_id: string; label?: any }[];
+  onToggle: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const allLabels = useLabels();
+  const ref = useRef<HTMLDivElement>(null);
+  const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setLocalLabelIds(new Set(currentLabels.map((cl) => cl.label_id)));
+  }, [currentLabels]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const toggleLabel = async (labelId: string) => {
+    const add = !localLabelIds.has(labelId);
+
+    setLocalLabelIds((prev) => {
+      const next = new Set(prev);
+      if (add) next.add(labelId);
+      else next.delete(labelId);
+      return next;
+    });
+
+    try {
+      await fetch("/api/conversations/labels", {
+        method: add ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId, labelId }),
+      });
+      onToggle();
+    } catch (error) {
+      console.error("Label toggle failed:", error);
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24]"
+      >
+        <Tag size={12} />
+        <span>Labels</span>
+        <ChevronDown size={10} className="text-[#484F58]" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1">
+          <div className="px-3 py-2 border-b border-[#1E242C]">
+            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+              Toggle labels
+            </div>
+          </div>
+
+          {allLabels.map((label) => {
+            const active = localLabelIds.has(label.id);
+            return (
+              <button
+                key={label.id}
+                onClick={() => toggleLabel(label.id)}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[#1E242C]"
+              >
+                <div
+                  className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
+                    active ? "border-transparent" : "border-[#484F58]"
+                  }`}
+                  style={active ? { background: label.color } : {}}
+                >
+                  {active && <Check size={10} className="text-[#0B0E11]" />}
+                </div>
+                <span className="w-2 h-2 rounded-full" style={{ background: label.color }} />
+                <span className={active ? "text-[#E6EDF3] font-medium" : "text-[#7D8590]"}>
+                  {label.name}
+                </span>
+              </button>
+            );
+          })}
+
+          {allLabels.length === 0 && (
+            <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">
+              No labels yet
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoveToFolderDropdown({
+  conversationId,
+  currentFolderId,
+  onMove,
+}: {
+  conversationId: string;
+  currentFolderId: string | null;
+  onMove: (conversationIds: string[], folderId: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const allFolders = useFolders();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const move = async (folderId: string) => {
+    await onMove([conversationId], folderId);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24]"
+      >
+        <FolderOpen size={12} />
+        <span>Move to</span>
+        <ChevronDown size={10} className="text-[#484F58]" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 max-h-[320px] overflow-y-auto">
+          <div className="px-3 py-2 border-b border-[#1E242C]">
+            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+              Move to folder
+            </div>
+          </div>
+
+          {allFolders.map((folder) => {
+            const active = folder.id === currentFolderId;
+            return (
+              <button
+                key={folder.id}
+                onClick={() => !active && move(folder.id)}
+                className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] ${
+                  active
+                    ? "text-[#4ADE80] bg-[rgba(74,222,128,0.06)]"
+                    : "text-[#7D8590] hover:bg-[#1E242C]"
+                }`}
+              >
+                <span className="text-[13px]">{folder.icon || "📁"}</span>
+                <span className="flex-1 text-left truncate">{folder.name}</span>
+                {active && <Check size={12} className="text-[#4ADE80]" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TeamChat({
   conversationId,
   currentUser,
@@ -172,236 +367,121 @@ function TeamChat({
   const [comments, setComments] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Fetch comments
-  useEffect(() => {
-    if (!conversationId) return;
-    fetchComments();
-    // Poll every 5 seconds for new comments (Realtime would be better, but this works)
-    const interval = setInterval(fetchComments, 5000);
-    return () => clearInterval(interval);
-  }, [conversationId]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [comments]);
 
   const fetchComments = async () => {
     try {
       const res = await fetch(`/api/comments?conversation_id=${conversationId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setComments(data.comments || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch comments:", err);
+      if (!res.ok) return;
+      const data = await res.json();
+      setComments(data.comments || []);
+    } catch (error) {
+      console.error("Failed to fetch comments:", error);
     }
   };
 
-  const handleSend = async () => {
+  useEffect(() => {
+    if (!conversationId) return;
+    fetchComments();
+    const id = setInterval(fetchComments, 5000);
+    return () => clearInterval(id);
+  }, [conversationId]);
+
+  const sendComment = async () => {
     if (!input.trim() || !currentUser) return;
     setSending(true);
-
-    // Extract @mentions from input
-    const mentionRegex = /@(\w+)/g;
-    const mentionNames: string[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = mentionRegex.exec(input)) !== null) {
-      mentionNames.push(match[1].toLowerCase());
-    }
-    const mentionIds = teamMembers
-      .filter((m) =>
-        mentionNames.some(
-          (name) =>
-            m.name.toLowerCase().includes(name) ||
-            m.initials.toLowerCase() === name
-        )
-      )
-      .map((m) => m.id);
-
     try {
-      const res = await fetch("/api/comments", {
+      await fetch("/api/comments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: conversationId,
           author_id: currentUser.id,
           body: input.trim(),
-          mentions: mentionIds,
+          mentions: [],
         }),
       });
-      if (res.ok) {
-        setInput("");
-        fetchComments();
-      }
-    } catch (err) {
-      console.error("Failed to send comment:", err);
+      setInput("");
+      fetchComments();
+    } catch (error) {
+      console.error("Failed to send comment:", error);
+    } finally {
+      setSending(false);
     }
-    setSending(false);
-  };
-
-  const handleInputChange = (value: string) => {
-    setInput(value);
-    // Check if user is typing @mention
-    const lastAt = value.lastIndexOf("@");
-    if (lastAt !== -1 && lastAt === value.length - 1) {
-      setShowMentions(true);
-      setMentionFilter("");
-    } else if (lastAt !== -1) {
-      const afterAt = value.slice(lastAt + 1);
-      if (!afterAt.includes(" ")) {
-        setShowMentions(true);
-        setMentionFilter(afterAt.toLowerCase());
-      } else {
-        setShowMentions(false);
-      }
-    } else {
-      setShowMentions(false);
-    }
-  };
-
-  const insertMention = (member: TeamMember) => {
-    const lastAt = input.lastIndexOf("@");
-    const before = input.slice(0, lastAt);
-    setInput(`${before}@${member.name} `);
-    setShowMentions(false);
-    inputRef.current?.focus();
-  };
-
-  const filteredMembers = teamMembers.filter(
-    (m) =>
-      m.id !== currentUser?.id &&
-      (mentionFilter === "" ||
-        m.name.toLowerCase().includes(mentionFilter) ||
-        m.initials.toLowerCase().includes(mentionFilter))
-  );
-
-  // Render comment body with highlighted @mentions
-  const renderCommentBody = (body: string) => {
-    const parts = body.split(/(@\w+(?:\s\w+)?)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("@")) {
-        return (
-          <span key={i} className="text-[#58A6FF] font-semibold">
-            {part}
-          </span>
-        );
-      }
-      return part;
-    });
   };
 
   return (
-    <div className="border-t border-[#1E242C] bg-[#0D1117] flex flex-col" style={{ maxHeight: "280px" }}>
-      {/* Chat header */}
-      <div className="px-4 py-2 border-b border-[#161B22] flex items-center gap-2 shrink-0">
-        <MessageSquare size={13} className="text-[#484F58]" />
-        <span className="text-[11px] font-semibold text-[#484F58] uppercase tracking-wider">
-          Team Chat
-        </span>
-        <span className="text-[10px] text-[#484F58] ml-1">
-          (internal — not visible to sender)
-        </span>
+    <div className="border-t border-[#161B22]">
+      <div className="px-4 py-3 border-b border-[#161B22] flex items-center gap-2 text-[11px] text-[#7D8590] uppercase tracking-wider">
+        <MessageSquare size={12} />
+        <span>Team Chat</span>
+        <span className="text-[#484F58] normal-case">(internal — not visible to sender)</span>
       </div>
 
-      {/* Comments */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 min-h-[60px]">
-        {comments.length === 0 && (
-          <div className="text-center py-3 text-[11px] text-[#484F58]">
+      <div className="h-[110px] overflow-y-auto px-4 py-3">
+        {comments.length === 0 ? (
+          <div className="text-center text-[12px] text-[#484F58] pt-6">
             No team discussion yet. Start a conversation about this thread.
           </div>
-        )}
-        {comments.map((comment: any) => (
-          <div key={comment.id} className="flex items-start gap-2 animate-fade-in">
-            <Avatar
-              initials={comment.author?.initials || "?"}
-              color={comment.author?.color || "#484F58"}
-              size={22}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-baseline gap-1.5">
-                <span
-                  className="text-[11px] font-bold"
-                  style={{ color: comment.author?.color || "#7D8590" }}
-                >
-                  {comment.author?.name || "Unknown"}
-                </span>
-                <span className="text-[10px] text-[#484F58]">
-                  {new Date(comment.created_at).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-              <div className="text-[12px] text-[#E6EDF3] leading-relaxed mt-0.5">
-                {renderCommentBody(comment.body)}
-              </div>
-            </div>
+        ) : (
+          <div className="space-y-3">
+            {comments.map((comment) => {
+              const author =
+                comment.author ||
+                teamMembers.find((member) => member.id === comment.author_id) ||
+                null;
+
+              return (
+                <div key={comment.id} className="flex items-start gap-2">
+                  {author ? (
+                    <Avatar initials={author.initials} color={author.color} size={20} />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-[#30363D]" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className="text-[11px] font-semibold"
+                        style={{ color: author?.color || "#E6EDF3" }}
+                      >
+                        {author?.name || "Unknown"}
+                      </span>
+                      <span className="text-[10px] text-[#484F58]">
+                        {comment.created_at
+                          ? new Date(comment.created_at).toLocaleString()
+                          : ""}
+                      </span>
+                    </div>
+                    <div className="text-[12px] text-[#E6EDF3] whitespace-pre-wrap">
+                      {comment.body}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))}
-        <div ref={chatEndRef} />
+        )}
       </div>
 
-      {/* Input */}
-      <div className="px-3 py-2 border-t border-[#161B22] relative shrink-0">
-        {/* @mention dropdown */}
-        {showMentions && filteredMembers.length > 0 && (
-          <div className="absolute bottom-full left-3 mb-1 w-52 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1 z-50">
-            {filteredMembers.map((member) => (
-              <button
-                key={member.id}
-                onClick={() => insertMention(member)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#1E242C] transition-colors"
-              >
-                <Avatar initials={member.initials} color={member.color} size={18} />
-                <span className="font-medium">{member.name}</span>
-                <span className="text-[#484F58] ml-auto">{member.department}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] focus-within:border-[#484F58] transition-colors">
-          <button
-            onClick={() => {
-              setInput(input + "@");
-              setShowMentions(true);
-              setMentionFilter("");
-              inputRef.current?.focus();
-            }}
-            className="text-[#484F58] hover:text-[#58A6FF] transition-colors shrink-0"
-            title="Mention a teammate"
-          >
-            <AtSign size={14} />
-          </button>
+      <div className="px-4 py-3 border-t border-[#161B22]">
+        <div className="flex items-center gap-2">
           <input
-            ref={inputRef}
             value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                sendComment();
               }
-              if (e.key === "Escape") setShowMentions(false);
             }}
-            placeholder="Chat with your team..."
-            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[12px] placeholder:text-[#484F58]"
+            placeholder="@ Chat with your team..."
+            className="flex-1 h-10 rounded-lg bg-[#0B0E11] border border-[#1E242C] px-3 text-[13px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#30363D]"
           />
           <button
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-            className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-all ${
-              input.trim() && !sending
-                ? "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73]"
-                : "text-[#484F58]"
-            }`}
+            onClick={sendComment}
+            disabled={sending || !input.trim()}
+            className="w-10 h-10 rounded-lg bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] disabled:opacity-50 flex items-center justify-center"
           >
-            <Send size={11} />
+            <Send size={14} />
           </button>
         </div>
       </div>
@@ -409,359 +489,110 @@ function TeamChat({
   );
 }
 
-// ── Activity Timeline Item ──────────────────────────
-const ACTIVITY_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-  assigned: { icon: UserPlus, color: "#4ADE80", label: "Assigned" },
-  unassigned: { icon: UserMinus, color: "#F85149", label: "Unassigned" },
-  label_added: { icon: Tag, color: "#58A6FF", label: "Label added" },
-  label_removed: { icon: Tag, color: "#7D8590", label: "Label removed" },
-  starred: { icon: Star, color: "#F5D547", label: "Starred" },
-  unstarred: { icon: Star, color: "#484F58", label: "Unstarred" },
-  marked_read: { icon: Eye, color: "#7D8590", label: "Marked as read" },
-  marked_unread: { icon: EyeOff, color: "#BC8CFF", label: "Marked as unread" },
-  status_changed: { icon: Circle, color: "#39D2C0", label: "Status changed" },
-  note_added: { icon: StickyNote, color: "#4ADE80", label: "Note added" },
-    task_created: { icon: Plus, color: "#58A6FF", label: "Task created" },
-  task_completed: { icon: CheckCircle, color: "#4ADE80", label: "Task completed" },
-  task_reopened: { icon: Circle, color: "#F0883E", label: "Task reopened" },
-  task_deleted: { icon: Trash2, color: "#F85149", label: "Task deleted" },
-  reply_sent: { icon: Send, color: "#4ADE80", label: "Reply sent" },
-  email_composed: { icon: MailPlus, color: "#58A6FF", label: "Email sent" },
-  email_received: { icon: Mail, color: "#BC8CFF", label: "Email received" },
-  viewed: { icon: Eye, color: "#58A6FF", label: "Viewed" },
-  moved_to_folder: { icon: FolderOpen, color: "#39D2C0", label: "Moved to folder" },
-  rule_executed: { icon: Zap, color: "#F5D547", label: "Rule executed" },
-  bulk_star: { icon: Star, color: "#F5D547", label: "Bulk starred" },
-  bulk_mark_unread: { icon: MailOpen, color: "#BC8CFF", label: "Bulk marked unread" },
-  bulk_archive: { icon: Archive, color: "#58A6FF", label: "Bulk archived" },
-  bulk_delete: { icon: Archive, color: "#F85149", label: "Bulk deleted" },
-};
-
 function ActivityItem({
   activity,
-  isLast,
   teamMembers,
 }: {
   activity: any;
-  isLast: boolean;
   teamMembers: TeamMember[];
 }) {
-  const config = ACTIVITY_CONFIG[activity.action] || {
-    icon: Clock,
-    color: "#484F58",
-    label: activity.action.replace(/_/g, " "),
+  const actor =
+    activity.actor ||
+    teamMembers.find((member) => member.id === activity.actor_id) ||
+    null;
+
+  const actionMap: Record<string, { label: string; color: string; icon: any }> = {
+    viewed: { label: "Viewed", color: "#58A6FF", icon: Eye },
+    assigned: { label: "Assigned", color: "#4ADE80", icon: User },
+    unassigned: { label: "Unassigned", color: "#F0883E", icon: User },
+    note_created: { label: "Note added", color: "#A371F7", icon: MessageSquare },
+    task_created: { label: "Task created", color: "#58A6FF", icon: Plus },
+    task_completed: { label: "Task completed", color: "#4ADE80", icon: CheckCircle },
+    task_reopened: { label: "Task reopened", color: "#F5D547", icon: Circle },
+    task_deleted: { label: "Task deleted", color: "#F85149", icon: Trash2 },
+    reply_sent: { label: "Reply sent", color: "#4ADE80", icon: Send },
+  };
+
+  const config = actionMap[activity.action] || {
+    label: activity.action || "Activity",
+    color: "#7D8590",
+    icon: MessageSquare,
   };
   const Icon = config.icon;
-  const actor = activity.actor;
-  const details = activity.details || {};
-
-  // Build description
-  let description = "";
-  switch (activity.action) {
-    case "assigned": {
-      const assignee = teamMembers.find((m) => m.id === details.assignee_id);
-      description = assignee ? `to ${assignee.name}` : "";
-      break;
-    }
-    case "unassigned": {
-      const prev = teamMembers.find((m) => m.id === details.previous_assignee_id);
-      description = prev ? `from ${prev.name}` : "";
-      break;
-    }
-    case "label_added":
-    case "label_removed":
-      description = details.label_name || "";
-      break;
-    case "status_changed":
-      description = details.status || "";
-      break;
-    case "note_added":
-    case "task_created":
-    case "task_completed":
-    case "task_reopened":
-      description = details.text || details.preview || "";
-      break;
-    case "reply_sent":
-    case "email_composed":
-      description = details.to ? `to ${details.to}` : "";
-      break;
-    case "moved_to_folder":
-      description = details.folder_name || "";
-      break;
-    case "rule_executed":
-      description = details.rule_name || "";
-      break;
-    default:
-      description = "";
-  }
-
-  const timeStr = new Date(activity.created_at).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 
   return (
-    <div className="flex gap-3 relative">
-      {/* Timeline line */}
-      {!isLast && (
-        <div className="absolute left-[13px] top-[28px] bottom-0 w-[1.5px] bg-[#1E242C]" />
-      )}
-
-      {/* Icon bubble */}
+    <div className="flex items-start gap-3 py-3 border-b border-[#161B22] last:border-b-0">
       <div
-        className="w-[28px] h-[28px] rounded-full flex items-center justify-center flex-shrink-0 z-10"
-        style={{ background: `${config.color}15`, border: `1.5px solid ${config.color}30` }}
+        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+        style={{ background: `${config.color}20`, color: config.color }}
       >
-        <Icon size={13} style={{ color: config.color }} />
+        <Icon size={14} />
       </div>
-
-      {/* Content */}
-      <div className="flex-1 pb-4 min-w-0">
-        <div className="flex items-baseline gap-1.5 flex-wrap">
-          <span className="text-[12px] font-semibold" style={{ color: config.color }}>
-            {config.label}
-          </span>
-          {description && (
-            <span className="text-[11px] text-[#7D8590] truncate max-w-[200px]">
-              {description}
-            </span>
-          )}
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] font-semibold" style={{ color: config.color }}>
+          {config.label}
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
+        <div className="flex items-center gap-2 mt-1 text-[11px] text-[#484F58]">
           {actor && (
             <>
-              <Avatar initials={actor.initials} color={actor.color} size={14} />
-              <span className="text-[10px] font-medium" style={{ color: actor.color }}>
-                {actor.name}
-              </span>
-              <span className="text-[10px] text-[#484F58]">·</span>
+              <Avatar initials={actor.initials} color={actor.color} size={16} />
+              <span style={{ color: actor.color }}>{actor.name}</span>
             </>
           )}
-          <span className="text-[10px] text-[#484F58]">{timeStr}</span>
+          <span>
+            {activity.created_at ? new Date(activity.created_at).toLocaleString() : ""}
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Label Picker (add/remove labels on thread) ──────
-function LabelPicker({
-  conversationId,
-  currentLabels,
-  onToggle,
-}: {
-  conversationId: string;
-  currentLabels: { label_id: string; label?: any }[];
-  onToggle: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const allLabels = useLabels();
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  // Local state so the UI updates instantly
-  const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
-
-  // Sync local state when props change
-  useEffect(() => {
-    setLocalLabelIds(new Set(currentLabels.map((cl) => cl.label_id)));
-  }, [currentLabels]);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    if (open) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  const handleToggleLabel = async (labelId: string) => {
-    const isAdding = !localLabelIds.has(labelId);
-
-    // Optimistic update
-    setLocalLabelIds((prev) => {
-      const next = new Set(prev);
-      if (isAdding) next.add(labelId);
-      else next.delete(labelId);
-      return next;
-    });
-
-    try {
-      if (isAdding) {
-        await fetch("/api/conversations/labels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId, labelId }),
-        });
-      } else {
-        await fetch("/api/conversations/labels", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId, labelId }),
-        });
-      }
-      onToggle();
-    } catch (err) {
-      // Revert on error
-      setLocalLabelIds((prev) => {
-        const next = new Set(prev);
-        if (isAdding) next.delete(labelId);
-        else next.add(labelId);
-        return next;
-      });
-      console.error("Label toggle failed:", err);
-    }
-  };
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24] transition-all"
-      >
-        <Tag size={12} />
-        <span>Labels</span>
-        <ChevronDown size={10} className="text-[#484F58]" />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in">
-          <div className="px-3 py-2 border-b border-[#1E242C]">
-            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Toggle labels</div>
-          </div>
-          {allLabels.map((label) => {
-            const isActive = localLabelIds.has(label.id);
-            return (
-              <button
-                key={label.id}
-                onClick={() => handleToggleLabel(label.id)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[#1E242C] transition-colors"
-              >
-                <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all ${
-                  isActive ? "border-transparent" : "border-[#484F58]"
-                }`} style={isActive ? { background: label.color } : {}}>
-                  {isActive && <Check size={10} className="text-[#0B0E11]" />}
-                </div>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: label.color }} />
-                <span className={isActive ? "text-[#E6EDF3] font-medium" : "text-[#7D8590]"}>{label.name}</span>
-              </button>
-            );
-          })}
-          {allLabels.length === 0 && (
-            <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">No labels — create some in Settings</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Move to Folder Dropdown ─────────────────────────
-function MoveToFolderDropdown({
-  conversationId,
-  currentFolderId,
-  onMove,
-}: {
-  conversationId: string;
-  currentFolderId: string | null;
-  onMove: (conversationIds: string[], folderId: string) => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const allFolders = useFolders();
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    if (open) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  const handleMove = async (folderId: string) => {
-    await onMove([conversationId], folderId);
-    setOpen(false);
-  };
-
-  // Group folders by email account
-  const grouped: Record<string, any[]> = {};
-  for (const f of allFolders) {
-    const key = f.email_account_id;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(f);
-  }
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24] transition-all"
-        title="Move to folder"
-      >
-        <FolderOpen size={12} />
-        <span>Move to</span>
-        <ChevronDown size={10} className="text-[#484F58]" />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 animate-fade-in max-h-[300px] overflow-y-auto">
-          <div className="px-3 py-2 border-b border-[#1E242C]">
-            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Move to folder</div>
-          </div>
-          {Object.values(grouped).flat().map((folder) => {
-            const isCurrent = folder.id === currentFolderId;
-            return (
-              <button
-                key={folder.id}
-                onClick={() => !isCurrent && handleMove(folder.id)}
-                className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] transition-colors ${
-                  isCurrent ? "text-[#4ADE80] bg-[rgba(74,222,128,0.06)]" : "text-[#7D8590] hover:bg-[#1E242C]"
-                }`}
-              >
-                <span className="text-[13px]">{folder.icon || "📁"}</span>
-                <span className="flex-1 text-left truncate">{folder.name}</span>
-                {isCurrent && <Check size={12} className="text-[#4ADE80]" />}
-              </button>
-            );
-          })}
-          {allFolders.length === 0 && (
-            <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">No folders — create some in the sidebar</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main ConversationDetail ──────────────────────────
 export default function ConversationDetail({
-  conversation: convo, currentUser, teamMembers,
-  onAddNote, onToggleTask, onAddTask, onUpdateTask, onAssign, onSendReply, onMoveToFolder,
+  conversation: convo,
+  currentUser,
+  teamMembers,
+  onAddNote,
+  onToggleTask,
+  onAddTask,
+  onUpdateTask,
+  onAssign,
+  onSendReply,
+  onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
+  const [showTaskInput, setShowTaskInput] = useState(false);
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
   const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
-  const [showTaskInput, setShowTaskInput] = useState(false);
+  const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
+  const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
 
-  const { notes, tasks, messages, activities, refetch: refetchDetail } = useConversationDetail(convo?.id || null);
-const {
-  threads: relatedThreads,
-  externalEmail,
-  summary,
-  loading: relatedThreadsLoading,
-} = useRelatedThreads(convo?.id || null);
+  const {
+    notes,
+    tasks,
+    messages,
+    activities,
+    refetch: refetchDetail,
+  } = useConversationDetail(convo?.id || null);
 
-const {
-  summary: threadSummary,
-  loading: threadSummaryLoading,
-  generating: threadSummaryGenerating,
-  generateSummary,
-} = useThreadSummary(convo?.id || null);
+  const {
+    threads: relatedThreads,
+    externalEmail,
+    summary,
+    loading: relatedThreadsLoading,
+  } = useRelatedThreads(convo?.id || null);
+
+  const {
+    summary: threadSummary,
+    loading: threadSummaryLoading,
+    generating: threadSummaryGenerating,
+    generateSummary,
+  } = useThreadSummary(convo?.id || null);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -774,36 +605,169 @@ const {
     setNewTaskDueDate("");
   }, [convo?.id]);
 
-  // Mark as read when conversation is opened + log viewed activity
   useEffect(() => {
-    if (convo?.id) {
-      // Log that this user viewed the conversation
-      if (currentUser?.id) {
-        fetch("/api/conversations/activity", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversation_id: convo.id,
-            actor_id: currentUser.id,
-            action: "viewed",
-            details: {},
-          }),
-        }).catch(() => {});
-      }
+    if (!convo?.id) return;
 
-      if (convo.is_unread) {
-        fetch("/api/conversations/status", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversation_id: convo.id,
-            is_unread: false,
-            actor_id: currentUser?.id,
-          }),
-        }).catch(() => {});
-      }
+    if (currentUser?.id) {
+      fetch("/api/conversations/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          actor_id: currentUser.id,
+          action: "viewed",
+          details: {},
+        }),
+      }).catch(() => {});
     }
-  }, [convo?.id]);
+
+    if (convo.is_unread) {
+      fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_unread: false,
+          actor_id: currentUser?.id,
+        }),
+      }).catch(() => {});
+    }
+  }, [convo?.id, convo?.is_unread, currentUser?.id]);
+
+  const assignee = useMemo(
+    () => convo?.assignee || teamMembers.find((member) => member.id === convo?.assignee_id),
+    [convo, teamMembers]
+  );
+
+  const tabs = [
+    { id: "messages", label: "Messages", count: messages.length },
+    { id: "notes", label: "Notes", count: notes.length },
+    { id: "tasks", label: "Tasks", count: tasks.length },
+    { id: "activity", label: "Activity", count: activities.length },
+    { id: "related", label: "Related Threads", count: relatedThreads.length },
+    { id: "summary", label: "Summary", count: 0 },
+  ];
+
+  const getTaskAssignees = (task: any) =>
+    task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : [];
+
+  const handleAddNoteInternal = async () => {
+    if (!convo || !noteText.trim()) return;
+    await onAddNote(convo.id, noteText.trim());
+    setNoteText("");
+    setShowNoteInput(false);
+    await refetchDetail();
+  };
+
+  const handleAddTaskInternal = async () => {
+    if (!convo || !newTaskText.trim()) return;
+
+    await onAddTask(
+      convo.id,
+      newTaskText.trim(),
+      newTaskAssigneeIds.length > 0
+        ? newTaskAssigneeIds
+        : currentUser?.id
+          ? [currentUser.id]
+          : [],
+      newTaskDueDate || undefined
+    );
+
+    await refetchDetail();
+    setActiveTab("tasks");
+    setNewTaskText("");
+    setNewTaskAssigneeIds([]);
+    setNewTaskDueDate("");
+    setShowTaskInput(false);
+  };
+
+  const handleSendReplyInternal = async () => {
+    if (!convo || !replyText.trim()) return;
+    setSending(true);
+    try {
+      await onSendReply(convo.id, replyText.trim());
+      setReplyText("");
+      await refetchDetail();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleToggleRead = async () => {
+    if (!convo) return;
+    try {
+      await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_unread: !convo.is_unread,
+        }),
+      });
+    } catch (error) {
+      console.error("Toggle read failed:", error);
+    }
+  };
+
+  const handleToggleStar = async () => {
+    if (!convo) return;
+    try {
+      await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          is_starred: !convo.is_starred,
+        }),
+      });
+    } catch (error) {
+      console.error("Toggle star failed:", error);
+    }
+  };
+
+  const createSuggestedTask = async (taskText: string) => {
+    if (!convo || !taskText.trim()) return;
+
+    try {
+      setCreatingSuggestedTasks((prev) => [...prev, taskText]);
+
+      await onAddTask(
+        convo.id,
+        taskText.trim(),
+        currentUser?.id ? [currentUser.id] : [],
+        undefined
+      );
+
+      await refetchDetail();
+    } finally {
+      setCreatingSuggestedTasks((prev) => prev.filter((item) => item !== taskText));
+    }
+  };
+
+  const createAllSuggestedTasks = async () => {
+    if (!convo) return;
+
+    const tasksToCreate = (threadSummary?.summary?.suggested_tasks || []).filter(
+      (item: string) => typeof item === "string" && item.trim()
+    );
+
+    if (tasksToCreate.length === 0) return;
+
+    try {
+      setCreatingAllSuggestedTasks(true);
+      for (const taskText of tasksToCreate) {
+        await onAddTask(
+          convo.id,
+          taskText.trim(),
+          currentUser?.id ? [currentUser.id] : [],
+          undefined
+        );
+      }
+      await refetchDetail();
+    } finally {
+      setCreatingAllSuggestedTasks(false);
+    }
+  };
 
   if (!convo) {
     return (
@@ -817,90 +781,8 @@ const {
     );
   }
 
-  const assignee = convo.assignee || teamMembers.find((t) => t.id === convo.assignee_id);
-
-  const getTaskAssignees = (task: any) =>
-    task.assignees?.length
-      ? task.assignees
-      : task.assignee
-        ? [task.assignee]
-        : [];
-
-  const handleAddNote = async () => {
-    if (!noteText.trim()) return;
-    await onAddNote(convo.id, noteText.trim());
-    setNoteText("");
-    setShowNoteInput(false);
-  };
-
-  const handleAddTask = async () => {
-  if (!convo || !newTaskText.trim()) return;
-
-  await onAddTask(
-    convo.id,
-    newTaskText.trim(),
-    newTaskAssigneeIds.length > 0 ? newTaskAssigneeIds : currentUser?.id ? [currentUser.id] : [],
-    newTaskDueDate || undefined
-  );
-
-  await refetchDetail();
-  setActiveTab("tasks");
-  setNewTaskText("");
-  setNewTaskAssigneeIds([]);
-  setNewTaskDueDate("");
-  setShowTaskInput(false);
-};
-
-  const handleSendReply = async () => {
-    if (!replyText.trim()) return;
-    setSending(true);
-    await onSendReply(convo.id, replyText.trim());
-    setReplyText("");
-    setSending(false);
-  };
-
-  const handleToggleRead = async () => {
-    try {
-      await fetch("/api/conversations/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: convo.id,
-          is_unread: !convo.is_unread,
-        }),
-      });
-    } catch (err) {
-      console.error("Toggle read failed:", err);
-    }
-  };
-
-  const handleToggleStar = async () => {
-    try {
-      await fetch("/api/conversations/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: convo.id,
-          is_starred: !convo.is_starred,
-        }),
-      });
-    } catch (err) {
-      console.error("Toggle star failed:", err);
-    }
-  };
-
-     const tabs = [
-      { id: "messages", label: "Messages", count: messages.length },
-      { id: "notes", label: "Notes", count: notes.length },
-      { id: "tasks", label: "Tasks", count: tasks.length },
-      { id: "activity", label: "Activity", count: activities.length },
-      { id: "related", label: "Related Threads", count: relatedThreads.length },
-      { id: "summary", label: "Summary", count: 0 },
-    ];
-
   return (
     <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
-      {/* Header with Assign */}
       <div className="px-5 py-3 border-b border-[#1E242C] flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-base font-bold text-[#E6EDF3] truncate tracking-tight mb-1">
@@ -910,26 +792,31 @@ const {
             <span className="text-[#7D8590]">{convo.from_name}</span>
             <span className="text-[#484F58]">&lt;{convo.from_email}&gt;</span>
           </div>
-          {/* Labels row */}
+
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            {(convo.labels || []).map((cl) => cl.label && (
-              <span
-                key={cl.label_id || cl.label?.id}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
-                style={{ background: cl.label.bg_color, color: cl.label.color }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: cl.label.color }} />
-                {cl.label.name}
-              </span>
-            ))}
+            {(convo.labels || []).map(
+              (cl) =>
+                cl.label && (
+                  <span
+                    key={cl.label_id || cl.label?.id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
+                    style={{ background: cl.label.bg_color, color: cl.label.color }}
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: cl.label.color }}
+                    />
+                    {cl.label.name}
+                  </span>
+                )
+            )}
+
             <LabelPicker
               conversationId={convo.id}
               currentLabels={convo.labels || []}
-              onToggle={() => {
-                // The realtime subscription will handle the full refetch,
-                // but we can force it by triggering a re-render
-              }}
+              onToggle={() => {}}
             />
+
             {onMoveToFolder && (
               <MoveToFolderDropdown
                 conversationId={convo.id}
@@ -940,7 +827,6 @@ const {
           </div>
         </div>
 
-        {/* Action buttons + Assign */}
         <div className="flex items-center gap-2 shrink-0">
           <AssignDropdown
             currentAssignee={assignee}
@@ -949,47 +835,38 @@ const {
             onAssign={onAssign}
             conversationId={convo.id}
           />
+
           <div className="flex gap-1">
-            {/* Star */}
             <button
               onClick={handleToggleStar}
               title={convo.is_starred ? "Unstar" : "Star"}
-              className={`w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24] transition-all ${
+              className={`w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24] ${
                 convo.is_starred ? "text-[#F5D547]" : "text-[#7D8590]"
               }`}
             >
               <Star size={16} fill={convo.is_starred ? "#F5D547" : "none"} />
             </button>
-            {/* Mark unread/read */}
+
             <button
               onClick={handleToggleRead}
               title={convo.is_unread ? "Mark as read" : "Mark as unread"}
-              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] transition-all"
+              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
             >
               {convo.is_unread ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
-            {/* Reply, Forward, Archive */}
-            {[
-              { icon: Reply, title: "Reply" },
-              { icon: Forward, title: "Forward" },
-              { icon: Archive, title: "Archive" },
-            ].map((btn, i) => {
-              const Icon = btn.icon;
-              return (
-                <button
-                  key={i}
-                  title={btn.title}
-                  className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] transition-all"
-                >
-                  <Icon size={16} />
-                </button>
-              );
-            })}
+
+            {[Reply, Forward, Archive].map((Icon, idx) => (
+              <button
+                key={idx}
+                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
+              >
+                <Icon size={16} />
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-[#161B22] px-5">
         {tabs.map((tab) => (
           <button
@@ -1017,234 +894,183 @@ const {
         ))}
       </div>
 
-      {/* Content area */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {/* Messages tab */}
-        {activeTab === "messages" && messages.map((msg: any) => (
-          <div
-            key={msg.id}
-            className={`mb-4 p-4 rounded-xl border animate-fade-in ${
-              msg.is_outbound
-                ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
-                : "bg-[#12161B] border-[#161B22]"
-            }`}
-          >
-            <div className="flex items-center gap-2 mb-2.5">
-              <Avatar
-                initials={(msg.from_name || "?").slice(0, 2).toUpperCase()}
-                color={msg.is_outbound ? "#4ADE80" : "#58A6FF"}
-              />
-              <div className="flex-1">
-                <span className="text-[13px] font-semibold text-[#E6EDF3]">
-                  {msg.from_name}
-                  {msg.is_outbound && <span className="text-[10px] text-[#4ADE80] ml-2">Sent</span>}
-                </span>
-                <span className="text-[11px] text-[#484F58] ml-2">{msg.from_email}</span>
-              </div>
-              <span className="text-[11px] text-[#484F58]">
-                {msg.sent_at ? new Date(msg.sent_at).toLocaleString() : ""}
-              </span>
-            </div>
-            <div className="text-[13px] leading-relaxed text-[#7D8590] whitespace-pre-wrap">
-              {msg.body_text || "(No text content)"}
-            </div>
-          </div>
-        ))}
-
-        {activeTab === "messages" && messages.length === 0 && (
-          <div className="text-center py-10 text-[#484F58] text-sm">
-            No messages yet. Click the sync button (↻) in the sidebar to fetch emails.
-          </div>
-        )}
-
-        {/* Notes tab */}
-        {activeTab === "notes" && (
-          <div>
-            {notes.map((note) => (
+        {activeTab === "messages" && (
+          <>
+            {messages.map((msg: any) => (
               <div
-                key={note.id}
-                className="mb-3 p-3.5 rounded-xl bg-[rgba(74,222,128,0.06)] border border-[rgba(74,222,128,0.15)] animate-fade-in"
+                key={msg.id}
+                className={`mb-4 p-4 rounded-xl border ${
+                  msg.is_outbound
+                    ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
+                    : "bg-[#12161B] border-[#161B22]"
+                }`}
               >
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  {note.author && (
-                    <Avatar initials={note.author.initials} color={note.author.color} size={20} />
-                  )}
-                  <span className="text-xs font-semibold text-[#4ADE80]">{note.author?.name}</span>
-                  <span className="text-[10px] text-[#484F58] ml-auto">
-                    {new Date(note.created_at).toLocaleString()}
+                <div className="flex items-center gap-2 mb-2.5">
+                  <Avatar
+                    initials={(msg.from_name || "?").slice(0, 2).toUpperCase()}
+                    color={msg.is_outbound ? "#4ADE80" : "#58A6FF"}
+                  />
+                  <div className="flex-1">
+                    <span className="text-[13px] font-semibold text-[#E6EDF3]">
+                      {msg.from_name}
+                      {msg.is_outbound && (
+                        <span className="text-[10px] text-[#4ADE80] ml-2">Sent</span>
+                      )}
+                    </span>
+                    <span className="text-[11px] text-[#484F58] ml-2">{msg.from_email}</span>
+                  </div>
+                  <span className="text-[11px] text-[#484F58]">
+                    {msg.sent_at ? new Date(msg.sent_at).toLocaleString() : ""}
                   </span>
                 </div>
-                <div className="text-[13px] text-[#E6EDF3] leading-relaxed">{note.text}</div>
+                <div className="text-[13px] leading-relaxed text-[#7D8590] whitespace-pre-wrap">
+                  {msg.body_text || msg.snippet || "(No text content)"}
+                </div>
               </div>
             ))}
 
-            {!showNoteInput ? (
+            {messages.length === 0 && (
+              <div className="text-center py-10 text-[#484F58] text-sm">
+                No messages yet. Click the sync button in the sidebar to fetch emails.
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === "notes" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[#E6EDF3]">Internal Notes</div>
               <button
-                onClick={() => setShowNoteInput(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] text-xs font-medium hover:bg-[#181D24] transition-all"
+                onClick={() => setShowNoteInput((v) => !v)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24]"
               >
-                <Plus size={14} /> Add note
+                <Plus size={13} />
+                New note
               </button>
-            ) : (
-              <div className="p-3 rounded-xl bg-[#12161B] border border-[#4ADE80]">
+            </div>
+
+            {showNoteInput && (
+              <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
                 <textarea
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Write an internal note... (invisible to customer)"
-                  rows={3}
-                  autoFocus
-                  className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] resize-y leading-relaxed placeholder:text-[#484F58]"
+                  placeholder="Write an internal note..."
+                  rows={4}
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
                 />
-                <div className="flex gap-2 justify-end mt-2">
+                <div className="flex justify-end gap-2 mt-3">
                   <button
-                    onClick={() => { setShowNoteInput(false); setNoteText(""); }}
-                    className="px-3 py-1.5 rounded text-[#7D8590] text-xs border border-[#1E242C]"
+                    onClick={() => {
+                      setShowNoteInput(false);
+                      setNoteText("");
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={handleAddNote}
-                    className="px-3.5 py-1.5 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold"
+                    onClick={handleAddNoteInternal}
+                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73]"
                   >
-                    Add Note
+                    Save note
                   </button>
                 </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* Tasks tab */}
-        {activeTab === "tasks" && (
-          <div>
-            {tasks.map((task) => {
-              const taskStatus = task.status || (task.is_done ? "completed" : "todo");
+            {notes.length === 0 && (
+              <div className="text-center py-10 text-[#484F58] text-sm">No notes yet</div>
+            )}
+
+            {notes.map((note: any) => {
+              const author =
+                note.author || teamMembers.find((member) => member.id === note.author_id) || null;
               return (
-                <div
-                  key={task.id}
-                  className={`flex items-start gap-2.5 p-3 mb-2 rounded-lg bg-[#12161B] border border-[#161B22] transition-opacity ${
-                    taskStatus === "completed" ? "opacity-60" : ""
-                  }`}
-                >
-                  <button
-                    onClick={() => onToggleTask(task.id, taskStatus !== "completed")}
-                    className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 border-2 transition-all ${
-                      taskStatus === "completed"
-                        ? "border-[#4ADE80] bg-[rgba(74,222,128,0.12)]"
-                        : "border-[#484F58]"
-                    }`}
-                  >
-                    {taskStatus === "completed" && <Check size={12} className="text-[#4ADE80]" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-[13px] font-medium ${taskStatus === "completed" ? "text-[#484F58] line-through" : "text-[#E6EDF3]"}`}>
-                      {task.text}
-                    </div>
-                    <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
-                      {getTaskAssignees(task).map((member: TeamMember) => (
-                        <span
-                          key={member.id}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[rgba(88,166,255,0.1)]"
-                          style={{ color: member.color }}
-                        >
-                          <Avatar initials={member.initials} color={member.color} size={14} />
-                          {member.name}
-                        </span>
-                      ))}
-                      {task.due_date && (
-                        <span className="inline-flex items-center gap-1 text-[#F5D547] bg-[rgba(245,213,71,0.1)] rounded-full px-2 py-0.5">
-                          <Clock size={11} />
-                          {task.due_date}
-                        </span>
-                      )}
+                <div key={note.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    {author ? (
+                      <Avatar initials={author.initials} color={author.color} size={20} />
+                    ) : (
+                      <div className="w-5 h-5 rounded-full bg-[#30363D]" />
+                    )}
+                    <div className="text-[12px]">
+                      <span
+                        className="font-semibold"
+                        style={{ color: author?.color || "#E6EDF3" }}
+                      >
+                        {author?.name || "Unknown"}
+                      </span>
+                      <span className="text-[#484F58] ml-2">
+                        {note.created_at ? new Date(note.created_at).toLocaleString() : ""}
+                      </span>
                     </div>
                   </div>
-                  <select
-                    value={taskStatus}
-                    onChange={(e) => onUpdateTask(task.id, { status: e.target.value as any })}
-                    className="w-[130px] rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 py-1.5 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
-                  >
-                    <option value="todo">To do</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="completed">Completed</option>
-                  </select>
+                  <div className="text-[13px] text-[#E6EDF3] whitespace-pre-wrap">{note.text}</div>
                 </div>
               );
             })}
+          </div>
+        )}
 
-            {tasks.length === 0 && !showTaskInput && (
-              <div className="text-center py-10 text-[#484F58] text-sm">
-                No tasks for this conversation
-              </div>
-            )}
-
-            {/* Add task */}
-            {!showTaskInput ? (
+        {activeTab === "tasks" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[#E6EDF3]">Thread Tasks</div>
               <button
-                onClick={() => setShowTaskInput(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] text-xs font-medium hover:bg-[#181D24] transition-all mt-2"
+                onClick={() => setShowTaskInput((v) => !v)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24]"
               >
-                <Plus size={14} /> New task
+                <Plus size={13} />
+                New task
               </button>
-            ) : (
-              <div className="p-3 rounded-xl bg-[#12161B] border border-[#4ADE80] mt-2">
-                <input
+            </div>
+
+            {showTaskInput && (
+              <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 space-y-3">
+                <textarea
                   value={newTaskText}
                   onChange={(e) => setNewTaskText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddTask();
-                    if (e.key === "Escape") {
-                      setShowTaskInput(false);
-                      setNewTaskText("");
-                      setNewTaskAssigneeIds([]);
-                      setNewTaskDueDate("");
-                    }
-                  }}
                   placeholder="What needs to be done?"
-                  autoFocus
-                  className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58] mb-3"
+                  rows={3}
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
                 />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <div className="text-[11px] font-semibold text-[#7D8590] mb-2">Assign to</div>
-                    <div className="max-h-32 overflow-y-auto rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1.5">
-                      {teamMembers.filter((member) => member.is_active !== false).map((member) => {
-                        const checked = newTaskAssigneeIds.includes(member.id);
-                        return (
-                          <label key={member.id} className="flex items-center gap-2 text-[12px] text-[#E6EDF3] cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                setNewTaskAssigneeIds((prev) =>
-                                  e.target.checked
-                                    ? [...prev, member.id]
-                                    : prev.filter((id) => id !== member.id)
-                                );
-                              }}
-                              className="rounded border-[#484F58] bg-[#12161B] text-[#4ADE80] focus:ring-[#4ADE80]"
-                            />
-                            <Avatar initials={member.initials} color={member.color} size={16} />
-                            <span>{member.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-[#7D8590] mb-2">Due date</label>
-                    <div className="flex items-center gap-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 focus-within:border-[#4ADE80]">
-                      <Clock size={14} className="text-[#F5D547]" />
-                      <input
-                        type="date"
-                        value={newTaskDueDate}
-                        onChange={(e) => setNewTaskDueDate(e.target.value)}
-                        className="w-full bg-transparent text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]"
-                      />
-                    </div>
-                  </div>
+
+                <input
+                  type="date"
+                  value={newTaskDueDate}
+                  onChange={(e) => setNewTaskDueDate(e.target.value)}
+                  className="h-10 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-sm text-[#E6EDF3] outline-none"
+                />
+
+                <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-3 space-y-2 max-h-36 overflow-y-auto">
+                  {teamMembers
+                    .filter((member) => member.is_active !== false)
+                    .map((member) => {
+                      const checked = newTaskAssigneeIds.includes(member.id);
+                      return (
+                        <label key={member.id} className="flex items-center gap-2 text-sm text-[#E6EDF3]">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setNewTaskAssigneeIds((prev) =>
+                                e.target.checked
+                                  ? [...prev, member.id]
+                                  : prev.filter((id) => id !== member.id)
+                              );
+                            }}
+                            className="accent-[#4ADE80]"
+                          />
+                          <Avatar initials={member.initials} color={member.color} size={18} />
+                          <span>{member.name}</span>
+                        </label>
+                      );
+                    })}
                 </div>
-                <div className="flex gap-2 justify-end">
+
+                <div className="flex justify-end gap-2">
                   <button
                     onClick={() => {
                       setShowTaskInput(false);
@@ -1252,24 +1078,95 @@ const {
                       setNewTaskAssigneeIds([]);
                       setNewTaskDueDate("");
                     }}
-                    className="px-3 py-1.5 rounded text-[#7D8590] text-xs border border-[#1E242C]"
+                    className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={handleAddTask}
-                    disabled={!newTaskText.trim()}
-                    className="px-3.5 py-1.5 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold"
+                    onClick={handleAddTaskInternal}
+                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73]"
                   >
-                    Add Task
+                    Create task
                   </button>
                 </div>
               </div>
             )}
+
+            {tasks.length === 0 && (
+              <div className="text-center py-10 text-[#484F58] text-sm">
+                No tasks for this conversation
+              </div>
+            )}
+
+            {tasks.map((task: any) => {
+              const assignees = getTaskAssignees(task);
+
+              return (
+                <div key={task.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="flex items-start gap-3">
+                    <button
+                      onClick={() => onToggleTask(task.id, !(task.status === "completed" || task.is_done))}
+                      className="mt-0.5"
+                    >
+                      {task.status === "completed" || task.is_done ? (
+                        <CheckCircle size={18} className="text-[#4ADE80]" />
+                      ) : (
+                        <Circle size={18} className="text-[#7D8590]" />
+                      )}
+                    </button>
+
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={`text-sm font-medium ${
+                          task.status === "completed" || task.is_done
+                            ? "text-[#7D8590] line-through"
+                            : "text-[#E6EDF3]"
+                        }`}
+                      >
+                        {task.text}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <select
+                          value={task.status || (task.is_done ? "completed" : "todo")}
+                          onChange={(e) =>
+                            onUpdateTask(task.id, { status: e.target.value as any })
+                          }
+                          className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none"
+                        >
+                          <option value="todo">To do</option>
+                          <option value="in_progress">In progress</option>
+                          <option value="completed">Completed</option>
+                        </select>
+
+                        {task.due_date && (
+                          <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                            Due: {task.due_date}
+                          </span>
+                        )}
+
+                        {assignees.map((member: TeamMember) => (
+                          <span
+                            key={member.id}
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px]"
+                            style={{
+                              background: `${member.color}20`,
+                              color: member.color,
+                            }}
+                          >
+                            <Avatar initials={member.initials} color={member.color} size={16} />
+                            {member.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-                {/* Activity tab */}
         {activeTab === "activity" && (
           <div className="space-y-0.5">
             {activities.length === 0 && (
@@ -1277,54 +1174,44 @@ const {
                 No activity recorded yet
               </div>
             )}
-            {activities.map((act: any, idx: number) => {
-              const isLast = idx === activities.length - 1;
-              return (
-                <ActivityItem key={act.id} activity={act} isLast={isLast} teamMembers={teamMembers} />
-              );
-            })}
+            {activities.map((activity: any) => (
+              <ActivityItem key={activity.id} activity={activity} teamMembers={teamMembers} />
+            ))}
           </div>
         )}
 
-        {/* Related Threads tab */}
         {activeTab === "related" && (
-          <div> {summary && (
-  <div className="mb-4 rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
-    <div className="text-sm font-semibold text-[#E6EDF3] mb-2">
-      Supplier Contact
-    </div>
+          <div>
+            {summary && (
+              <div className="mb-4 rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+                <div className="text-sm font-semibold text-[#E6EDF3] mb-2">Supplier Contact</div>
+                <div className="text-xs text-[#7D8590] mb-3">{externalEmail}</div>
 
-    <div className="text-xs text-[#7D8590] mb-3">
-      {externalEmail}
-    </div>
+                <div className="flex flex-wrap gap-3 text-xs">
+                  <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
+                    Threads: {summary.total_threads}
+                  </span>
+                  <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#4ADE80]">
+                    Open: {summary.open_threads}
+                  </span>
+                  <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#F87171]">
+                    Closed: {summary.closed_threads}
+                  </span>
+                  {summary.last_activity && (
+                    <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
+                      Last activity:{" "}
+                      {new Date(summary.last_activity).toLocaleString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
-    <div className="flex flex-wrap gap-3 text-xs">
-      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
-        Threads: {summary.total_threads}
-      </span>
-
-      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#4ADE80]">
-        Open: {summary.open_threads}
-      </span>
-
-      <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[#F87171]">
-        Closed: {summary.closed_threads}
-      </span>
-
-      {summary.last_activity && (
-        <span className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C]">
-          Last activity:{" "}
-          {new Date(summary.last_activity).toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })}
-        </span>
-      )}
-    </div>
-  </div>
-)}
             <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] px-4 py-3">
               <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
                 <GitBranch size={14} className="text-[#58A6FF]" />
@@ -1368,11 +1255,9 @@ const {
                           {thread.is_unread && (
                             <span className="w-2 h-2 rounded-full bg-[#4ADE80]" />
                           )}
-
                           <div className="text-[13px] font-semibold text-[#E6EDF3] truncate">
                             {thread.subject || "(No subject)"}
                           </div>
-
                           {sameSubject && (
                             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
                               Possible duplicate
@@ -1388,11 +1273,9 @@ const {
                           <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
                             Status: {thread.status || "open"}
                           </span>
-
                           <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
                             Folder: {thread.folder?.name || "Inbox"}
                           </span>
-
                           <span className="inline-flex items-center gap-1 rounded-full bg-[#0B0E11] px-2 py-1 text-[#7D8590] border border-[#1E242C]">
                             Last activity:{" "}
                             {thread.last_message_at
@@ -1434,7 +1317,7 @@ const {
                         href={href}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] transition-all shrink-0"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] shrink-0"
                       >
                         <ExternalLink size={13} />
                         Open
@@ -1445,193 +1328,242 @@ const {
               })}
           </div>
         )}
-      </div>
-{activeTab === "summary" && (
-  <div className="h-full overflow-y-auto pr-2">
-    <div className="mb-3 flex items-center justify-between gap-2">
-      <div>
-        <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
-        <div className="text-xs text-[#7D8590]">
-          AI-generated review of this conversation
-        </div>
-      </div>
 
-      <button
-        type="button"
-        onClick={() => generateSummary(true)}
-        disabled={threadSummaryGenerating}
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
-      >
-        {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
-      </button>
-    </div>
-
-    {threadSummaryLoading && (
-      <div className="text-center py-10 text-[#484F58] text-sm">
-        Loading summary...
-      </div>
-    )}
-
-    {!threadSummaryLoading && !threadSummary && (
-      <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-        <div className="text-sm text-[#E6EDF3] mb-2">
-          No summary yet for this thread
-        </div>
-        <div className="text-xs text-[#7D8590] mb-4">
-          Generate a cached AI summary with status, intent, action items, completed items, and next step.
-        </div>
-        <button
-          type="button"
-          onClick={() => generateSummary(false)}
-          disabled={threadSummaryGenerating}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[12px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60"
-        >
-          {threadSummaryGenerating ? "Generating..." : "Generate Summary"}
-        </button>
-      </div>
-    )}
-
-    {!threadSummaryLoading && threadSummary?.summary && (
-      <div className="space-y-3">
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Overview
-          </div>
-          <div className="text-sm text-[#E6EDF3] leading-6">
-            {threadSummary.summary.overview || "No overview available"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Current Status
-          </div>
-          <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-            {threadSummary.summary.status || "Unknown"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Supplier Intent
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-              {threadSummary.summary.intent
-                ? threadSummary.summary.intent.replace(/_/g, " ")
-                : "general inquiry"}
-            </span>
-
-            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-              Confidence: {threadSummary.summary.confidence || "medium"}
-            </span>
-          </div>
-
-          {threadSummary.summary.secondary_intents?.length > 0 && (
-            <div className="mt-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                Secondary intents
+        {activeTab === "summary" && (
+          <div className="h-full overflow-y-auto pr-2">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
+                <div className="text-xs text-[#7D8590]">
+                  AI-generated review of this conversation
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {threadSummary.summary.secondary_intents.map((intent: string, index: number) => (
-                  <span
-                    key={index}
-                    className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
-                  >
-                    {intent.replace(/_/g, " ")}
-                  </span>
-                ))}
-              </div>
+
+              <button
+                type="button"
+                onClick={() => generateSummary(true)}
+                disabled={threadSummaryGenerating}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
+              >
+                {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
+              </button>
             </div>
-          )}
-        </div>
 
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Open Action Items
-          </div>
-          {threadSummary.summary.open_action_items?.length > 0 ? (
-            <ul className="space-y-2">
-              {threadSummary.summary.open_action_items.map((item: string, index: number) => (
-                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="text-sm text-[#7D8590]">No open action items detected</div>
-          )}
-        </div>
+            {threadSummaryLoading && (
+              <div className="text-center py-10 text-[#484F58] text-sm">Loading summary...</div>
+            )}
 
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Completed Items
-          </div>
-          {threadSummary.summary.completed_items?.length > 0 ? (
-            <ul className="space-y-2">
-              {threadSummary.summary.completed_items.map((item: string, index: number) => (
-                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
-                  <span className="mt-1 text-[#4ADE80]">✓</span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="text-sm text-[#7D8590]">No completed items detected</div>
-          )}
-        </div>
+            {!threadSummaryLoading && !threadSummary && (
+              <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                <div className="text-sm text-[#E6EDF3] mb-2">No summary yet for this thread</div>
+                <div className="text-xs text-[#7D8590] mb-4">
+                  Generate a cached AI summary with status, intent, action items, completed items,
+                  and next step.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => generateSummary(false)}
+                  disabled={threadSummaryGenerating}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[12px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60"
+                >
+                  {threadSummaryGenerating ? "Generating..." : "Generate Summary"}
+                </button>
+              </div>
+            )}
 
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-            Next Step
-          </div>
-          <div className="text-sm text-[#E6EDF3]">
-            {threadSummary.summary.next_step || "No next step identified"}
-          </div>
-        </div>
+            {!threadSummaryLoading && threadSummary?.summary && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Overview
+                  </div>
+                  <div className="text-sm text-[#E6EDF3] leading-6">
+                    {threadSummary.summary.overview || "No overview available"}
+                  </div>
+                </div>
 
-        <div className="text-[11px] text-[#484F58] px-1">
-          Last generated:{" "}
-          {threadSummary.generated_at
-            ? new Date(threadSummary.generated_at).toLocaleString()
-            : "Unknown"}
-        </div>
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Current Status
+                  </div>
+                  <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+                    {threadSummary.summary.status || "Unknown"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Supplier Intent
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                      {threadSummary.summary.intent
+                        ? threadSummary.summary.intent.replace(/_/g, " ")
+                        : "general inquiry"}
+                    </span>
+
+                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+                      Confidence: {threadSummary.summary.confidence || "medium"}
+                    </span>
+                  </div>
+
+                  {threadSummary.summary.secondary_intents?.length > 0 && (
+                    <div className="mt-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                        Secondary intents
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {threadSummary.summary.secondary_intents.map(
+                          (intent: string, index: number) => (
+                            <span
+                              key={index}
+                              className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
+                            >
+                              {intent.replace(/_/g, " ")}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Open Action Items
+                  </div>
+                  {threadSummary.summary.open_action_items?.length > 0 ? (
+                    <ul className="space-y-2">
+                      {threadSummary.summary.open_action_items.map(
+                        (item: string, index: number) => (
+                          <li
+                            key={index}
+                            className="text-sm text-[#E6EDF3] flex items-start gap-2"
+                          >
+                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
+                            <span>{item}</span>
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  ) : (
+                    <div className="text-sm text-[#7D8590]">No open action items detected</div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590]">
+                      Suggested Tasks
+                    </div>
+
+                    {threadSummary.summary.suggested_tasks?.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={createAllSuggestedTasks}
+                        disabled={creatingAllSuggestedTasks}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#4ADE80] hover:bg-[#181D24] disabled:opacity-60"
+                      >
+                        {creatingAllSuggestedTasks ? "Creating..." : "Create All"}
+                      </button>
+                    )}
+                  </div>
+
+                  {threadSummary.summary.suggested_tasks?.length > 0 ? (
+                    <div className="space-y-2">
+                      {threadSummary.summary.suggested_tasks.map(
+                        (item: string, index: number) => {
+                          const isCreating = creatingSuggestedTasks.includes(item);
+
+                          return (
+                            <div
+                              key={`${item}-${index}`}
+                              className="flex items-start justify-between gap-3 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2"
+                            >
+                              <div className="text-sm text-[#E6EDF3] flex-1">{item}</div>
+
+                              <button
+                                type="button"
+                                onClick={() => createSuggestedTask(item)}
+                                disabled={isCreating || creatingAllSuggestedTasks}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60 shrink-0"
+                              >
+                                {isCreating ? "Creating..." : "Create"}
+                              </button>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-[#7D8590]">No suggested tasks generated</div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Completed Items
+                  </div>
+                  {threadSummary.summary.completed_items?.length > 0 ? (
+                    <ul className="space-y-2">
+                      {threadSummary.summary.completed_items.map(
+                        (item: string, index: number) => (
+                          <li
+                            key={index}
+                            className="text-sm text-[#E6EDF3] flex items-start gap-2"
+                          >
+                            <span className="mt-1 text-[#4ADE80]">✓</span>
+                            <span>{item}</span>
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  ) : (
+                    <div className="text-sm text-[#7D8590]">No completed items detected</div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                    Next Step
+                  </div>
+                  <div className="text-sm text-[#E6EDF3]">
+                    {threadSummary.summary.next_step || "No next step identified"}
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-[#484F58] px-1">
+                  Last generated:{" "}
+                  {threadSummary.generated_at
+                    ? new Date(threadSummary.generated_at).toLocaleString()
+                    : "Unknown"}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-    )}
-  </div>
-)}
-      {/* Reply bar */}
-      <div className="px-5 py-3 border-t border-[#1E242C] bg-[#12161B] shrink-0">
-        <div className="flex items-end gap-2.5 px-3.5 py-2.5 rounded-xl border border-[#1E242C] bg-[#0B0E11]">
+
+      <div className="px-5 py-3 border-t border-[#161B22]">
+        <div className="flex items-center gap-2">
           <textarea
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             placeholder="Write a reply..."
-            rows={1}
-            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] resize-none leading-relaxed placeholder:text-[#484F58] max-h-[120px]"
-            onInput={(e) => {
-              const t = e.target as HTMLTextAreaElement;
-              t.style.height = "auto";
-              t.style.height = t.scrollHeight + "px";
-            }}
+            rows={2}
+            className="flex-1 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none"
           />
           <button
-            onClick={handleSendReply}
-            disabled={!replyText.trim() || sending}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${
-              replyText.trim() && !sending
-                ? "bg-[#4ADE80] text-[#0B0E11] cursor-pointer"
-                : "bg-[#1E242C] text-[#484F58]"
-            }`}
+            onClick={handleSendReplyInternal}
+            disabled={sending || !replyText.trim()}
+            className="w-12 h-12 rounded-xl bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] disabled:opacity-50 flex items-center justify-center"
           >
             <Send size={16} />
           </button>
         </div>
       </div>
 
-      {/* Team Chat — always visible at bottom */}
       <TeamChat
         conversationId={convo.id}
         currentUser={currentUser}
@@ -1640,5 +1572,3 @@ const {
     </div>
   );
 }
-
-
