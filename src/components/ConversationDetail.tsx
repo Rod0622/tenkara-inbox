@@ -33,6 +33,16 @@ import {
 } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
+function normalizeSuggestedTaskText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function Avatar({
   initials,
   color,
@@ -727,6 +737,33 @@ export default function ConversationDetail({
     }
   };
 
+  const existingTaskTextSet = useMemo(() => {
+    return new Set(
+      tasks
+        .map((task) => normalizeSuggestedTaskText(task?.text || ""))
+        .filter(Boolean)
+    );
+  }, [tasks]);
+
+  const suggestedTaskItems = useMemo(() => {
+    return (threadSummary?.summary?.suggested_tasks || [])
+      .filter((item: string) => typeof item === "string" && item.trim())
+      .map((item: string, index: number) => {
+        const normalizedText = normalizeSuggestedTaskText(item);
+        return {
+          id: `${normalizedText || item}-${index}`,
+          text: item.trim(),
+          normalizedText,
+          alreadyCreated: existingTaskTextSet.has(normalizedText),
+        };
+      });
+  }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+
+  const pendingSuggestedTaskItems = useMemo(
+    () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
+    [suggestedTaskItems]
+  );
+
   const createSuggestedTask = async (taskText: string) => {
     if (!convo || !taskText.trim()) return;
 
@@ -749,9 +786,7 @@ export default function ConversationDetail({
   const createAllSuggestedTasks = async () => {
     if (!convo) return;
 
-    const tasksToCreate = (threadSummary?.summary?.suggested_tasks || []).filter(
-      (item: string) => typeof item === "string" && item.trim()
-    );
+    const tasksToCreate = pendingSuggestedTaskItems.map((item) => item.text);
 
     if (tasksToCreate.length === 0) return;
 
@@ -1464,7 +1499,7 @@ export default function ConversationDetail({
                       Suggested Tasks
                     </div>
 
-                    {threadSummary.summary.suggested_tasks?.length > 1 && (
+                    {pendingSuggestedTaskItems.length > 1 && (
                       <button
                         type="button"
                         onClick={createAllSuggestedTasks}
@@ -1476,31 +1511,42 @@ export default function ConversationDetail({
                     )}
                   </div>
 
-                  {threadSummary.summary.suggested_tasks?.length > 0 ? (
+                  {suggestedTaskItems.length > 0 ? (
                     <div className="space-y-2">
-                      {threadSummary.summary.suggested_tasks.map(
-                        (item: string, index: number) => {
-                          const isCreating = creatingSuggestedTasks.includes(item);
+                      {suggestedTaskItems.map((item) => {
+                        const isCreating = creatingSuggestedTasks.includes(item.text);
 
-                          return (
-                            <div
-                              key={`${item}-${index}`}
-                              className="flex items-start justify-between gap-3 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2"
-                            >
-                              <div className="text-sm text-[#E6EDF3] flex-1">{item}</div>
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between gap-3 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-[#E6EDF3]">{item.text}</div>
+                              {item.alreadyCreated && (
+                                <div className="mt-1 text-[11px] font-medium text-[#4ADE80]">
+                                  Already created in thread tasks
+                                </div>
+                              )}
+                            </div>
 
+                            {item.alreadyCreated ? (
+                              <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[11px] font-semibold text-[#4ADE80] shrink-0">
+                                Created
+                              </div>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => createSuggestedTask(item)}
+                                onClick={() => createSuggestedTask(item.text)}
                                 disabled={isCreating || creatingAllSuggestedTasks}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60 shrink-0"
                               >
                                 {isCreating ? "Creating..." : "Create"}
                               </button>
-                            </div>
-                          );
-                        }
-                      )}
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="text-sm text-[#7D8590]">No suggested tasks generated</div>
