@@ -759,10 +759,31 @@ export default function ConversationDetail({
       });
   }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
 
-  const pendingSuggestedTaskItems = useMemo(
-    () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
-    [suggestedTaskItems]
-  );
+  type SuggestedTaskItem = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  alreadyCreated: boolean;
+};
+
+const suggestedTaskItems = useMemo<SuggestedTaskItem[]>(() => {
+  return (threadSummary?.summary?.suggested_tasks || [])
+    .filter((item: string) => typeof item === "string" && item.trim())
+    .map((item: string, index: number) => {
+      const normalizedText = normalizeSuggestedTaskText(item);
+      return {
+        id: `${normalizedText || item}-${index}`,
+        text: item.trim(),
+        normalizedText,
+        alreadyCreated: existingTaskTextSet.has(normalizedText),
+      };
+    });
+}, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+
+const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
+  () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
+  [suggestedTaskItems]
+);
 
   const createSuggestedTask = async (taskText: string) => {
     if (!convo || !taskText.trim()) return;
