@@ -130,12 +130,14 @@ Rules:
 - "confidence" should reflect how certain the classification is.
 - Open action items should be things still needing action.
 - Completed items should be clearly done.
+- "suggested_tasks" should contain only concrete, actionable follow-up tasks that a teammate could create immediately.
 - "status" should be short, like:
   "waiting for supplier"
   "waiting for internal decision"
   "quote received"
   "ready to reply"
   "in progress"
+  
 
 Thread subject: ${params.subject}
 Conversation from: ${params.fromName || ""} <${params.fromEmail || ""}>
@@ -355,22 +357,25 @@ export async function POST(req: NextRequest) {
 
     const payload = {
       conversation_id: conversationId,
-      summary: {
-        overview: typeof parsed.overview === "string" ? parsed.overview : "",
-        status: typeof parsed.status === "string" ? parsed.status : "",
-        intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
-        confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
-        secondary_intents: Array.isArray(parsed.secondary_intents)
-          ? parsed.secondary_intents
-          : [],
-        open_action_items: Array.isArray(parsed.open_action_items)
-          ? parsed.open_action_items
-          : [],
-        completed_items: Array.isArray(parsed.completed_items)
-          ? parsed.completed_items
-          : [],
-        next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
-      },
+            summary: {
+              overview: typeof parsed.overview === "string" ? parsed.overview : "",
+              status: typeof parsed.status === "string" ? parsed.status : "",
+              intent: typeof parsed.intent === "string" ? parsed.intent : "general_inquiry",
+              confidence: typeof parsed.confidence === "string" ? parsed.confidence : "medium",
+              secondary_intents: Array.isArray(parsed.secondary_intents)
+                ? parsed.secondary_intents
+                : [],
+              open_action_items: Array.isArray(parsed.open_action_items)
+                ? parsed.open_action_items
+                : [],
+              completed_items: Array.isArray(parsed.completed_items)
+                ? parsed.completed_items
+                : [],
+              next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
+              suggested_tasks: Array.isArray(parsed.suggested_tasks)
+                ? parsed.suggested_tasks
+                : [],
+            },
       source_message_count: messageCount,
       last_message_at: conversation.last_message_at || null,
       generated_at: new Date().toISOString(),

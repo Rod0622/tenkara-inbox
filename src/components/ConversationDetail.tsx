@@ -894,7 +894,7 @@ export default function ConversationDetail({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className={`${activeTab === "summary" ? "flex-1 overflow-hidden px-5 py-4" : "flex-1 overflow-y-auto px-5 py-4"}`}>
         {activeTab === "messages" && (
           <>
             {messages.map((msg: any) => (
@@ -1330,7 +1330,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "summary" && (
-          <div className="h-full overflow-y-auto pr-2">
+  <div className="h-full overflow-y-auto pr-2 pb-6">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
@@ -1545,30 +1545,34 @@ export default function ConversationDetail({
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-[#161B22]">
-        <div className="flex items-center gap-2">
-          <textarea
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            placeholder="Write a reply..."
-            rows={2}
-            className="flex-1 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none"
-          />
-          <button
-            onClick={handleSendReplyInternal}
-            disabled={sending || !replyText.trim()}
-            className="w-12 h-12 rounded-xl bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] disabled:opacity-50 flex items-center justify-center"
-          >
-            <Send size={16} />
-          </button>
+      {activeTab !== "summary" && (
+        <div className="px-5 py-3 border-t border-[#161B22]">
+          <div className="flex items-center gap-2">
+            <textarea
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Write a reply..."
+              rows={2}
+              className="flex-1 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none"
+            />
+            <button
+              onClick={handleSendReplyInternal}
+              disabled={sending || !replyText.trim()}
+              className="w-12 h-12 rounded-xl bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] disabled:opacity-50 flex items-center justify-center"
+            >
+              <Send size={16} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <TeamChat
-        conversationId={convo.id}
-        currentUser={currentUser}
-        teamMembers={teamMembers}
-      />
+      {activeTab !== "summary" && (
+        <TeamChat
+          conversationId={convo.id}
+          currentUser={currentUser}
+          teamMembers={teamMembers}
+        />
+)}
     </div>
   );
 }
