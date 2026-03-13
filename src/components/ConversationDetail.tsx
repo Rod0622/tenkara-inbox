@@ -895,23 +895,6 @@ export default function ConversationDetail({
     }
   };
 
-    if (tasksToCreate.length === 0) return;
-
-    try {
-      setCreatingAllSuggestedTasks(true);
-      for (const taskText of tasksToCreate) {
-        await onAddTask(
-          convo.id,
-          taskText.trim(),
-          currentUser?.id ? [currentUser.id] : [],
-          undefined
-        );
-      }
-      await refetchDetail();
-    } finally {
-      setCreatingAllSuggestedTasks(false);
-    }
-  };
 
   if (!convo) {
     return (
@@ -1730,7 +1713,6 @@ export default function ConversationDetail({
               </div>
             )}
           </div>
-        )}
         )}
       </div>
 
