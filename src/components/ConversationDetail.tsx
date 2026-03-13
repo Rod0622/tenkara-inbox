@@ -43,6 +43,79 @@ function normalizeSuggestedTaskText(value: string) {
     .trim();
 }
 
+function normalizeThreadSubject(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^(re|fw|fwd)\s*:\s*/g, "")
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getSubjectTokens(value: string) {
+  return normalizeThreadSubject(value)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+}
+
+function getDaysBetween(a?: string | null, b?: string | null) {
+  if (!a || !b) return null;
+  const aTime = new Date(a).getTime();
+  const bTime = new Date(b).getTime();
+  if (Number.isNaN(aTime) || Number.isNaN(bTime)) return null;
+  return Math.abs(aTime - bTime) / (1000 * 60 * 60 * 24);
+}
+
+function buildDuplicateSignals(currentConvo: any, relatedThread: any) {
+  const currentSubject = normalizeThreadSubject(currentConvo?.subject || "");
+  const relatedSubject = normalizeThreadSubject(relatedThread?.subject || "");
+  const currentTokens = getSubjectTokens(currentConvo?.subject || "");
+  const relatedTokens = getSubjectTokens(relatedThread?.subject || "");
+  const currentTokenSet = new Set(currentTokens);
+  const overlapCount = relatedTokens.filter((token) => currentTokenSet.has(token)).length;
+  const tokenBase = Math.max(new Set([...currentTokens, ...relatedTokens]).size, 1);
+  const subjectOverlapRatio = overlapCount / tokenBase;
+  const exactSubjectMatch = Boolean(currentSubject) && currentSubject === relatedSubject;
+
+  const currentPreview = normalizeSuggestedTaskText(currentConvo?.snippet || currentConvo?.preview || "");
+  const relatedPreview = normalizeSuggestedTaskText(relatedThread?.preview || "");
+  const previewOverlap =
+    currentPreview && relatedPreview
+      ? currentPreview.slice(0, 80) === relatedPreview.slice(0, 80)
+      : false;
+
+  const recencyDays = getDaysBetween(currentConvo?.last_message_at, relatedThread?.last_message_at);
+  const isVeryRecentOverlap = recencyDays !== null && recencyDays <= 3;
+  const isRecentOverlap = recencyDays !== null && recencyDays <= 7;
+
+  let score = 0;
+  if (exactSubjectMatch) score += 60;
+  else score += Math.round(subjectOverlapRatio * 45);
+  if (previewOverlap) score += 15;
+  if (isVeryRecentOverlap) score += 15;
+  else if (isRecentOverlap) score += 8;
+  if (relatedThread?.is_unread) score += 2;
+  if ((relatedThread?.status || "").toLowerCase() === "open") score += 3;
+  score = Math.max(0, Math.min(score, 100));
+
+  const badges: Array<{ label: string; tone: "yellow" | "blue" | "green" | "gray" }> = [];
+  if (exactSubjectMatch) badges.push({ label: "Same subject", tone: "yellow" });
+  else if (subjectOverlapRatio >= 0.45) badges.push({ label: "Strong subject overlap", tone: "blue" });
+  if (isVeryRecentOverlap) badges.push({ label: "Recent overlap", tone: "green" });
+  if (previewOverlap) badges.push({ label: "Similar preview", tone: "blue" });
+  if (score >= 75) badges.unshift({ label: "Likely duplicate", tone: "yellow" });
+  else if (score >= 55) badges.unshift({ label: "Possible duplicate", tone: "blue" });
+
+  return {
+    score,
+    exactSubjectMatch,
+    subjectOverlapRatio,
+    recencyDays,
+    badges,
+  };
+}
+
 function Avatar({
   initials,
   color,
@@ -719,6 +792,26 @@ export default function ConversationDetail({
     convo?.last_message_at,
   ]);
 
+
+  const rankedRelatedThreads = useMemo(() => {
+    return relatedThreads
+      .map((thread: any) => {
+        const duplicateSignals = buildDuplicateSignals(convo, thread);
+        return {
+          ...thread,
+          duplicateSignals,
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (b.duplicateSignals.score !== a.duplicateSignals.score) {
+          return b.duplicateSignals.score - a.duplicateSignals.score;
+        }
+        const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+        const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [relatedThreads, convo]);
+
   useEffect(() => {
     setActiveTab("messages");
     setShowNoteInput(false);
@@ -769,7 +862,7 @@ export default function ConversationDetail({
     { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
     { id: "activity", label: "Activity", count: activities.length },
-    { id: "related", label: "Related Threads", count: relatedThreads.length },
+    { id: "related", label: "Related Threads", count: rankedRelatedThreads.length },
     { id: "summary", label: "Summary", count: 0 },
   ];
 
@@ -1361,19 +1454,17 @@ export default function ConversationDetail({
               </div>
             )}
 
-            {!relatedThreadsLoading && relatedThreads.length === 0 && (
+            {!relatedThreadsLoading && rankedRelatedThreads.length === 0 && (
               <div className="text-center py-10 text-[#484F58] text-sm">
                 No related threads found for this contact in this shared account
               </div>
             )}
 
             {!relatedThreadsLoading &&
-              relatedThreads.map((thread: any) => {
-                const sameSubject =
-                  String(thread.subject || "").trim().toLowerCase() ===
-                  String(convo.subject || "").trim().toLowerCase();
-
+              rankedRelatedThreads.map((thread: any) => {
                 const href = `/#conversation=${thread.id}&mailbox=${thread.email_account_id || ""}&folder=${thread.folder_id || ""}`;
+                const score = thread.duplicateSignals?.score || 0;
+                const badges = thread.duplicateSignals?.badges || [];
 
                 return (
                   <div
@@ -1389,12 +1480,39 @@ export default function ConversationDetail({
                           <div className="text-[13px] font-semibold text-[#E6EDF3] truncate">
                             {thread.subject || "(No subject)"}
                           </div>
-                          {sameSubject && (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-                              Possible duplicate
-                            </span>
-                          )}
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              score >= 75
+                                ? "bg-[rgba(245,213,71,0.12)] text-[#F5D547]"
+                                : score >= 55
+                                  ? "bg-[rgba(88,166,255,0.12)] text-[#58A6FF]"
+                                  : "bg-[#0B0E11] text-[#7D8590] border border-[#1E242C]"
+                            }`}
+                          >
+                            Match score: {score}
+                          </span>
                         </div>
+
+                        {badges.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {badges.map((badge: any) => (
+                              <span
+                                key={`${thread.id}-${badge.label}`}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                  badge.tone === "yellow"
+                                    ? "bg-[rgba(245,213,71,0.12)] text-[#F5D547]"
+                                    : badge.tone === "green"
+                                      ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]"
+                                      : badge.tone === "blue"
+                                        ? "bg-[rgba(88,166,255,0.12)] text-[#58A6FF]"
+                                        : "bg-[#0B0E11] text-[#7D8590] border border-[#1E242C]"
+                                }`}
+                              >
+                                {badge.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
 
                         <div className="text-[11px] text-[#7D8590] mb-2 truncate">
                           {thread.preview || "No preview available"}
