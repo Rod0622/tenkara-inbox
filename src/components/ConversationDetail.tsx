@@ -604,6 +604,129 @@ export default function ConversationDetail({
     generateSummary,
   } = useThreadSummary(convo?.id || null);
 
+  type SuggestedTaskItem = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  alreadyCreated: boolean;
+};
+
+const normalizeSuggestedTaskText = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
+    .trim();
+
+const existingTaskTextSet = useMemo(() => {
+  return new Set(
+    tasks
+      .map((task: any) => normalizeSuggestedTaskText(task.text || ""))
+      .filter(Boolean)
+  );
+}, [tasks]);
+
+const suggestedTaskItems = useMemo<SuggestedTaskItem[]>(() => {
+  return (threadSummary?.summary?.suggested_tasks || [])
+    .filter((item: string) => typeof item === "string" && item.trim())
+    .map((item: string, index: number) => {
+      const normalizedText = normalizeSuggestedTaskText(item);
+      return {
+        id: `${normalizedText || item}-${index}`,
+        text: item.trim(),
+        normalizedText,
+        alreadyCreated: existingTaskTextSet.has(normalizedText),
+      };
+    });
+}, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+
+const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
+  () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
+  [suggestedTaskItems]
+);
+
+const summarySourceMessageCount = Number(threadSummary?.source_message_count || 0);
+const summarySourceNoteCount = Number(threadSummary?.source_note_count || 0);
+const summarySourceTaskCount = Number(threadSummary?.source_task_count || 0);
+const summarySourceCompletedTaskCount = Number(
+  threadSummary?.source_completed_task_count || 0
+);
+
+const currentCompletedTaskCount = useMemo(
+  () => tasks.filter((task: any) => task.status === "completed" || task.is_done).length,
+  [tasks]
+);
+
+const isSummaryStale = useMemo(() => {
+  if (!threadSummary) return false;
+
+  const messageCountChanged = summarySourceMessageCount !== messages.length;
+  const noteCountChanged = summarySourceNoteCount !== notes.length;
+  const taskCountChanged = summarySourceTaskCount !== tasks.length;
+  const completedTaskCountChanged =
+    summarySourceCompletedTaskCount !== currentCompletedTaskCount;
+  const lastMessageChanged =
+    String(threadSummary.last_message_at || "") !== String(convo?.last_message_at || "");
+
+  return (
+    messageCountChanged ||
+    noteCountChanged ||
+    taskCountChanged ||
+    completedTaskCountChanged ||
+    lastMessageChanged
+  );
+}, [
+  threadSummary,
+  summarySourceMessageCount,
+  summarySourceNoteCount,
+  summarySourceTaskCount,
+  summarySourceCompletedTaskCount,
+  messages.length,
+  notes.length,
+  tasks.length,
+  currentCompletedTaskCount,
+  convo?.last_message_at,
+]);
+
+const staleReasons = useMemo(() => {
+  if (!threadSummary) return [];
+
+  const reasons: string[] = [];
+
+  if (summarySourceMessageCount !== messages.length) {
+    reasons.push("messages changed");
+  }
+
+  if (summarySourceNoteCount !== notes.length) {
+    reasons.push("notes changed");
+  }
+
+  if (summarySourceTaskCount !== tasks.length) {
+    reasons.push("tasks changed");
+  }
+
+  if (summarySourceCompletedTaskCount !== currentCompletedTaskCount) {
+    reasons.push("task completion changed");
+  }
+
+  if (String(threadSummary.last_message_at || "") !== String(convo?.last_message_at || "")) {
+    reasons.push("latest email changed");
+  }
+
+  return reasons;
+}, [
+  threadSummary,
+  summarySourceMessageCount,
+  summarySourceNoteCount,
+  summarySourceTaskCount,
+  summarySourceCompletedTaskCount,
+  messages.length,
+  notes.length,
+  tasks.length,
+  currentCompletedTaskCount,
+  convo?.last_message_at,
+]);
+
   useEffect(() => {
     setActiveTab("messages");
     setShowNoteInput(false);
@@ -774,46 +897,47 @@ const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
 );
 
   const createSuggestedTask = async (taskText: string) => {
-    if (!convo || !taskText.trim()) return;
+  if (!convo || !taskText.trim()) return;
 
-    try {
-      setCreatingSuggestedTasks((prev) => [...prev, taskText]);
+  const normalized = normalizeSuggestedTaskText(taskText);
+  if (existingTaskTextSet.has(normalized)) return;
 
+  try {
+    setCreatingSuggestedTasks((prev) => [...prev, taskText]);
+
+    await onAddTask(
+      convo.id,
+      taskText.trim(),
+      currentUser?.id ? [currentUser.id] : [],
+      undefined
+    );
+
+    await refetchDetail();
+  } finally {
+    setCreatingSuggestedTasks((prev) => prev.filter((item) => item !== taskText));
+  }
+};
+
+const createAllSuggestedTasks = async () => {
+  if (!convo || pendingSuggestedTaskItems.length === 0) return;
+
+  try {
+    setCreatingAllSuggestedTasks(true);
+
+    for (const item of pendingSuggestedTaskItems) {
       await onAddTask(
         convo.id,
-        taskText.trim(),
+        item.text,
         currentUser?.id ? [currentUser.id] : [],
         undefined
       );
-
-      await refetchDetail();
-    } finally {
-      setCreatingSuggestedTasks((prev) => prev.filter((item) => item !== taskText));
     }
-  };
 
-  const createAllSuggestedTasks = async () => {
-    if (!convo) return;
-
-    const tasksToCreate = pendingSuggestedTaskItems.map((item) => item.text);
-
-    if (tasksToCreate.length === 0) return;
-
-    try {
-      setCreatingAllSuggestedTasks(true);
-      for (const taskText of tasksToCreate) {
-        await onAddTask(
-          convo.id,
-          taskText.trim(),
-          currentUser?.id ? [currentUser.id] : [],
-          undefined
-        );
-      }
-      await refetchDetail();
-    } finally {
-      setCreatingAllSuggestedTasks(false);
-    }
-  };
+    await refetchDetail();
+  } finally {
+    setCreatingAllSuggestedTasks(false);
+  }
+};
 
   if (!convo) {
     return (
@@ -1380,230 +1504,259 @@ const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
         )}
 
         {activeTab === "summary" && (
-          <div className="h-full overflow-y-auto pr-2 pb-6">
-            <div className="mb-3 flex items-center justify-between gap-2">
+  <div className="h-full overflow-y-auto pr-2">
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <div>
+        <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
+        <div className="text-xs text-[#7D8590]">
+          AI-generated review of this conversation
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => generateSummary(true)}
+        disabled={threadSummaryGenerating}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
+      >
+        {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
+      </button>
+    </div>
+
+    {threadSummaryLoading && (
+      <div className="text-center py-10 text-[#484F58] text-sm">Loading summary...</div>
+    )}
+
+    {!threadSummaryLoading && !threadSummary && (
+      <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+        <div className="text-sm text-[#E6EDF3] mb-2">No summary yet for this thread</div>
+        <div className="text-xs text-[#7D8590] mb-4">
+          Generate a cached AI summary with status, intent, action items, completed items,
+          suggested tasks, and next step.
+        </div>
+        <button
+          type="button"
+          onClick={() => generateSummary(false)}
+          disabled={threadSummaryGenerating}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[12px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60"
+        >
+          {threadSummaryGenerating ? "Generating..." : "Generate Summary"}
+        </button>
+      </div>
+    )}
+
+    {!threadSummaryLoading && threadSummary?.summary && (
+      <div className="space-y-3">
+        {isSummaryStale && (
+          <div className="rounded-xl border border-[rgba(245,213,71,0.35)] bg-[rgba(245,213,71,0.08)] p-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
-                <div className="text-xs text-[#7D8590]">
-                  AI-generated review of this conversation
+                <div className="text-sm font-semibold text-[#F5D547]">
+                  Summary may be outdated
                 </div>
+                <div className="mt-1 text-xs text-[#C9D1D9]">
+                  This thread changed after the last summary was generated.
+                </div>
+
+                {staleReasons.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {staleReasons.map((reason) => (
+                      <span
+                        key={reason}
+                        className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[rgba(245,213,71,0.28)] text-[#F5D547]"
+                      >
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <button
                 type="button"
                 onClick={() => generateSummary(true)}
                 disabled={threadSummaryGenerating}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F5D547] text-[#0B0E11] text-[12px] font-semibold hover:opacity-90 disabled:opacity-60 shrink-0"
               >
-                {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
+                {threadSummaryGenerating ? "Refreshing..." : "Refresh now"}
               </button>
             </div>
-
-            {threadSummaryLoading && (
-              <div className="text-center py-10 text-[#484F58] text-sm">Loading summary...</div>
-            )}
-
-            {!threadSummaryLoading && !threadSummary && (
-              <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                <div className="text-sm text-[#E6EDF3] mb-2">No summary yet for this thread</div>
-                <div className="text-xs text-[#7D8590] mb-4">
-                  Generate a cached AI summary with status, intent, action items, completed items,
-                  and next step.
-                </div>
-                <button
-                  type="button"
-                  onClick={() => generateSummary(false)}
-                  disabled={threadSummaryGenerating}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[12px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60"
-                >
-                  {threadSummaryGenerating ? "Generating..." : "Generate Summary"}
-                </button>
-              </div>
-            )}
-
-            {!threadSummaryLoading && threadSummary?.summary && (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Overview
-                  </div>
-                  <div className="text-sm text-[#E6EDF3] leading-6">
-                    {threadSummary.summary.overview || "No overview available"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Current Status
-                  </div>
-                  <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-                    {threadSummary.summary.status || "Unknown"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Supplier Intent
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-                      {threadSummary.summary.intent
-                        ? threadSummary.summary.intent.replace(/_/g, " ")
-                        : "general inquiry"}
-                    </span>
-
-                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-                      Confidence: {threadSummary.summary.confidence || "medium"}
-                    </span>
-                  </div>
-
-                  {threadSummary.summary.secondary_intents?.length > 0 && (
-                    <div className="mt-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                        Secondary intents
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {threadSummary.summary.secondary_intents.map(
-                          (intent: string, index: number) => (
-                            <span
-                              key={index}
-                              className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
-                            >
-                              {intent.replace(/_/g, " ")}
-                            </span>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Open Action Items
-                  </div>
-                  {threadSummary.summary.open_action_items?.length > 0 ? (
-                    <ul className="space-y-2">
-                      {threadSummary.summary.open_action_items.map(
-                        (item: string, index: number) => (
-                          <li
-                            key={index}
-                            className="text-sm text-[#E6EDF3] flex items-start gap-2"
-                          >
-                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
-                            <span>{item}</span>
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  ) : (
-                    <div className="text-sm text-[#7D8590]">No open action items detected</div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590]">
-                      Suggested Tasks
-                    </div>
-
-                    {pendingSuggestedTaskItems.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={createAllSuggestedTasks}
-                        disabled={creatingAllSuggestedTasks}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#4ADE80] hover:bg-[#181D24] disabled:opacity-60"
-                      >
-                        {creatingAllSuggestedTasks ? "Creating..." : "Create All"}
-                      </button>
-                    )}
-                  </div>
-
-                  {suggestedTaskItems.length > 0 ? (
-                    <div className="space-y-2">
-                      {suggestedTaskItems.map((item) => {
-                        const isCreating = creatingSuggestedTasks.includes(item.text);
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="flex items-start justify-between gap-3 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm text-[#E6EDF3]">{item.text}</div>
-                              {item.alreadyCreated && (
-                                <div className="mt-1 text-[11px] font-medium text-[#4ADE80]">
-                                  Already created in thread tasks
-                                </div>
-                              )}
-                            </div>
-
-                            {item.alreadyCreated ? (
-                              <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[11px] font-semibold text-[#4ADE80] shrink-0">
-                                Created
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => createSuggestedTask(item.text)}
-                                disabled={isCreating || creatingAllSuggestedTasks}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60 shrink-0"
-                              >
-                                {isCreating ? "Creating..." : "Create"}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-[#7D8590]">No suggested tasks generated</div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Completed Items
-                  </div>
-                  {threadSummary.summary.completed_items?.length > 0 ? (
-                    <ul className="space-y-2">
-                      {threadSummary.summary.completed_items.map(
-                        (item: string, index: number) => (
-                          <li
-                            key={index}
-                            className="text-sm text-[#E6EDF3] flex items-start gap-2"
-                          >
-                            <span className="mt-1 text-[#4ADE80]">✓</span>
-                            <span>{item}</span>
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  ) : (
-                    <div className="text-sm text-[#7D8590]">No completed items detected</div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Next Step
-                  </div>
-                  <div className="text-sm text-[#E6EDF3]">
-                    {threadSummary.summary.next_step || "No next step identified"}
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-[#484F58] px-1">
-                  Last generated:{" "}
-                  {threadSummary.generated_at
-                    ? new Date(threadSummary.generated_at).toLocaleString()
-                    : "Unknown"}
-                </div>
-              </div>
-            )}
           </div>
         )}
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Overview
+          </div>
+          <div className="text-sm text-[#E6EDF3] leading-6">
+            {threadSummary.summary.overview || "No overview available"}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Status
+          </div>
+          <div className="text-sm text-[#E6EDF3]">
+            {threadSummary.summary.status || "No status available"}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Supplier Intent
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+              {threadSummary.summary.intent
+                ? threadSummary.summary.intent.replace(/_/g, " ")
+                : "general inquiry"}
+            </span>
+
+            <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+              Confidence: {threadSummary.summary.confidence || "medium"}
+            </span>
+          </div>
+
+          {threadSummary.summary.secondary_intents?.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+                Secondary intents
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {threadSummary.summary.secondary_intents.map(
+                  (intent: string, index: number) => (
+                    <span
+                      key={index}
+                      className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[#1E242C] text-[#E6EDF3]"
+                    >
+                      {intent.replace(/_/g, " ")}
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Open Action Items
+          </div>
+          {threadSummary.summary.open_action_items?.length > 0 ? (
+            <ul className="space-y-2">
+              {threadSummary.summary.open_action_items.map((item: string, index: number) => (
+                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-[#7D8590]">No open action items detected</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Suggested Tasks
+          </div>
+
+          {suggestedTaskItems.length > 0 ? (
+            <div className="space-y-2">
+              {suggestedTaskItems.map((item) => {
+                const isCreating = creatingSuggestedTasks.includes(item.text);
+
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm text-[#E6EDF3]">{item.text}</div>
+                        {item.alreadyCreated && (
+                          <div className="mt-1 text-[11px] text-[#7D8590]">
+                            Already created in thread tasks
+                          </div>
+                        )}
+                      </div>
+
+                      {item.alreadyCreated ? (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
+                          Created
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => createSuggestedTask(item.text)}
+                          disabled={isCreating}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#58A6FF] text-[#0B0E11] text-[12px] font-semibold hover:opacity-90 disabled:opacity-60 shrink-0"
+                        >
+                          {isCreating ? "Creating..." : "Create"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {pendingSuggestedTaskItems.length >= 2 && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={createAllSuggestedTasks}
+                    disabled={creatingAllSuggestedTasks}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
+                  >
+                    {creatingAllSuggestedTasks ? "Creating all..." : "Create All"}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm text-[#7D8590]">No suggested tasks detected</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Completed Items
+          </div>
+          {threadSummary.summary.completed_items?.length > 0 ? (
+            <ul className="space-y-2">
+              {threadSummary.summary.completed_items.map((item: string, index: number) => (
+                <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
+                  <span className="mt-1 text-[#4ADE80]">✓</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-[#7D8590]">No completed items detected</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
+            Next Step
+          </div>
+          <div className="text-sm text-[#E6EDF3]">
+            {threadSummary.summary.next_step || "No next step identified"}
+          </div>
+        </div>
+
+        <div className="text-[11px] text-[#484F58] px-1">
+          Last generated:{" "}
+          {threadSummary.generated_at
+            ? new Date(threadSummary.generated_at).toLocaleString()
+            : "Unknown"}
+        </div>
+      </div>
+    )}
+  </div>
+)}
       </div>
 
       {!isReviewTab && (
