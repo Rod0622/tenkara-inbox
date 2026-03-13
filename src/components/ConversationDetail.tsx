@@ -648,6 +648,8 @@ export default function ConversationDetail({
     { id: "summary", label: "Summary", count: 0 },
   ];
 
+  const isReviewTab = activeTab !== "messages";
+
   const getTaskAssignees = (task: any) =>
     task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : [];
 
@@ -894,7 +896,11 @@ export default function ConversationDetail({
         ))}
       </div>
 
-      <div className={`${activeTab === "summary" ? "flex-1 overflow-hidden px-5 py-4" : "flex-1 overflow-y-auto px-5 py-4"}`}>
+      <div
+        className={`${
+          isReviewTab ? "flex-1 overflow-hidden px-5 py-4" : "flex-1 overflow-y-auto px-5 py-4"
+        }`}
+      >
         {activeTab === "messages" && (
           <>
             {messages.map((msg: any) => (
@@ -939,7 +945,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "notes" && (
-          <div className="space-y-3">
+          <div className="h-full overflow-y-auto pr-2 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-[#E6EDF3]">Internal Notes</div>
               <button
@@ -1015,7 +1021,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "tasks" && (
-          <div className="space-y-3">
+          <div className="h-full overflow-y-auto pr-2 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-[#E6EDF3]">Thread Tasks</div>
               <button
@@ -1168,7 +1174,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "activity" && (
-          <div className="space-y-0.5">
+          <div className="h-full overflow-y-auto pr-2 space-y-0.5">
             {activities.length === 0 && (
               <div className="text-center py-10 text-[#484F58] text-sm">
                 No activity recorded yet
@@ -1181,7 +1187,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "related" && (
-          <div>
+          <div className="h-full overflow-y-auto pr-2">
             {summary && (
               <div className="mb-4 rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
                 <div className="text-sm font-semibold text-[#E6EDF3] mb-2">Supplier Contact</div>
@@ -1330,7 +1336,7 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "summary" && (
-  <div className="h-full overflow-y-auto pr-2 pb-6">
+          <div className="h-full overflow-y-auto pr-2 pb-6">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold text-[#E6EDF3]">Thread Summary</div>
@@ -1545,7 +1551,7 @@ export default function ConversationDetail({
         )}
       </div>
 
-      {activeTab !== "summary" && (
+      {!isReviewTab && (
         <div className="px-5 py-3 border-t border-[#161B22]">
           <div className="flex items-center gap-2">
             <textarea
@@ -1566,13 +1572,13 @@ export default function ConversationDetail({
         </div>
       )}
 
-      {activeTab !== "summary" && (
+      {!isReviewTab && (
         <TeamChat
           conversationId={convo.id}
           currentUser={currentUser}
           teamMembers={teamMembers}
         />
-)}
+      )}
     </div>
   );
 }
