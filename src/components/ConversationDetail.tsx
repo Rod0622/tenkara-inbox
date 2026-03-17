@@ -1999,93 +1999,103 @@ export default function ConversationDetail({
       )}
 
       {showForwardModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-[#1E242C] bg-[#0F1318] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#1E242C] px-5 py-4">
-              <div>
-                <div className="text-sm font-semibold text-[#E6EDF3]">Forward Message</div>
-                <div className="text-xs text-[#7D8590]">
-                  Send this conversation content to another recipient
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowForwardModal(false)}
-                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
-              >
-                <X size={15} />
-              </button>
-            </div>
-
-            <div className="space-y-3 px-5 py-4">
-              <div>
-                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">To</label>
-                <input
-                  type="text"
-                  value={forwardTo}
-                  onChange={(e) => setForwardTo(e.target.value)}
-                  placeholder="recipient@example.com"
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Cc</label>
-                <input
-                  type="text"
-                  value={forwardCc}
-                  onChange={(e) => setForwardCc(e.target.value)}
-                  placeholder="optional cc recipients"
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Subject</label>
-                <input
-                  type="text"
-                  value={forwardSubject}
-                  onChange={(e) => setForwardSubject(e.target.value)}
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Message</label>
-                <textarea
-                  value={forwardBody}
-                  onChange={(e) => setForwardBody(e.target.value)}
-                  rows={14}
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-y"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-[#1E242C] px-5 py-4">
-              <button
-                onClick={() => setShowForwardModal(false)}
-                className="px-3 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleSendForward}
-                disabled={
-                  forwardSending ||
-                  !forwardTo.trim() ||
-                  !forwardSubject.trim() ||
-                  !forwardBody.trim()
-                }
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73] disabled:opacity-50"
-              >
-                <Send size={14} />
-                {forwardSending ? "Sending..." : "Send Forward"}
-              </button>
-            </div>
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-[#1E242C] bg-[#0F1318] shadow-2xl flex flex-col">
+      <div className="flex items-center justify-between border-b border-[#1E242C] px-5 py-4 shrink-0">
+        <div>
+          <div className="text-sm font-semibold text-[#E6EDF3]">Forward Message</div>
+          <div className="text-xs text-[#7D8590]">
+            Send this conversation content to another recipient
           </div>
         </div>
-      )}
+
+        <button
+          type="button"
+          onClick={() => setShowForwardModal(false)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] hover:bg-[#181D24]"
+          title="Close"
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">To</label>
+          <input
+            type="text"
+            value={forwardTo}
+            onChange={(e) => setForwardTo(e.target.value)}
+            placeholder="recipient@example.com"
+            className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Cc</label>
+          <input
+            type="text"
+            value={forwardCc}
+            onChange={(e) => setForwardCc(e.target.value)}
+            placeholder="optional cc recipients"
+            className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Subject</label>
+          <input
+            type="text"
+            value={forwardSubject}
+            onChange={(e) => setForwardSubject(e.target.value)}
+            className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Message</label>
+          <textarea
+            value={forwardBody}
+            onChange={(e) => setForwardBody(e.target.value)}
+            rows={14}
+            className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-y"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t border-[#1E242C] px-5 py-4 shrink-0 bg-[#0F1318]">
+        <div className="text-[11px] text-[#7D8590]">
+          Save draft is not wired yet in this forward flow.
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowForwardModal(false)}
+            className="px-3 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSendForward}
+            disabled={
+              forwardSending ||
+              !forwardTo.trim() ||
+              !forwardSubject.trim() ||
+              !forwardBody.trim()
+            }
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73] disabled:opacity-50"
+          >
+            <Send size={14} />
+            {forwardSending ? "Sending..." : "Send Forward"}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
     </div>
   );
