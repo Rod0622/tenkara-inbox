@@ -43,76 +43,59 @@ function normalizeSuggestedTaskText(value: string) {
     .trim();
 }
 
-function normalizeThreadSubject(value: string) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/^(re|fw|fwd)\s*:\s*/g, "")
-    .replace(/\[[^\]]+\]/g, " ")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
-function getSubjectTokens(value: string) {
-  return normalizeThreadSubject(value)
+function getNormalizedTokens(value: string) {
+  return normalizeSuggestedTaskText(value)
     .split(" ")
-    .filter((token) => token.length >= 3);
+    .filter((token) => token.length > 2);
 }
 
-function getDaysBetween(a?: string | null, b?: string | null) {
-  if (!a || !b) return null;
-  const aTime = new Date(a).getTime();
-  const bTime = new Date(b).getTime();
-  if (Number.isNaN(aTime) || Number.isNaN(bTime)) return null;
-  return Math.abs(aTime - bTime) / (1000 * 60 * 60 * 24);
-}
+function getTaskMatchMeta(itemText: string, tasks: any[]) {
+  const normalizedItem = normalizeSuggestedTaskText(itemText);
+  const itemTokens = getNormalizedTokens(itemText);
 
-function buildDuplicateSignals(currentConvo: any, relatedThread: any) {
-  const currentSubject = normalizeThreadSubject(currentConvo?.subject || "");
-  const relatedSubject = normalizeThreadSubject(relatedThread?.subject || "");
-  const currentTokens = getSubjectTokens(currentConvo?.subject || "");
-  const relatedTokens = getSubjectTokens(relatedThread?.subject || "");
-  const currentTokenSet = new Set(currentTokens);
-  const overlapCount = relatedTokens.filter((token) => currentTokenSet.has(token)).length;
-  const tokenBase = Math.max(new Set([...currentTokens, ...relatedTokens]).size, 1);
-  const subjectOverlapRatio = overlapCount / tokenBase;
-  const exactSubjectMatch = Boolean(currentSubject) && currentSubject === relatedSubject;
+  let bestTask: any = null;
+  let bestScore = 0;
 
-  const currentPreview = normalizeSuggestedTaskText(currentConvo?.snippet || currentConvo?.preview || "");
-  const relatedPreview = normalizeSuggestedTaskText(relatedThread?.preview || "");
-  const previewOverlap =
-    currentPreview && relatedPreview
-      ? currentPreview.slice(0, 80) === relatedPreview.slice(0, 80)
-      : false;
+  for (const task of tasks || []) {
+    const taskText = String(task?.text || "");
+    const normalizedTask = normalizeSuggestedTaskText(taskText);
 
-  const recencyDays = getDaysBetween(currentConvo?.last_message_at, relatedThread?.last_message_at);
-  const isVeryRecentOverlap = recencyDays !== null && recencyDays <= 3;
-  const isRecentOverlap = recencyDays !== null && recencyDays <= 7;
+    if (!normalizedTask) continue;
 
-  let score = 0;
-  if (exactSubjectMatch) score += 60;
-  else score += Math.round(subjectOverlapRatio * 45);
-  if (previewOverlap) score += 15;
-  if (isVeryRecentOverlap) score += 15;
-  else if (isRecentOverlap) score += 8;
-  if (relatedThread?.is_unread) score += 2;
-  if ((relatedThread?.status || "").toLowerCase() === "open") score += 3;
-  score = Math.max(0, Math.min(score, 100));
+    if (normalizedTask === normalizedItem) {
+      return {
+        matchedTask: task,
+        score: 1,
+        isCompleted: task?.status === "completed" || task?.is_done,
+      };
+    }
 
-  const badges: Array<{ label: string; tone: "yellow" | "blue" | "green" | "gray" }> = [];
-  if (exactSubjectMatch) badges.push({ label: "Same subject", tone: "yellow" });
-  else if (subjectOverlapRatio >= 0.45) badges.push({ label: "Strong subject overlap", tone: "blue" });
-  if (isVeryRecentOverlap) badges.push({ label: "Recent overlap", tone: "green" });
-  if (previewOverlap) badges.push({ label: "Similar preview", tone: "blue" });
-  if (score >= 75) badges.unshift({ label: "Likely duplicate", tone: "yellow" });
-  else if (score >= 55) badges.unshift({ label: "Possible duplicate", tone: "blue" });
+    const taskTokens = getNormalizedTokens(taskText);
+    if (itemTokens.length === 0 || taskTokens.length === 0) continue;
+
+    const taskTokenSet = new Set(taskTokens);
+    const sharedCount = itemTokens.filter((token) => taskTokenSet.has(token)).length;
+    const score = sharedCount / Math.max(itemTokens.length, taskTokens.length);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestTask = task;
+    }
+  }
+
+  if (bestTask && bestScore >= 0.5) {
+    return {
+      matchedTask: bestTask,
+      score: bestScore,
+      isCompleted: bestTask?.status === "completed" || bestTask?.is_done,
+    };
+  }
 
   return {
-    score,
-    exactSubjectMatch,
-    subjectOverlapRatio,
-    recencyDays,
-    badges,
+    matchedTask: null,
+    score: 0,
+    isCompleted: false,
   };
 }
 
@@ -676,141 +659,6 @@ export default function ConversationDetail({
     generating: threadSummaryGenerating,
     generateSummary,
   } = useThreadSummary(convo?.id || null);
-  type SuggestedTaskItem = {
-    id: string;
-    text: string;
-    normalizedText: string;
-    alreadyCreated: boolean;
-  };
-
-  const existingTaskTextSet = useMemo(() => {
-    return new Set(
-      tasks
-        .map((task: any) => normalizeSuggestedTaskText(task?.text || ""))
-        .filter(Boolean)
-    );
-  }, [tasks]);
-
-  const suggestedTaskItems = useMemo<SuggestedTaskItem[]>(() => {
-    return (threadSummary?.summary?.suggested_tasks || [])
-      .filter((item: string) => typeof item === "string" && item.trim())
-      .map((item: string, index: number) => {
-        const normalizedText = normalizeSuggestedTaskText(item);
-        return {
-          id: `${normalizedText || item}-${index}`,
-          text: item.trim(),
-          normalizedText,
-          alreadyCreated: existingTaskTextSet.has(normalizedText),
-        };
-      });
-  }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
-
-  const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
-    () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
-    [suggestedTaskItems]
-  );
-
-  const summarySourceMessageCount = Number(threadSummary?.source_message_count || 0);
-  const summarySourceNoteCount = Number(threadSummary?.source_note_count || 0);
-  const summarySourceTaskCount = Number(threadSummary?.source_task_count || 0);
-  const summarySourceCompletedTaskCount = Number(
-    threadSummary?.source_completed_task_count || 0
-  );
-
-  const currentCompletedTaskCount = useMemo(
-    () => tasks.filter((task: any) => task.status === "completed" || task.is_done).length,
-    [tasks]
-  );
-
-  const isSummaryStale = useMemo(() => {
-    if (!threadSummary) return false;
-
-    const messageCountChanged = summarySourceMessageCount !== messages.length;
-    const noteCountChanged = summarySourceNoteCount !== notes.length;
-    const taskCountChanged = summarySourceTaskCount !== tasks.length;
-    const completedTaskCountChanged =
-      summarySourceCompletedTaskCount !== currentCompletedTaskCount;
-    const lastMessageChanged =
-      String(threadSummary.last_message_at || "") !== String(convo?.last_message_at || "");
-
-    return (
-      messageCountChanged ||
-      noteCountChanged ||
-      taskCountChanged ||
-      completedTaskCountChanged ||
-      lastMessageChanged
-    );
-  }, [
-    threadSummary,
-    summarySourceMessageCount,
-    summarySourceNoteCount,
-    summarySourceTaskCount,
-    summarySourceCompletedTaskCount,
-    messages.length,
-    notes.length,
-    tasks.length,
-    currentCompletedTaskCount,
-    convo?.last_message_at,
-  ]);
-
-  const staleReasons = useMemo(() => {
-    if (!threadSummary) return [];
-
-    const reasons: string[] = [];
-
-    if (summarySourceMessageCount !== messages.length) {
-      reasons.push("messages changed");
-    }
-
-    if (summarySourceNoteCount !== notes.length) {
-      reasons.push("notes changed");
-    }
-
-    if (summarySourceTaskCount !== tasks.length) {
-      reasons.push("tasks changed");
-    }
-
-    if (summarySourceCompletedTaskCount !== currentCompletedTaskCount) {
-      reasons.push("task completion changed");
-    }
-
-    if (String(threadSummary.last_message_at || "") !== String(convo?.last_message_at || "")) {
-      reasons.push("latest email changed");
-    }
-
-    return reasons;
-  }, [
-    threadSummary,
-    summarySourceMessageCount,
-    summarySourceNoteCount,
-    summarySourceTaskCount,
-    summarySourceCompletedTaskCount,
-    messages.length,
-    notes.length,
-    tasks.length,
-    currentCompletedTaskCount,
-    convo?.last_message_at,
-  ]);
-
-
-  const rankedRelatedThreads = useMemo(() => {
-    return relatedThreads
-      .map((thread: any) => {
-        const duplicateSignals = buildDuplicateSignals(convo, thread);
-        return {
-          ...thread,
-          duplicateSignals,
-        };
-      })
-      .sort((a: any, b: any) => {
-        if (b.duplicateSignals.score !== a.duplicateSignals.score) {
-          return b.duplicateSignals.score - a.duplicateSignals.score;
-        }
-        const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-        const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [relatedThreads, convo]);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -862,7 +710,7 @@ export default function ConversationDetail({
     { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
     { id: "activity", label: "Activity", count: activities.length },
-    { id: "related", label: "Related Threads", count: rankedRelatedThreads.length },
+    { id: "related", label: "Related Threads", count: relatedThreads.length },
     { id: "summary", label: "Summary", count: 0 },
   ];
 
@@ -945,6 +793,76 @@ export default function ConversationDetail({
     }
   };
 
+  const existingTaskTextSet = useMemo(() => {
+    return new Set(
+      tasks
+        .map((task) => normalizeSuggestedTaskText(task?.text || ""))
+        .filter(Boolean)
+    );
+  }, [tasks]);
+
+  const suggestedTaskItems = useMemo(() => {
+    return (threadSummary?.summary?.suggested_tasks || [])
+      .filter((item: string) => typeof item === "string" && item.trim())
+      .map((item: string, index: number) => {
+        const normalizedText = normalizeSuggestedTaskText(item);
+        return {
+          id: `${normalizedText || item}-${index}`,
+          text: item.trim(),
+          normalizedText,
+          alreadyCreated: existingTaskTextSet.has(normalizedText),
+        };
+      });
+  }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+
+  const pendingSuggestedTaskItems = useMemo(
+    () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
+    [suggestedTaskItems]
+  );
+
+
+  const openActionItemStates = useMemo(() => {
+    return (threadSummary?.summary?.open_action_items || [])
+      .filter((item: string) => typeof item === "string" && item.trim())
+      .map((item: string, index: number) => {
+        const match = getTaskMatchMeta(item, tasks);
+        const status = !match.matchedTask
+          ? "needs_task"
+          : match.isCompleted
+            ? "completed_by_task"
+            : "tracked_by_task";
+
+        return {
+          id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
+          text: item.trim(),
+          matchedTask: match.matchedTask,
+          score: match.score,
+          status,
+        };
+      });
+  }, [threadSummary?.summary?.open_action_items, tasks]);
+
+  const completedItemStates = useMemo(() => {
+    return (threadSummary?.summary?.completed_items || [])
+      .filter((item: string) => typeof item === "string" && item.trim())
+      .map((item: string, index: number) => {
+        const match = getTaskMatchMeta(item, tasks);
+        const status = !match.matchedTask
+          ? "ai_only"
+          : match.isCompleted
+            ? "confirmed_by_task"
+            : "still_open_in_tasks";
+
+        return {
+          id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
+          text: item.trim(),
+          matchedTask: match.matchedTask,
+          score: match.score,
+          status,
+        };
+      });
+  }, [threadSummary?.summary?.completed_items, tasks]);
+
   const createSuggestedTask = async (taskText: string) => {
     if (!convo || !taskText.trim()) return;
 
@@ -968,26 +886,27 @@ export default function ConversationDetail({
   };
 
   const createAllSuggestedTasks = async () => {
-    if (!convo || pendingSuggestedTaskItems.length === 0) return;
+    if (!convo) return;
+
+    const tasksToCreate = pendingSuggestedTaskItems.map((item) => item.text);
+
+    if (tasksToCreate.length === 0) return;
 
     try {
       setCreatingAllSuggestedTasks(true);
-
-      for (const item of pendingSuggestedTaskItems) {
+      for (const taskText of tasksToCreate) {
         await onAddTask(
           convo.id,
-          item.text,
+          taskText.trim(),
           currentUser?.id ? [currentUser.id] : [],
           undefined
         );
       }
-
       await refetchDetail();
     } finally {
       setCreatingAllSuggestedTasks(false);
     }
   };
-
 
   if (!convo) {
     return (
@@ -1437,30 +1356,14 @@ export default function ConversationDetail({
             )}
 
             <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
-                    <GitBranch size={14} className="text-[#58A6FF]" />
-                    Related threads in this shared account
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#7D8590]">
-                    {externalEmail
-                      ? `Showing threads where the outside contact is ${externalEmail}`
-                      : "We could not determine the outside contact for this thread."}
-                  </div>
-                </div>
-
-                {externalEmail && convo?.email_account_id ? (
-                  <a
-                    href={`/contacts/${encodeURIComponent(externalEmail)}?account=${convo.email_account_id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] shrink-0"
-                  >
-                    <ExternalLink size={13} />
-                    Command Center
-                  </a>
-                ) : null}
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
+                <GitBranch size={14} className="text-[#58A6FF]" />
+                Related threads in this shared account
+              </div>
+              <div className="mt-1 text-[11px] text-[#7D8590]">
+                {externalEmail
+                  ? `Showing threads where the outside contact is ${externalEmail}`
+                  : "We could not determine the outside contact for this thread."}
               </div>
             </div>
 
@@ -1470,17 +1373,19 @@ export default function ConversationDetail({
               </div>
             )}
 
-            {!relatedThreadsLoading && rankedRelatedThreads.length === 0 && (
+            {!relatedThreadsLoading && relatedThreads.length === 0 && (
               <div className="text-center py-10 text-[#484F58] text-sm">
                 No related threads found for this contact in this shared account
               </div>
             )}
 
             {!relatedThreadsLoading &&
-              rankedRelatedThreads.map((thread: any) => {
+              relatedThreads.map((thread: any) => {
+                const sameSubject =
+                  String(thread.subject || "").trim().toLowerCase() ===
+                  String(convo.subject || "").trim().toLowerCase();
+
                 const href = `/#conversation=${thread.id}&mailbox=${thread.email_account_id || ""}&folder=${thread.folder_id || ""}`;
-                const score = thread.duplicateSignals?.score || 0;
-                const badges = thread.duplicateSignals?.badges || [];
 
                 return (
                   <div
@@ -1496,39 +1401,12 @@ export default function ConversationDetail({
                           <div className="text-[13px] font-semibold text-[#E6EDF3] truncate">
                             {thread.subject || "(No subject)"}
                           </div>
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              score >= 75
-                                ? "bg-[rgba(245,213,71,0.12)] text-[#F5D547]"
-                                : score >= 55
-                                  ? "bg-[rgba(88,166,255,0.12)] text-[#58A6FF]"
-                                  : "bg-[#0B0E11] text-[#7D8590] border border-[#1E242C]"
-                            }`}
-                          >
-                            Match score: {score}
-                          </span>
+                          {sameSubject && (
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                              Possible duplicate
+                            </span>
+                          )}
                         </div>
-
-                        {badges.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mb-2">
-                            {badges.map((badge: any) => (
-                              <span
-                                key={`${thread.id}-${badge.label}`}
-                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                  badge.tone === "yellow"
-                                    ? "bg-[rgba(245,213,71,0.12)] text-[#F5D547]"
-                                    : badge.tone === "green"
-                                      ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]"
-                                      : badge.tone === "blue"
-                                        ? "bg-[rgba(88,166,255,0.12)] text-[#58A6FF]"
-                                        : "bg-[#0B0E11] text-[#7D8590] border border-[#1E242C]"
-                                }`}
-                              >
-                                {badge.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
 
                         <div className="text-[11px] text-[#7D8590] mb-2 truncate">
                           {thread.preview || "No preview available"}
@@ -1623,7 +1501,7 @@ export default function ConversationDetail({
                 <div className="text-sm text-[#E6EDF3] mb-2">No summary yet for this thread</div>
                 <div className="text-xs text-[#7D8590] mb-4">
                   Generate a cached AI summary with status, intent, action items, completed items,
-                  suggested tasks, and next step.
+                  and next step.
                 </div>
                 <button
                   type="button"
@@ -1638,43 +1516,6 @@ export default function ConversationDetail({
 
             {!threadSummaryLoading && threadSummary?.summary && (
               <div className="space-y-3">
-                {isSummaryStale && (
-                  <div className="rounded-xl border border-[rgba(245,213,71,0.35)] bg-[rgba(245,213,71,0.08)] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-[#F5D547]">
-                          Summary may be outdated
-                        </div>
-                        <div className="mt-1 text-xs text-[#C9D1D9]">
-                          This thread changed after the last summary was generated.
-                        </div>
-
-                        {staleReasons.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {staleReasons.map((reason) => (
-                              <span
-                                key={reason}
-                                className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#0B0E11] border border-[rgba(245,213,71,0.28)] text-[#F5D547]"
-                              >
-                                {reason}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => generateSummary(true)}
-                        disabled={threadSummaryGenerating}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F5D547] text-[#0B0E11] text-[12px] font-semibold hover:opacity-90 disabled:opacity-60 shrink-0"
-                      >
-                        {threadSummaryGenerating ? "Refreshing..." : "Refresh now"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
                     Overview
@@ -1686,10 +1527,10 @@ export default function ConversationDetail({
 
                 <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Status
+                    Current Status
                   </div>
-                  <div className="text-sm text-[#E6EDF3]">
-                    {threadSummary.summary.status || "No status available"}
+                  <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+                    {threadSummary.summary.status || "Unknown"}
                   </div>
                 </div>
 
@@ -1732,26 +1573,81 @@ export default function ConversationDetail({
                 </div>
 
                 <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Open Action Items
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590]">
+                      Open Action Items
+                    </div>
+                    <div className="text-[11px] text-[#484F58]">AI items synced with thread tasks</div>
                   </div>
-                  {threadSummary.summary.open_action_items?.length > 0 ? (
-                    <ul className="space-y-2">
-                      {threadSummary.summary.open_action_items.map((item: string, index: number) => (
-                        <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
-                          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#F5D547]" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+                  {openActionItemStates.length > 0 ? (
+                    <div className="space-y-2">
+                      {openActionItemStates.map((item) => {
+                        const isCreating = creatingSuggestedTasks.includes(item.text);
+                        return (
+                          <div
+                            key={item.id}
+                            className="rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm text-[#E6EDF3]">{item.text}</div>
+                                {item.matchedTask?.text && (
+                                  <div className="mt-1 text-[11px] text-[#7D8590]">
+                                    Matched task: {item.matchedTask.text}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {item.status === "needs_task" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => createSuggestedTask(item.text)}
+                                    disabled={isCreating}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#F5D547] text-[#0B0E11] text-[11px] font-semibold hover:opacity-90 disabled:opacity-60"
+                                  >
+                                    {isCreating ? "Creating..." : "Create task"}
+                                  </button>
+                                )}
+
+                                {item.status === "tracked_by_task" && (
+                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
+                                    Tracked by task
+                                  </span>
+                                )}
+
+                                {item.status === "completed_by_task" && (
+                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
+                                    Completed in tasks
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <div className="text-sm text-[#7D8590]">No open action items detected</div>
                   )}
                 </div>
 
                 <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Suggested Tasks
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590]">
+                      Suggested Tasks
+                    </div>
+
+                    {pendingSuggestedTaskItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={createAllSuggestedTasks}
+                        disabled={creatingAllSuggestedTasks}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#4ADE80] hover:bg-[#181D24] disabled:opacity-60"
+                      >
+                        {creatingAllSuggestedTasks ? "Creating..." : "Create All"}
+                      </button>
+                    )}
                   </div>
 
                   {suggestedTaskItems.length > 0 ? (
@@ -1762,68 +1658,88 @@ export default function ConversationDetail({
                         return (
                           <div
                             key={item.id}
-                            className="rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2.5"
+                            className="flex items-start justify-between gap-3 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2"
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-sm text-[#E6EDF3]">{item.text}</div>
-                                {item.alreadyCreated && (
-                                  <div className="mt-1 text-[11px] text-[#7D8590]">
-                                    Already created in thread tasks
-                                  </div>
-                                )}
-                              </div>
-
-                              {item.alreadyCreated ? (
-                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
-                                  Created
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => createSuggestedTask(item.text)}
-                                  disabled={isCreating}
-                                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#58A6FF] text-[#0B0E11] text-[12px] font-semibold hover:opacity-90 disabled:opacity-60 shrink-0"
-                                >
-                                  {isCreating ? "Creating..." : "Create"}
-                                </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-[#E6EDF3]">{item.text}</div>
+                              {item.alreadyCreated && (
+                                <div className="mt-1 text-[11px] font-medium text-[#4ADE80]">
+                                  Already created in thread tasks
+                                </div>
                               )}
                             </div>
+
+                            {item.alreadyCreated ? (
+                              <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[11px] font-semibold text-[#4ADE80] shrink-0">
+                                Created
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => createSuggestedTask(item.text)}
+                                disabled={isCreating || creatingAllSuggestedTasks}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold hover:bg-[#3FCF73] disabled:opacity-60 shrink-0"
+                              >
+                                {isCreating ? "Creating..." : "Create"}
+                              </button>
+                            )}
                           </div>
                         );
                       })}
-
-                      {pendingSuggestedTaskItems.length >= 2 && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={createAllSuggestedTasks}
-                            disabled={creatingAllSuggestedTasks}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] disabled:opacity-60"
-                          >
-                            {creatingAllSuggestedTasks ? "Creating all..." : "Create All"}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   ) : (
-                    <div className="text-sm text-[#7D8590]">No suggested tasks detected</div>
+                    <div className="text-sm text-[#7D8590]">No suggested tasks generated</div>
                   )}
                 </div>
 
                 <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                    Completed Items
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-[#7D8590]">
+                      Completed Items
+                    </div>
+                    <div className="text-[11px] text-[#484F58]">AI items checked against task completion</div>
                   </div>
-                  {threadSummary.summary.completed_items?.length > 0 ? (
-                    <ul className="space-y-2">
-                      {threadSummary.summary.completed_items.map((item: string, index: number) => (
-                        <li key={index} className="text-sm text-[#E6EDF3] flex items-start gap-2">
-                          <span className="mt-1 text-[#4ADE80]">✓</span>
-                          <span>{item}</span>
-                        </li>
+                  {completedItemStates.length > 0 ? (
+                    <div className="space-y-2">
+                      {completedItemStates.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-[#E6EDF3] flex items-start gap-2">
+                                <span className="mt-0.5 text-[#4ADE80]">✓</span>
+                                <span>{item.text}</span>
+                              </div>
+                              {item.matchedTask?.text && (
+                                <div className="mt-1 text-[11px] text-[#7D8590]">
+                                  Matched task: {item.matchedTask.text}
+                                </div>
+                              )}
+                            </div>
+
+                            {item.status === "confirmed_by_task" && (
+                              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
+                                Confirmed by task state
+                              </span>
+                            )}
+
+                            {item.status === "still_open_in_tasks" && (
+                              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547] shrink-0">
+                                Still open in tasks
+                              </span>
+                            )}
+
+                            {item.status === "ai_only" && (
+                              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#12161B] text-[#7D8590] border border-[#1E242C] shrink-0">
+                                AI only
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <div className="text-sm text-[#7D8590]">No completed items detected</div>
                   )}
