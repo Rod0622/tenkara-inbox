@@ -869,26 +869,43 @@ const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
     });
 }, [threadSummary?.summary?.open_action_items, tasks]);
 
-  const completedItemStates = useMemo(() => {
-    return (threadSummary?.summary?.completed_items || [])
-      .filter((item: string) => typeof item === "string" && item.trim())
-      .map((item: string, index: number) => {
-        const match = getTaskMatchMeta(item, tasks);
-        const status = !match.matchedTask
-          ? "ai_only"
-          : match.isCompleted
-            ? "confirmed_by_task"
-            : "still_open_in_tasks";
+  type CompletedItemState = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  taskMatch: any | null;
+  state: "confirmed_completed" | "still_open" | "ai_only";
+};
 
-        return {
-          id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
-          text: item.trim(),
-          matchedTask: match.matchedTask,
-          score: match.score,
-          status,
-        };
-      });
-  }, [threadSummary?.summary?.completed_items, tasks]);
+const completedItemStates = useMemo<CompletedItemState[]>(() => {
+  return (threadSummary?.summary?.completed_items || [])
+    .filter((item: string) => typeof item === "string" && item.trim())
+    .map((item: string, index: number) => {
+      const normalizedText = normalizeSuggestedTaskText(item);
+      const taskMatch =
+        tasks.find(
+          (task: any) =>
+            normalizeSuggestedTaskText(task?.text || "") === normalizedText
+        ) || null;
+
+      let state: "confirmed_completed" | "still_open" | "ai_only" = "ai_only";
+
+      if (taskMatch) {
+        state =
+          taskMatch.status === "completed" || taskMatch.is_done
+            ? "confirmed_completed"
+            : "still_open";
+      }
+
+      return {
+        id: `${normalizedText || item}-${index}`,
+        text: item.trim(),
+        normalizedText,
+        taskMatch,
+        state,
+      };
+    });
+}, [threadSummary?.summary?.completed_items, tasks]);
 
   const createSuggestedTask = async (taskText: string) => {
     if (!convo || !taskText.trim()) return;
@@ -1728,7 +1745,7 @@ const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
                   </div>
                   {completedItemStates.length > 0 ? (
                     <div className="space-y-2">
-                      {completedItemStates.map((item) => (
+                      {completedItemStates.map((item: CompletedItemState) => (
                         <div
                           key={item.id}
                           className="rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2.5"
