@@ -1756,9 +1756,9 @@ const completedItemStates = useMemo<CompletedItemState[]>(() => {
                                 <span className="mt-0.5 text-[#4ADE80]">✓</span>
                                 <span>{item.text}</span>
                               </div>
-                              {item.matchedTask?.text && (
+                              {item.taskMatch?.text && (
                                 <div className="mt-1 text-[11px] text-[#7D8590]">
-                                  Matched task: {item.matchedTask.text}
+                                  Matched task: {item.taskMatch.text}
                                 </div>
                               )}
                             </div>
