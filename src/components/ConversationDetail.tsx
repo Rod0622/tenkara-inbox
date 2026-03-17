@@ -815,8 +815,11 @@ export default function ConversationDetail({
       });
   }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
 
-  const pendingSuggestedTaskItems = useMemo(
-    () => suggestedTaskItems.filter((item) => !item.alreadyCreated),
+  const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
+    () =>
+      suggestedTaskItems.filter(
+        (item: SuggestedTaskItem) => !item.alreadyCreated
+      ),
     [suggestedTaskItems]
   );
 
