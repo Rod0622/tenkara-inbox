@@ -801,27 +801,34 @@ export default function ConversationDetail({
     );
   }, [tasks]);
 
-  const suggestedTaskItems = useMemo(() => {
-    return (threadSummary?.summary?.suggested_tasks || [])
-      .filter((item: string) => typeof item === "string" && item.trim())
-      .map((item: string, index: number) => {
-        const normalizedText = normalizeSuggestedTaskText(item);
-        return {
-          id: `${normalizedText || item}-${index}`,
-          text: item.trim(),
-          normalizedText,
-          alreadyCreated: existingTaskTextSet.has(normalizedText),
-        };
-      });
-  }, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+  type SuggestedTaskItem = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  alreadyCreated: boolean;
+};
 
-  const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
-    () =>
-      suggestedTaskItems.filter(
-        (item: SuggestedTaskItem) => !item.alreadyCreated
-      ),
-    [suggestedTaskItems]
-  );
+const suggestedTaskItems = useMemo<SuggestedTaskItem[]>(() => {
+  return (threadSummary?.summary?.suggested_tasks || [])
+    .filter((item: string) => typeof item === "string" && item.trim())
+    .map((item: string, index: number) => {
+      const normalizedText = normalizeSuggestedTaskText(item);
+      return {
+        id: `${normalizedText || item}-${index}`,
+        text: item.trim(),
+        normalizedText,
+        alreadyCreated: existingTaskTextSet.has(normalizedText),
+      };
+    });
+}, [threadSummary?.summary?.suggested_tasks, existingTaskTextSet]);
+
+const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
+  () =>
+    suggestedTaskItems.filter(
+      (item: SuggestedTaskItem) => !item.alreadyCreated
+    ),
+  [suggestedTaskItems]
+);
 
 
   const openActionItemStates = useMemo(() => {
