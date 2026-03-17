@@ -831,26 +831,43 @@ const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
 );
 
 
-  const openActionItemStates = useMemo(() => {
-    return (threadSummary?.summary?.open_action_items || [])
-      .filter((item: string) => typeof item === "string" && item.trim())
-      .map((item: string, index: number) => {
-        const match = getTaskMatchMeta(item, tasks);
-        const status = !match.matchedTask
-          ? "needs_task"
-          : match.isCompleted
-            ? "completed_by_task"
-            : "tracked_by_task";
+  type OpenActionItemState = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  taskMatch: any | null;
+  state: "needs_task" | "tracked" | "completed";
+};
 
-        return {
-          id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
-          text: item.trim(),
-          matchedTask: match.matchedTask,
-          score: match.score,
-          status,
-        };
-      });
-  }, [threadSummary?.summary?.open_action_items, tasks]);
+const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
+  return (threadSummary?.summary?.open_action_items || [])
+    .filter((item: string) => typeof item === "string" && item.trim())
+    .map((item: string, index: number) => {
+      const normalizedText = normalizeSuggestedTaskText(item);
+      const taskMatch =
+        tasks.find(
+          (task: any) =>
+            normalizeSuggestedTaskText(task?.text || "") === normalizedText
+        ) || null;
+
+      let state: "needs_task" | "tracked" | "completed" = "needs_task";
+
+      if (taskMatch) {
+        state =
+          taskMatch.status === "completed" || taskMatch.is_done
+            ? "completed"
+            : "tracked";
+      }
+
+      return {
+        id: `${normalizedText || item}-${index}`,
+        text: item.trim(),
+        normalizedText,
+        taskMatch,
+        state,
+      };
+    });
+}, [threadSummary?.summary?.open_action_items, tasks]);
 
   const completedItemStates = useMemo(() => {
     return (threadSummary?.summary?.completed_items || [])
@@ -1591,7 +1608,7 @@ const pendingSuggestedTaskItems = useMemo<SuggestedTaskItem[]>(
                   </div>
                   {openActionItemStates.length > 0 ? (
                     <div className="space-y-2">
-                      {openActionItemStates.map((item) => {
+                      {openActionItemStates.map((item: OpenActionItemState) => {
                         const isCreating = creatingSuggestedTasks.includes(item.text);
                         return (
                           <div
