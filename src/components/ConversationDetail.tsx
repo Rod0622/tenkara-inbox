@@ -1643,26 +1643,21 @@ const completedItemStates = useMemo<CompletedItemState[]>(() => {
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0">
-                                {item.state === "needs_task" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => createSuggestedTask(item.text)}
-                                    disabled={isCreating}
-                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#F5D547] text-[#0B0E11] text-[11px] font-semibold hover:opacity-90 disabled:opacity-60"
-                                  >
-                                    {isCreating ? "Creating..." : "Create task"}
-                                  </button>
-                                )}
-
-                                {item.state === "tracked" && (
-                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
-                                    Tracked by task
+                                {item.state === "confirmed_completed" && (
+                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
+                                    Confirmed by task state
                                   </span>
                                 )}
 
-                                {item.state === "completed" && (
-                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
-                                    Completed in tasks
+                                {item.state === "still_open" && (
+                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547] shrink-0">
+                                    Still open in tasks
+                                  </span>
+                                )}
+
+                                {item.state === "ai_only" && (
+                                  <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(125,133,144,0.12)] text-[#7D8590] shrink-0">
+                                    AI only
                                   </span>
                                 )}
                               </div>
@@ -1763,7 +1758,7 @@ const completedItemStates = useMemo<CompletedItemState[]>(() => {
                               )}
                             </div>
 
-                            {item.state === "confirmed_by_task" && (
+                            {item.state === "confirmed_completed" && (
                               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
                                 Confirmed by task state
                               </span>
