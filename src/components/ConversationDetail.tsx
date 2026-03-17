@@ -1637,7 +1637,7 @@ const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
                                   </button>
                                 )}
 
-                                {item.state === "tracked_by_task" && (
+                                {item.state === "tracked" && (
                                   <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
                                     Tracked by task
                                   </span>
