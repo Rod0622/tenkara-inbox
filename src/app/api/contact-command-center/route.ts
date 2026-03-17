@@ -3,14 +3,13 @@ import { createServerClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-// If your thread summary table has a different name, change this:
 const THREAD_SUMMARIES_TABLE = "thread_summaries";
 
 function safeLower(value?: string | null) {
   return String(value || "").trim().toLowerCase();
 }
 
-function formatRelativeDate(value?: string | null) {
+function formatIso(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -210,8 +209,6 @@ export async function GET(req: NextRequest) {
     const tasks = tasksRaw || [];
     const taskIds = tasks.map((t: any) => t.id);
 
-    // IMPORTANT:
-    // Fetch task assignees separately instead of nested relationship joins.
     const { data: taskAssigneeLinks, error: linkError } =
       taskIds.length > 0
         ? await supabase
@@ -265,24 +262,35 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: notesError.message }, { status: 500 });
     }
 
-    const { data: activities, error: activitiesError } = await supabase
+    // conversation_activity is optional in your project.
+    // If the table does not exist, do not fail the whole page.
+    let activities: any[] = [];
+    const activityResult = await supabase
       .from("conversation_activity")
       .select("*")
       .in("conversation_id", conversationIds)
       .order("created_at", { ascending: false })
       .limit(100);
 
-    if (activitiesError) {
-      return NextResponse.json({ error: activitiesError.message }, { status: 500 });
+    if (!activityResult.error) {
+      activities = activityResult.data || [];
     }
 
-    const { data: threadSummaries, error: summariesError } = await supabase
+    const summariesResult = await supabase
       .from(THREAD_SUMMARIES_TABLE)
       .select("*")
       .in("conversation_id", conversationIds);
 
-    if (summariesError) {
-      return NextResponse.json({ error: summariesError.message }, { status: 500 });
+    const threadSummaries =
+      summariesResult.error && summariesResult.error.message?.toLowerCase().includes("does not exist")
+        ? []
+        : (summariesResult.data || []);
+
+    if (
+      summariesResult.error &&
+      !summariesResult.error.message?.toLowerCase().includes("does not exist")
+    ) {
+      return NextResponse.json({ error: summariesResult.error.message }, { status: 500 });
     }
 
     const openThreads = relatedThreads.filter(
@@ -303,13 +311,13 @@ export async function GET(req: NextRequest) {
       ...relatedThreads.map((t: any) => t.last_message_at).filter(Boolean),
       ...(notes || []).map((n: any) => n.created_at).filter(Boolean),
       ...hydratedTasks.map((t: any) => t.updated_at || t.created_at).filter(Boolean),
-      ...(activities || []).map((a: any) => a.created_at).filter(Boolean),
+      ...activities.map((a: any) => a.created_at).filter(Boolean),
     ].sort((a, b) => +new Date(b) - +new Date(a));
 
     const riskSignals = detectRiskSignals({
       threads: relatedThreads,
       tasks: hydratedTasks,
-      summaries: threadSummaries || [],
+      summaries: threadSummaries,
     });
 
     const contactName =
@@ -321,7 +329,7 @@ export async function GET(req: NextRequest) {
       contactEmail: email,
       threads: relatedThreads,
       openTasks,
-      summaries: threadSummaries || [],
+      summaries: threadSummaries,
       riskSignals,
     });
 
@@ -337,8 +345,8 @@ export async function GET(req: NextRequest) {
         open_tasks: openTasks.length,
         completed_tasks: completedTasks.length,
         notes_count: (notes || []).length,
-        activity_count: (activities || []).length,
-        last_activity: formatRelativeDate(lastActivityCandidates[0] || null),
+        activity_count: activities.length,
+        last_activity: formatIso(lastActivityCandidates[0] || null),
         risk_signals: riskSignals,
         rollup,
       },
@@ -352,8 +360,8 @@ export async function GET(req: NextRequest) {
       })),
       tasks: hydratedTasks,
       notes: notes || [],
-      activities: activities || [],
-      thread_summaries: threadSummaries || [],
+      activities,
+      thread_summaries: threadSummaries,
     });
   } catch (error: any) {
     console.error("GET /api/contact-command-center failed:", error);
