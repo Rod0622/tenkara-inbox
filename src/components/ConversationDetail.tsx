@@ -1618,9 +1618,9 @@ const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="text-sm text-[#E6EDF3]">{item.text}</div>
-                                {item.matchedTask?.text && (
+                                {item.taskMatch?.text && (
                                   <div className="mt-1 text-[11px] text-[#7D8590]">
-                                    Matched task: {item.matchedTask.text}
+                                    Matched task: {item.taskMatch.text}
                                   </div>
                                 )}
                               </div>
