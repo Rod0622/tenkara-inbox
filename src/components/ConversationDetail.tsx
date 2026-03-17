@@ -1643,7 +1643,7 @@ const openActionItemStates = useMemo<OpenActionItemState[]>(() => {
                                   </span>
                                 )}
 
-                                {item.state === "completed_by_task" && (
+                                {item.state === "completed" && (
                                   <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
                                     Completed in tasks
                                   </span>
