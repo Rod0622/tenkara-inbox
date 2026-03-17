@@ -177,9 +177,9 @@ function AssignDropdown({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conversation_id: conversationId,
-          assignee_id: memberId,
-          actor_id: currentUser?.id,
+          conversation_id: convo.id,
+          status: "closed",
+          actor_id: currentUser?.id || null,
         }),
       });
       const result = await res.json().catch(() => ({}));
