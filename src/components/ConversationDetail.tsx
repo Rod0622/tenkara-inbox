@@ -33,6 +33,29 @@ import {
 } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 
+type SuggestedTaskItem = {
+  id: string;
+  text: string;
+  normalizedText: string;
+  alreadyCreated: boolean;
+};
+
+type OpenActionItemState = {
+  id: string;
+  text: string;
+  matchedTask: any | null;
+  score: number;
+  status: "needs_task" | "tracked_by_task" | "completed_by_task";
+};
+
+type CompletedItemState = {
+  id: string;
+  text: string;
+  matchedTask: any | null;
+  score: number;
+  status: "confirmed_by_task" | "still_open_in_tasks" | "ai_only";
+};
+
 function normalizeSuggestedTaskText(value: string) {
   return value
     .toLowerCase()
@@ -1356,14 +1379,30 @@ export default function ConversationDetail({
             )}
 
             <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] px-4 py-3">
-              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
-                <GitBranch size={14} className="text-[#58A6FF]" />
-                Related threads in this shared account
-              </div>
-              <div className="mt-1 text-[11px] text-[#7D8590]">
-                {externalEmail
-                  ? `Showing threads where the outside contact is ${externalEmail}`
-                  : "We could not determine the outside contact for this thread."}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-[12px] font-semibold text-[#E6EDF3]">
+                    <GitBranch size={14} className="text-[#58A6FF]" />
+                    Related threads in this shared account
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#7D8590]">
+                    {externalEmail
+                      ? `Showing threads where the outside contact is ${externalEmail}`
+                      : "We could not determine the outside contact for this thread."}
+                  </div>
+                </div>
+
+                {externalEmail && (
+                  <a
+                    href={`/contacts/${encodeURIComponent(externalEmail)}?account=${convo.email_account_id || ""}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24] shrink-0"
+                  >
+                    <ExternalLink size={13} />
+                    Command Center
+                  </a>
+                )}
               </div>
             </div>
 
@@ -1796,27 +1835,4 @@ export default function ConversationDetail({
       )}
     </div>
   );
-type SuggestedTaskItem = {
-  id: string;
-  text: string;
-  normalizedText: string;
-  alreadyCreated: boolean;
-};
-
-type OpenActionItemState = {
-  id: string;
-  text: string;
-  matchedTask: any | null;
-  score: number;
-  status: "needs_task" | "tracked_by_task" | "completed_by_task";
-};
-
-type CompletedItemState = {
-  id: string;
-  text: string;
-  matchedTask: any | null;
-  score: number;
-  status: "confirmed_by_task" | "still_open_in_tasks" | "ai_only";
-};
-
 }
