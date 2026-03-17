@@ -43,17 +43,17 @@ type SuggestedTaskItem = {
 type OpenActionItemState = {
   id: string;
   text: string;
-  matchedTask: any | null;
+  taskMatch: any | null;
   score: number;
-  status: "needs_task" | "tracked_by_task" | "completed_by_task";
+  state: "needs_task" | "tracked" | "completed";
 };
 
 type CompletedItemState = {
   id: string;
   text: string;
-  matchedTask: any | null;
+  taskMatch: any | null;
   score: number;
-  status: "confirmed_by_task" | "still_open_in_tasks" | "ai_only";
+  state: "confirmed_completed" | "still_open" | "ai_only";
 };
 
 function normalizeSuggestedTaskText(value: string) {
@@ -660,6 +660,14 @@ export default function ConversationDetail({
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
+  const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [forwardTo, setForwardTo] = useState("");
+  const [forwardCc, setForwardCc] = useState("");
+  const [forwardSubject, setForwardSubject] = useState("");
+  const [forwardBody, setForwardBody] = useState("");
+  const [forwardSending, setForwardSending] = useState(false);
+  const [trashingConversation, setTrashingConversation] = useState(false);
 
   const {
     notes,
@@ -784,6 +792,145 @@ export default function ConversationDetail({
     }
   };
 
+  const handleReplyAction = () => {
+    setActiveTab("messages");
+
+    const latestInbound =
+      [...messages].reverse().find((msg: any) => !msg.is_outbound) || messages[messages.length - 1];
+
+    if (!replyText.trim() && latestInbound) {
+      const fromLine = latestInbound.from_name
+        ? `\n\n---\nOn ${
+            latestInbound.sent_at
+              ? new Date(latestInbound.sent_at).toLocaleString()
+              : "an earlier message"
+          }, ${latestInbound.from_name} <${latestInbound.from_email || ""}> wrote:\n`
+        : `\n\n---\nPrevious message:\n`;
+
+      const quotedBody = String(latestInbound.body_text || latestInbound.snippet || "")
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n");
+
+      setReplyText(`${fromLine}${quotedBody}`);
+    }
+
+    setTimeout(() => {
+      replyTextareaRef.current?.focus();
+      replyTextareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  };
+
+  const handleOpenForward = () => {
+    if (!convo) return;
+
+    const latestMessage = messages[messages.length - 1];
+    const sourceBody = String(latestMessage?.body_text || latestMessage?.snippet || convo.preview || "");
+
+    const formattedForward = [
+      "",
+      "",
+      "---------- Forwarded message ---------",
+      `From: ${latestMessage?.from_name || convo.from_name || ""} <${latestMessage?.from_email || convo.from_email || ""}>`,
+      latestMessage?.to_addresses ? `To: ${latestMessage.to_addresses}` : "",
+      latestMessage?.cc_addresses ? `Cc: ${latestMessage.cc_addresses}` : "",
+      `Subject: ${latestMessage?.subject || convo.subject || ""}`,
+      latestMessage?.sent_at ? `Date: ${new Date(latestMessage.sent_at).toLocaleString()}` : "",
+      "",
+      sourceBody,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setForwardTo("");
+    setForwardCc("");
+    setForwardSubject(
+      convo.subject?.toLowerCase().startsWith("fwd:")
+        ? convo.subject
+        : `Fwd: ${convo.subject || "(No subject)"}`
+    );
+    setForwardBody(formattedForward);
+    setShowForwardModal(true);
+  };
+
+  const handleSendForward = async () => {
+    if (!convo) return;
+    if (!forwardTo.trim() || !forwardSubject.trim() || !forwardBody.trim()) return;
+
+    try {
+      setForwardSending(true);
+
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          account_id: convo.email_account_id,
+          to: forwardTo.trim(),
+          cc: forwardCc.trim(),
+          subject: forwardSubject.trim(),
+          body: forwardBody,
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to forward email");
+      }
+
+      setShowForwardModal(false);
+      setForwardTo("");
+      setForwardCc("");
+      setForwardSubject("");
+      setForwardBody("");
+    } catch (error: any) {
+      console.error("Forward failed:", error);
+      alert(error?.message || "Failed to forward email");
+    } finally {
+      setForwardSending(false);
+    }
+  };
+
+  const handleTrashConversation = async () => {
+    if (!convo || trashingConversation) return;
+
+    const confirmed = window.confirm(`Move "${convo.subject || "this conversation"}" to trash?`);
+
+    if (!confirmed) return;
+
+    try {
+      setTrashingConversation(true);
+
+      const res = await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          status: "trash",
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to move conversation to trash");
+      }
+
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Trash failed:", error);
+      alert(error?.message || "Failed to move conversation to trash");
+    } finally {
+      setTrashingConversation(false);
+    }
+  };
+
   const handleToggleRead = async () => {
     if (!convo) return;
     try {
@@ -849,18 +996,18 @@ export default function ConversationDetail({
       .filter((item: string) => typeof item === "string" && item.trim())
       .map((item: string, index: number) => {
         const match = getTaskMatchMeta(item, tasks);
-        const status = !match.matchedTask
+        const state: OpenActionItemState["state"] = !match.matchedTask
           ? "needs_task"
           : match.isCompleted
-            ? "completed_by_task"
-            : "tracked_by_task";
+            ? "completed"
+            : "tracked";
 
         return {
           id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
           text: item.trim(),
-          matchedTask: match.matchedTask,
+          taskMatch: match.matchedTask,
           score: match.score,
-          status,
+          state,
         };
       });
   }, [threadSummary?.summary?.open_action_items, tasks]);
@@ -870,18 +1017,18 @@ export default function ConversationDetail({
       .filter((item: string) => typeof item === "string" && item.trim())
       .map((item: string, index: number) => {
         const match = getTaskMatchMeta(item, tasks);
-        const status = !match.matchedTask
+        const state: CompletedItemState["state"] = !match.matchedTask
           ? "ai_only"
           : match.isCompleted
-            ? "confirmed_by_task"
-            : "still_open_in_tasks";
+            ? "confirmed_completed"
+            : "still_open";
 
         return {
           id: `${normalizeSuggestedTaskText(item) || item}-${index}`,
           text: item.trim(),
-          matchedTask: match.matchedTask,
+          taskMatch: match.matchedTask,
           score: match.score,
-          status,
+          state,
         };
       });
   }, [threadSummary?.summary?.completed_items, tasks]);
@@ -1017,14 +1164,30 @@ export default function ConversationDetail({
               {convo.is_unread ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
 
-            {[Reply, Forward, Archive].map((Icon, idx) => (
-              <button
-                key={idx}
-                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
-              >
-                <Icon size={16} />
-              </button>
-            ))}
+            <button
+              onClick={handleReplyAction}
+              title="Reply"
+              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
+            >
+              <Reply size={16} />
+            </button>
+
+            <button
+              onClick={handleOpenForward}
+              title="Forward"
+              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
+            >
+              <Forward size={16} />
+            </button>
+
+            <button
+              onClick={handleTrashConversation}
+              title="Trash"
+              disabled={trashingConversation}
+              className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] disabled:opacity-50"
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
         </div>
       </div>
@@ -1630,15 +1793,15 @@ export default function ConversationDetail({
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="text-sm text-[#E6EDF3]">{item.text}</div>
-                                {item.matchedTask?.text && (
+                                {item.taskMatch?.text && (
                                   <div className="mt-1 text-[11px] text-[#7D8590]">
-                                    Matched task: {item.matchedTask.text}
+                                    Matched task: {item.taskMatch.text}
                                   </div>
                                 )}
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0">
-                                {item.status === "needs_task" && (
+                                {item.state === "needs_task" && (
                                   <button
                                     type="button"
                                     onClick={() => createSuggestedTask(item.text)}
@@ -1649,13 +1812,13 @@ export default function ConversationDetail({
                                   </button>
                                 )}
 
-                                {item.status === "tracked_by_task" && (
+                                {item.state === "tracked" && (
                                   <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">
                                     Tracked by task
                                   </span>
                                 )}
 
-                                {item.status === "completed_by_task" && (
+                                {item.state === "completed" && (
                                   <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
                                     Completed in tasks
                                   </span>
@@ -1751,26 +1914,26 @@ export default function ConversationDetail({
                                 <span className="mt-0.5 text-[#4ADE80]">✓</span>
                                 <span>{item.text}</span>
                               </div>
-                              {item.matchedTask?.text && (
+                              {item.taskMatch?.text && (
                                 <div className="mt-1 text-[11px] text-[#7D8590]">
-                                  Matched task: {item.matchedTask.text}
+                                  Matched task: {item.taskMatch.text}
                                 </div>
                               )}
                             </div>
 
-                            {item.status === "confirmed_by_task" && (
+                            {item.state === "confirmed_completed" && (
                               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80] shrink-0">
                                 Confirmed by task state
                               </span>
                             )}
 
-                            {item.status === "still_open_in_tasks" && (
+                            {item.state === "still_open" && (
                               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(245,213,71,0.12)] text-[#F5D547] shrink-0">
                                 Still open in tasks
                               </span>
                             )}
 
-                            {item.status === "ai_only" && (
+                            {item.state === "ai_only" && (
                               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#12161B] text-[#7D8590] border border-[#1E242C] shrink-0">
                                 AI only
                               </span>
@@ -1809,6 +1972,7 @@ export default function ConversationDetail({
         <div className="px-5 py-3 border-t border-[#161B22]">
           <div className="flex items-center gap-2">
             <textarea
+              ref={replyTextareaRef}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
               placeholder="Write a reply..."
@@ -1833,6 +1997,96 @@ export default function ConversationDetail({
           teamMembers={teamMembers}
         />
       )}
+
+      {showForwardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-[#1E242C] bg-[#0F1318] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#1E242C] px-5 py-4">
+              <div>
+                <div className="text-sm font-semibold text-[#E6EDF3]">Forward Message</div>
+                <div className="text-xs text-[#7D8590]">
+                  Send this conversation content to another recipient
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowForwardModal(false)}
+                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24]"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="space-y-3 px-5 py-4">
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">To</label>
+                <input
+                  type="text"
+                  value={forwardTo}
+                  onChange={(e) => setForwardTo(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Cc</label>
+                <input
+                  type="text"
+                  value={forwardCc}
+                  onChange={(e) => setForwardCc(e.target.value)}
+                  placeholder="optional cc recipients"
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Subject</label>
+                <input
+                  type="text"
+                  value={forwardSubject}
+                  onChange={(e) => setForwardSubject(e.target.value)}
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[#7D8590]">Message</label>
+                <textarea
+                  value={forwardBody}
+                  onChange={(e) => setForwardBody(e.target.value)}
+                  rows={14}
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-y"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-[#1E242C] px-5 py-4">
+              <button
+                onClick={() => setShowForwardModal(false)}
+                className="px-3 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleSendForward}
+                disabled={
+                  forwardSending ||
+                  !forwardTo.trim() ||
+                  !forwardSubject.trim() ||
+                  !forwardBody.trim()
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73] disabled:opacity-50"
+              >
+                <Send size={14} />
+                {forwardSending ? "Sending..." : "Send Forward"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
