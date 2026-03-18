@@ -177,8 +177,27 @@ function SignatureEditor({
           contentEditable
           suppressContentEditableWarning
           onInput={() => setSignature(editorRef.current?.innerHTML || "")}
-          data-placeholder="Your email signature..."
-          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type.startsWith("image/")) {
+                e.preventDefault();
+                const file = items[i].getAsFile();
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  const base64 = ev.target?.result as string;
+                  document.execCommand("insertImage", false, base64);
+                  setSignature(editorRef.current?.innerHTML || "");
+                };
+                reader.readAsDataURL(file);
+                return;
+              }
+            }
+          }}
+          data-placeholder="Your email signature... (paste images here)"
+          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded"
           style={{ fontFamily: "Arial, sans-serif" }}
         />
       </div>
