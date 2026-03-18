@@ -112,6 +112,8 @@ function SignatureEditor({
   const [enabled, setEnabled] = useState(initialEnabled);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [selectedImg, setSelectedImg] = useState<HTMLImageElement | null>(null);
+  const [imgWidth, setImgWidth] = useState("");
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -177,6 +179,20 @@ function SignatureEditor({
           contentEditable
           suppressContentEditableWarning
           onInput={() => setSignature(editorRef.current?.innerHTML || "")}
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.tagName === "IMG") {
+              const img = target as HTMLImageElement;
+              setSelectedImg(img);
+              setImgWidth(String(img.width || img.naturalWidth || 100));
+              // Add visual selection
+              editorRef.current?.querySelectorAll("img").forEach((i) => i.style.outline = "none");
+              img.style.outline = "2px solid #4ADE80";
+            } else {
+              setSelectedImg(null);
+              editorRef.current?.querySelectorAll("img").forEach((i) => i.style.outline = "none");
+            }
+          }}
           onPaste={(e) => {
             const items = e.clipboardData?.items;
             if (!items) return;
@@ -189,6 +205,15 @@ function SignatureEditor({
                 reader.onload = (ev) => {
                   const base64 = ev.target?.result as string;
                   document.execCommand("insertImage", false, base64);
+                  // Auto-size pasted images to 200px width
+                  const imgs = editorRef.current?.querySelectorAll("img");
+                  if (imgs) {
+                    const last = imgs[imgs.length - 1];
+                    if (last && !last.style.width) {
+                      last.style.width = "200px";
+                      last.style.height = "auto";
+                    }
+                  }
                   setSignature(editorRef.current?.innerHTML || "");
                 };
                 reader.readAsDataURL(file);
@@ -197,10 +222,66 @@ function SignatureEditor({
             }
           }}
           data-placeholder="Your email signature... (paste images here)"
-          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded"
+          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[250px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:cursor-pointer"
           style={{ fontFamily: "Arial, sans-serif" }}
         />
       </div>
+
+      {/* Image resize controls */}
+      {selectedImg && (
+        <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-[#161B22] border border-[#1E242C]">
+          <span className="text-[10px] text-[#484F58] font-semibold">Image size:</span>
+          <div className="flex gap-1">
+            {[50, 80, 100, 150, 200, 300].map((w) => (
+              <button
+                key={w}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectedImg.style.width = `${w}px`;
+                  selectedImg.style.height = "auto";
+                  setImgWidth(String(w));
+                  setSignature(editorRef.current?.innerHTML || "");
+                }}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                  imgWidth === String(w)
+                    ? "bg-[#4ADE80] text-[#0B0E11] font-bold"
+                    : "bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"
+                }`}
+              >
+                {w}px
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 ml-1">
+            <input
+              type="number"
+              value={imgWidth}
+              onChange={(e) => {
+                const w = e.target.value;
+                setImgWidth(w);
+                if (parseInt(w) > 0) {
+                  selectedImg.style.width = `${w}px`;
+                  selectedImg.style.height = "auto";
+                  setSignature(editorRef.current?.innerHTML || "");
+                }
+              }}
+              className="w-16 px-1.5 py-0.5 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+            />
+            <span className="text-[10px] text-[#484F58]">px</span>
+          </div>
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectedImg.remove();
+              setSelectedImg(null);
+              setSignature(editorRef.current?.innerHTML || "");
+            }}
+            className="ml-auto px-2 py-0.5 rounded text-[10px] text-[#F85149] hover:bg-[rgba(248,81,73,0.1)] transition-colors"
+          >
+            Remove
+          </button>
+        </div>
+      )}
 
       {/* Preview */}
       {signature && (
