@@ -667,6 +667,15 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [driveResult, setDriveResult] = useState<string | null>(null);
   const [downloadingAllThread, setDownloadingAllThread] = useState(false);
 
+  // Reset when conversation changes (messages array changes)
+  const messageIds = messagesWithAttachments.map((m: any) => m.id).join(",");
+  useEffect(() => {
+    setAllAttachments([]);
+    setLoaded(false);
+    setExpanded(false);
+    setDriveResult(null);
+  }, [messageIds]);
+
   if (messagesWithAttachments.length === 0) return null;
 
   const loadAll = async () => {
@@ -847,6 +856,14 @@ function MessageAttachments({ messageId }: { messageId: string }) {
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
+
+  // Reset when switching messages
+  useEffect(() => {
+    setAttachments([]);
+    setLoaded(false);
+    setShowDrivePicker(false);
+    setUploadResult(null);
+  }, [messageId]);
 
   const loadAttachments = async () => {
     if (loaded) return;
