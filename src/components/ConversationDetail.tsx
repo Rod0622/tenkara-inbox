@@ -915,6 +915,7 @@ export default function ConversationDetail({
   const handleTrashConversation = async () => {
     if (!convo) return;
     if (trashingConversation) return;
+    if (!confirm("Move this conversation to trash?")) return;
 
     try {
       setTrashingConversation(true);

@@ -167,6 +167,7 @@ export function useConversations(accountId: string | null) {
           label:labels(*)
         )
       `)
+      .neq("status", "trash")
       .order("last_message_at", { ascending: false })
       .limit(300);
 
