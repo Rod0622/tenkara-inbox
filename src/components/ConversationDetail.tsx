@@ -855,7 +855,8 @@ function MessageAttachments({ messageId }: { messageId: string }) {
     setUploading(false);
   };
 
-  const downloadable = loaded ? attachments.filter((a: any) => !a.isInline) : [];
+  // Compute non-inline attachments for display
+  const visibleAttachments = loaded ? attachments.filter((a: any) => !a.isInline) : [];
 
   return (
     <div className="mt-3">
@@ -868,7 +869,7 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           <Paperclip size={12} />
           {loading ? "Loading attachments..." : "Show attachments"}
         </button>
-      ) : downloadable.length === 0 ? (
+      ) : visibleAttachments.length === 0 ? (
         <div className="text-[11px] text-[#484F58] flex items-center gap-1">
           <Paperclip size={11} /> No downloadable attachments
         </div>
@@ -876,9 +877,9 @@ function MessageAttachments({ messageId }: { messageId: string }) {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#484F58] font-semibold flex items-center gap-1">
-              <Paperclip size={11} /> {downloadable.length} attachment{downloadable.length !== 1 ? "s" : ""}
+              <Paperclip size={11} /> {visibleAttachments.length} attachment{visibleAttachments.length !== 1 ? "s" : ""}
             </span>
-            {downloadable.length > 1 && (
+            {visibleAttachments.length > 1 && (
               <div className="flex gap-2">
                 <button
                   onClick={() => openDrivePicker("all")}
@@ -899,7 +900,7 @@ function MessageAttachments({ messageId }: { messageId: string }) {
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {downloadable.map((att: any) => (
+            {visibleAttachments.map((att: any) => (
               <button
                 key={att.id}
                 onClick={() => downloadAttachment(att.id, att.name)}
