@@ -337,6 +337,42 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (action === "create_folder") {
+      const { folderName, parentFolderId, driveId: parentDriveId } = body;
+      if (!folderName) {
+        return NextResponse.json({ error: "folderName required" }, { status: 400 });
+      }
+
+      const metadata: any = {
+        name: folderName,
+        mimeType: "application/vnd.google-apps.folder",
+        ...(parentFolderId ? { parents: [parentFolderId] } : parentDriveId ? { parents: [parentDriveId] } : {}),
+      };
+
+      const createRes = await fetch(
+        `${DRIVE_API}/files?supportsAllDrives=true`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(metadata),
+        }
+      );
+
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}));
+        return NextResponse.json({ error: `Create folder failed: ${err.error?.message || createRes.statusText}` }, { status: 500 });
+      }
+
+      const folder = await createRes.json();
+      return NextResponse.json({
+        success: true,
+        folder: { id: folder.id, name: folder.name },
+      });
+    }
+
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

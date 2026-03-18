@@ -927,64 +927,36 @@ function MessageAttachments({ messageId }: { messageId: string }) {
   const openDrivePicker = async (type: "single" | "all", attId?: string, attName?: string) => {
     setDriveAction({ type, attId, attName });
     setUploadResult(null);
+    setShowDrivePicker(true);
+    setFolders([]);
+    setFolderPath([]);
+    setSelectedDrive(null);
+    setLoadingFolders(true);
 
-    // Check if direct mode (no picker needed)
     try {
+      // Check if there's a default folder configured
       const configRes = await fetch("/api/drive?action=config");
       const config = await configRes.json();
-      if (config.mode === "direct" && config.folderId) {
-        // Skip picker, upload directly
-        setUploading(true);
-        if (type === "single" && attId) {
-          const res = await fetch("/api/drive", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "upload_attachment",
-              messageId, attachmentId: attId,
-              fileName: attName || "attachment",
-              folderId: config.folderId,
-            }),
-          });
-          const data = await res.json();
-          setUploadResult(data.success ? "Saved to Drive!" : `Error: ${data.error}`);
-        } else if (type === "all") {
-          const dl = attachments.filter((a: any) => !a.isInline);
-          let saved = 0;
-          for (const att of dl) {
-            const res = await fetch("/api/drive", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "upload_attachment",
-                messageId, attachmentId: att.id,
-                fileName: att.name,
-                folderId: config.folderId,
-              }),
-            });
-            const data = await res.json();
-            if (data.success) saved++;
-          }
-          const label = saved === 1 ? "1 file" : `${saved} files`;
-          setUploadResult(`Saved ${label} to Drive!`);
-        }
-        setUploading(false);
-        setTimeout(() => setUploadResult(null), 3000);
-        return;
-      }
-    } catch (e) { /* fall through to picker */ }
 
-    // Show picker
-    setShowDrivePicker(true);
-    if (drives.length === 0) {
-      setLoadingDrives(true);
-      try {
+      if (config.mode === "direct" && config.folderId) {
+        // Start inside the configured folder
+        setSelectedDrive({ id: "configured", name: "Shared Drive" });
+        setFolderPath([{ id: config.folderId, name: "Training Files" }]);
+        const res = await fetch(`/api/drive?action=folders&folder_id=${config.folderId}`);
+        const data = await res.json();
+        setFolders(data.folders || []);
+      } else {
+        // Load drives
+        setLoadingDrives(true);
         const res = await fetch("/api/drive?action=drives");
         const data = await res.json();
         setDrives(data.drives || []);
-      } catch (e) { console.error("Failed to load drives:", e); }
-      setLoadingDrives(false);
+        setLoadingDrives(false);
+      }
+    } catch (e) {
+      console.error("Failed to load drive:", e);
     }
+    setLoadingFolders(false);
   };
 
   const selectDrive = async (drive: any) => {
@@ -1217,8 +1189,36 @@ function MessageAttachments({ messageId }: { messageId: string }) {
                           <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
                         </button>
                       ))}
+                      {/* New Folder button */}
+                      <button
+                        onClick={async () => {
+                          const name = prompt("New folder name:");
+                          if (!name?.trim()) return;
+                          const parentId = folderPath.length > 0 ? folderPath[folderPath.length - 1].id : selectedDrive?.id;
+                          try {
+                            const res = await fetch("/api/drive", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                action: "create_folder",
+                                folderName: name.trim(),
+                                parentFolderId: parentId,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (data.success && data.folder) {
+                              // Add to list and navigate into it
+                              setFolders((prev) => [...prev, { id: data.folder.id, name: data.folder.name }]);
+                            }
+                          } catch (e) { console.error("Create folder failed:", e); }
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors border border-dashed border-[#1E242C] mt-1"
+                      >
+                        <Plus size={14} className="text-[#4ADE80]" />
+                        <span className="text-[12px] text-[#4ADE80] font-medium">New Folder</span>
+                      </button>
                       {folders.length === 0 && (
-                        <div className="text-[11px] text-[#484F58] py-2">No subfolders. Save here or navigate back.</div>
+                        <div className="text-[11px] text-[#484F58] py-1">No subfolders yet.</div>
                       )}
                     </div>
                   )}
@@ -1234,10 +1234,10 @@ function MessageAttachments({ messageId }: { messageId: string }) {
               </div>
             )}
 
-            {selectedDrive && (
+            {(selectedDrive || folderPath.length > 0) && (
               <div className="px-4 py-3 border-t border-[#1E242C] flex justify-between items-center">
                 <div className="text-[10px] text-[#484F58]">
-                  Saving to: {selectedDrive.name}{folderPath.length > 0 ? ` / ${folderPath.map((p) => p.name).join(" / ")}` : " (root)"}
+                  Saving to: {folderPath.length > 0 ? folderPath.map((p) => p.name).join(" / ") : selectedDrive?.name || "Drive root"}
                 </div>
                 <button
                   onClick={saveToDrive}
