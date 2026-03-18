@@ -666,6 +666,11 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [savingToDrive, setSavingToDrive] = useState(false);
   const [driveResult, setDriveResult] = useState<string | null>(null);
   const [downloadingAllThread, setDownloadingAllThread] = useState(false);
+  const [showThreadDrivePicker, setShowThreadDrivePicker] = useState(false);
+  const [threadFolders, setThreadFolders] = useState<any[]>([]);
+  const [threadFolderPath, setThreadFolderPath] = useState<{ id: string; name: string }[]>([]);
+  const [threadLoadingFolders, setThreadLoadingFolders] = useState(false);
+  const [threadDefaultFolderId, setThreadDefaultFolderId] = useState<string | null>(null);
 
   // Reset when conversation changes (messages array changes)
   const messageIds = messagesWithAttachments.map((m: any) => m.id).join(",");
@@ -732,15 +737,56 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     setDownloadingAllThread(false);
   };
 
+  const openThreadDrivePicker = async () => {
+    setShowThreadDrivePicker(true);
+    setDriveResult(null);
+    setThreadFolders([]);
+    setThreadFolderPath([]);
+    setThreadLoadingFolders(true);
+    try {
+      const configRes = await fetch("/api/drive?action=config");
+      const config = await configRes.json();
+      if (config.mode === "direct" && config.folderId) {
+        setThreadDefaultFolderId(config.folderId);
+        setThreadFolderPath([{ id: config.folderId, name: "Training Files" }]);
+        const res = await fetch(`/api/drive?action=folders&folder_id=${config.folderId}`);
+        const data = await res.json();
+        setThreadFolders(data.folders || []);
+      }
+    } catch (e) { console.error(e); }
+    setThreadLoadingFolders(false);
+  };
+
+  const openThreadFolder = async (folder: any) => {
+    setThreadFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
+    setThreadLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/drive?action=folders&folder_id=${folder.id}`);
+      const data = await res.json();
+      setThreadFolders(data.folders || []);
+    } catch (e) { console.error(e); }
+    setThreadLoadingFolders(false);
+  };
+
+  const navigateThreadPath = async (index: number) => {
+    const newPath = index < 0 ? [{ id: threadDefaultFolderId!, name: "Training Files" }] : threadFolderPath.slice(0, index + 1);
+    setThreadFolderPath(newPath);
+    setThreadLoadingFolders(true);
+    try {
+      const fId = newPath[newPath.length - 1].id;
+      const res = await fetch(`/api/drive?action=folders&folder_id=${fId}`);
+      const data = await res.json();
+      setThreadFolders(data.folders || []);
+    } catch (e) { console.error(e); }
+    setThreadLoadingFolders(false);
+  };
+
   const saveAllToDrive = async () => {
+    const folderId = threadFolderPath.length > 0 ? threadFolderPath[threadFolderPath.length - 1].id : threadDefaultFolderId;
+    if (!folderId) return;
     setSavingToDrive(true);
     setDriveResult(null);
     try {
-      // Check for direct mode
-      const configRes = await fetch("/api/drive?action=config");
-      const config = await configRes.json();
-      const folderId = config.mode === "direct" ? config.folderId : null;
-
       let saved = 0;
       for (const group of allAttachments) {
         for (const att of group.attachments) {
@@ -752,7 +798,7 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               messageId: group.messageId,
               attachmentId: att.id,
               fileName: att.name,
-              ...(folderId ? { folderId } : {}),
+              folderId,
             }),
           });
           const data = await res.json();
@@ -761,7 +807,7 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
       }
       const label = saved === 1 ? "1 file" : `${saved} files`;
       setDriveResult(`Saved ${label} to Drive!`);
-      setTimeout(() => setDriveResult(null), 4000);
+      setTimeout(() => { setDriveResult(null); setShowThreadDrivePicker(false); }, 2000);
     } catch (e: any) {
       setDriveResult(`Error: ${e.message}`);
     }
@@ -801,7 +847,7 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                 {downloadingAllThread ? "Downloading..." : "Download All"}
               </button>
               <button
-                onClick={saveAllToDrive}
+                onClick={openThreadDrivePicker}
                 disabled={savingToDrive}
                 className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold transition-colors"
               >
@@ -831,6 +877,73 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               </div>
             </div>
           ))}
+          </div>
+        </div>
+      )}
+
+      {/* Thread Drive Picker Modal */}
+      {showThreadDrivePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowThreadDrivePicker(false)}>
+          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[#E6EDF3]">Save All Attachments to Drive</div>
+                <div className="text-[10px] text-[#484F58]">{totalCount} file{totalCount !== 1 ? "s" : ""} — choose a folder</div>
+              </div>
+              <button onClick={() => setShowThreadDrivePicker(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 max-h-[350px] overflow-y-auto">
+              {threadFolderPath.length > 0 && (
+                <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                  {threadFolderPath.map((fp, i) => (
+                    <span key={fp.id} className="flex items-center gap-1">
+                      {i > 0 && <span className="text-[#484F58]">/</span>}
+                      <button onClick={() => navigateThreadPath(i)} className="text-[#58A6FF] hover:underline">{fp.name}</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {threadLoadingFolders ? (
+                <div className="text-center py-4 text-[#484F58] text-[12px]">Loading...</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {threadFolders.map((f) => (
+                    <button key={f.id} onClick={() => openThreadFolder(f)}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                      <FolderOpen size={14} className="text-[#F0883E]" />
+                      <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
+                    </button>
+                  ))}
+                  <button onClick={async () => {
+                    const name = prompt("New folder name:");
+                    if (!name?.trim()) return;
+                    const parentId = threadFolderPath.length > 0 ? threadFolderPath[threadFolderPath.length - 1].id : null;
+                    if (!parentId) return;
+                    try {
+                      const res = await fetch("/api/drive", { method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "create_folder", folderName: name.trim(), parentFolderId: parentId }) });
+                      const data = await res.json();
+                      if (data.success) setThreadFolders((prev) => [...prev, { id: data.folder.id, name: data.folder.name }]);
+                    } catch (e) { console.error(e); }
+                  }} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] border border-dashed border-[#1E242C] mt-1">
+                    <Plus size={14} className="text-[#4ADE80]" />
+                    <span className="text-[12px] text-[#4ADE80] font-medium">New Folder</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            {driveResult && (
+              <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-[11px] ${driveResult.startsWith("Error") ? "bg-[rgba(248,81,73,0.1)] text-[#F85149]" : "bg-[rgba(74,222,128,0.1)] text-[#4ADE80]"}`}>{driveResult}</div>
+            )}
+            <div className="px-4 py-3 border-t border-[#1E242C] flex justify-between items-center">
+              <div className="text-[10px] text-[#484F58]">Saving to: {threadFolderPath.map((p) => p.name).join(" / ") || "..."}</div>
+              <button onClick={saveAllToDrive} disabled={savingToDrive}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold disabled:opacity-50">
+                <ExternalLink size={12} /> {savingToDrive ? "Uploading..." : "Save Here"}
+              </button>
+            </div>
           </div>
         </div>
       )}
