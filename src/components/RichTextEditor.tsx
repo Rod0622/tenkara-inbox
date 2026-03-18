@@ -371,8 +371,8 @@ export default function RichTextEditor({
         data-placeholder={placeholder}
         className="px-4 py-3 text-[13.5px] text-[#E6EDF3] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
         style={{
-          minHeight: compact ? 80 : minHeight,
-          maxHeight: compact ? 200 : 500,
+          minHeight: compact ? 40 : minHeight,
+          maxHeight: compact ? 150 : 500,
           fontFamily: "Arial, sans-serif",
         }}
       />

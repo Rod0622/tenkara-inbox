@@ -499,15 +499,26 @@ function TeamChat({
     }
   };
 
+  const [isTeamChatOpen, setIsTeamChatOpen] = useState(false);
+
   return (
-    <div className="border-t border-[#161B22]">
-      <div className="px-4 py-3 border-b border-[#161B22] flex items-center gap-2 text-[11px] text-[#7D8590] uppercase tracking-wider">
+    <div className="border-t border-[#161B22] shrink-0">
+      <button
+        onClick={() => setIsTeamChatOpen(!isTeamChatOpen)}
+        className="w-full px-4 py-2 flex items-center gap-2 text-[11px] text-[#7D8590] uppercase tracking-wider hover:bg-[#12161B] transition-colors"
+      >
         <MessageSquare size={12} />
         <span>Team Chat</span>
         <span className="text-[#484F58] normal-case">(internal — not visible to sender)</span>
-      </div>
+        {comments.length > 0 && (
+          <span className="ml-auto bg-[#1E242C] text-[#7D8590] text-[10px] px-1.5 py-0.5 rounded-full font-bold">{comments.length}</span>
+        )}
+        <ChevronDown size={12} className={`ml-1 transition-transform ${isTeamChatOpen ? "rotate-180" : ""}`} />
+      </button>
 
-      <div className="h-[110px] overflow-y-auto px-4 py-3">
+      {isTeamChatOpen && (
+        <>
+      <div className="h-[90px] overflow-y-auto px-4 py-2">
         {comments.length === 0 ? (
           <div className="text-center text-[12px] text-[#484F58] pt-6">
             No team discussion yet. Start a conversation about this thread.
@@ -575,6 +586,8 @@ function TeamChat({
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -651,6 +664,7 @@ export default function ConversationDetail({
   onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
+  const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [showTaskInput, setShowTaskInput] = useState(false);
@@ -1978,25 +1992,41 @@ export default function ConversationDetail({
       </div>
 
       {!isReviewTab && (
-        <div className="px-5 py-3 border-t border-[#161B22]">
-          <div className="flex flex-col gap-2">
-            <RichTextEditor
-              onChange={setReplyText}
-              placeholder="Write a reply..."
-              compact
-              minHeight={60}
-            />
-            <div className="flex justify-end">
-              <button
-                onClick={handleSendReplyInternal}
-                disabled={sending || !replyText.replace(/<[^>]*>/g, "").trim()}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] hover:text-[#E6EDF3] disabled:opacity-50 transition-all text-[12px] font-semibold"
-              >
-                <Send size={14} />
-                {sending ? "Sending..." : "Send Reply"}
-              </button>
+        <div className="px-4 py-2 border-t border-[#161B22] shrink-0">
+          {!showReplyEditor ? (
+            <button
+              onClick={() => setShowReplyEditor(true)}
+              className="w-full px-4 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[#484F58] text-[13px] text-left hover:border-[#4ADE80]/30 hover:text-[#7D8590] transition-all"
+            >
+              Write a reply...
+            </button>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <RichTextEditor
+                onChange={setReplyText}
+                placeholder="Write a reply..."
+                compact
+                minHeight={50}
+                autoFocus
+              />
+              <div className="flex justify-between items-center">
+                <button
+                  onClick={() => { setShowReplyEditor(false); setReplyText(""); }}
+                  className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
+                >
+                  Collapse
+                </button>
+                <button
+                  onClick={handleSendReplyInternal}
+                  disabled={sending || !replyText.replace(/<[^>]*>/g, "").trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] disabled:opacity-40 transition-all text-[11px] font-bold"
+                >
+                  <Send size={12} />
+                  {sending ? "Sending..." : "Send"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
