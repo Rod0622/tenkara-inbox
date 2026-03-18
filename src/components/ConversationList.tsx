@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
@@ -544,8 +544,9 @@ export default function ConversationList({
                     </div>
 
                     {/* Subject */}
-                    <div className={`text-[12.5px] truncate mb-1 ${c.is_unread ? "font-semibold text-[#E6EDF3]" : "text-[#7D8590]"}`}>
-                      {c.subject}
+                    <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[#E6EDF3]" : "text-[#7D8590]"}`}>
+                      {(c as any).has_attachments && <Paperclip size={11} className="text-[#484F58] flex-shrink-0" />}
+                      <span className="truncate">{c.subject}</span>
                     </div>
 
                     {/* Preview */}

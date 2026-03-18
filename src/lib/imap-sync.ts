@@ -165,13 +165,16 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         }
 
         // Update conversation with latest message info
+        const convoUpdate: any = {
+          preview: email.snippet || email.bodyText?.slice(0, 200),
+          last_message_at: email.sentAt.toISOString(),
+          is_unread: !isOutbound(email.fromEmail, account.email),
+        };
+        if (email.hasAttachments) convoUpdate.has_attachments = true;
+
         await supabase
           .from("conversations")
-          .update({
-            preview: email.snippet || email.bodyText?.slice(0, 200),
-            last_message_at: email.sentAt.toISOString(),
-            is_unread: !isOutbound(email.fromEmail, account.email),
-          })
+          .update(convoUpdate)
           .eq("id", conversationId);
 
         // Run rules engine against this message

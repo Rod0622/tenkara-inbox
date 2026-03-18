@@ -158,6 +158,7 @@ export function useConversations(accountId: string | null) {
         is_starred,
         assignee_id,
         status,
+        has_attachments,
         last_message_at,
         created_at,
         updated_at,

@@ -278,11 +278,14 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
         });
         if (me) { result.errors.push(me.message); continue; }
 
-        await supabase.from("conversations").update({
+        const convoUpdate: any = {
           preview: (email.bodyPreview || bodyText).slice(0, 200),
           last_message_at: email.receivedDateTime || new Date().toISOString(),
           is_unread: !isOutbound,
-        }).eq("id", conversationId);
+        };
+        if (email.hasAttachments) convoUpdate.has_attachments = true;
+
+        await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
 
         if (runRulesFn && conversationId) {
           try {
