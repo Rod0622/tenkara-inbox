@@ -663,6 +663,9 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [savingToDrive, setSavingToDrive] = useState(false);
+  const [driveResult, setDriveResult] = useState<string | null>(null);
+  const [downloadingAllThread, setDownloadingAllThread] = useState(false);
 
   if (messagesWithAttachments.length === 0) return null;
 
@@ -708,10 +711,6 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     if (["xls","xlsx","csv"].includes(ext)) return <FileText size={12} className="text-[#4ADE80]" />;
     return <File size={12} className="text-[#7D8590]" />;
   };
-
-  const [savingToDrive, setSavingToDrive] = useState(false);
-  const [driveResult, setDriveResult] = useState<string | null>(null);
-  const [downloadingAllThread, setDownloadingAllThread] = useState(false);
 
   const downloadAllThread = async () => {
     setDownloadingAllThread(true);
