@@ -77,7 +77,15 @@ export default function InboxPage() {
       ? folders.find((folder: any) => folder.id === activeFolder)
       : null;
 
-    if (activeMailbox && selectedFolder) {
+    // Check if we're viewing a Trash system folder
+    const isTrashFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "trash";
+
+    if (isTrashFolder) {
+      // Show only trashed conversations for this account
+      filtered = conversations.filter(
+        (c) => c.status === "trash" && c.email_account_id === activeMailbox
+      );
+    } else if (activeMailbox && selectedFolder) {
       const folderName = String(selectedFolder.name || "").toLowerCase();
       const isSystemInbox = selectedFolder.is_system && folderName === "inbox";
       const isSystemSent = selectedFolder.is_system && folderName === "sent";
@@ -113,6 +121,11 @@ export default function InboxPage() {
       } else {
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
       }
+    }
+
+    // Exclude trashed conversations from all views except Trash folder
+    if (!isTrashFolder) {
+      filtered = filtered.filter((c) => c.status !== "trash");
     }
 
     if (searchQuery.trim()) {
