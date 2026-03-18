@@ -7,14 +7,19 @@ import {
   CheckCircle,
   ChevronDown,
   Circle,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
+  File,
+  FileText,
   FolderOpen,
   Forward,
   GitBranch,
+  Image,
   Mail,
   MessageSquare,
+  Paperclip,
   Plus,
   Reply,
   Send,
@@ -651,6 +656,142 @@ function ActivityItem({
   );
 }
 
+// ── Message Attachments ─────────────────────────────
+function MessageAttachments({ messageId }: { messageId: string }) {
+  const [attachments, setAttachments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+
+  const loadAttachments = async () => {
+    if (loaded) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/attachments?message_id=${messageId}`);
+      const data = await res.json();
+      setAttachments(data.attachments || []);
+    } catch (err) {
+      console.error("Failed to load attachments:", err);
+    }
+    setLoading(false);
+    setLoaded(true);
+  };
+
+  const downloadAttachment = async (attId: string, filename: string) => {
+    setDownloading(attId);
+    try {
+      const res = await fetch(`/api/attachments?message_id=${messageId}&attachment_id=${attId}`);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+    }
+    setDownloading(null);
+  };
+
+  const downloadAllAttachments = async () => {
+    setDownloadingAll(true);
+    try {
+      const res = await fetch(`/api/attachments?message_id=${messageId}&download_all=true`);
+      const data = await res.json();
+      if (data.attachments && data.format === "base64") {
+        // Download each file individually
+        for (const att of data.attachments) {
+          const bytes = Uint8Array.from(atob(att.data), (c) => c.charCodeAt(0));
+          const blob = new Blob([bytes], { type: att.contentType || "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = att.name;
+          a.click();
+          URL.revokeObjectURL(url);
+          // Small delay between downloads
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    } catch (err) {
+      console.error("Download all failed:", err);
+    }
+    setDownloadingAll(false);
+  };
+
+  const getFileIcon = (name: string, contentType: string) => {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext) || contentType.startsWith("image/"))
+      return <Image size={14} className="text-[#BC8CFF]" />;
+    if (["pdf"].includes(ext)) return <FileText size={14} className="text-[#F85149]" />;
+    if (["doc", "docx", "txt", "rtf"].includes(ext)) return <FileText size={14} className="text-[#58A6FF]" />;
+    if (["xls", "xlsx", "csv"].includes(ext)) return <FileText size={14} className="text-[#4ADE80]" />;
+    if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return <Archive size={14} className="text-[#F0883E]" />;
+    return <File size={14} className="text-[#7D8590]" />;
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="mt-3">
+      {!loaded ? (
+        <button
+          onClick={loadAttachments}
+          disabled={loading}
+          className="flex items-center gap-1.5 text-[11px] text-[#58A6FF] hover:text-[#79B8FF] transition-colors"
+        >
+          <Paperclip size={12} />
+          {loading ? "Loading attachments..." : "Show attachments"}
+        </button>
+      ) : attachments.length === 0 ? (
+        <div className="text-[11px] text-[#484F58] flex items-center gap-1">
+          <Paperclip size={11} /> No downloadable attachments
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-[#484F58] font-semibold flex items-center gap-1">
+              <Paperclip size={11} /> {attachments.length} attachment{attachments.length !== 1 ? "s" : ""}
+            </span>
+            {attachments.length > 1 && (
+              <button
+                onClick={downloadAllAttachments}
+                disabled={downloadingAll}
+                className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors"
+              >
+                <Download size={10} />
+                {downloadingAll ? "Downloading..." : "Download All"}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {attachments.filter((a: any) => !a.isInline).map((att: any) => (
+              <button
+                key={att.id}
+                onClick={() => downloadAttachment(att.id, att.name)}
+                disabled={downloading === att.id}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#4ADE80]/30 hover:bg-[#12161B] transition-all group"
+              >
+                {getFileIcon(att.name, att.contentType)}
+                <span className="text-[11px] text-[#E6EDF3] max-w-[150px] truncate">{att.name}</span>
+                <span className="text-[9px] text-[#484F58]">{formatSize(att.size)}</span>
+                <Download size={10} className="text-[#484F58] group-hover:text-[#4ADE80] transition-colors" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ConversationDetail({
   conversation: convo,
   currentUser,
@@ -1272,6 +1413,9 @@ export default function ConversationDetail({
                 <div className="text-[13px] leading-relaxed text-[#7D8590] whitespace-pre-wrap">
                   {msg.body_text || msg.snippet || "(No text content)"}
                 </div>
+                {msg.has_attachments && (
+                  <MessageAttachments messageId={msg.id} />
+                )}
               </div>
             ))}
 
