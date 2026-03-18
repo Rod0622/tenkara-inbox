@@ -709,6 +709,57 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     return <File size={12} className="text-[#7D8590]" />;
   };
 
+  const [savingToDrive, setSavingToDrive] = useState(false);
+  const [driveResult, setDriveResult] = useState<string | null>(null);
+  const [downloadingAllThread, setDownloadingAllThread] = useState(false);
+
+  const downloadAllThread = async () => {
+    setDownloadingAllThread(true);
+    for (const group of allAttachments) {
+      for (const att of group.attachments) {
+        await downloadAtt(group.messageId, att.id, att.name);
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+    setDownloadingAllThread(false);
+  };
+
+  const saveAllToDrive = async () => {
+    setSavingToDrive(true);
+    setDriveResult(null);
+    try {
+      // Check for direct mode
+      const configRes = await fetch("/api/drive?action=config");
+      const config = await configRes.json();
+      const folderId = config.mode === "direct" ? config.folderId : null;
+
+      let saved = 0;
+      for (const group of allAttachments) {
+        for (const att of group.attachments) {
+          const res = await fetch("/api/drive", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "upload_attachment",
+              messageId: group.messageId,
+              attachmentId: att.id,
+              fileName: att.name,
+              ...(folderId ? { folderId } : {}),
+            }),
+          });
+          const data = await res.json();
+          if (data.success) saved++;
+        }
+      }
+      const label = saved === 1 ? "1 file" : `${saved} files`;
+      setDriveResult(`Saved ${label} to Drive!`);
+      setTimeout(() => setDriveResult(null), 4000);
+    } catch (e: any) {
+      setDriveResult(`Error: ${e.message}`);
+    }
+    setSavingToDrive(false);
+  };
+
   return (
     <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] overflow-hidden">
       <button
@@ -720,11 +771,40 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
           {loaded ? `${totalCount} attachment${totalCount !== 1 ? "s" : ""}` : `${messagesWithAttachments.length} message${messagesWithAttachments.length !== 1 ? "s" : ""} with attachments`}
         </span>
         {loading && <span className="text-[10px] text-[#484F58]">Loading...</span>}
+        {driveResult && (
+          <span className={`text-[10px] ml-1 ${driveResult.startsWith("Error") ? "text-[#F85149]" : "text-[#4ADE80]"}`}>
+            {driveResult}
+          </span>
+        )}
         <ChevronDown size={12} className={`ml-auto text-[#484F58] transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
 
       {expanded && loaded && (
-        <div className="px-4 pb-3 space-y-2 border-t border-[#1E242C]">
+        <div className="px-4 pb-3 border-t border-[#1E242C]">
+          {/* Action buttons */}
+          {totalCount > 0 && (
+            <div className="flex items-center gap-3 py-2 border-b border-[#1E242C] mb-2">
+              <button
+                onClick={downloadAllThread}
+                disabled={downloadingAllThread}
+                className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors"
+              >
+                <Download size={10} />
+                {downloadingAllThread ? "Downloading..." : "Download All"}
+              </button>
+              <button
+                onClick={saveAllToDrive}
+                disabled={savingToDrive}
+                className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold transition-colors"
+              >
+                <ExternalLink size={10} />
+                {savingToDrive ? "Uploading..." : "Save All to Drive"}
+              </button>
+            </div>
+          )}
+
+          {/* Attachment list grouped by sender */}
+          <div className="space-y-2">
           {allAttachments.map((group) => (
             <div key={group.messageId}>
               <div className="text-[10px] text-[#484F58] mt-2 mb-1">From {group.fromName}:</div>
@@ -743,6 +823,7 @@ function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
     </div>
