@@ -846,7 +846,8 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           const data = await res.json();
           if (data.success) saved++;
         }
-        setUploadResult(`Saved ${saved} file${saved !== 1 ? "s" : ""} to Drive!`);
+        const label = saved === 1 ? "1 file" : `${saved} files`;
+        setUploadResult(`Saved ${label} to Drive!`);
       }
     } catch (e: any) {
       setUploadResult(`Error: ${e.message}`);
