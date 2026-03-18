@@ -901,25 +901,25 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {visibleAttachments.map((att: any) => (
-              <button
-                key={att.id}
-                onClick={() => downloadAttachment(att.id, att.name)}
-                disabled={downloading === att.id}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#4ADE80]/30 hover:bg-[#12161B] transition-all group"
-              >
-                {getFileIcon(att.name, att.contentType)}
-                <span className="text-[11px] text-[#E6EDF3] max-w-[150px] truncate">{att.name}</span>
-                <span className="text-[9px] text-[#484F58]">{formatSize(att.size)}</span>
-                <Download size={10} className="text-[#484F58] group-hover:text-[#4ADE80] transition-colors" />
-              </button>
-              <button
-                key={`drive-${att.id}`}
-                onClick={(e) => { e.stopPropagation(); openDrivePicker("single", att.id, att.name); }}
-                title="Save to Google Drive"
-                className="w-7 h-7 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#58A6FF]/30 flex items-center justify-center transition-all"
-              >
-                <ExternalLink size={10} className="text-[#484F58] hover:text-[#58A6FF]" />
-              </button>
+              <div key={att.id} className="flex items-center gap-1">
+                <button
+                  onClick={() => downloadAttachment(att.id, att.name)}
+                  disabled={downloading === att.id}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#4ADE80]/30 hover:bg-[#12161B] transition-all group"
+                >
+                  {getFileIcon(att.name, att.contentType)}
+                  <span className="text-[11px] text-[#E6EDF3] max-w-[150px] truncate">{att.name}</span>
+                  <span className="text-[9px] text-[#484F58]">{formatSize(att.size)}</span>
+                  <Download size={10} className="text-[#484F58] group-hover:text-[#4ADE80] transition-colors" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); openDrivePicker("single", att.id, att.name); }}
+                  title="Save to Google Drive"
+                  className="w-7 h-7 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#58A6FF]/30 flex items-center justify-center transition-all"
+                >
+                  <ExternalLink size={10} className="text-[#484F58] hover:text-[#58A6FF]" />
+                </button>
+              </div>
             ))}
           </div>
         </div>
