@@ -5,6 +5,11 @@ const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 
+// Comma-separated list of allowed Shared Drive names (empty = show all)
+const ALLOWED_DRIVES = (process.env.GOOGLE_ALLOWED_DRIVES || "").split(",").map(s => s.trim()).filter(Boolean);
+// If set, uploads go directly to this folder (skip drive/folder picker)
+const DEFAULT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || "";
+
 // ── JWT Token Generation (no external deps) ─────────
 async function getAccessToken(): Promise<string> {
   if (!GOOGLE_SERVICE_EMAIL || !GOOGLE_PRIVATE_KEY) {
@@ -62,6 +67,18 @@ export async function GET(req: NextRequest) {
   try {
     const token = await getAccessToken();
 
+    if (action === "config") {
+      // Return drive config for the UI
+      if (DEFAULT_FOLDER_ID) {
+        return NextResponse.json({
+          mode: "direct",
+          folderId: DEFAULT_FOLDER_ID,
+          message: "Files will be saved to the configured folder",
+        });
+      }
+      return NextResponse.json({ mode: "picker" });
+    }
+
     if (action === "drives") {
       // Try the drives endpoint first
       const res = await fetch(`${DRIVE_API}/drives?pageSize=50`, {
@@ -71,9 +88,12 @@ export async function GET(req: NextRequest) {
       if (res.ok) {
         const data = await res.json();
         const drivesList = (data.drives || []).map((d: any) => ({ id: d.id, name: d.name }));
+        const filteredDrives = ALLOWED_DRIVES.length > 0
+          ? drivesList.filter((d: any) => ALLOWED_DRIVES.some(name => d.name.toLowerCase() === name.toLowerCase()))
+          : drivesList;
         
-        if (drivesList.length > 0) {
-          return NextResponse.json({ drives: drivesList });
+        if (filteredDrives.length > 0) {
+          return NextResponse.json({ drives: filteredDrives });
         }
       }
 
@@ -106,8 +126,11 @@ export async function GET(req: NextRequest) {
         }
 
         const drives = Array.from(drivesMap.entries()).map(([id, name]) => ({ id, name }));
-        if (drives.length > 0) {
-          return NextResponse.json({ drives });
+        const filteredFallback = ALLOWED_DRIVES.length > 0
+          ? drives.filter((d: any) => ALLOWED_DRIVES.some(name => d.name.toLowerCase() === name.toLowerCase()))
+          : drives;
+        if (filteredFallback.length > 0) {
+          return NextResponse.json({ drives: filteredFallback });
         }
       }
 

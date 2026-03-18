@@ -656,6 +656,99 @@ function ActivityItem({
   );
 }
 
+// ── Thread Attachment Bar (top-level summary) ───────
+function ThreadAttachmentBar({ messages }: { messages: any[] }) {
+  const messagesWithAttachments = messages.filter((m: any) => m.has_attachments);
+  const [allAttachments, setAllAttachments] = useState<{ messageId: string; fromName: string; attachments: any[] }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  if (messagesWithAttachments.length === 0) return null;
+
+  const loadAll = async () => {
+    if (loaded) { setExpanded(!expanded); return; }
+    setLoading(true);
+    const results: { messageId: string; fromName: string; attachments: any[] }[] = [];
+    for (const msg of messagesWithAttachments) {
+      try {
+        const res = await fetch(`/api/attachments?message_id=${msg.id}`);
+        const data = await res.json();
+        const nonInline = (data.attachments || []).filter((a: any) => !a.isInline);
+        if (nonInline.length > 0) {
+          results.push({ messageId: msg.id, fromName: msg.from_name || "Unknown", attachments: nonInline });
+        }
+      } catch (e) { /* skip */ }
+    }
+    setAllAttachments(results);
+    setLoaded(true);
+    setExpanded(true);
+    setLoading(false);
+  };
+
+  const totalCount = allAttachments.reduce((sum, g) => sum + g.attachments.length, 0);
+
+  const downloadAtt = async (messageId: string, attId: string, name: string) => {
+    try {
+      const res = await fetch(`/api/attachments?message_id=${messageId}&attachment_id=${attId}`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); }
+  };
+
+  const getIcon = (name: string) => {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) return <Image size={12} className="text-[#BC8CFF]" />;
+    if (ext === "pdf") return <FileText size={12} className="text-[#F85149]" />;
+    if (["doc","docx","txt","rtf"].includes(ext)) return <FileText size={12} className="text-[#58A6FF]" />;
+    if (["xls","xlsx","csv"].includes(ext)) return <FileText size={12} className="text-[#4ADE80]" />;
+    return <File size={12} className="text-[#7D8590]" />;
+  };
+
+  return (
+    <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] overflow-hidden">
+      <button
+        onClick={loadAll}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[#161B22] transition-colors"
+      >
+        <Paperclip size={14} className="text-[#58A6FF]" />
+        <span className="text-[12px] font-semibold text-[#E6EDF3]">
+          {loaded ? `${totalCount} attachment${totalCount !== 1 ? "s" : ""}` : `${messagesWithAttachments.length} message${messagesWithAttachments.length !== 1 ? "s" : ""} with attachments`}
+        </span>
+        {loading && <span className="text-[10px] text-[#484F58]">Loading...</span>}
+        <ChevronDown size={12} className={`ml-auto text-[#484F58] transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
+
+      {expanded && loaded && (
+        <div className="px-4 pb-3 space-y-2 border-t border-[#1E242C]">
+          {allAttachments.map((group) => (
+            <div key={group.messageId}>
+              <div className="text-[10px] text-[#484F58] mt-2 mb-1">From {group.fromName}:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {group.attachments.map((att: any) => (
+                  <button
+                    key={att.id}
+                    onClick={() => downloadAtt(group.messageId, att.id, att.name)}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#4ADE80]/30 transition-all text-left"
+                  >
+                    {getIcon(att.name)}
+                    <span className="text-[10px] text-[#E6EDF3] max-w-[140px] truncate">{att.name}</span>
+                    <Download size={9} className="text-[#484F58]" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Message Attachments ─────────────────────────────
 function MessageAttachments({ messageId }: { messageId: string }) {
   const [attachments, setAttachments] = useState<any[]>([]);
@@ -753,8 +846,56 @@ function MessageAttachments({ messageId }: { messageId: string }) {
   // Drive functions
   const openDrivePicker = async (type: "single" | "all", attId?: string, attName?: string) => {
     setDriveAction({ type, attId, attName });
-    setShowDrivePicker(true);
     setUploadResult(null);
+
+    // Check if direct mode (no picker needed)
+    try {
+      const configRes = await fetch("/api/drive?action=config");
+      const config = await configRes.json();
+      if (config.mode === "direct" && config.folderId) {
+        // Skip picker, upload directly
+        setUploading(true);
+        if (type === "single" && attId) {
+          const res = await fetch("/api/drive", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "upload_attachment",
+              messageId, attachmentId: attId,
+              fileName: attName || "attachment",
+              folderId: config.folderId,
+            }),
+          });
+          const data = await res.json();
+          setUploadResult(data.success ? "Saved to Drive!" : `Error: ${data.error}`);
+        } else if (type === "all") {
+          const dl = attachments.filter((a: any) => !a.isInline);
+          let saved = 0;
+          for (const att of dl) {
+            const res = await fetch("/api/drive", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "upload_attachment",
+                messageId, attachmentId: att.id,
+                fileName: att.name,
+                folderId: config.folderId,
+              }),
+            });
+            const data = await res.json();
+            if (data.success) saved++;
+          }
+          const label = saved === 1 ? "1 file" : `${saved} files`;
+          setUploadResult(`Saved ${label} to Drive!`);
+        }
+        setUploading(false);
+        setTimeout(() => setUploadResult(null), 3000);
+        return;
+      }
+    } catch (e) { /* fall through to picker */ }
+
+    // Show picker
+    setShowDrivePicker(true);
     if (drives.length === 0) {
       setLoadingDrives(true);
       try {
@@ -878,6 +1019,12 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#484F58] font-semibold flex items-center gap-1">
               <Paperclip size={11} /> {visibleAttachments.length} attachment{visibleAttachments.length !== 1 ? "s" : ""}
+              {uploading && <span className="text-[10px] text-[#58A6FF] ml-2">Uploading to Drive...</span>}
+              {uploadResult && !showDrivePicker && (
+                <span className={`text-[10px] ml-2 ${uploadResult.startsWith("Error") ? "text-[#F85149]" : "text-[#4ADE80]"}`}>
+                  {uploadResult}
+                </span>
+              )}
             </span>
             {visibleAttachments.length > 1 && (
               <div className="flex gap-2">
@@ -1620,6 +1767,9 @@ export default function ConversationDetail({
       >
         {activeTab === "messages" && (
           <>
+            {/* Attachment summary bar — shows all attachments across all messages */}
+            <ThreadAttachmentBar messages={messages} />
+
             {messages.map((msg: any) => (
               <div
                 key={msg.id}
