@@ -750,17 +750,19 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           <Paperclip size={12} />
           {loading ? "Loading attachments..." : "Show attachments"}
         </button>
-      ) : attachments.length === 0 ? (
-        <div className="text-[11px] text-[#484F58] flex items-center gap-1">
-          <Paperclip size={11} /> No downloadable attachments
-        </div>
-      ) : (
+      ) : (() => {
+        const downloadable = attachments.filter((a: any) => !a.isInline);
+        return downloadable.length === 0 ? (
+          <div className="text-[11px] text-[#484F58] flex items-center gap-1">
+            <Paperclip size={11} /> No downloadable attachments
+          </div>
+        ) : (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#484F58] font-semibold flex items-center gap-1">
-              <Paperclip size={11} /> {attachments.length} attachment{attachments.length !== 1 ? "s" : ""}
+              <Paperclip size={11} /> {downloadable.length} attachment{downloadable.length !== 1 ? "s" : ""}
             </span>
-            {attachments.length > 1 && (
+            {downloadable.length > 1 && (
               <button
                 onClick={downloadAllAttachments}
                 disabled={downloadingAll}
@@ -772,7 +774,7 @@ function MessageAttachments({ messageId }: { messageId: string }) {
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {attachments.filter((a: any) => !a.isInline).map((att: any) => (
+            {downloadable.map((att: any) => (
               <button
                 key={att.id}
                 onClick={() => downloadAttachment(att.id, att.name)}
@@ -787,7 +789,8 @@ function MessageAttachments({ messageId }: { messageId: string }) {
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

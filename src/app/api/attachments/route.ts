@@ -134,14 +134,21 @@ async function handleGraphAttachments(
       return NextResponse.json({ attachments });
     }
 
-    // Download specific attachment
+    // Download specific attachment — fetch individually to get contentBytes
     if (attachmentId) {
-      const att = listData.value?.find((a: any) => a.id === attachmentId);
-      if (!att) {
-        return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+      const attRes = await fetch(
+        `${GRAPH_BASE}/users/${userEmail}/messages/${graphMessageId}/attachments/${attachmentId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!attRes.ok) {
+        return NextResponse.json({ error: "Failed to download attachment" }, { status: 500 });
+      }
+      const att = await attRes.json();
+
+      if (!att.contentBytes) {
+        return NextResponse.json({ error: "Attachment has no content" }, { status: 404 });
       }
 
-      // Attachment content is in contentBytes (base64)
       const bytes = Buffer.from(att.contentBytes, "base64");
       return new NextResponse(bytes, {
         headers: {
@@ -152,17 +159,32 @@ async function handleGraphAttachments(
       });
     }
 
-    // Download all as individual files info (ZIP requires archiver package)
+    // Download all — fetch each attachment individually
     if (downloadAll) {
-      // Return all attachment data for client-side ZIP creation
-      const allAttachments = (listData.value || [])
-        .filter((att: any) => !att.isInline && att.contentBytes)
-        .map((att: any) => ({
-          name: att.name,
-          contentType: att.contentType,
-          size: att.size,
-          data: att.contentBytes, // base64
-        }));
+      const nonInline = (listData.value || []).filter((att: any) => !att.isInline);
+      const allAttachments = [];
+
+      for (const att of nonInline) {
+        try {
+          const attRes = await fetch(
+            `${GRAPH_BASE}/users/${userEmail}/messages/${graphMessageId}/attachments/${att.id}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (attRes.ok) {
+            const fullAtt = await attRes.json();
+            if (fullAtt.contentBytes) {
+              allAttachments.push({
+                name: fullAtt.name,
+                contentType: fullAtt.contentType,
+                size: fullAtt.size,
+                data: fullAtt.contentBytes,
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to fetch attachment ${att.name}:`, e);
+        }
+      }
 
       return NextResponse.json({ attachments: allAttachments, format: "base64" });
     }
