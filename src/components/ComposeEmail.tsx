@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { X, Send, ChevronDown, Paperclip } from "lucide-react";
+import { X, Send, ChevronDown } from "lucide-react";
 import { useActions, useEmailAccounts } from "@/lib/hooks";
+import RichTextEditor, { getCleanHtml, htmlToPlainText } from "@/components/RichTextEditor";
 
 interface ComposeEmailProps {
   onClose: () => void;
@@ -19,16 +20,16 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [cc, setCc] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
-  // Auto-select first account
   const accountId = selectedAccount || accounts[0]?.id || "";
   const currentAccount = accounts.find((a) => a.id === accountId);
 
   const handleSend = async () => {
-    if (!to.trim() || !subject.trim() || !body.trim()) {
+    const plainText = htmlToPlainText(bodyHtml);
+    if (!to.trim() || !subject.trim() || !plainText.trim()) {
       setError("Please fill in To, Subject, and Body");
       return;
     }
@@ -41,12 +42,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
     setError("");
 
     try {
+      const cleanHtml = getCleanHtml(bodyHtml);
       const result = await sendEmail({
         account_id: accountId,
         to: to.trim(),
         cc: cc.trim() || undefined,
         subject: subject.trim(),
-        body: body.trim(),
+        body: cleanHtml,
       });
 
       if (result.error) {
@@ -55,7 +57,6 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         return;
       }
 
-      // Success
       onSent?.();
       onClose();
     } catch (err: any) {
@@ -95,14 +96,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
       {/* Form */}
       <div className="flex-1 overflow-y-auto">
-        {/* Error */}
         {error && (
           <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.2)] text-[#F85149] text-[12px]">
             {error}
           </div>
         )}
 
-        {/* From account picker */}
+        {/* From */}
         <div className="px-5 py-2.5 border-b border-[#161B22] flex items-center gap-3">
           <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">From</span>
           <div className="relative flex-1">
@@ -151,10 +151,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
           />
           {!showCc && (
-            <button
-              onClick={() => setShowCc(true)}
-              className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
-            >
+            <button onClick={() => setShowCc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors">
               Cc
             </button>
           )}
@@ -184,15 +181,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           />
         </div>
 
-        {/* Body */}
-        <div className="px-5 py-4">
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
+        {/* Rich Text Body */}
+        <div className="px-5 py-3">
+          <RichTextEditor
+            onChange={setBodyHtml}
             placeholder="Write your message..."
-            rows={16}
+            minHeight={300}
             autoFocus
-            className="w-full bg-transparent border-none outline-none text-[#E6EDF3] text-[13.5px] leading-relaxed resize-none placeholder:text-[#484F58]"
           />
         </div>
       </div>

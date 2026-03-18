@@ -97,13 +97,18 @@ export async function POST(req: NextRequest) {
         tls: { rejectUnauthorized: false },
       });
 
+      // Detect if body is already HTML
+      const isHtmlBody = emailBody.trim().startsWith("<") || emailBody.includes("<br") || emailBody.includes("<div") || emailBody.includes("<p");
+      const htmlContent = isHtmlBody ? emailBody : emailBody.replace(/\n/g, "<br>");
+      const plainContent = isHtmlBody ? emailBody.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() : emailBody;
+
       const info = await transport.sendMail({
         from: `"${account.name}" <${account.email}>`,
         to,
         cc: cc || undefined,
         subject,
-        text: emailBody,
-        html: emailBody.replace(/\n/g, "<br>"),
+        text: plainContent,
+        html: htmlContent,
       });
 
       messageId = info.messageId;

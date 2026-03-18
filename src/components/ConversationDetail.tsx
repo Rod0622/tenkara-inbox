@@ -32,6 +32,7 @@ import {
   useThreadSummary,
 } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
+import RichTextEditor from "@/components/RichTextEditor";
 
 type SuggestedTaskItem = {
   id: string;
@@ -781,10 +782,13 @@ export default function ConversationDetail({
   };
 
   const handleSendReplyInternal = async () => {
-    if (!convo || !replyText.trim()) return;
+    if (!convo) return;
+    // Check if there's actual content (not just empty tags)
+    const textContent = replyText.replace(/<[^>]*>/g, "").trim();
+    if (!textContent) return;
     setSending(true);
     try {
-      await onSendReply(convo.id, replyText.trim());
+      await onSendReply(convo.id, replyText);
       setReplyText("");
       await refetchDetail();
     } finally {
@@ -922,7 +926,12 @@ export default function ConversationDetail({
         throw new Error(json?.error || "Failed to move conversation to trash");
       }
 
-      window.location.reload();
+      // Use onTrash callback if available, otherwise reload
+      if (typeof (window as any).__tenkaraRefetch === "function") {
+        (window as any).__tenkaraRefetch();
+      } else {
+        window.location.reload();
+      }
     } catch (error: any) {
       console.error("Trash failed:", error);
       alert(error?.message || "Failed to move conversation to trash");
@@ -1970,22 +1979,23 @@ export default function ConversationDetail({
 
       {!isReviewTab && (
         <div className="px-5 py-3 border-t border-[#161B22]">
-          <div className="flex items-center gap-2">
-            <textarea
-              ref={replyTextareaRef}
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
+          <div className="flex flex-col gap-2">
+            <RichTextEditor
+              onChange={setReplyText}
               placeholder="Write a reply..."
-              rows={2}
-              className="flex-1 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none"
+              compact
+              minHeight={60}
             />
-            <button
-              onClick={handleSendReplyInternal}
-              disabled={sending || !replyText.trim()}
-              className="w-12 h-12 rounded-xl bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] disabled:opacity-50 flex items-center justify-center"
-            >
-              <Send size={16} />
-            </button>
+            <div className="flex justify-end">
+              <button
+                onClick={handleSendReplyInternal}
+                disabled={sending || !replyText.replace(/<[^>]*>/g, "").trim()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#12161B] border border-[#1E242C] text-[#7D8590] hover:bg-[#181D24] hover:text-[#E6EDF3] disabled:opacity-50 transition-all text-[12px] font-semibold"
+              >
+                <Send size={14} />
+                {sending ? "Sending..." : "Send Reply"}
+              </button>
+            </div>
           </div>
         </div>
       )}
