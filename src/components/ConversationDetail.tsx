@@ -854,6 +854,8 @@ function MessageAttachments({ messageId }: { messageId: string }) {
     setUploading(false);
   };
 
+  const downloadable = loaded ? attachments.filter((a: any) => !a.isInline) : [];
+
   return (
     <div className="mt-3">
       {!loaded ? (
@@ -865,13 +867,11 @@ function MessageAttachments({ messageId }: { messageId: string }) {
           <Paperclip size={12} />
           {loading ? "Loading attachments..." : "Show attachments"}
         </button>
-      ) : (() => {
-        const downloadable = attachments.filter((a: any) => !a.isInline);
-        return downloadable.length === 0 ? (
-          <div className="text-[11px] text-[#484F58] flex items-center gap-1">
-            <Paperclip size={11} /> No downloadable attachments
-          </div>
-        ) : (
+      ) : downloadable.length === 0 ? (
+        <div className="text-[11px] text-[#484F58] flex items-center gap-1">
+          <Paperclip size={11} /> No downloadable attachments
+        </div>
+      ) : (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#484F58] font-semibold flex items-center gap-1">
@@ -921,8 +921,7 @@ function MessageAttachments({ messageId }: { messageId: string }) {
             ))}
           </div>
         </div>
-        );
-      })()}
+        )}
 
       {/* Drive Picker Modal */}
       {showDrivePicker && (
