@@ -63,15 +63,56 @@ export async function GET(req: NextRequest) {
     const token = await getAccessToken();
 
     if (action === "drives") {
-      // List all shared drives the service account has access to
+      // Try the drives endpoint first
       const res = await fetch(`${DRIVE_API}/drives?pageSize=50`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`Drive API error: ${res.statusText}`);
-      const data = await res.json();
-      return NextResponse.json({
-        drives: (data.drives || []).map((d: any) => ({ id: d.id, name: d.name })),
-      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        const drivesList = (data.drives || []).map((d: any) => ({ id: d.id, name: d.name }));
+        
+        if (drivesList.length > 0) {
+          return NextResponse.json({ drives: drivesList });
+        }
+      }
+
+      // Fallback: search for shared drives via files endpoint
+      // This works better for service accounts that are members (not owners)
+      const fallbackRes = await fetch(
+        `${DRIVE_API}/files?q=mimeType='application/vnd.google-apps.folder'&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&spaces=drive&fields=files(id,name,driveId)&pageSize=50`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        // Extract unique drive IDs from the files
+        const driveIds = new Set<string>();
+        const drivesMap = new Map<string, string>();
+        
+        for (const f of (fallbackData.files || [])) {
+          if (f.driveId && !driveIds.has(f.driveId)) {
+            driveIds.add(f.driveId);
+            // Fetch drive name
+            const driveRes = await fetch(
+              `${DRIVE_API}/drives/${f.driveId}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (driveRes.ok) {
+              const driveData = await driveRes.json();
+              drivesMap.set(f.driveId, driveData.name || f.driveId);
+            }
+          }
+        }
+
+        const drives = Array.from(drivesMap.entries()).map(([id, name]) => ({ id, name }));
+        if (drives.length > 0) {
+          return NextResponse.json({ drives });
+        }
+      }
+
+      // Last resort: try getting a specific drive if we know the name
+      return NextResponse.json({ drives: [], debug: "No shared drives found via any method" });
     }
 
     if (action === "folders") {
