@@ -1,0 +1,280 @@
+import { NextRequest, NextResponse } from "next/server";
+
+const GOOGLE_SERVICE_EMAIL = process.env.GOOGLE_SERVICE_EMAIL || "";
+const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
+
+// ── JWT Token Generation (no external deps) ─────────
+async function getAccessToken(): Promise<string> {
+  if (!GOOGLE_SERVICE_EMAIL || !GOOGLE_PRIVATE_KEY) {
+    throw new Error("Google Drive credentials not configured");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: GOOGLE_SERVICE_EMAIL,
+    scope: "https://www.googleapis.com/auth/drive",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now,
+  };
+
+  const encode = (obj: any) =>
+    Buffer.from(JSON.stringify(obj)).toString("base64url");
+
+  const unsignedToken = `${encode(header)}.${encode(payload)}`;
+
+  // Sign with RSA-SHA256 using Node.js crypto
+  const crypto = await import("crypto");
+  const sign = crypto.createSign("RSA-SHA256");
+  sign.update(unsignedToken);
+  const signature = sign.sign(GOOGLE_PRIVATE_KEY, "base64url");
+
+  const jwt = `${unsignedToken}.${signature}`;
+
+  // Exchange JWT for access token
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Google auth failed: ${err.error_description || err.error || res.statusText}`);
+  }
+
+  const data = await res.json();
+  return data.access_token;
+}
+
+// ── GET /api/drive — List shared drives, folders, or files ──
+export async function GET(req: NextRequest) {
+  const action = req.nextUrl.searchParams.get("action") || "drives";
+  const driveId = req.nextUrl.searchParams.get("drive_id");
+  const folderId = req.nextUrl.searchParams.get("folder_id");
+
+  try {
+    const token = await getAccessToken();
+
+    if (action === "drives") {
+      // List all shared drives the service account has access to
+      const res = await fetch(`${DRIVE_API}/drives?pageSize=50`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`Drive API error: ${res.statusText}`);
+      const data = await res.json();
+      return NextResponse.json({
+        drives: (data.drives || []).map((d: any) => ({ id: d.id, name: d.name })),
+      });
+    }
+
+    if (action === "folders") {
+      // List folders within a drive or folder
+      const parentId = folderId || driveId;
+      if (!parentId) return NextResponse.json({ error: "drive_id or folder_id required" }, { status: 400 });
+
+      const query = `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+      const params = new URLSearchParams({
+        q: query,
+        fields: "files(id,name,mimeType)",
+        orderBy: "name",
+        pageSize: "100",
+        ...(driveId ? { driveId, includeItemsFromAllDrives: "true", supportsAllDrives: "true", corpora: "drive" } : { supportsAllDrives: "true", includeItemsFromAllDrives: "true" }),
+      });
+
+      const res = await fetch(`${DRIVE_API}/files?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || res.statusText);
+      }
+      const data = await res.json();
+      return NextResponse.json({
+        folders: (data.files || []).map((f: any) => ({ id: f.id, name: f.name })),
+      });
+    }
+
+    if (action === "files") {
+      // List files in a folder (for "Insert from Drive")
+      const parentId = folderId || driveId;
+      if (!parentId) return NextResponse.json({ error: "drive_id or folder_id required" }, { status: 400 });
+
+      const query = `'${parentId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`;
+      const params = new URLSearchParams({
+        q: query,
+        fields: "files(id,name,mimeType,size,webViewLink,thumbnailLink,iconLink)",
+        orderBy: "modifiedTime desc",
+        pageSize: "50",
+        ...(driveId ? { driveId, includeItemsFromAllDrives: "true", supportsAllDrives: "true", corpora: "drive" } : { supportsAllDrives: "true", includeItemsFromAllDrives: "true" }),
+      });
+
+      const res = await fetch(`${DRIVE_API}/files?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || res.statusText);
+      }
+      const data = await res.json();
+      return NextResponse.json({
+        files: (data.files || []).map((f: any) => ({
+          id: f.id, name: f.name, mimeType: f.mimeType,
+          size: f.size ? parseInt(f.size) : 0,
+          webViewLink: f.webViewLink, iconLink: f.iconLink,
+        })),
+      });
+    }
+
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+// ── POST /api/drive — Upload file to Google Drive ───
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action } = body;
+
+    const token = await getAccessToken();
+
+    if (action === "upload") {
+      // Upload a file from base64 data
+      const { fileName, mimeType, data, folderId: targetFolderId, driveId: targetDriveId } = body;
+
+      if (!fileName || !data) {
+        return NextResponse.json({ error: "fileName and data required" }, { status: 400 });
+      }
+
+      // Create file metadata
+      const metadata: any = {
+        name: fileName,
+        ...(targetFolderId ? { parents: [targetFolderId] } : targetDriveId ? { parents: [targetDriveId] } : {}),
+      };
+
+      const fileBytes = Buffer.from(data, "base64");
+
+      // Use multipart upload
+      const boundary = "tenkara_upload_boundary";
+      const multipartBody = [
+        `--${boundary}`,
+        "Content-Type: application/json; charset=UTF-8",
+        "",
+        JSON.stringify(metadata),
+        `--${boundary}`,
+        `Content-Type: ${mimeType || "application/octet-stream"}`,
+        "Content-Transfer-Encoding: base64",
+        "",
+        data,
+        `--${boundary}--`,
+      ].join("\r\n");
+
+      const uploadRes = await fetch(
+        `${UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": `multipart/related; boundary=${boundary}`,
+          },
+          body: multipartBody,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: `Upload failed: ${err.error?.message || uploadRes.statusText}` },
+          { status: 500 }
+        );
+      }
+
+      const result = await uploadRes.json();
+      return NextResponse.json({
+        success: true,
+        file: { id: result.id, name: result.name, webViewLink: result.webViewLink },
+      });
+    }
+
+    if (action === "upload_attachment") {
+      // Download attachment from email and upload to Drive in one step
+      const { messageId, attachmentId, fileName, folderId: targetFolderId, driveId: targetDriveId } = body;
+
+      if (!messageId || !attachmentId) {
+        return NextResponse.json({ error: "messageId and attachmentId required" }, { status: 400 });
+      }
+
+      // Fetch attachment from our attachments API
+      const baseUrl = req.nextUrl.origin;
+      const attRes = await fetch(
+        `${baseUrl}/api/attachments?message_id=${messageId}&attachment_id=${attachmentId}`
+      );
+
+      if (!attRes.ok) {
+        return NextResponse.json({ error: "Failed to fetch attachment" }, { status: 500 });
+      }
+
+      const attBuffer = await attRes.arrayBuffer();
+      const base64Data = Buffer.from(attBuffer).toString("base64");
+      const contentType = attRes.headers.get("content-type") || "application/octet-stream";
+
+      // Upload to Drive
+      const metadata: any = {
+        name: fileName || "attachment",
+        ...(targetFolderId ? { parents: [targetFolderId] } : targetDriveId ? { parents: [targetDriveId] } : {}),
+      };
+
+      const boundary = "tenkara_upload_boundary";
+      const multipartBody = [
+        `--${boundary}`,
+        "Content-Type: application/json; charset=UTF-8",
+        "",
+        JSON.stringify(metadata),
+        `--${boundary}`,
+        `Content-Type: ${contentType}`,
+        "Content-Transfer-Encoding: base64",
+        "",
+        base64Data,
+        `--${boundary}--`,
+      ].join("\r\n");
+
+      const uploadRes = await fetch(
+        `${UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": `multipart/related; boundary=${boundary}`,
+          },
+          body: multipartBody,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: `Upload failed: ${err.error?.message || uploadRes.statusText}` },
+          { status: 500 }
+        );
+      }
+
+      const result = await uploadRes.json();
+      return NextResponse.json({
+        success: true,
+        file: { id: result.id, name: result.name },
+      });
+    }
+
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

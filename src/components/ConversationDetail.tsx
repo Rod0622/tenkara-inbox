@@ -663,6 +663,17 @@ function MessageAttachments({ messageId }: { messageId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  // Drive state
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [driveAction, setDriveAction] = useState<{ type: "single" | "all"; attId?: string; attName?: string } | null>(null);
+  const [drives, setDrives] = useState<any[]>([]);
+  const [selectedDrive, setSelectedDrive] = useState<any>(null);
+  const [folders, setFolders] = useState<any[]>([]);
+  const [folderPath, setFolderPath] = useState<{ id: string; name: string }[]>([]);
+  const [loadingDrives, setLoadingDrives] = useState(false);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
 
   const loadAttachments = async () => {
     if (loaded) return;
@@ -739,6 +750,110 @@ function MessageAttachments({ messageId }: { messageId: string }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // Drive functions
+  const openDrivePicker = async (type: "single" | "all", attId?: string, attName?: string) => {
+    setDriveAction({ type, attId, attName });
+    setShowDrivePicker(true);
+    setUploadResult(null);
+    if (drives.length === 0) {
+      setLoadingDrives(true);
+      try {
+        const res = await fetch("/api/drive?action=drives");
+        const data = await res.json();
+        setDrives(data.drives || []);
+      } catch (e) { console.error("Failed to load drives:", e); }
+      setLoadingDrives(false);
+    }
+  };
+
+  const selectDrive = async (drive: any) => {
+    setSelectedDrive(drive);
+    setFolderPath([]);
+    setLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/drive?action=folders&drive_id=${drive.id}`);
+      const data = await res.json();
+      setFolders(data.folders || []);
+    } catch (e) { console.error(e); }
+    setLoadingFolders(false);
+  };
+
+  const openFolder = async (folder: any) => {
+    setFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
+    setLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/drive?action=folders&drive_id=${selectedDrive?.id}&folder_id=${folder.id}`);
+      const data = await res.json();
+      setFolders(data.folders || []);
+    } catch (e) { console.error(e); }
+    setLoadingFolders(false);
+  };
+
+  const navigateToPathIndex = async (index: number) => {
+    if (index < 0) {
+      // Back to drive root
+      setFolderPath([]);
+      await selectDrive(selectedDrive);
+      return;
+    }
+    const newPath = folderPath.slice(0, index + 1);
+    setFolderPath(newPath);
+    setLoadingFolders(true);
+    try {
+      const fId = newPath[newPath.length - 1].id;
+      const res = await fetch(`/api/drive?action=folders&drive_id=${selectedDrive?.id}&folder_id=${fId}`);
+      const data = await res.json();
+      setFolders(data.folders || []);
+    } catch (e) { console.error(e); }
+    setLoadingFolders(false);
+  };
+
+  const saveToDrive = async () => {
+    if (!driveAction || !selectedDrive) return;
+    setUploading(true);
+    setUploadResult(null);
+    const targetFolderId = folderPath.length > 0 ? folderPath[folderPath.length - 1].id : null;
+
+    try {
+      if (driveAction.type === "single" && driveAction.attId) {
+        const res = await fetch("/api/drive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upload_attachment",
+            messageId, attachmentId: driveAction.attId,
+            fileName: driveAction.attName || "attachment",
+            folderId: targetFolderId, driveId: selectedDrive.id,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) { setUploadResult("Saved to Drive!"); }
+        else { setUploadResult(`Error: ${data.error}`); }
+      } else if (driveAction.type === "all") {
+        const downloadable = attachments.filter((a: any) => !a.isInline);
+        let saved = 0;
+        for (const att of downloadable) {
+          const res = await fetch("/api/drive", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "upload_attachment",
+              messageId, attachmentId: att.id,
+              fileName: att.name,
+              folderId: targetFolderId, driveId: selectedDrive.id,
+            }),
+          });
+          const data = await res.json();
+          if (data.success) saved++;
+        }
+        setUploadResult(`Saved ${saved} file${saved !== 1 ? "s" : ""} to Drive!`);
+      }
+    } catch (e: any) {
+      setUploadResult(`Error: ${e.message}`);
+    }
+    setUploading(false);
+  };
+
   return (
     <div className="mt-3">
       {!loaded ? (
@@ -763,14 +878,23 @@ function MessageAttachments({ messageId }: { messageId: string }) {
               <Paperclip size={11} /> {downloadable.length} attachment{downloadable.length !== 1 ? "s" : ""}
             </span>
             {downloadable.length > 1 && (
-              <button
-                onClick={downloadAllAttachments}
-                disabled={downloadingAll}
-                className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors"
-              >
-                <Download size={10} />
-                {downloadingAll ? "Downloading..." : "Download All"}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => openDrivePicker("all")}
+                  className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold transition-colors"
+                >
+                  <ExternalLink size={10} />
+                  Save All to Drive
+                </button>
+                <button
+                  onClick={downloadAllAttachments}
+                  disabled={downloadingAll}
+                  className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors"
+                >
+                  <Download size={10} />
+                  {downloadingAll ? "Downloading..." : "Download All"}
+                </button>
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -786,11 +910,120 @@ function MessageAttachments({ messageId }: { messageId: string }) {
                 <span className="text-[9px] text-[#484F58]">{formatSize(att.size)}</span>
                 <Download size={10} className="text-[#484F58] group-hover:text-[#4ADE80] transition-colors" />
               </button>
+              <button
+                key={`drive-${att.id}`}
+                onClick={(e) => { e.stopPropagation(); openDrivePicker("single", att.id, att.name); }}
+                title="Save to Google Drive"
+                className="w-7 h-7 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#58A6FF]/30 flex items-center justify-center transition-all"
+              >
+                <ExternalLink size={10} className="text-[#484F58] hover:text-[#58A6FF]" />
+              </button>
             ))}
           </div>
         </div>
         );
       })()}
+
+      {/* Drive Picker Modal */}
+      {showDrivePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDrivePicker(false)}>
+          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[#E6EDF3]">
+                  {driveAction?.type === "all" ? "Save All to Google Drive" : `Save "${driveAction?.attName}" to Drive`}
+                </div>
+                <div className="text-[10px] text-[#484F58]">Choose a shared drive and folder</div>
+              </div>
+              <button onClick={() => setShowDrivePicker(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-4 max-h-[350px] overflow-y-auto">
+              {!selectedDrive ? (
+                <>
+                  <div className="text-[11px] text-[#484F58] font-semibold mb-2">Select a Shared Drive:</div>
+                  {loadingDrives ? (
+                    <div className="text-center py-6 text-[#484F58] text-[12px]">Loading drives...</div>
+                  ) : drives.length === 0 ? (
+                    <div className="text-center py-6 text-[#484F58] text-[12px]">No shared drives found. Make sure the service account has access.</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {drives.map((d) => (
+                        <button key={d.id} onClick={() => selectDrive(d)}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                          <FolderOpen size={16} className="text-[#F0883E]" />
+                          <span className="text-[12px] text-[#E6EDF3] font-medium">{d.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Breadcrumb */}
+                  <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                    <button onClick={() => { setSelectedDrive(null); setFolderPath([]); setFolders([]); }}
+                      className="text-[#58A6FF] hover:underline">Drives</button>
+                    <span className="text-[#484F58]">/</span>
+                    <button onClick={() => navigateToPathIndex(-1)}
+                      className="text-[#58A6FF] hover:underline">{selectedDrive.name}</button>
+                    {folderPath.map((fp, i) => (
+                      <span key={fp.id} className="flex items-center gap-1">
+                        <span className="text-[#484F58]">/</span>
+                        <button onClick={() => navigateToPathIndex(i)}
+                          className="text-[#58A6FF] hover:underline">{fp.name}</button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {loadingFolders ? (
+                    <div className="text-center py-4 text-[#484F58] text-[12px]">Loading folders...</div>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {folders.map((f) => (
+                        <button key={f.id} onClick={() => openFolder(f)}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                          <FolderOpen size={14} className="text-[#F0883E]" />
+                          <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
+                        </button>
+                      ))}
+                      {folders.length === 0 && (
+                        <div className="text-[11px] text-[#484F58] py-2">No subfolders. Save here or navigate back.</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {uploadResult && (
+              <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-[11px] ${
+                uploadResult.startsWith("Error") ? "bg-[rgba(248,81,73,0.1)] text-[#F85149]" : "bg-[rgba(74,222,128,0.1)] text-[#4ADE80]"
+              }`}>
+                {uploadResult}
+              </div>
+            )}
+
+            {selectedDrive && (
+              <div className="px-4 py-3 border-t border-[#1E242C] flex justify-between items-center">
+                <div className="text-[10px] text-[#484F58]">
+                  Saving to: {selectedDrive.name}{folderPath.length > 0 ? ` / ${folderPath.map((p) => p.name).join(" / ")}` : " (root)"}
+                </div>
+                <button
+                  onClick={saveToDrive}
+                  disabled={uploading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold disabled:opacity-50"
+                >
+                  <ExternalLink size={12} />
+                  {uploading ? "Uploading..." : "Save Here"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
