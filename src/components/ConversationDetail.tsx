@@ -913,11 +913,8 @@ export default function ConversationDetail({
   };
 
   const handleTrashConversation = async () => {
-    if (!convo || trashingConversation) return;
-
-    const confirmed = window.confirm(`Move "${convo.subject || "this conversation"}" to trash?`);
-
-    if (!confirmed) return;
+    if (!convo) return;
+    if (trashingConversation) return;
 
     try {
       setTrashingConversation(true);
@@ -940,15 +937,10 @@ export default function ConversationDetail({
         throw new Error(json?.error || "Failed to move conversation to trash");
       }
 
-      // Use onTrash callback if available, otherwise reload
-      if (typeof (window as any).__tenkaraRefetch === "function") {
-        (window as any).__tenkaraRefetch();
-      } else {
-        window.location.reload();
-      }
+      window.location.reload();
     } catch (error: any) {
       console.error("Trash failed:", error);
-      alert(error?.message || "Failed to move conversation to trash");
+      alert("Trash failed: " + (error?.message || "Unknown error"));
     } finally {
       setTrashingConversation(false);
     }
