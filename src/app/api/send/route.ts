@@ -66,13 +66,22 @@ export async function POST(req: NextRequest) {
     // Send via Graph API or SMTP depending on provider
     let messageId: string | undefined;
 
+    // Append signature if enabled and not already in body
+    let finalBody = emailBody;
+    if (account.signature_enabled && account.signature) {
+      const sigText = (account.signature || "").replace(/<[^>]*>/g, "").trim();
+      if (sigText && !emailBody.includes(sigText.slice(0, 30))) {
+        finalBody = `${emailBody}<br><div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 16px;">${account.signature}</div>`;
+      }
+    }
+
     if (MICROSOFT_PROVIDERS.includes(account.provider)) {
       // Microsoft Graph API
       const graphResult = await sendGraphEmail(
         account.email,
         to,
         subject,
-        emailBody,
+        finalBody,
         cc || undefined
       );
 
@@ -98,9 +107,9 @@ export async function POST(req: NextRequest) {
       });
 
       // Detect if body is already HTML
-      const isHtmlBody = emailBody.trim().startsWith("<") || emailBody.includes("<br") || emailBody.includes("<div") || emailBody.includes("<p");
-      const htmlContent = isHtmlBody ? emailBody : emailBody.replace(/\n/g, "<br>");
-      const plainContent = isHtmlBody ? emailBody.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() : emailBody;
+      const isHtmlBody = finalBody.trim().startsWith("<") || finalBody.includes("<br") || finalBody.includes("<div") || finalBody.includes("<p");
+      const htmlContent = isHtmlBody ? finalBody : finalBody.replace(/\n/g, "<br>");
+      const plainContent = isHtmlBody ? finalBody.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() : finalBody;
 
       const info = await transport.sendMail({
         from: `"${account.name}" <${account.email}>`,

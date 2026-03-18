@@ -26,6 +26,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
   const accountId = selectedAccount || accounts[0]?.id || "";
   const currentAccount = accounts.find((a) => a.id === accountId);
+  const accountSignature = currentAccount?.signature_enabled ? currentAccount?.signature : "";
 
   const handleSend = async () => {
     const plainText = htmlToPlainText(bodyHtml);
@@ -188,6 +189,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             placeholder="Write your message..."
             minHeight={300}
             autoFocus
+            signature={accountSignature}
           />
         </div>
       </div>

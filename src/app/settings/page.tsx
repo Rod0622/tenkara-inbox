@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
-  Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown
+  Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
+  FileSignature, Check
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -100,11 +101,119 @@ export default function SettingsPage() {
 }
 
 // ── Accounts Tab ─────────────────────────────────────
+// ── Signature Editor ─────────────────────────────────
+function SignatureEditor({
+  accountId, initialSignature, initialEnabled, onSaved,
+}: {
+  accountId: string; initialSignature: string;
+  initialEnabled: boolean; onSaved: () => void;
+}) {
+  const [signature, setSignature] = useState(initialSignature);
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editorRef.current && initialSignature) {
+      editorRef.current.innerHTML = initialSignature;
+    }
+  }, [initialSignature]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const html = editorRef.current?.innerHTML || "";
+    const { error } = await supabase
+      .from("email_accounts")
+      .update({ signature: html, signature_enabled: enabled })
+      .eq("id", accountId);
+
+    if (!error) {
+      setSaved(true);
+      setTimeout(() => { setSaved(false); onSaved(); }, 1200);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="px-4 pb-4 border-t border-[#1E242C]">
+      <div className="flex items-center justify-between py-3">
+        <div className="text-[12px] font-semibold text-[#7D8590]">Email Signature</div>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <span className="text-[11px] text-[#484F58]">{enabled ? "Enabled" : "Disabled"}</span>
+          <button
+            onClick={() => setEnabled(!enabled)}
+            className={`w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
+              enabled ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
+            }`}
+          >
+            <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
+          </button>
+        </label>
+      </div>
+
+      <div className="text-[10px] text-[#484F58] mb-2">
+        Write your signature below or paste a rich HTML signature. It will be auto-appended to all outgoing emails from this account.
+      </div>
+
+      <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] overflow-hidden">
+        {/* Mini toolbar */}
+        <div className="flex items-center gap-0.5 px-2 py-1 border-b border-[#161B22] bg-[#0D1117]">
+          <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("bold"); }}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] font-bold">B</button>
+          <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("italic"); }}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] italic">I</button>
+          <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("underline"); }}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] underline">U</button>
+          <div className="w-px h-3 bg-[#1E242C] mx-0.5" />
+          <button onMouseDown={(e) => { e.preventDefault(); const url = prompt("Link URL:"); if (url) document.execCommand("createLink", false, url); }}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[10px]">🔗</button>
+          <button onMouseDown={(e) => { e.preventDefault(); const url = prompt("Image URL:"); if (url) document.execCommand("insertImage", false, url); }}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[10px]">🖼</button>
+        </div>
+
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={() => setSignature(editorRef.current?.innerHTML || "")}
+          data-placeholder="Your email signature..."
+          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
+          style={{ fontFamily: "Arial, sans-serif" }}
+        />
+      </div>
+
+      {/* Preview */}
+      {signature && (
+        <div className="mt-2">
+          <div className="text-[10px] text-[#484F58] mb-1">Preview:</div>
+          <div
+            className="px-3 py-2 rounded-lg bg-[#0D1117] border border-[#1E242C] text-[12px] text-[#7D8590]"
+            dangerouslySetInnerHTML={{ __html: signature }}
+          />
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 mt-3">
+        <button onClick={onSaved} className="px-3 py-1.5 rounded-lg text-[11px] text-[#7D8590] border border-[#1E242C] hover:bg-[#1E242C]">Cancel</button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold disabled:opacity-50"
+        >
+          {saved ? <><Check size={12} /> Saved!</> : saving ? "Saving..." : "Save Signature"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingSignatureId, setEditingSignatureId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchAccounts = () => {
     supabase
       .from("email_accounts")
       .select("*")
@@ -113,7 +222,9 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         setAccounts(data || []);
         setLoading(false);
       });
-  }, []);
+  };
+
+  useEffect(() => { fetchAccounts(); }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Remove this email account? This won't delete any emails from the provider.")) return;
@@ -154,45 +265,67 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         <div className="space-y-3">
           {accounts.map((account) => {
             const provider = PROVIDERS.find((p) => p.id === account.provider);
+            const isEditingSig = editingSignatureId === account.id;
             return (
-              <div key={account.id} className="flex items-center gap-4 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
-                  style={{ background: `${provider?.color}20` }}
-                >
-                  {provider?.icon || "📧"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm">{account.name}</span>
-                    {account.is_active && !account.sync_error && (
-                      <CheckCircle size={14} className="text-[#4ADE80]" />
+              <div key={account.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden">
+                <div className="flex items-center gap-4 p-4">
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                    style={{ background: `${provider?.color}20` }}
+                  >
+                    {provider?.icon || "📧"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{account.name}</span>
+                      {account.is_active && !account.sync_error && (
+                        <CheckCircle size={14} className="text-[#4ADE80]" />
+                      )}
+                      {account.sync_error && (
+                        <AlertCircle size={14} className="text-[#F85149]" />
+                      )}
+                    </div>
+                    <div className="text-xs text-[#7D8590]">{account.email}</div>
+                    {account.last_sync_at && (
+                      <div className="text-[10px] text-[#484F58] mt-0.5">
+                        Last synced: {new Date(account.last_sync_at).toLocaleString()}
+                      </div>
                     )}
                     {account.sync_error && (
-                      <AlertCircle size={14} className="text-[#F85149]" />
+                      <div className="text-[10px] text-[#F85149] mt-0.5">{account.sync_error}</div>
                     )}
                   </div>
-                  <div className="text-xs text-[#7D8590]">{account.email}</div>
-                  {account.last_sync_at && (
-                    <div className="text-[10px] text-[#484F58] mt-0.5">
-                      Last synced: {new Date(account.last_sync_at).toLocaleString()}
-                    </div>
-                  )}
-                  {account.sync_error && (
-                    <div className="text-[10px] text-[#F85149] mt-0.5">{account.sync_error}</div>
-                  )}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setEditingSignatureId(isEditingSig ? null : account.id)}
+                      title="Edit signature"
+                      className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
+                        isEditingSig ? "text-[#4ADE80] bg-[#1E242C]" : "text-[#7D8590] hover:bg-[#1E242C]"
+                      }`}
+                    >
+                      <FileSignature size={14} />
+                    </button>
+                    <button className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:bg-[#1E242C] transition-colors">
+                      <RefreshCw size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(account.id)}
+                      className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:text-[#F85149] hover:bg-[#1E242C] transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  <button className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:bg-[#1E242C] transition-colors">
-                    <RefreshCw size={14} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(account.id)}
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:text-[#F85149] hover:bg-[#1E242C] transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+
+                {/* Signature Editor */}
+                {isEditingSig && (
+                  <SignatureEditor
+                    accountId={account.id}
+                    initialSignature={account.signature || ""}
+                    initialEnabled={account.signature_enabled ?? false}
+                    onSaved={() => { setEditingSignatureId(null); fetchAccounts(); }}
+                  />
+                )}
               </div>
             );
           })}
