@@ -91,9 +91,11 @@ export default function InboxPage() {
       const isSystemSent = selectedFolder.is_system && folderName === "sent";
 
       if (isSystemInbox) {
+        // Team inbox: show unassigned conversations only
         filtered = conversations.filter(
           (c) =>
             c.email_account_id === activeMailbox &&
+            !c.assignee_id &&
             (c.folder_id === null || c.folder_id === selectedFolder.id)
         );
       } else if (isSystemSent) {

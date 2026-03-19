@@ -28,7 +28,7 @@ function buildPrompt(params: {
     from_name?: string | null;
     from_email?: string | null;
     to_addresses?: string | null;
-    body?: string | null;
+    body_text?: string | null;
     snippet?: string | null;
     sent_at?: string | null;
   }>;
@@ -38,7 +38,7 @@ function buildPrompt(params: {
   const messagesText = params.messages
     .slice(-12)
     .map((msg, idx) => {
-      const body = cleanText(msg.body || msg.snippet || "");
+      const body = cleanText(msg.body_text || msg.snippet || "");
       return [
         `Message ${idx + 1}`,
         `From: ${msg.from_name || ""} <${msg.from_email || ""}>`,
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
 
     const { data: messages, error: messagesError } = await supabase
       .from("messages")
-      .select("from_name, from_email, to_addresses, body, snippet, sent_at")
+      .select("from_name, from_email, to_addresses, body_text, snippet, sent_at")
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: true });
 
