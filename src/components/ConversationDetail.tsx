@@ -1401,6 +1401,12 @@ export default function ConversationDetail({
   const [replyText, setReplyText] = useState("");
   const [replyAttachments, setReplyAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
+  const [showReplyDrive, setShowReplyDrive] = useState(false);
+  const [replyDriveFolders, setReplyDriveFolders] = useState<any[]>([]);
+  const [replyDriveFiles, setReplyDriveFiles] = useState<any[]>([]);
+  const [replyDrivePath, setReplyDrivePath] = useState<{ id: string; name: string }[]>([]);
+  const [replyDriveLoading, setReplyDriveLoading] = useState(false);
+  const [replyDriveDefaultFolder, setReplyDriveDefaultFolder] = useState<string | null>(null);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
@@ -1564,6 +1570,74 @@ export default function ConversationDetail({
     setNewTaskDueTime("");
     setNewTaskCategoryId("");
     setShowTaskInput(false);
+  };
+
+  const openReplyDrivePicker = async () => {
+    setShowReplyDrive(true);
+    setReplyDriveFolders([]); setReplyDriveFiles([]); setReplyDrivePath([]);
+    setReplyDriveLoading(true);
+    try {
+      const configRes = await fetch("/api/drive?action=config");
+      const config = await configRes.json();
+      if (config.mode === "direct" && config.folderId) {
+        setReplyDriveDefaultFolder(config.folderId);
+        setReplyDrivePath([{ id: config.folderId, name: "Training Files" }]);
+        const [fr, fi] = await Promise.all([
+          fetch(`/api/drive?action=folders&folder_id=${config.folderId}`),
+          fetch(`/api/drive?action=files&folder_id=${config.folderId}`),
+        ]);
+        setReplyDriveFolders((await fr.json()).folders || []);
+        setReplyDriveFiles((await fi.json()).files || []);
+      }
+    } catch (e) { console.error(e); }
+    setReplyDriveLoading(false);
+  };
+
+  const navigateReplyDriveFolder = async (folder: any) => {
+    setReplyDrivePath((prev) => [...prev, { id: folder.id, name: folder.name }]);
+    setReplyDriveLoading(true);
+    try {
+      const [fr, fi] = await Promise.all([
+        fetch(`/api/drive?action=folders&folder_id=${folder.id}`),
+        fetch(`/api/drive?action=files&folder_id=${folder.id}`),
+      ]);
+      setReplyDriveFolders((await fr.json()).folders || []);
+      setReplyDriveFiles((await fi.json()).files || []);
+    } catch (e) { console.error(e); }
+    setReplyDriveLoading(false);
+  };
+
+  const navigateReplyDrivePath = async (index: number) => {
+    const newPath = index < 0 ? [{ id: replyDriveDefaultFolder!, name: "Training Files" }] : replyDrivePath.slice(0, index + 1);
+    setReplyDrivePath(newPath);
+    setReplyDriveLoading(true);
+    try {
+      const fId = newPath[newPath.length - 1].id;
+      const [fr, fi] = await Promise.all([
+        fetch(`/api/drive?action=folders&folder_id=${fId}`),
+        fetch(`/api/drive?action=files&folder_id=${fId}`),
+      ]);
+      setReplyDriveFolders((await fr.json()).folders || []);
+      setReplyDriveFiles((await fi.json()).files || []);
+    } catch (e) { console.error(e); }
+    setReplyDriveLoading(false);
+  };
+
+  const attachReplyDriveFile = async (file: any) => {
+    try {
+      const res = await fetch(`/api/drive?action=download&file_id=${file.id}`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const data = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.readAsDataURL(blob);
+      });
+      setReplyAttachments((prev) => [...prev, {
+        name: file.name, size: file.size || 0,
+        type: file.mimeType || "application/octet-stream", data,
+      }]);
+    } catch (e) { console.error(e); }
   };
 
   const handleSendReplyInternal = async () => {
@@ -2903,6 +2977,8 @@ export default function ConversationDetail({
                 compact
                 minHeight={50}
                 autoFocus
+                onAttach={() => replyFileInputRef.current?.click()}
+                onDrive={() => openReplyDrivePicker()}
               />
               {/* Reply attachments */}
               <input ref={replyFileInputRef} type="file" multiple onChange={async (e) => {
@@ -2935,21 +3011,12 @@ export default function ConversationDetail({
                 </div>
               )}
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
-                    className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
-                  >
-                    Collapse
-                  </button>
-                  <button
-                    onClick={() => replyFileInputRef.current?.click()}
-                    className="flex items-center gap-1 text-[11px] text-[#484F58] hover:text-[#58A6FF] transition-colors"
-                  >
-                    <Paperclip size={11} />
-                    Attach
-                  </button>
-                </div>
+                <button
+                  onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
+                  className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
+                >
+                  Collapse
+                </button>
                 <button
                   onClick={handleSendReplyInternal}
                   disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
@@ -2959,6 +3026,58 @@ export default function ConversationDetail({
                   {sending ? "Sending..." : "Send"}
                 </button>
               </div>
+
+              {/* Reply Drive Picker Modal */}
+              {showReplyDrive && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowReplyDrive(false)}>
+                  <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-bold text-[#E6EDF3]">Insert from Google Drive</div>
+                        <div className="text-[10px] text-[#484F58]">Click a file to attach it</div>
+                      </div>
+                      <button onClick={() => setShowReplyDrive(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="p-4 max-h-[400px] overflow-y-auto">
+                      {replyDrivePath.length > 0 && (
+                        <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                          {replyDrivePath.map((fp, i) => (
+                            <span key={fp.id} className="flex items-center gap-1">
+                              {i > 0 && <span className="text-[#484F58]">/</span>}
+                              <button onClick={() => navigateReplyDrivePath(i)} className="text-[#58A6FF] hover:underline">{fp.name}</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {replyDriveLoading ? (
+                        <div className="text-center py-6 text-[#484F58] text-[12px]">Loading...</div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {replyDriveFolders.map((f) => (
+                            <button key={f.id} onClick={() => navigateReplyDriveFolder(f)}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                              <FolderOpen size={14} className="text-[#F0883E]" />
+                              <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
+                            </button>
+                          ))}
+                          {replyDriveFiles.map((f) => (
+                            <button key={f.id} onClick={() => { attachReplyDriveFile(f); setShowReplyDrive(false); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[rgba(74,222,128,0.08)] text-left transition-colors">
+                              <FileText size={14} className="text-[#58A6FF]" />
+                              <span className="text-[12px] text-[#E6EDF3] flex-1 truncate">{f.name}</span>
+                            </button>
+                          ))}
+                          {replyDriveFolders.length === 0 && replyDriveFiles.length === 0 && (
+                            <div className="text-[11px] text-[#484F58] py-4 text-center">No files in this folder</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

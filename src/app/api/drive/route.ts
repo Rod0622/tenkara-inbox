@@ -196,6 +196,34 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    if (action === "download") {
+      const fileId = req.nextUrl.searchParams.get("file_id");
+      if (!fileId) return NextResponse.json({ error: "file_id required" }, { status: 400 });
+
+      const res = await fetch(`${DRIVE_API}/files/${fileId}?alt=media&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return NextResponse.json({ error: err.error?.message || res.statusText }, { status: 500 });
+      }
+
+      const buffer = await res.arrayBuffer();
+      
+      // Get file metadata for content type
+      const metaRes = await fetch(`${DRIVE_API}/files/${fileId}?fields=name,mimeType,size&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const meta = metaRes.ok ? await metaRes.json() : {};
+
+      return new NextResponse(buffer, {
+        headers: {
+          "Content-Type": meta.mimeType || "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${meta.name || "file"}"`,
+        },
+      });
+    }
+
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

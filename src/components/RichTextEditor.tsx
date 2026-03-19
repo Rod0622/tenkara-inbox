@@ -4,7 +4,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import {
   Bold, Italic, Underline, Strikethrough, Link2, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Type, Palette, Smile, ChevronDown,
-  Undo2, Redo2, X, Check,
+  Undo2, Redo2, X, Check, Paperclip, FolderOpen,
 } from "lucide-react";
 
 // ── Font options ────────────────────────────────────
@@ -90,14 +90,17 @@ interface RichTextEditorProps {
   onChange?: (html: string) => void;
   placeholder?: string;
   minHeight?: number;
-  compact?: boolean; // For reply mode (smaller toolbar)
+  compact?: boolean;
   signature?: string;
   autoFocus?: boolean;
+  onAttach?: () => void;
+  onDrive?: () => void;
 }
 
 export default function RichTextEditor({
   value, onChange, placeholder = "Write your message...",
   minHeight = 200, compact = false, signature, autoFocus = false,
+  onAttach, onDrive,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFontFamily, setShowFontFamily] = useState(false);
@@ -271,18 +274,17 @@ export default function RichTextEditor({
           </div>
         </ToolbarDropdown>
 
+        {/* Lists — available in both full and compact mode */}
+        <div className="w-px h-4 bg-[#1E242C] mx-1" />
+        <ToolbarBtn onClick={() => exec("insertUnorderedList")} title="Bullet list">
+          <List size={13} />
+        </ToolbarBtn>
+        <ToolbarBtn onClick={() => exec("insertOrderedList")} title="Numbered list">
+          <ListOrdered size={13} />
+        </ToolbarBtn>
+
         {!compact && (
           <>
-            <div className="w-px h-4 bg-[#1E242C] mx-1" />
-
-            {/* Lists */}
-            <ToolbarBtn onClick={() => exec("insertUnorderedList")} title="Bullet list">
-              <List size={13} />
-            </ToolbarBtn>
-            <ToolbarBtn onClick={() => exec("insertOrderedList")} title="Numbered list">
-              <ListOrdered size={13} />
-            </ToolbarBtn>
-
             <div className="w-px h-4 bg-[#1E242C] mx-1" />
 
             {/* Alignment */}
@@ -352,6 +354,23 @@ export default function RichTextEditor({
             ))}
           </div>
         </ToolbarDropdown>
+
+        {/* Attach file + Drive buttons */}
+        {(onAttach || onDrive) && (
+          <>
+            <div className="w-px h-4 bg-[#1E242C] mx-1" />
+            {onAttach && (
+              <ToolbarBtn onClick={onAttach} title="Attach file">
+                <Paperclip size={13} />
+              </ToolbarBtn>
+            )}
+            {onDrive && (
+              <ToolbarBtn onClick={onDrive} title="Insert from Drive">
+                <FolderOpen size={13} />
+              </ToolbarBtn>
+            )}
+          </>
+        )}
       </div>
 
       {/* Editor area */}

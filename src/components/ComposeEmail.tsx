@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { X, Send, ChevronDown, Paperclip, File, Trash2 } from "lucide-react";
+import { X, Send, ChevronDown, Paperclip, File, Trash2, FolderOpen } from "lucide-react";
 import { useActions, useEmailAccounts } from "@/lib/hooks";
 import RichTextEditor, { getCleanHtml, htmlToPlainText } from "@/components/RichTextEditor";
 
@@ -31,6 +31,12 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const [showDriveModal, setShowDriveModal] = useState(false);
+  const [driveFolders, setDriveFolders] = useState<any[]>([]);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [drivePath, setDrivePath] = useState<{ id: string; name: string }[]>([]);
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveDefaultFolder, setDriveDefaultFolder] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const accountId = selectedAccount || accounts[0]?.id || "";
@@ -69,6 +75,81 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const openDrivePicker = async () => {
+    setShowDriveModal(true);
+    setDriveFolders([]);
+    setDriveFiles([]);
+    setDrivePath([]);
+    setDriveLoading(true);
+    try {
+      const configRes = await fetch("/api/drive?action=config");
+      const config = await configRes.json();
+      if (config.mode === "direct" && config.folderId) {
+        setDriveDefaultFolder(config.folderId);
+        setDrivePath([{ id: config.folderId, name: "Training Files" }]);
+        const [foldersRes, filesRes] = await Promise.all([
+          fetch(`/api/drive?action=folders&folder_id=${config.folderId}`),
+          fetch(`/api/drive?action=files&folder_id=${config.folderId}`),
+        ]);
+        const foldersData = await foldersRes.json();
+        const filesData = await filesRes.json();
+        setDriveFolders(foldersData.folders || []);
+        setDriveFiles(filesData.files || []);
+      }
+    } catch (e) { console.error(e); }
+    setDriveLoading(false);
+  };
+
+  const navigateDriveFolder = async (folder: any) => {
+    setDrivePath((prev) => [...prev, { id: folder.id, name: folder.name }]);
+    setDriveLoading(true);
+    try {
+      const [foldersRes, filesRes] = await Promise.all([
+        fetch(`/api/drive?action=folders&folder_id=${folder.id}`),
+        fetch(`/api/drive?action=files&folder_id=${folder.id}`),
+      ]);
+      const foldersData = await foldersRes.json();
+      const filesData = await filesRes.json();
+      setDriveFolders(foldersData.folders || []);
+      setDriveFiles(filesData.files || []);
+    } catch (e) { console.error(e); }
+    setDriveLoading(false);
+  };
+
+  const navigateDrivePath = async (index: number) => {
+    const newPath = index < 0 ? [{ id: driveDefaultFolder!, name: "Training Files" }] : drivePath.slice(0, index + 1);
+    setDrivePath(newPath);
+    setDriveLoading(true);
+    try {
+      const fId = newPath[newPath.length - 1].id;
+      const [foldersRes, filesRes] = await Promise.all([
+        fetch(`/api/drive?action=folders&folder_id=${fId}`),
+        fetch(`/api/drive?action=files&folder_id=${fId}`),
+      ]);
+      setDriveFolders((await foldersRes.json()).folders || []);
+      setDriveFiles((await filesRes.json()).files || []);
+    } catch (e) { console.error(e); }
+    setDriveLoading(false);
+  };
+
+  const attachDriveFile = async (file: any) => {
+    // Download file content via Drive API and add as attachment
+    try {
+      const res = await fetch(`/api/drive?action=download&file_id=${file.id}`);
+      if (!res.ok) { setError("Failed to download from Drive"); return; }
+      const blob = await res.blob();
+      const data = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.readAsDataURL(blob);
+      });
+      setAttachments((prev) => [...prev, {
+        name: file.name, size: file.size || 0,
+        type: file.mimeType || "application/octet-stream", data,
+      }]);
+    } catch (e) { setError("Failed to attach file from Drive"); }
   };
 
   const handleSend = async () => {
@@ -228,32 +309,22 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
         {/* Rich Text Body */}
         <div className="px-5 py-3">
+          <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
           <RichTextEditor
             onChange={setBodyHtml}
             placeholder="Write your message..."
             minHeight={300}
             autoFocus
             signature={accountSignature}
+            onAttach={() => fileInputRef.current?.click()}
+            onDrive={() => openDrivePicker()}
           />
         </div>
 
-        {/* Attachments */}
-        <div className="px-5 pb-3">
-          <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] text-[#7D8590] hover:text-[#E6EDF3] hover:border-[#4ADE80] transition-all"
-            >
-              <Paperclip size={13} />
-              Attach files
-            </button>
-            {attachments.length > 0 && (
-              <span className="text-[11px] text-[#484F58]">{attachments.length} file{attachments.length !== 1 ? "s" : ""}</span>
-            )}
-          </div>
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
+        {/* Attachments list */}
+        {attachments.length > 0 && (
+          <div className="px-5 pb-3">
+            <div className="flex flex-wrap gap-2">
               {attachments.map((att, i) => (
                 <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px]">
                   <File size={12} className="text-[#58A6FF] shrink-0" />
@@ -265,9 +336,62 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
+
+      {/* Drive Picker Modal */}
+      {showDriveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDriveModal(false)}>
+          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[#E6EDF3]">Insert from Google Drive</div>
+                <div className="text-[10px] text-[#484F58]">Click a file to attach it</div>
+              </div>
+              <button onClick={() => setShowDriveModal(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 max-h-[400px] overflow-y-auto">
+              {drivePath.length > 0 && (
+                <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                  {drivePath.map((fp, i) => (
+                    <span key={fp.id} className="flex items-center gap-1">
+                      {i > 0 && <span className="text-[#484F58]">/</span>}
+                      <button onClick={() => navigateDrivePath(i)} className="text-[#58A6FF] hover:underline">{fp.name}</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {driveLoading ? (
+                <div className="text-center py-6 text-[#484F58] text-[12px]">Loading...</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {driveFolders.map((f) => (
+                    <button key={f.id} onClick={() => navigateDriveFolder(f)}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                      <FolderOpen size={14} className="text-[#F0883E]" />
+                      <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
+                    </button>
+                  ))}
+                  {driveFiles.map((f) => (
+                    <button key={f.id} onClick={() => { attachDriveFile(f); setShowDriveModal(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[rgba(74,222,128,0.08)] text-left transition-colors">
+                      <File size={14} className="text-[#58A6FF]" />
+                      <span className="text-[12px] text-[#E6EDF3] flex-1 truncate">{f.name}</span>
+                      <span className="text-[10px] text-[#484F58]">{f.size ? formatSize(f.size) : ""}</span>
+                    </button>
+                  ))}
+                  {driveFolders.length === 0 && driveFiles.length === 0 && (
+                    <div className="text-[11px] text-[#484F58] py-4 text-center">No files in this folder</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
