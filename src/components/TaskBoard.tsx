@@ -59,6 +59,7 @@ export default function TaskBoard({
   const [dueHours, setDueHours] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
+  const [userGroups, setUserGroups] = useState<any[]>([]);
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,12 +87,14 @@ export default function TaskBoard({
     setSelectedTaskIds((prev) => prev.filter((id) => tasks.some((task) => task.id === id)));
   }, [tasks]);
 
-  // Load task categories
+  // Load task categories and user groups
   useEffect(() => {
     import("@/lib/supabase").then(({ createBrowserClient }) => {
       const sb = createBrowserClient();
       sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
         .then(({ data }) => setTaskCategories(data || []));
+      sb.from("user_groups").select("*, user_group_members(team_member_id)").eq("is_active", true).order("created_at")
+        .then(({ data }) => setUserGroups(data || []));
     });
   }, []);
 
@@ -297,6 +300,30 @@ export default function TaskBoard({
                   </button>
                 </div>
                 <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3 space-y-2 max-h-40 overflow-y-auto">
+                  {/* Group quick-select */}
+                  {userGroups.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pb-2 mb-2 border-b border-[#1E242C]">
+                      {userGroups.map((g: any) => {
+                        const memberIds = (g.user_group_members || []).map((m: any) => m.team_member_id);
+                        const isSelected = memberIds.length > 0 && memberIds.every((id: string) => assigneeIds.includes(id));
+                        return (
+                          <button key={g.id} onClick={() => {
+                            if (isSelected) {
+                              setAssigneeIds((prev) => prev.filter((id) => !memberIds.includes(id)));
+                            } else {
+                              setAssigneeIds((prev) => [...new Set([...prev, ...memberIds])]);
+                            }
+                          }}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
+                              isSelected ? "ring-1 ring-[#4ADE80] bg-[rgba(74,222,128,0.1)]" : "bg-[#12161B] border border-[#1E242C] hover:border-[#484F58]"
+                            }`}>
+                            <span className="text-[11px]">{g.icon}</span>
+                            <span style={{ color: isSelected ? "#4ADE80" : g.color }}>{g.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {teamMembers
                     .filter((member) => member.is_active !== false)
                     .map((member) => {

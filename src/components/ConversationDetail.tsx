@@ -1412,6 +1412,7 @@ export default function ConversationDetail({
   const [newTaskDueTime, setNewTaskDueTime] = useState("");
   const [newTaskCategoryId, setNewTaskCategoryId] = useState("");
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
+  const [userGroups, setUserGroups] = useState<any[]>([]);
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1445,13 +1446,14 @@ export default function ConversationDetail({
     generateSummary,
   } = useThreadSummary(convo?.id || null);
 
-  // Load task categories
+  // Load task categories and user groups
   useEffect(() => {
-    fetch("/api/drive?action=config").catch(() => {}); // preload drive config
     import("@/lib/supabase").then(({ createBrowserClient }) => {
       const sb = createBrowserClient();
       sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
         .then(({ data }) => setTaskCategories(data || []));
+      sb.from("user_groups").select("*, user_group_members(team_member_id)").eq("is_active", true).order("created_at")
+        .then(({ data }) => setUserGroups(data || []));
     });
   }, []);
 
@@ -2230,7 +2232,7 @@ export default function ConversationDetail({
                   </div>
                 </div>
 
-                {/* Assignees with Select All */}
+                {/* Assignees with Select All + Groups */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="text-[10px] text-[#484F58] font-semibold">Assign to</div>
@@ -2248,6 +2250,30 @@ export default function ConversationDetail({
                       {newTaskAssigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
                     </button>
                   </div>
+                  {/* Group quick-select */}
+                  {userGroups.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {userGroups.map((g: any) => {
+                        const memberIds = (g.user_group_members || []).map((m: any) => m.team_member_id);
+                        const isSelected = memberIds.length > 0 && memberIds.every((id: string) => newTaskAssigneeIds.includes(id));
+                        return (
+                          <button key={g.id} onClick={() => {
+                            if (isSelected) {
+                              setNewTaskAssigneeIds((prev) => prev.filter((id) => !memberIds.includes(id)));
+                            } else {
+                              setNewTaskAssigneeIds((prev) => [...new Set([...prev, ...memberIds])]);
+                            }
+                          }}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
+                              isSelected ? "ring-1 ring-[#4ADE80] bg-[rgba(74,222,128,0.1)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
+                            }`}>
+                            <span className="text-[11px]">{g.icon}</span>
+                            <span style={{ color: isSelected ? "#4ADE80" : g.color }}>{g.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1 max-h-32 overflow-y-auto">
                     {teamMembers
                       .filter((member) => member.is_active !== false)

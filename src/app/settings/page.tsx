@@ -37,6 +37,7 @@ const PROVIDERS = [
 const TABS = [
   { id: "accounts", label: "Accounts", icon: Mail },
   { id: "team", label: "Team Members", icon: Users },
+  { id: "groups", label: "User Groups", icon: Users },
   { id: "labels", label: "Labels", icon: Tag },
   { id: "rules", label: "Rules", icon: Zap },
   { id: "categories", label: "Task Categories", icon: Tag },
@@ -91,6 +92,7 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto">
         {activeTab === "accounts" && <AccountsTab onConnect={() => setShowConnectModal(true)} />}
         {activeTab === "team" && <TeamTab />}
+        {activeTab === "groups" && <UserGroupsTab />}
         {activeTab === "labels" && <LabelsTab />}
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "categories" && <TaskCategoriesTab />}
@@ -1801,6 +1803,232 @@ function RulesTab() {
     </div>
   );
 }
+// ── User Groups Tab ─────────────────────────────────
+const GROUP_COLORS = ["#58A6FF", "#4ADE80", "#F0883E", "#BC8CFF", "#F5D547", "#F85149", "#39D2C0", "#E6EDF3"];
+const GROUP_ICONS = ["👥", "🏢", "🔧", "📦", "💼", "🎯", "⚡", "🌐"];
+
+function UserGroupsTab() {
+  const [groups, setGroups] = useState<any[]>([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [managingId, setManagingId] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formDesc, setFormDesc] = useState("");
+  const [formColor, setFormColor] = useState("#58A6FF");
+  const [formIcon, setFormIcon] = useState("👥");
+
+  const fetchGroups = async () => {
+    const [groupsRes, membersRes] = await Promise.all([
+      supabase.from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(*))").order("created_at"),
+      supabase.from("team_members").select("*").eq("is_active", true).order("name"),
+    ]);
+    setGroups(groupsRes.data || []);
+    setTeamMembers(membersRes.data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchGroups(); }, []);
+
+  const resetForm = () => { setFormName(""); setFormDesc(""); setFormColor("#58A6FF"); setFormIcon("👥"); };
+
+  const handleAdd = async () => {
+    if (!formName.trim()) return;
+    await supabase.from("user_groups").insert({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon });
+    resetForm(); setShowAdd(false); fetchGroups();
+  };
+
+  const handleUpdate = async (id: string) => {
+    await supabase.from("user_groups").update({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon }).eq("id", id);
+    setEditingId(null); resetForm(); fetchGroups();
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete group "${name}"? Members won't be deleted.`)) return;
+    await supabase.from("user_groups").delete().eq("id", id);
+    fetchGroups();
+  };
+
+  const startEdit = (g: any) => {
+    setEditingId(g.id); setFormName(g.name); setFormDesc(g.description || ""); setFormColor(g.color); setFormIcon(g.icon);
+  };
+
+  const toggleMember = async (groupId: string, memberId: string, isMember: boolean) => {
+    if (isMember) {
+      await supabase.from("user_group_members").delete().eq("group_id", groupId).eq("team_member_id", memberId);
+    } else {
+      await supabase.from("user_group_members").insert({ group_id: groupId, team_member_id: memberId });
+    }
+    fetchGroups();
+  };
+
+  const getGroupMembers = (group: any) => (group.user_group_members || []).map((m: any) => m.team_member).filter(Boolean);
+
+  const renderForm = (isEdit: boolean, groupId?: string) => (
+    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+      <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Group name (e.g. Operations Team, Sales Team)"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Description (optional)"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      <div className="flex gap-4">
+        <div>
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Icon</div>
+          <div className="flex flex-wrap gap-1">
+            {GROUP_ICONS.map((icon) => (
+              <button key={icon} onClick={() => setFormIcon(icon)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[16px] transition-all ${formIcon === icon ? "bg-[#1E242C] ring-2 ring-[#4ADE80]" : "hover:bg-[#1E242C]"}`}>
+                {icon}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Color</div>
+          <div className="flex flex-wrap gap-1">
+            {GROUP_COLORS.map((c) => (
+              <button key={c} onClick={() => setFormColor(c)}
+                className={`w-6 h-6 rounded-md transition-all ${formColor === c ? "ring-2 ring-white scale-110" : "hover:scale-110"}`} style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+          <span className="text-[16px]">{formIcon}</span>
+          <span className="text-[12px] font-semibold" style={{ color: formColor }}>{formName || "Preview"}</span>
+        </div>
+        <div className="flex-1" />
+        <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
+          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+        <button onClick={() => isEdit && groupId ? handleUpdate(groupId) : handleAdd()} disabled={!formName.trim()}
+          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          {isEdit ? "Save" : "Create"}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">User Groups</h1>
+          <p className="text-sm text-[#7D8590] mt-1">Create groups to quickly assign tasks to teams</p>
+        </div>
+        <button onClick={() => { resetForm(); setShowAdd(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          <Plus size={16} /> New Group
+        </button>
+      </div>
+
+      {showAdd && <div className="mb-4">{renderForm(false)}</div>}
+
+      {loading ? (
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <div className="space-y-3">
+          {groups.map((group) => {
+            const members = getGroupMembers(group);
+            if (editingId === group.id) return <div key={group.id}>{renderForm(true, group.id)}</div>;
+
+            return (
+              <div key={group.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden">
+                <div className="flex items-center gap-3 p-4 group">
+                  <span className="text-[20px]">{group.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold" style={{ color: group.color }}>{group.name}</div>
+                    {group.description && <div className="text-[11px] text-[#484F58]">{group.description}</div>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-[#484F58] mr-2">{members.length} member{members.length !== 1 ? "s" : ""}</span>
+                    <button onClick={() => setManagingId(managingId === group.id ? null : group.id)}
+                      className="px-2 py-1 rounded text-[11px] text-[#58A6FF] hover:bg-[#1E242C] font-semibold">
+                      {managingId === group.id ? "Done" : "Manage"}
+                    </button>
+                    <button onClick={() => startEdit(group)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Edit2 size={13} />
+                    </button>
+                    <button onClick={() => handleDelete(group.id, group.name)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Member badges */}
+                {members.length > 0 && managingId !== group.id && (
+                  <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+                    {members.map((m: any) => (
+                      <span key={m.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
+                        style={{ background: `${m.color}20`, color: m.color }}>
+                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
+                        {m.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Manage members panel */}
+                {managingId === group.id && (
+                  <div className="px-4 pb-4 border-t border-[#1E242C] pt-3">
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-2">
+                      Toggle members:
+                      <button onClick={async () => {
+                        const currentIds = new Set(members.map((m: any) => m.id));
+                        const allActive = teamMembers.filter((m: any) => m.is_active);
+                        if (currentIds.size === allActive.length) {
+                          // Remove all
+                          await supabase.from("user_group_members").delete().eq("group_id", group.id);
+                        } else {
+                          // Add missing
+                          const toAdd = allActive.filter((m: any) => !currentIds.has(m.id));
+                          if (toAdd.length > 0) {
+                            await supabase.from("user_group_members").insert(toAdd.map((m: any) => ({ group_id: group.id, team_member_id: m.id })));
+                          }
+                        }
+                        fetchGroups();
+                      }} className="ml-2 text-[#58A6FF] hover:text-[#79B8FF]">
+                        {members.length === teamMembers.length ? "Remove all" : "Add all"}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {teamMembers.map((m: any) => {
+                        const isMember = members.some((mem: any) => mem.id === m.id);
+                        return (
+                          <button key={m.id} onClick={() => toggleMember(group.id, m.id, isMember)}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] text-left transition-all ${
+                              isMember ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
+                            }`}>
+                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[#0B0E11] shrink-0" style={{ background: m.color }}>{m.initials}</span>
+                            <span className="flex-1 truncate" style={{ color: isMember ? "#4ADE80" : "#7D8590" }}>{m.name}</span>
+                            {isMember && <Check size={12} className="text-[#4ADE80] shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {groups.length === 0 && !showAdd && (
+            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+              <h3 className="text-lg font-semibold mb-2">No user groups yet</h3>
+              <p className="text-sm text-[#7D8590] mb-4">Create groups like &quot;Operations Team&quot; or &quot;Sales Team&quot; to assign tasks faster</p>
+              <button onClick={() => { resetForm(); setShowAdd(true); }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                <Plus size={16} /> Create First Group
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Task Categories Tab ─────────────────────────────
 const CATEGORY_COLORS = [
   "#4ADE80", "#58A6FF", "#F0883E", "#BC8CFF", "#F5D547",
