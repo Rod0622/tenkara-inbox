@@ -132,6 +132,7 @@ export default function Sidebar({
   const myConvos = conversations.filter(
     (c) => c.assignee_id === currentUser?.id
   );
+  const myTotalCount = myConvos.length;
   const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
   const mySentCount = conversations.filter((c) => isOutbound(c)).length;
 
@@ -276,9 +277,9 @@ export default function Sidebar({
         </div>
 
         {[
-          { id: "inbox", label: "Inbox", icon: Inbox, count: myUnreadCount },
-          { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount },
-          { id: "sent", label: "Sent", icon: Send, count: mySentCount },
+          { id: "inbox", label: "Inbox", icon: Inbox, count: myTotalCount, unread: myUnreadCount },
+          { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount, unread: 0 },
+          { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -300,11 +301,18 @@ export default function Sidebar({
             >
               <Icon size={18} />
               <span className="flex-1">{item.label}</span>
-              {item.count > 0 && (
-                <span className="min-w-[18px] h-[18px] rounded-full px-1 bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold flex items-center justify-center">
-                  {item.count > 99 ? "99+" : item.count}
-                </span>
-              )}
+              <span className="flex items-center gap-1.5">
+                {item.unread > 0 && (
+                  <span className="min-w-[18px] h-[18px] rounded-full px-1 bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold flex items-center justify-center">
+                    {item.unread > 99 ? "99+" : item.unread}
+                  </span>
+                )}
+                {item.count > 0 && (
+                  <span className="text-[11px] text-[#484F58]">
+                    {item.count}
+                  </span>
+                )}
+              </span>
             </button>
           );
         })}
@@ -332,6 +340,7 @@ export default function Sidebar({
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
           const unassignedConvos = mbConvos.filter((c) => !c.assignee_id && !isOutbound(c));
+          const totalInbox = unassignedConvos.filter((c) => !c.folder_id).length;
           const unread = unassignedConvos.filter((c) => c.is_unread).length;
           const isExpanded = expandedAccounts.has(mb.id);
           const accountFolders = getFoldersForAccount(mb.id);
@@ -350,14 +359,17 @@ export default function Sidebar({
                 />
                 <span className="text-[15px] shrink-0">{mb.icon || "📬"}</span>
                 <span className="flex-1 truncate ml-1">{mb.name}</span>
-                {unread > 0 && (
-                  <span
-                    className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center shrink-0"
-                    style={{ background: mb.color || "#4ADE80" }}
-                  >
-                    {unread}
-                  </span>
-                )}
+                <span className="flex items-center gap-1.5 shrink-0">
+                  {unread > 0 && (
+                    <span
+                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center"
+                      style={{ background: mb.color || "#4ADE80" }}
+                    >
+                      {unread}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-[#484F58]">{totalInbox}</span>
+                </span>
               </button>
 
               {isExpanded && (
@@ -373,6 +385,7 @@ export default function Sidebar({
                         ? unassignedConvos.filter((c) => !c.folder_id)
                         : mbConvos.filter((c) => c.folder_id === folder.id);
 
+                    const folderTotal = folderConvos.length;
                     const folderUnread = folderConvos.filter((c) => c.is_unread).length;
 
                     return (
@@ -396,14 +409,19 @@ export default function Sidebar({
                         >
                           <span className="text-[13px] shrink-0">{folder.icon}</span>
                           <span className="flex-1 truncate">{folder.name}</span>
-                          {folderUnread > 0 && (
-                            <span
-                              className="min-w-[16px] h-[16px] rounded-full px-1 text-[#0B0E11] text-[10px] font-bold flex items-center justify-center shrink-0"
-                              style={{ background: mb.color || "#4ADE80" }}
-                            >
-                              {folderUnread}
-                            </span>
-                          )}
+                          <span className="flex items-center gap-1 shrink-0">
+                            {folderUnread > 0 && (
+                              <span
+                                className="min-w-[16px] h-[16px] rounded-full px-1 text-[#0B0E11] text-[10px] font-bold flex items-center justify-center"
+                                style={{ background: mb.color || "#4ADE80" }}
+                              >
+                                {folderUnread}
+                              </span>
+                            )}
+                            {folderTotal > 0 && (
+                              <span className="text-[10px] text-[#484F58]">{folderTotal}</span>
+                            )}
+                          </span>
                         </button>
 
                         {!folder.is_system && (
