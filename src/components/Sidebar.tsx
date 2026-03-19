@@ -130,7 +130,7 @@ export default function Sidebar({
   const isOutbound = (c: any) => accountEmails.has(c.from_email?.toLowerCase());
 
   const myConvos = conversations.filter(
-    (c) => c.assignee_id === currentUser?.id && !isOutbound(c)
+    (c) => c.assignee_id === currentUser?.id
   );
   const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
   const mySentCount = conversations.filter((c) => isOutbound(c)).length;
