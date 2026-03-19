@@ -41,6 +41,7 @@ const TABS = [
   { id: "labels", label: "Labels", icon: Tag },
   { id: "rules", label: "Rules", icon: Zap },
   { id: "categories", label: "Task Categories", icon: Tag },
+  { id: "templates", label: "Email Templates", icon: FileSignature },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -96,6 +97,7 @@ export default function SettingsPage() {
         {activeTab === "labels" && <LabelsTab />}
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "categories" && <TaskCategoriesTab />}
+        {activeTab === "templates" && <EmailTemplatesTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -2187,6 +2189,212 @@ function TaskCategoriesTab() {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Email Templates Tab ─────────────────────────────
+const TEMPLATE_CATEGORIES = ["General", "Sales", "Procurement", "Follow-up", "Introduction", "Compliance", "Shipping"];
+
+function EmailTemplatesTab() {
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formSubject, setFormSubject] = useState("");
+  const [formBody, setFormBody] = useState("");
+  const [formScope, setFormScope] = useState<"personal" | "organization">("organization");
+  const [formCategory, setFormCategory] = useState("");
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  const fetchTemplates = async () => {
+    const { data } = await supabase.from("email_templates").select("*, owner:team_members(name)").order("scope").order("sort_order");
+    setTemplates(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchTemplates();
+    // Get current user ID
+    supabase.from("team_members").select("id, email").then(({ data }) => {
+      // Will be set properly when we know the session email
+      if (data && data.length > 0) setCurrentUserId(data[0].id);
+    });
+  }, []);
+
+  const resetForm = () => { setFormName(""); setFormSubject(""); setFormBody(""); setFormScope("organization"); setFormCategory(""); };
+
+  const handleAdd = async () => {
+    if (!formName.trim() || !formBody.trim()) return;
+    await supabase.from("email_templates").insert({
+      name: formName.trim(), subject: formSubject.trim(), body: formBody.trim(),
+      scope: formScope, category: formCategory, owner_id: currentUserId,
+      sort_order: templates.length,
+    });
+    resetForm(); setShowAdd(false); fetchTemplates();
+  };
+
+  const handleUpdate = async (id: string) => {
+    await supabase.from("email_templates").update({
+      name: formName.trim(), subject: formSubject.trim(), body: formBody.trim(),
+      scope: formScope, category: formCategory,
+    }).eq("id", id);
+    setEditingId(null); resetForm(); fetchTemplates();
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete template "${name}"?`)) return;
+    await supabase.from("email_templates").delete().eq("id", id);
+    fetchTemplates();
+  };
+
+  const startEdit = (t: any) => {
+    setEditingId(t.id); setFormName(t.name); setFormSubject(t.subject || "");
+    setFormBody(t.body); setFormScope(t.scope); setFormCategory(t.category || "");
+  };
+
+  const renderForm = (isEdit: boolean, tplId?: string) => (
+    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+      <div className="grid grid-cols-2 gap-3">
+        <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Template name"
+          className="px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        <input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} placeholder="Subject line (optional)"
+          className="px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      </div>
+      <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} placeholder="Template body (supports HTML)"
+        rows={8}
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] resize-none" />
+      <div className="flex items-center gap-3">
+        <div>
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1">Scope</div>
+          <div className="flex gap-1">
+            {(["organization", "personal"] as const).map((s) => (
+              <button key={s} onClick={() => setFormScope(s)}
+                className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                  formScope === s ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C]"
+                }`}>
+                {s === "organization" ? "🏢 Organization" : "👤 Personal"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1">
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1">Category</div>
+          <select value={formCategory} onChange={(e) => setFormCategory(e.target.value)}
+            className="h-8 rounded-lg bg-[#0B0E11] border border-[#1E242C] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            <option value="">None</option>
+            {TEMPLATE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
+          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+        <button onClick={() => isEdit && tplId ? handleUpdate(tplId) : handleAdd()}
+          disabled={!formName.trim() || !formBody.trim()}
+          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          {isEdit ? "Save" : "Create"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const orgTemplates = templates.filter((t) => t.scope === "organization");
+  const personalTemplates = templates.filter((t) => t.scope === "personal");
+
+  const renderSection = (title: string, icon: string, list: any[]) => (
+    <div className="mb-6">
+      <div className="text-[11px] font-bold text-[#484F58] uppercase tracking-widest mb-2 flex items-center gap-1.5">
+        <span>{icon}</span> {title}
+      </div>
+      {list.length === 0 ? (
+        <div className="text-[12px] text-[#484F58] py-3 px-4 border border-dashed border-[#1E242C] rounded-lg text-center">
+          No {title.toLowerCase()} yet
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {list.map((tpl) => (
+            editingId === tpl.id ? (
+              <div key={tpl.id}>{renderForm(true, tpl.id)}</div>
+            ) : (
+              <div key={tpl.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden group">
+                <div className="flex items-center gap-3 p-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-[#E6EDF3]">{tpl.name}</span>
+                      {tpl.category && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">{tpl.category}</span>
+                      )}
+                    </div>
+                    {tpl.subject && <div className="text-[11px] text-[#484F58] mt-0.5">Subject: {tpl.subject}</div>}
+                    {tpl.owner?.name && tpl.scope === "personal" && (
+                      <div className="text-[10px] text-[#484F58]">By {tpl.owner.name}</div>
+                    )}
+                  </div>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setPreviewId(previewId === tpl.id ? null : tpl.id)}
+                      className="px-2 py-1 rounded text-[10px] text-[#58A6FF] hover:bg-[#1E242C] font-semibold">
+                      {previewId === tpl.id ? "Hide" : "Preview"}
+                    </button>
+                    <button onClick={() => startEdit(tpl)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C]">
+                      <Edit2 size={13} />
+                    </button>
+                    <button onClick={() => handleDelete(tpl.id, tpl.name)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)]">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+                {previewId === tpl.id && (
+                  <div className="px-4 pb-3 border-t border-[#1E242C] pt-2">
+                    <div className="text-[12px] text-[#7D8590] bg-[#0B0E11] rounded-lg p-3 whitespace-pre-wrap max-h-[200px] overflow-y-auto"
+                      dangerouslySetInnerHTML={{ __html: tpl.body }} />
+                  </div>
+                )}
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Email Templates</h1>
+          <p className="text-sm text-[#7D8590] mt-1">Create reusable templates for common emails</p>
+        </div>
+        <button onClick={() => { resetForm(); setShowAdd(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          <Plus size={16} /> New Template
+        </button>
+      </div>
+
+      {showAdd && <div className="mb-4">{renderForm(false)}</div>}
+
+      {loading ? (
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <>
+          {renderSection("Organization Templates", "🏢", orgTemplates)}
+          {renderSection("Personal Templates", "👤", personalTemplates)}
+          {templates.length === 0 && !showAdd && (
+            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+              <h3 className="text-lg font-semibold mb-2">No email templates yet</h3>
+              <p className="text-sm text-[#7D8590] mb-4">Create templates for common replies like pricing requests, follow-ups, and introductions</p>
+              <button onClick={() => { resetForm(); setShowAdd(true); }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                <Plus size={16} /> Create First Template
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

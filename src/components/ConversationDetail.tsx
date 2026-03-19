@@ -1407,6 +1407,8 @@ export default function ConversationDetail({
   const [replyDrivePath, setReplyDrivePath] = useState<{ id: string; name: string }[]>([]);
   const [replyDriveLoading, setReplyDriveLoading] = useState(false);
   const [replyDriveDefaultFolder, setReplyDriveDefaultFolder] = useState<string | null>(null);
+  const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
+  const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
@@ -1570,6 +1572,17 @@ export default function ConversationDetail({
     setNewTaskDueTime("");
     setNewTaskCategoryId("");
     setShowTaskInput(false);
+  };
+
+  const openReplyTemplatePicker = async () => {
+    setShowReplyTemplateModal(true);
+    if (replyTemplates.length === 0) {
+      import("@/lib/supabase").then(({ createBrowserClient }) => {
+        const sb = createBrowserClient();
+        sb.from("email_templates").select("*").eq("is_active", true).order("scope").order("sort_order")
+          .then(({ data }) => setReplyTemplates(data || []));
+      });
+    }
   };
 
   const openReplyDrivePicker = async () => {
@@ -2979,6 +2992,7 @@ export default function ConversationDetail({
                 autoFocus
                 onAttach={() => replyFileInputRef.current?.click()}
                 onDrive={() => openReplyDrivePicker()}
+                onTemplate={() => openReplyTemplatePicker()}
               />
               {/* Reply attachments */}
               <input ref={replyFileInputRef} type="file" multiple onChange={async (e) => {
@@ -3026,6 +3040,56 @@ export default function ConversationDetail({
                   {sending ? "Sending..." : "Send"}
                 </button>
               </div>
+
+              {/* Reply Template Picker Modal */}
+              {showReplyTemplateModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowReplyTemplateModal(false)}>
+                  <div className="w-full max-w-lg bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-bold text-[#E6EDF3]">Insert Template</div>
+                        <div className="text-[10px] text-[#484F58]">Click a template to insert into reply</div>
+                      </div>
+                      <button onClick={() => setShowReplyTemplateModal(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto">
+                      {replyTemplates.length === 0 ? (
+                        <div className="text-center py-8 text-[#484F58] text-[12px]">No templates yet. Create them in Settings.</div>
+                      ) : (
+                        <div className="p-2 space-y-0.5">
+                          {["organization", "personal"].map((scope) => {
+                            const scopeTemplates = replyTemplates.filter((t: any) => t.scope === scope);
+                            if (scopeTemplates.length === 0) return null;
+                            return (
+                              <div key={scope}>
+                                <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest px-3 pt-2 pb-1">
+                                  {scope === "organization" ? "🏢 Organization" : "👤 Personal"}
+                                </div>
+                                {scopeTemplates.map((tpl: any) => (
+                                  <button key={tpl.id} onClick={() => { setReplyText(tpl.body); setShowReplyTemplateModal(false); }}
+                                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-[12px] font-semibold text-[#E6EDF3]">{tpl.name}</div>
+                                      <div className="text-[10px] text-[#484F58] truncate mt-0.5">
+                                        {tpl.body.replace(/<[^>]*>/g, "").slice(0, 80)}...
+                                      </div>
+                                    </div>
+                                    {tpl.category && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[#58A6FF] shrink-0">{tpl.category}</span>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Reply Drive Picker Modal */}
               {showReplyDrive && (

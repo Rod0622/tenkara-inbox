@@ -32,6 +32,8 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [error, setError] = useState("");
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [showDriveModal, setShowDriveModal] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
   const [driveFolders, setDriveFolders] = useState<any[]>([]);
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [drivePath, setDrivePath] = useState<{ id: string; name: string }[]>([]);
@@ -75,6 +77,22 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const openTemplatePicker = async () => {
+    setShowTemplateModal(true);
+    if (templates.length === 0) {
+      const { createBrowserClient } = await import("@/lib/supabase");
+      const sb = createBrowserClient();
+      const { data } = await sb.from("email_templates").select("*").eq("is_active", true).order("scope").order("sort_order");
+      setTemplates(data || []);
+    }
+  };
+
+  const insertTemplate = (tpl: any) => {
+    if (tpl.subject && !subject) setSubject(tpl.subject);
+    setBodyHtml(tpl.body);
+    setShowTemplateModal(false);
   };
 
   const openDrivePicker = async () => {
@@ -318,6 +336,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             signature={accountSignature}
             onAttach={() => fileInputRef.current?.click()}
             onDrive={() => openDrivePicker()}
+            onTemplate={() => openTemplatePicker()}
           />
         </div>
 
@@ -339,6 +358,57 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           </div>
         )}
       </div>
+
+      {/* Template Picker Modal */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowTemplateModal(false)}>
+          <div className="w-full max-w-lg bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[#E6EDF3]">Insert Template</div>
+                <div className="text-[10px] text-[#484F58]">Click a template to insert it</div>
+              </div>
+              <button onClick={() => setShowTemplateModal(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="max-h-[400px] overflow-y-auto">
+              {templates.length === 0 ? (
+                <div className="text-center py-8 text-[#484F58] text-[12px]">No templates yet. Create them in Settings.</div>
+              ) : (
+                <div className="p-2 space-y-0.5">
+                  {["organization", "personal"].map((scope) => {
+                    const scopeTemplates = templates.filter((t) => t.scope === scope);
+                    if (scopeTemplates.length === 0) return null;
+                    return (
+                      <div key={scope}>
+                        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest px-3 pt-2 pb-1">
+                          {scope === "organization" ? "🏢 Organization" : "👤 Personal"}
+                        </div>
+                        {scopeTemplates.map((tpl) => (
+                          <button key={tpl.id} onClick={() => insertTemplate(tpl)}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[12px] font-semibold text-[#E6EDF3]">{tpl.name}</div>
+                              {tpl.subject && <div className="text-[10px] text-[#484F58] truncate">Subject: {tpl.subject}</div>}
+                              <div className="text-[10px] text-[#484F58] truncate mt-0.5">
+                                {tpl.body.replace(/<[^>]*>/g, "").slice(0, 80)}...
+                              </div>
+                            </div>
+                            {tpl.category && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[#58A6FF] shrink-0">{tpl.category}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Drive Picker Modal */}
       {showDriveModal && (

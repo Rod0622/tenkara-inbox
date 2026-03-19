@@ -4,7 +4,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import {
   Bold, Italic, Underline, Strikethrough, Link2, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Type, Palette, Smile, ChevronDown,
-  Undo2, Redo2, X, Check, Paperclip, FolderOpen,
+  Undo2, Redo2, X, Check, Paperclip, FolderOpen, FileSignature,
 } from "lucide-react";
 
 // ── Font options ────────────────────────────────────
@@ -95,12 +95,13 @@ interface RichTextEditorProps {
   autoFocus?: boolean;
   onAttach?: () => void;
   onDrive?: () => void;
+  onTemplate?: () => void;
 }
 
 export default function RichTextEditor({
   value, onChange, placeholder = "Write your message...",
   minHeight = 200, compact = false, signature, autoFocus = false,
-  onAttach, onDrive,
+  onAttach, onDrive, onTemplate,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFontFamily, setShowFontFamily] = useState(false);
@@ -355,8 +356,8 @@ export default function RichTextEditor({
           </div>
         </ToolbarDropdown>
 
-        {/* Attach file + Drive buttons */}
-        {(onAttach || onDrive) && (
+        {/* Attach file + Drive + Template buttons */}
+        {(onAttach || onDrive || onTemplate) && (
           <>
             <div className="w-px h-4 bg-[#1E242C] mx-1" />
             {onAttach && (
@@ -367,6 +368,11 @@ export default function RichTextEditor({
             {onDrive && (
               <ToolbarBtn onClick={onDrive} title="Insert from Drive">
                 <FolderOpen size={13} />
+              </ToolbarBtn>
+            )}
+            {onTemplate && (
+              <ToolbarBtn onClick={onTemplate} title="Insert template">
+                <FileSignature size={13} />
               </ToolbarBtn>
             )}
           </>
