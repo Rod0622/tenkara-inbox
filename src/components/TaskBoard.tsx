@@ -56,6 +56,9 @@ export default function TaskBoard({
   const [showComposer, setShowComposer] = useState(false);
   const [text, setText] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [dueHours, setDueHours] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [taskCategories, setTaskCategories] = useState<any[]>([]);
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +86,15 @@ export default function TaskBoard({
     setSelectedTaskIds((prev) => prev.filter((id) => tasks.some((task) => task.id === id)));
   }, [tasks]);
 
+  // Load task categories
+  useEffect(() => {
+    import("@/lib/supabase").then(({ createBrowserClient }) => {
+      const sb = createBrowserClient();
+      sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
+        .then(({ data }) => setTaskCategories(data || []));
+    });
+  }, []);
+
   const grouped = useMemo(
     () => ({
       todo: tasks.filter((task) => task.status === "todo"),
@@ -97,6 +109,18 @@ export default function TaskBoard({
     setSaving(true);
     setError(null);
 
+    // Calculate due_time from hours
+    let computedDueDate = dueDate || null;
+    let computedDueTime: string | null = null;
+    if (dueHours) {
+      const hours = parseInt(dueHours);
+      if (hours > 0) {
+        const deadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+        computedDueDate = computedDueDate || deadline.toISOString().split("T")[0];
+        computedDueTime = deadline.toTimeString().slice(0, 5);
+      }
+    }
+
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
@@ -104,7 +128,9 @@ export default function TaskBoard({
         body: JSON.stringify({
           text: text.trim(),
           assignee_ids: assigneeIds,
-          due_date: dueDate || null,
+          due_date: computedDueDate,
+          due_time: computedDueTime,
+          category_id: categoryId || null,
           status: "todo",
         }),
       });
@@ -112,6 +138,8 @@ export default function TaskBoard({
       if (res.ok) {
         setText("");
         setDueDate("");
+        setDueHours("");
+        setCategoryId("");
         setShowComposer(false);
         await refetch();
         await onTasksChanged?.();
@@ -234,10 +262,39 @@ export default function TaskBoard({
               rows={3}
               className="w-full rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none focus:border-[#4ADE80]"
             />
+
+            {/* Category picker */}
+            {taskCategories.length > 0 && (
+              <div className="mt-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Category</div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => setCategoryId("")}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                      !categoryId ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}>
+                    None
+                  </button>
+                  {taskCategories.map((cat: any) => (
+                    <button key={cat.id} onClick={() => setCategoryId(cat.id)}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                        categoryId === cat.id ? "ring-1 ring-[#4ADE80] bg-[#1E242C]" : "bg-[#0B0E11] border border-[#1E242C] hover:bg-[#1E242C]"}`}>
+                      <span className="text-[13px]">{cat.icon}</span>
+                      <span style={{ color: cat.color }}>{cat.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4 mt-4">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                  Assignees
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590]">Assignees</div>
+                  <button onClick={() => {
+                    const active = teamMembers.filter((m) => m.is_active !== false);
+                    setAssigneeIds(assigneeIds.length === active.length ? [] : active.map((m) => m.id));
+                  }} className="text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold">
+                    {assigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
+                  </button>
                 </div>
                 <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3 space-y-2 max-h-40 overflow-y-auto">
                   {teamMembers
@@ -264,27 +321,32 @@ export default function TaskBoard({
                 </div>
               </div>
 
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">
-                  Due date
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Due date</div>
+                  <button type="button" onClick={openDatePicker}
+                    className="w-full flex items-center gap-3 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-left text-sm text-[#E6EDF3] hover:border-[#4ADE80] transition-colors">
+                    <CalendarDays size={16} className="text-[#F5D547]" />
+                    <span className={dueDate ? "text-[#E6EDF3]" : "text-[#484F58]"}>{dueDate || "Pick a due date"}</span>
+                  </button>
+                  <input ref={dateInputRef} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="sr-only" />
                 </div>
-                <button
-                  type="button"
-                  onClick={openDatePicker}
-                  className="w-full flex items-center gap-3 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-left text-sm text-[#E6EDF3] hover:border-[#4ADE80] transition-colors"
-                >
-                  <CalendarDays size={16} className="text-[#F5D547]" />
-                  <span className={dueDate ? "text-[#E6EDF3]" : "text-[#484F58]"}>
-                    {dueDate || "Pick a due date"}
-                  </span>
-                </button>
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="sr-only"
-                />
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Hours to complete</div>
+                  <select value={dueHours} onChange={(e) => setDueHours(e.target.value)}
+                    className="w-full h-10 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-3 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                    <option value="">No limit</option>
+                    <option value="1">1 hour</option>
+                    <option value="2">2 hours</option>
+                    <option value="3">3 hours</option>
+                    <option value="4">4 hours</option>
+                    <option value="6">6 hours</option>
+                    <option value="8">8 hours (1 day)</option>
+                    <option value="12">12 hours</option>
+                    <option value="24">24 hours</option>
+                    <option value="48">48 hours (2 days)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -294,6 +356,8 @@ export default function TaskBoard({
                   setShowComposer(false);
                   setText("");
                   setDueDate("");
+                  setDueHours("");
+                  setCategoryId("");
                   setAssigneeIds([]);
                   setError(null);
                 }}
@@ -446,6 +510,13 @@ function TaskCard({
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
+        {task.category_id && task.category && (
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={{ background: `${task.category.color}18`, color: task.category.color }}>
+            <span className="text-[12px]">{task.category.icon}</span> {task.category.name}
+          </span>
+        )}
+
         {task.assignees?.map((member) => (
           <span
             key={member.id}
@@ -460,7 +531,7 @@ function TaskCard({
         {task.due_date && (
           <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,213,71,0.12)] px-2 py-1 text-[11px] text-[#F5D547]">
             <CalendarDays size={12} />
-            {task.due_date}
+            {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
           </span>
         )}
 

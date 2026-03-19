@@ -50,7 +50,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*)), category:task_categories(*)"
     )
     .eq("id", taskId)
     .single();
@@ -62,7 +62,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const fallback = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), category:task_categories(*)"
     )
     .eq("id", taskId)
     .single();
@@ -78,7 +78,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*))"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*)), category:task_categories(*)"
     )
     .order("created_at", { ascending: false });
 
@@ -89,7 +89,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const fallback = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), category:task_categories(*)"
     )
     .order("created_at", { ascending: false });
 

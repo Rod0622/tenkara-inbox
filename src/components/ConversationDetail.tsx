@@ -1527,6 +1527,18 @@ export default function ConversationDetail({
   const handleAddTaskInternal = async () => {
     if (!convo || !newTaskText.trim()) return;
 
+    // Calculate due_time from hours
+    let computedDueDate = newTaskDueDate || undefined;
+    let computedDueTime: string | undefined = undefined;
+    if (newTaskDueTime) {
+      const hours = parseInt(newTaskDueTime);
+      if (hours > 0) {
+        const deadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+        computedDueDate = computedDueDate || deadline.toISOString().split("T")[0];
+        computedDueTime = deadline.toTimeString().slice(0, 5); // "HH:MM"
+      }
+    }
+
     await onAddTask(
       convo.id,
       newTaskText.trim(),
@@ -1535,9 +1547,9 @@ export default function ConversationDetail({
         : currentUser?.id
           ? [currentUser.id]
           : [],
-      newTaskDueDate || undefined,
+      computedDueDate,
       newTaskCategoryId || undefined,
-      newTaskDueTime || undefined
+      computedDueTime
     );
 
     await refetchDetail();
@@ -2197,14 +2209,24 @@ export default function ConversationDetail({
                       className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
                     />
                   </div>
-                  <div className="w-28">
-                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Due Time</div>
-                    <input
-                      type="time"
+                  <div className="w-32">
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Hours</div>
+                    <select
                       value={newTaskDueTime}
                       onChange={(e) => setNewTaskDueTime(e.target.value)}
-                      className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
-                    />
+                      className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
+                    >
+                      <option value="">No limit</option>
+                      <option value="1">1 hour</option>
+                      <option value="2">2 hours</option>
+                      <option value="3">3 hours</option>
+                      <option value="4">4 hours</option>
+                      <option value="6">6 hours</option>
+                      <option value="8">8 hours (1 day)</option>
+                      <option value="12">12 hours</option>
+                      <option value="24">24 hours</option>
+                      <option value="48">48 hours (2 days)</option>
+                    </select>
                   </div>
                 </div>
 
@@ -2313,6 +2335,17 @@ export default function ConversationDetail({
                       </div>
 
                       <div className="flex flex-wrap gap-2 mt-2">
+                        {/* Category badge */}
+                        {task.category_id && (() => {
+                          const cat = taskCategories.find((c: any) => c.id === task.category_id);
+                          return cat ? (
+                            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              style={{ background: `${cat.color}18`, color: cat.color }}>
+                              <span className="text-[12px]">{cat.icon}</span> {cat.name}
+                            </span>
+                          ) : null;
+                        })()}
+
                         <select
                           value={task.status || (task.is_done ? "completed" : "todo")}
                           onChange={(e) =>
@@ -2327,7 +2360,7 @@ export default function ConversationDetail({
 
                         {task.due_date && (
                           <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-                            Due: {task.due_date}
+                            Due: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
                           </span>
                         )}
 
