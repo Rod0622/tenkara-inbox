@@ -143,9 +143,7 @@ export function useConversations(accountId: string | null) {
   const fetchConversations = useCallback(async () => {
     setLoading(true);
 
-    let query = supabase
-      .from("conversations")
-      .select(`
+    const selectFields = `
         id,
         email_account_id,
         folder_id,
@@ -167,24 +165,67 @@ export function useConversations(accountId: string | null) {
           label_id,
           label:labels(*)
         )
-      `)
-      .order("last_message_at", { ascending: false })
-      .limit(300);
+      `;
 
     if (accountId) {
-      query = query.eq("email_account_id", accountId);
-    }
+      // Specific account: fetch all for that account
+      const { data, error } = await supabase
+        .from("conversations")
+        .select(selectFields)
+        .eq("email_account_id", accountId)
+        .order("last_message_at", { ascending: false })
+        .limit(500);
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("Fetch conversations error:", error);
-      setConversations([]);
+      if (error) {
+        console.error("Fetch conversations error:", error);
+        setConversations([]);
+      } else {
+        setConversations((data || []) as unknown as Conversation[]);
+      }
     } else {
-      const all = (data || []) as unknown as Conversation[];
-      const assigned = all.filter((c: any) => c.assignee_id);
-      console.log(`[useConversations] accountId=${accountId}, total=${all.length}, assigned=${assigned.length}`, assigned.map((c: any) => ({ id: c.id?.slice(0,8), sub: c.subject?.slice(0,30), assignee: c.assignee_id?.slice(0,8) })));
-      setConversations(all);
+      // Personal inbox / all accounts: fetch recent + ALL assigned conversations
+      const [recentResult, assignedResult] = await Promise.all([
+        supabase
+          .from("conversations")
+          .select(selectFields)
+          .order("last_message_at", { ascending: false })
+          .limit(300),
+        supabase
+          .from("conversations")
+          .select(selectFields)
+          .not("assignee_id", "is", null)
+          .order("last_message_at", { ascending: false })
+          .limit(200),
+      ]);
+
+      if (recentResult.error) {
+        console.error("Fetch conversations error:", recentResult.error);
+        setConversations([]);
+      } else {
+        // Merge: all assigned + recent, deduplicated
+        const assignedData = (assignedResult.data || []) as unknown as Conversation[];
+        const recentData = (recentResult.data || []) as unknown as Conversation[];
+        const seen = new Set<string>();
+        const merged: Conversation[] = [];
+        
+        // Add assigned first (priority)
+        for (const c of assignedData) {
+          if (!seen.has(c.id)) { seen.add(c.id); merged.push(c); }
+        }
+        // Add recent
+        for (const c of recentData) {
+          if (!seen.has(c.id)) { seen.add(c.id); merged.push(c); }
+        }
+        
+        // Sort by last_message_at desc
+        merged.sort((a, b) => {
+          const aTime = a.last_message_at || a.created_at || "";
+          const bTime = b.last_message_at || b.created_at || "";
+          return bTime.localeCompare(aTime);
+        });
+
+        setConversations(merged);
+      }
     }
 
     setLoading(false);
