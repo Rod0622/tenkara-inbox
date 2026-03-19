@@ -240,18 +240,21 @@ export async function POST(req: NextRequest) {
       messages: [{ role: "user", content: prompt }],
     });
 
-    const text = response.content
+    const rawText = response.content
       .filter((item: any) => item.type === "text")
       .map((item: any) => item.text)
       .join("\n")
       .trim();
+
+    // Strip markdown code fences if present
+    const text = rawText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
 
     let parsed: any;
     try {
       parsed = JSON.parse(text);
     } catch {
       return NextResponse.json(
-        { error: "Model returned invalid JSON", raw: text },
+        { error: "Model returned invalid JSON", raw: rawText },
         { status: 500 }
       );
     }
