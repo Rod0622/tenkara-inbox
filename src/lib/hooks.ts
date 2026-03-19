@@ -181,7 +181,10 @@ export function useConversations(accountId: string | null) {
       console.error("Fetch conversations error:", error);
       setConversations([]);
     } else {
-      setConversations((data || []) as unknown as Conversation[]);
+      const all = (data || []) as unknown as Conversation[];
+      const assigned = all.filter((c: any) => c.assignee_id);
+      console.log(`[useConversations] accountId=${accountId}, total=${all.length}, assigned=${assigned.length}`, assigned.map((c: any) => ({ id: c.id?.slice(0,8), sub: c.subject?.slice(0,30), assignee: c.assignee_id?.slice(0,8) })));
+      setConversations(all);
     }
 
     setLoading(false);
