@@ -117,8 +117,9 @@ export default function InboxPage() {
       if (activeView === "sent") {
         filtered = conversations.filter((c) => isOutboundConvo(c));
       } else if (activeView === "inbox") {
+        // Personal inbox: show ALL conversations assigned to me
         filtered = conversations.filter(
-          (c) => c.assignee_id === currentUser.id && !isOutboundConvo(c)
+          (c) => c.assignee_id === currentUser.id
         );
       } else {
         filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
