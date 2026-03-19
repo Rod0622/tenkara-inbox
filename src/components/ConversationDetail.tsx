@@ -2261,7 +2261,7 @@ export default function ConversationDetail({
                             if (isSelected) {
                               setNewTaskAssigneeIds((prev) => prev.filter((id) => !memberIds.includes(id)));
                             } else {
-                              setNewTaskAssigneeIds((prev) => [...new Set([...prev, ...memberIds])]);
+                              setNewTaskAssigneeIds((prev) => Array.from(new Set([...prev, ...memberIds])));
                             }
                           }}
                             className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
