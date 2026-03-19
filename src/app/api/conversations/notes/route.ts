@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
   // Accept both camelCase and snake_case
   const conversationId = body.conversation_id || body.conversationId;
   const text = body.text;
+  const title = body.title || "";
 
   if (!conversationId || !text?.trim()) {
     return NextResponse.json(
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
     .insert({
       conversation_id: conversationId,
       author_id: authorId,
+      title: title.trim(),
       text: text.trim(),
     })
     .select("*, author:team_members(*)")

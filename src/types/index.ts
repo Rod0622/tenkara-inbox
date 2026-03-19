@@ -184,7 +184,7 @@ export interface ConversationDetailProps {
   conversation: Conversation | null;
   currentUser: TeamMember | null;
   teamMembers: TeamMember[];
-  onAddNote: (conversationId: string, text: string) => Promise<void>;
+  onAddNote: (conversationId: string, text: string, title?: string) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
   onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => Promise<void>;
   onUpdateTask: (taskId: string, updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }) => Promise<void>;

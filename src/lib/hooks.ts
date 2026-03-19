@@ -531,11 +531,11 @@ export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "min
 }
 
 export function useActions() {
-  const addNote = async (conversationId: string, text: string) => {
+  const addNote = async (conversationId: string, text: string, title?: string) => {
     const res = await fetch("/api/conversations/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, text }),
+      body: JSON.stringify({ conversation_id: conversationId, text, title: title || "" }),
     });
 
     if (!res.ok) {

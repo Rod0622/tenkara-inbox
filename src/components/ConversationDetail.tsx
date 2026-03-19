@@ -1401,6 +1401,7 @@ export default function ConversationDetail({
   const [replyText, setReplyText] = useState("");
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [noteTitle, setNoteTitle] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [showTaskInput, setShowTaskInput] = useState(false);
   const [activeTab, setActiveTab] = useState("messages");
@@ -1502,7 +1503,9 @@ export default function ConversationDetail({
 
   const handleAddNoteInternal = async () => {
     if (!convo || !noteText.trim()) return;
-    await onAddNote(convo.id, noteText.trim());
+    await onAddNote(convo.id, noteText.trim(), noteTitle.trim());
+    setNoteText("");
+    setNoteTitle("");
     setNoteText("");
     setShowNoteInput(false);
     await refetchDetail();
@@ -2039,18 +2042,25 @@ export default function ConversationDetail({
 
             {showNoteInput && (
               <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                <input
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  placeholder="Note title (e.g. Follow-up needed, Pricing info, Decision)"
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm font-semibold text-[#E6EDF3] placeholder:text-[#484F58] outline-none mb-2 focus:border-[#4ADE80]"
+                />
                 <textarea
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Write an internal note..."
                   rows={4}
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]"
                 />
                 <div className="flex justify-end gap-2 mt-3">
                   <button
                     onClick={() => {
                       setShowNoteInput(false);
                       setNoteText("");
+                      setNoteTitle("");
                     }}
                     className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
                   >
@@ -2058,7 +2068,8 @@ export default function ConversationDetail({
                   </button>
                   <button
                     onClick={handleAddNoteInternal}
-                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73]"
+                    disabled={!noteText.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73] disabled:opacity-40"
                   >
                     Save note
                   </button>
@@ -2075,6 +2086,12 @@ export default function ConversationDetail({
                 note.author || teamMembers.find((member) => member.id === note.author_id) || null;
               return (
                 <div key={note.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                  {note.title && (
+                    <div className="text-[14px] font-bold text-[#E6EDF3] mb-1.5 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#58A6FF] flex-shrink-0" />
+                      {note.title}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 mb-2">
                     {author ? (
                       <Avatar initials={author.initials} color={author.color} size={20} />
@@ -2093,7 +2110,7 @@ export default function ConversationDetail({
                       </span>
                     </div>
                   </div>
-                  <div className="text-[13px] text-[#E6EDF3] whitespace-pre-wrap">{note.text}</div>
+                  <div className="text-[13px] text-[#7D8590] whitespace-pre-wrap">{note.text}</div>
                 </div>
               );
             })}
