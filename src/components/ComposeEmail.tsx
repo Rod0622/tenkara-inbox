@@ -329,6 +329,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         <div className="px-5 py-3">
           <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
           <RichTextEditor
+            value={bodyHtml}
             onChange={setBodyHtml}
             placeholder="Write your message..."
             minHeight={300}

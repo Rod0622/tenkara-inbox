@@ -2985,6 +2985,7 @@ export default function ConversationDetail({
           ) : (
             <div className="flex flex-col gap-1.5">
               <RichTextEditor
+                value={replyText}
                 onChange={setReplyText}
                 placeholder="Write a reply..."
                 compact

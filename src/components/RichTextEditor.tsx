@@ -125,7 +125,6 @@ export default function RichTextEditor({
       setInitialized(true);
       if (autoFocus) {
         editorRef.current.focus();
-        // Place cursor at start
         const range = document.createRange();
         range.setStart(editorRef.current, 0);
         range.collapse(true);
@@ -135,6 +134,18 @@ export default function RichTextEditor({
       }
     }
   }, [value, signature, initialized, autoFocus]);
+
+  // Update content when value changes externally (e.g., template insertion)
+  const lastExternalValue = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (initialized && editorRef.current && value !== undefined && value !== lastExternalValue.current) {
+      // Only update if the new value differs from what's in the editor
+      if (editorRef.current.innerHTML !== value) {
+        editorRef.current.innerHTML = value;
+      }
+      lastExternalValue.current = value;
+    }
+  }, [value, initialized]);
 
   // Emit changes
   const handleInput = useCallback(() => {
