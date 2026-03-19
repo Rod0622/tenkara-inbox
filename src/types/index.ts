@@ -72,10 +72,13 @@ export interface Task {
   is_done: boolean;
   status: TaskStatus;
   due_date: string | null;
+  due_time: string | null;
+  category_id: string | null;
   created_at: string;
   updated_at?: string;
   assignee?: TeamMember;
   assignees?: TeamMember[];
+  category?: TaskCategory;
   task_assignees?: {
     team_member_id: string;
     team_member?: TeamMember;
@@ -87,6 +90,14 @@ export interface Task {
     from_email?: string;
     email_account_id?: string;
   } | null;
+}
+
+export interface TaskCategory {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  is_active: boolean;
 }
 
 export interface GmailMessage {
@@ -186,7 +197,7 @@ export interface ConversationDetailProps {
   teamMembers: TeamMember[];
   onAddNote: (conversationId: string, text: string, title?: string) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
-  onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => Promise<void>;
+  onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string, categoryId?: string, dueTime?: string) => Promise<void>;
   onUpdateTask: (taskId: string, updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string) => Promise<void>;

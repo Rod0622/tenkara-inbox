@@ -544,7 +544,7 @@ export function useActions() {
     }
   };
 
-  const addTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string) => {
+  const addTask = async (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string, categoryId?: string, dueTime?: string) => {
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -553,6 +553,8 @@ export function useActions() {
         text,
         assignee_ids: assigneeIds || [],
         due_date: dueDate,
+        category_id: categoryId || null,
+        due_time: dueTime || null,
         status: "todo",
       }),
     });

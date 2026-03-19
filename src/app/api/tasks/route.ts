@@ -144,6 +144,8 @@ export async function POST(req: NextRequest) {
     const text = body.text?.trim();
     const conversationId = body.conversation_id || body.conversationId || null;
     const dueDate = body.due_date || body.dueDate || null;
+    const dueTime = body.due_time || body.dueTime || null;
+    const categoryId = body.category_id || body.categoryId || null;
     const assigneeIds = normalizeAssigneeIds(body);
     const primaryAssigneeId = assigneeIds[0] || null;
     const status = (body.status || "todo") as TaskStatus;
@@ -157,6 +159,8 @@ export async function POST(req: NextRequest) {
       text,
       assignee_id: primaryAssigneeId,
       due_date: dueDate,
+      due_time: dueTime,
+      category_id: categoryId,
       is_done: status === "completed",
     };
 

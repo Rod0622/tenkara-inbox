@@ -39,6 +39,7 @@ const TABS = [
   { id: "team", label: "Team Members", icon: Users },
   { id: "labels", label: "Labels", icon: Tag },
   { id: "rules", label: "Rules", icon: Zap },
+  { id: "categories", label: "Task Categories", icon: Tag },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -92,6 +93,7 @@ export default function SettingsPage() {
         {activeTab === "team" && <TeamTab />}
         {activeTab === "labels" && <LabelsTab />}
         {activeTab === "rules" && <RulesTab />}
+        {activeTab === "categories" && <TaskCategoriesTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -1791,6 +1793,168 @@ function RulesTab() {
               <button onClick={() => { resetForm(); setShowAdd(true); }}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
                 <Plus size={16} /> Create First Rule
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+// ── Task Categories Tab ─────────────────────────────
+const CATEGORY_COLORS = [
+  "#4ADE80", "#58A6FF", "#F0883E", "#BC8CFF", "#F5D547",
+  "#F85149", "#39D2C0", "#7D8590", "#E6EDF3", "#D83B01",
+];
+const CATEGORY_ICONS = ["📋", "📞", "🔍", "↩️", "📄", "✅", "⚡", "🎯", "💼", "🔔", "📊", "🛠️"];
+
+function TaskCategoriesTab() {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formColor, setFormColor] = useState("#58A6FF");
+  const [formIcon, setFormIcon] = useState("📋");
+
+  const fetchCategories = () => {
+    supabase.from("task_categories").select("*").order("sort_order")
+      .then(({ data }) => { setCategories(data || []); setLoading(false); });
+  };
+
+  useEffect(() => { fetchCategories(); }, []);
+
+  const resetForm = () => { setFormName(""); setFormColor("#58A6FF"); setFormIcon("📋"); };
+
+  const handleAdd = async () => {
+    if (!formName.trim()) return;
+    await supabase.from("task_categories").insert({
+      name: formName.trim(), color: formColor, icon: formIcon,
+      sort_order: categories.length,
+    });
+    resetForm(); setShowAdd(false); fetchCategories();
+  };
+
+  const handleUpdate = async (id: string) => {
+    await supabase.from("task_categories").update({
+      name: formName.trim(), color: formColor, icon: formIcon,
+    }).eq("id", id);
+    setEditingId(null); resetForm(); fetchCategories();
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete category "${name}"?`)) return;
+    await supabase.from("task_categories").delete().eq("id", id);
+    fetchCategories();
+  };
+
+  const handleToggle = async (id: string, isActive: boolean) => {
+    await supabase.from("task_categories").update({ is_active: !isActive }).eq("id", id);
+    fetchCategories();
+  };
+
+  const startEdit = (cat: any) => {
+    setEditingId(cat.id); setFormName(cat.name); setFormColor(cat.color); setFormIcon(cat.icon);
+  };
+
+  const renderForm = (isEdit: boolean, catId?: string) => (
+    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+      <input value={formName} onChange={(e) => setFormName(e.target.value)}
+        placeholder="Category name (e.g. Call Task, Research Task)"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      <div className="flex gap-4">
+        <div>
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Icon</div>
+          <div className="flex flex-wrap gap-1">
+            {CATEGORY_ICONS.map((icon) => (
+              <button key={icon} onClick={() => setFormIcon(icon)}
+                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[16px] transition-all ${
+                  formIcon === icon ? "bg-[#1E242C] ring-2 ring-[#4ADE80]" : "hover:bg-[#1E242C]"}`}>
+                {icon}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Color</div>
+          <div className="flex flex-wrap gap-1">
+            {CATEGORY_COLORS.map((c) => (
+              <button key={c} onClick={() => setFormColor(c)}
+                className={`w-6 h-6 rounded-md transition-all ${
+                  formColor === c ? "ring-2 ring-white scale-110" : "hover:scale-110"}`}
+                style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+          <span className="text-[16px]">{formIcon}</span>
+          <span className="text-[12px] font-semibold" style={{ color: formColor }}>{formName || "Preview"}</span>
+        </div>
+        <div className="flex-1" />
+        <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
+          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+        <button onClick={() => isEdit && catId ? handleUpdate(catId) : handleAdd()}
+          disabled={!formName.trim()}
+          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          {isEdit ? "Save" : "Create"}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Task Categories</h1>
+          <p className="text-sm text-[#7D8590] mt-1">Define categories to organize and classify tasks</p>
+        </div>
+        <button onClick={() => { resetForm(); setShowAdd(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          <Plus size={16} /> New Category
+        </button>
+      </div>
+
+      {showAdd && <div className="mb-4">{renderForm(false)}</div>}
+
+      {loading ? (
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <div className="space-y-2">
+          {categories.map((cat) => (
+            editingId === cat.id ? (
+              <div key={cat.id}>{renderForm(true, cat.id)}</div>
+            ) : (
+              <div key={cat.id} className={`flex items-center gap-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${cat.is_active ? "" : "opacity-50"}`}>
+                <button onClick={() => handleToggle(cat.id, cat.is_active)}
+                  className={`w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
+                    cat.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"}`}>
+                  <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
+                </button>
+                <span className="text-[18px]">{cat.icon}</span>
+                <span className="text-sm font-semibold flex-1" style={{ color: cat.color }}>{cat.name}</span>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => startEdit(cat)}
+                    className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C]">
+                    <Edit2 size={13} />
+                  </button>
+                  <button onClick={() => handleDelete(cat.id, cat.name)}
+                    className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)]">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            )
+          ))}
+          {categories.length === 0 && !showAdd && (
+            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+              <h3 className="text-lg font-semibold mb-2">No task categories yet</h3>
+              <p className="text-sm text-[#7D8590] mb-4">Create categories to organize tasks</p>
+              <button onClick={() => { resetForm(); setShowAdd(true); }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                <Plus size={16} /> Create First Category
               </button>
             </div>
           )}

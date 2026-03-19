@@ -1409,6 +1409,9 @@ export default function ConversationDetail({
   const [newTaskText, setNewTaskText] = useState("");
   const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [newTaskDueTime, setNewTaskDueTime] = useState("");
+  const [newTaskCategoryId, setNewTaskCategoryId] = useState("");
+  const [taskCategories, setTaskCategories] = useState<any[]>([]);
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1441,6 +1444,16 @@ export default function ConversationDetail({
     generating: threadSummaryGenerating,
     generateSummary,
   } = useThreadSummary(convo?.id || null);
+
+  // Load task categories
+  useEffect(() => {
+    fetch("/api/drive?action=config").catch(() => {}); // preload drive config
+    import("@/lib/supabase").then(({ createBrowserClient }) => {
+      const sb = createBrowserClient();
+      sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
+        .then(({ data }) => setTaskCategories(data || []));
+    });
+  }, []);
 
   useEffect(() => {
     setActiveTab("messages");
@@ -1522,7 +1535,9 @@ export default function ConversationDetail({
         : currentUser?.id
           ? [currentUser.id]
           : [],
-      newTaskDueDate || undefined
+      newTaskDueDate || undefined,
+      newTaskCategoryId || undefined,
+      newTaskDueTime || undefined
     );
 
     await refetchDetail();
@@ -1530,6 +1545,8 @@ export default function ConversationDetail({
     setNewTaskText("");
     setNewTaskAssigneeIds([]);
     setNewTaskDueDate("");
+    setNewTaskDueTime("");
+    setNewTaskCategoryId("");
     setShowTaskInput(false);
   };
 
@@ -2137,40 +2154,103 @@ export default function ConversationDetail({
                   onChange={(e) => setNewTaskText(e.target.value)}
                   placeholder="What needs to be done?"
                   rows={3}
-                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none"
+                  className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]"
                 />
 
-                <input
-                  type="date"
-                  value={newTaskDueDate}
-                  onChange={(e) => setNewTaskDueDate(e.target.value)}
-                  className="h-10 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-sm text-[#E6EDF3] outline-none"
-                />
+                {/* Category picker */}
+                {taskCategories.length > 0 && (
+                  <div>
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Category</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        onClick={() => setNewTaskCategoryId("")}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                          !newTaskCategoryId ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
+                        }`}
+                      >
+                        None
+                      </button>
+                      {taskCategories.map((cat: any) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setNewTaskCategoryId(cat.id)}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                            newTaskCategoryId === cat.id ? "ring-1 ring-[#4ADE80] bg-[#1E242C]" : "bg-[#0B0E11] border border-[#1E242C] hover:bg-[#1E242C]"
+                          }`}
+                        >
+                          <span className="text-[13px]">{cat.icon}</span>
+                          <span style={{ color: cat.color }}>{cat.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-3 space-y-2 max-h-36 overflow-y-auto">
-                  {teamMembers
-                    .filter((member) => member.is_active !== false)
-                    .map((member) => {
-                      const checked = newTaskAssigneeIds.includes(member.id);
-                      return (
-                        <label key={member.id} className="flex items-center gap-2 text-sm text-[#E6EDF3]">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setNewTaskAssigneeIds((prev) =>
-                                e.target.checked
-                                  ? [...prev, member.id]
-                                  : prev.filter((id) => id !== member.id)
-                              );
-                            }}
-                            className="accent-[#4ADE80]"
-                          />
-                          <Avatar initials={member.initials} color={member.color} size={18} />
-                          <span>{member.name}</span>
-                        </label>
-                      );
-                    })}
+                {/* Date and Time */}
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Due Date</div>
+                    <input
+                      type="date"
+                      value={newTaskDueDate}
+                      onChange={(e) => setNewTaskDueDate(e.target.value)}
+                      className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="w-28">
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Due Time</div>
+                    <input
+                      type="time"
+                      value={newTaskDueTime}
+                      onChange={(e) => setNewTaskDueTime(e.target.value)}
+                      className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+
+                {/* Assignees with Select All */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-[10px] text-[#484F58] font-semibold">Assign to</div>
+                    <button
+                      onClick={() => {
+                        const activeMembers = teamMembers.filter((m) => m.is_active !== false);
+                        if (newTaskAssigneeIds.length === activeMembers.length) {
+                          setNewTaskAssigneeIds([]);
+                        } else {
+                          setNewTaskAssigneeIds(activeMembers.map((m) => m.id));
+                        }
+                      }}
+                      className="text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold"
+                    >
+                      {newTaskAssigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1 max-h-32 overflow-y-auto">
+                    {teamMembers
+                      .filter((member) => member.is_active !== false)
+                      .map((member) => {
+                        const checked = newTaskAssigneeIds.includes(member.id);
+                        return (
+                          <label key={member.id} className="flex items-center gap-2 text-[12px] text-[#E6EDF3] px-1 py-0.5 rounded hover:bg-[#1E242C] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setNewTaskAssigneeIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev, member.id]
+                                    : prev.filter((id) => id !== member.id)
+                                );
+                              }}
+                              className="accent-[#4ADE80]"
+                            />
+                            <Avatar initials={member.initials} color={member.color} size={16} />
+                            <span>{member.name}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-2">
@@ -2180,6 +2260,8 @@ export default function ConversationDetail({
                       setNewTaskText("");
                       setNewTaskAssigneeIds([]);
                       setNewTaskDueDate("");
+                      setNewTaskDueTime("");
+                      setNewTaskCategoryId("");
                     }}
                     className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
                   >
@@ -2187,7 +2269,8 @@ export default function ConversationDetail({
                   </button>
                   <button
                     onClick={handleAddTaskInternal}
-                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73]"
+                    disabled={!newTaskText.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3FCF73] disabled:opacity-40"
                   >
                     Create task
                   </button>
