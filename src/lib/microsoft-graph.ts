@@ -110,7 +110,8 @@ export async function sendGraphEmail(
   to: string,
   subject: string,
   body: string,
-  cc?: string
+  cc?: string,
+  attachments?: { name: string; type: string; data: string }[]
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const token = await getGraphToken();
 
@@ -135,6 +136,15 @@ export async function sendGraphEmail(
 
   if (ccRecipients.length > 0) {
     message.ccRecipients = ccRecipients;
+  }
+
+  if (attachments && attachments.length > 0) {
+    message.attachments = attachments.map((att) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: att.name,
+      contentType: att.type || "application/octet-stream",
+      contentBytes: att.data,
+    }));
   }
 
   const res = await fetch(`${GRAPH_BASE}/users/${fromEmail}/sendMail`, {

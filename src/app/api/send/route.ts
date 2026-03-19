@@ -82,7 +82,8 @@ export async function POST(req: NextRequest) {
         to,
         subject,
         finalBody,
-        cc || undefined
+        cc || undefined,
+        body.attachments || undefined
       );
 
       if (!graphResult.success) {
@@ -118,6 +119,11 @@ export async function POST(req: NextRequest) {
         subject,
         text: plainContent,
         html: htmlContent,
+        attachments: (body.attachments || []).map((att: any) => ({
+          filename: att.name,
+          content: Buffer.from(att.data, "base64"),
+          contentType: att.type || "application/octet-stream",
+        })),
       });
 
       messageId = info.messageId;

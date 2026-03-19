@@ -650,11 +650,11 @@ export function useActions() {
     }
   };
 
-  const sendReply = async (conversationId: string, body: string) => {
+  const sendReply = async (conversationId: string, body: string, attachments?: { name: string; type: string; data: string }[]) => {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, body }),
+      body: JSON.stringify({ conversation_id: conversationId, body, attachments: attachments || undefined }),
     });
 
     if (!res.ok) {
@@ -669,6 +669,7 @@ export function useActions() {
     cc?: string;
     subject: string;
     body: string;
+    attachments?: { name: string; type: string; data: string }[];
   }) => {
     const res = await fetch("/api/send", {
       method: "POST",

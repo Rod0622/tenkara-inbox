@@ -1399,6 +1399,8 @@ export default function ConversationDetail({
   onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
+  const replyFileInputRef = useRef<HTMLInputElement>(null);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
@@ -1566,13 +1568,13 @@ export default function ConversationDetail({
 
   const handleSendReplyInternal = async () => {
     if (!convo) return;
-    // Check if there's actual content (not just empty tags)
     const textContent = replyText.replace(/<[^>]*>/g, "").trim();
-    if (!textContent) return;
+    if (!textContent && replyAttachments.length === 0) return;
     setSending(true);
     try {
-      await onSendReply(convo.id, replyText);
+      await onSendReply(convo.id, replyText, replyAttachments.length > 0 ? replyAttachments : undefined);
       setReplyText("");
+      setReplyAttachments([]);
       await refetchDetail();
     } finally {
       setSending(false);
@@ -2902,16 +2904,55 @@ export default function ConversationDetail({
                 minHeight={50}
                 autoFocus
               />
+              {/* Reply attachments */}
+              <input ref={replyFileInputRef} type="file" multiple onChange={async (e) => {
+                const files = e.target.files;
+                if (!files) return;
+                const newAtts: { name: string; size: number; type: string; data: string }[] = [];
+                for (let i = 0; i < files.length; i++) {
+                  const file = files[i];
+                  if (file.size > 25 * 1024 * 1024) continue;
+                  const data = await new Promise<string>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+                    reader.readAsDataURL(file);
+                  });
+                  newAtts.push({ name: file.name, size: file.size, type: file.type || "application/octet-stream", data });
+                }
+                setReplyAttachments((prev) => [...prev, ...newAtts]);
+                if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+              }} className="hidden" />
+              {replyAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 py-1">
+                  {replyAttachments.map((att, i) => (
+                    <div key={i} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[10px]">
+                      <Paperclip size={10} className="text-[#58A6FF]" />
+                      <span className="text-[#E6EDF3] max-w-[120px] truncate">{att.name}</span>
+                      <button onClick={() => setReplyAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-[#484F58] hover:text-[#F85149]"><X size={10} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex justify-between items-center">
-                <button
-                  onClick={() => { setShowReplyEditor(false); setReplyText(""); }}
-                  className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
-                >
-                  Collapse
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
+                    className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
+                  >
+                    Collapse
+                  </button>
+                  <button
+                    onClick={() => replyFileInputRef.current?.click()}
+                    className="flex items-center gap-1 text-[11px] text-[#484F58] hover:text-[#58A6FF] transition-colors"
+                  >
+                    <Paperclip size={11} />
+                    Attach
+                  </button>
+                </div>
                 <button
                   onClick={handleSendReplyInternal}
-                  disabled={sending || !replyText.replace(/<[^>]*>/g, "").trim()}
+                  disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] disabled:opacity-40 transition-all text-[11px] font-bold"
                 >
                   <Send size={12} />

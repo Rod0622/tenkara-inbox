@@ -200,7 +200,7 @@ export interface ConversationDetailProps {
   onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string, categoryId?: string, dueTime?: string) => Promise<void>;
   onUpdateTask: (taskId: string, updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
-  onSendReply: (conversationId: string, text: string) => Promise<void>;
+  onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[]) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
 }
 

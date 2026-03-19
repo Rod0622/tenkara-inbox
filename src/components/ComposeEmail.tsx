@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { X, Send, ChevronDown } from "lucide-react";
+import { useState, useRef } from "react";
+import { X, Send, ChevronDown, Paperclip, File, Trash2 } from "lucide-react";
 import { useActions, useEmailAccounts } from "@/lib/hooks";
 import RichTextEditor, { getCleanHtml, htmlToPlainText } from "@/components/RichTextEditor";
+
+interface AttachmentFile {
+  name: string;
+  size: number;
+  type: string;
+  data: string; // base64
+}
 
 interface ComposeEmailProps {
   onClose: () => void;
@@ -23,10 +30,46 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [bodyHtml, setBodyHtml] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const accountId = selectedAccount || accounts[0]?.id || "";
   const currentAccount = accounts.find((a) => a.id === accountId);
   const accountSignature = currentAccount?.signature_enabled ? currentAccount?.signature : "";
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const newAttachments: AttachmentFile[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 25 * 1024 * 1024) {
+        setError(`File "${file.name}" is too large (max 25MB)`);
+        continue;
+      }
+      const data = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]); // strip data:...;base64, prefix
+        };
+        reader.readAsDataURL(file);
+      });
+      newAttachments.push({ name: file.name, size: file.size, type: file.type || "application/octet-stream", data });
+    }
+    setAttachments((prev) => [...prev, ...newAttachments]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const handleSend = async () => {
     const plainText = htmlToPlainText(bodyHtml);
@@ -50,6 +93,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         cc: cc.trim() || undefined,
         subject: subject.trim(),
         body: cleanHtml,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       if (result.error) {
@@ -191,6 +235,37 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             autoFocus
             signature={accountSignature}
           />
+        </div>
+
+        {/* Attachments */}
+        <div className="px-5 pb-3">
+          <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] text-[#7D8590] hover:text-[#E6EDF3] hover:border-[#4ADE80] transition-all"
+            >
+              <Paperclip size={13} />
+              Attach files
+            </button>
+            {attachments.length > 0 && (
+              <span className="text-[11px] text-[#484F58]">{attachments.length} file{attachments.length !== 1 ? "s" : ""}</span>
+            )}
+          </div>
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {attachments.map((att, i) => (
+                <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px]">
+                  <File size={12} className="text-[#58A6FF] shrink-0" />
+                  <span className="text-[#E6EDF3] max-w-[150px] truncate">{att.name}</span>
+                  <span className="text-[#484F58]">{formatSize(att.size)}</span>
+                  <button onClick={() => removeAttachment(i)} className="text-[#484F58] hover:text-[#F85149] transition-colors ml-0.5">
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
