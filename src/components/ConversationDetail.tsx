@@ -1414,6 +1414,8 @@ export default function ConversationDetail({
   const [noteTitle, setNoteTitle] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [showTaskInput, setShowTaskInput] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [deletingTasks, setDeletingTasks] = useState(false);
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
@@ -1610,6 +1612,22 @@ export default function ConversationDetail({
     setNewTaskDueTime("");
     setNewTaskCategoryId("");
     setShowTaskInput(false);
+  };
+
+  const handleDeleteTasks = async (taskIds: string[]) => {
+    if (taskIds.length === 0) return;
+    if (!confirm(`Delete ${taskIds.length} task${taskIds.length !== 1 ? "s" : ""}? This removes the task for all assignees.`)) return;
+    setDeletingTasks(true);
+    try {
+      await fetch("/api/tasks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_ids: taskIds }),
+      });
+      setSelectedTaskIds([]);
+      await refetchDetail();
+    } catch (e) { console.error(e); }
+    setDeletingTasks(false);
   };
 
   const openReplyTemplatePicker = async () => {
@@ -2279,13 +2297,25 @@ export default function ConversationDetail({
           <div className="h-full overflow-y-auto pr-2 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-[#E6EDF3]">Thread Tasks</div>
-              <button
-                onClick={() => setShowTaskInput((v) => !v)}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24]"
-              >
-                <Plus size={13} />
-                New task
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedTaskIds.length > 0 && (
+                  <button
+                    onClick={() => handleDeleteTasks(selectedTaskIds)}
+                    disabled={deletingTasks}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[rgba(248,81,73,0.3)] bg-[rgba(248,81,73,0.08)] text-[11px] font-semibold text-[#F85149] hover:bg-[rgba(248,81,73,0.14)] disabled:opacity-50"
+                  >
+                    <Trash2 size={11} />
+                    {deletingTasks ? "Deleting..." : `Delete (${selectedTaskIds.length})`}
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowTaskInput((v) => !v)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-semibold text-[#58A6FF] hover:bg-[#181D24]"
+                >
+                  <Plus size={13} />
+                  New task
+                </button>
+              </div>
             </div>
 
             {showTaskInput && (
@@ -2463,8 +2493,18 @@ export default function ConversationDetail({
               const assignees = getTaskAssignees(task);
 
               return (
-                <div key={task.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
+                <div key={task.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 group/task">
                   <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.includes(task.id)}
+                      onChange={(e) => {
+                        setSelectedTaskIds((prev) =>
+                          e.target.checked ? [...prev, task.id] : prev.filter((id) => id !== task.id)
+                        );
+                      }}
+                      className="mt-1 accent-[#4ADE80]"
+                    />
                     <button
                       onClick={async () => {
                         if (assignees.length > 1 && currentUser) {
@@ -2588,6 +2628,13 @@ export default function ConversationDetail({
                         ))}
                       </div>
                     </div>
+                    <button
+                      onClick={() => handleDeleteTasks([task.id])}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                      title="Delete task"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               );
