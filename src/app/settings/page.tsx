@@ -1374,7 +1374,7 @@ const TRIGGER_TYPES = [
   { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action" },
 ];
 
-interface RuleCondition { field: string; operator: string; value: string; }
+interface RuleCondition { field: string; operator: string; value: string; required?: boolean; }
 interface RuleAction { type: string; value: string; }
 
 function RulesTab() {
@@ -1619,6 +1619,17 @@ function RulesTab() {
               placeholder="Value..."
               className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
             />
+            <button
+              onClick={() => updateCondition(idx, { required: !cond.required })}
+              title={cond.required ? "Required — must match" : "Optional — click to make required"}
+              className={`px-1.5 py-1 rounded-md text-[9px] font-bold transition-all shrink-0 ${
+                cond.required
+                  ? "bg-[rgba(248,81,73,0.12)] text-[#F85149] border border-[rgba(248,81,73,0.3)]"
+                  : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
+              }`}
+            >
+              {cond.required ? "REQ" : "OPT"}
+            </button>
             <button onClick={() => removeCondition(idx)} disabled={formConditions.length <= 1}
               className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove">
               <Trash2 size={12} />
@@ -1753,6 +1764,7 @@ function RulesTab() {
                         {conds.map((c, i) => (
                           <span key={i}>
                             {i > 0 && <span className="text-[#484F58]"> · </span>}
+                            {c.required && <span className="text-[8px] font-bold text-[#F85149] bg-[rgba(248,81,73,0.12)] px-1 py-0.5 rounded mr-0.5">REQ</span>}
                             <span className="text-[#58A6FF]">{CONDITION_FIELDS.find((f) => f.value === c.field)?.label}</span>{" "}
                             <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
                             <span className="text-[#E6EDF3]">"{c.value}"</span>

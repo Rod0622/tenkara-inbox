@@ -4,6 +4,7 @@ interface Condition {
   field: string;
   operator: string;
   value: string;
+  required?: boolean;
 }
 
 interface Action {
@@ -67,15 +68,31 @@ function evaluateConditions(
 ): boolean {
   if (conditions.length === 0) return false;
 
-  const results = conditions.map((c) => {
+  const evaluatedConditions = conditions.map((c) => {
     const fieldValue = getFieldValue(msg, c.field);
-    return evaluateCondition(fieldValue, c.operator, c.value);
+    return { ...c, result: evaluateCondition(fieldValue, c.operator, c.value) };
   });
 
+  // Required conditions MUST always match regardless of match mode
+  const requiredConditions = evaluatedConditions.filter((c) => c.required);
+  const optionalConditions = evaluatedConditions.filter((c) => !c.required);
+
+  // If any required condition fails, rule doesn't match
+  if (requiredConditions.length > 0 && !requiredConditions.every((c) => c.result)) {
+    return false;
+  }
+
+  // If there are no optional conditions, just check required ones passed
+  if (optionalConditions.length === 0) {
+    return requiredConditions.length > 0 ? requiredConditions.every((c) => c.result) : false;
+  }
+
+  // Apply match mode to optional conditions only
+  const optionalResults = optionalConditions.map((c) => c.result);
   switch (matchMode) {
-    case "all": return results.every(Boolean);
-    case "any": return results.some(Boolean);
-    case "none": return results.every((r) => !r);
+    case "all": return optionalResults.every(Boolean);
+    case "any": return optionalResults.some(Boolean);
+    case "none": return optionalResults.every((r) => !r);
     default: return false;
   }
 }
