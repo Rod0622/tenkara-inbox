@@ -68,30 +68,72 @@ export function useTeamMembers() {
   return members;
 }
 
-export function useEmailAccounts() {
+export function useEmailAccounts(currentUserEmail?: string | null) {
   const [accounts, setAccounts] = useState<any[]>([]);
 
   useEffect(() => {
-    supabase
-      .from("email_accounts")
-      .select("*")
-      .eq("is_active", true)
-      .order("created_at")
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("Fetch email accounts error:", error);
-          setAccounts([]);
-          return;
-        }
-        setAccounts(data || []);
+    const load = async () => {
+      // Fetch all active accounts
+      const { data: allAccounts, error } = await supabase
+        .from("email_accounts")
+        .select("*")
+        .eq("is_active", true)
+        .order("created_at");
+
+      if (error) {
+        console.error("Fetch email accounts error:", error);
+        setAccounts([]);
+        return;
+      }
+
+      // Fetch access control entries
+      const { data: accessData } = await supabase
+        .from("account_access")
+        .select("email_account_id, team_member_id");
+
+      // Find current user
+      let currentUserId: string | null = null;
+      let currentUserRole: string | null = null;
+      if (currentUserEmail) {
+        const { data: member } = await supabase
+          .from("team_members")
+          .select("id, role")
+          .eq("email", currentUserEmail)
+          .single();
+        currentUserId = member?.id || null;
+        currentUserRole = member?.role || null;
+      }
+
+      // If no access entries exist for an account, everyone can see it (backward compatible)
+      // If access entries exist, only listed members can see it
+      // Admins can always see everything
+      const accessByAccount: Record<string, string[]> = {};
+      for (const row of (accessData || [])) {
+        if (!accessByAccount[row.email_account_id]) accessByAccount[row.email_account_id] = [];
+        accessByAccount[row.email_account_id].push(row.team_member_id);
+      }
+
+      const filtered = (allAccounts || []).filter((account: any) => {
+        // Admin sees everything
+        if (currentUserRole === "admin") return true;
+        // No access restrictions for this account = everyone sees it
+        const restrictedTo = accessByAccount[account.id];
+        if (!restrictedTo || restrictedTo.length === 0) return true;
+        // User must be in the access list
+        return currentUserId ? restrictedTo.includes(currentUserId) : false;
       });
-  }, []);
+
+      setAccounts(filtered);
+    };
+
+    load();
+  }, [currentUserEmail]);
 
   return accounts;
 }
 
-export function useMailboxes() {
-  return useEmailAccounts();
+export function useMailboxes(currentUserEmail?: string | null) {
+  return useEmailAccounts(currentUserEmail);
 }
 
 export function useLabels() {

@@ -41,7 +41,7 @@ function parseHashParams() {
 export default function InboxPage() {
   const { data: session, status } = useSession();
   const teamMembers = useTeamMembers();
-  const emailAccounts = useEmailAccounts();
+  const emailAccounts = useEmailAccounts(session?.user?.email);
   const folders = useFolders();
   const actions = useActions();
 
