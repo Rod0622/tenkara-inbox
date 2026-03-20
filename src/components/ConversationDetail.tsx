@@ -371,7 +371,16 @@ function CallAssignment({
     setOpen(false);
   };
 
-  if (callers.length === 0) return null;
+  if (callers.length === 0 && !currentCaller) return (
+    <button
+      disabled
+      title="No team members have call skillset. Enable in Settings → Team Members"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[11px] font-semibold text-[#484F58] cursor-not-allowed"
+    >
+      <Phone size={12} />
+      Call
+    </button>
+  );
 
   return (
     <div className="relative" ref={ref}>
