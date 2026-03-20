@@ -2108,7 +2108,7 @@ export default function ConversationDetail({
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); if (tab.id === "tasks" || tab.id === "notes") refetchDetail(); }}
             className={`px-4 py-2.5 text-xs font-semibold transition-all flex items-center gap-1.5 ${
               activeTab === tab.id
                 ? "text-[#4ADE80] border-b-2 border-[#4ADE80]"

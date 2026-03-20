@@ -308,6 +308,20 @@ export async function PATCH(req: NextRequest) {
     if (status) {
       update.status = status;
       update.is_done = status === "completed";
+
+      // Cascade to task_assignees: if completing task, mark all assignees done
+      // If reopening task (todo/in_progress), mark all assignees not done
+      if (status === "completed") {
+        await supabase
+          .from("task_assignees")
+          .update({ is_done: true, completed_at: new Date().toISOString() })
+          .eq("task_id", taskId);
+      } else if (status === "todo") {
+        await supabase
+          .from("task_assignees")
+          .update({ is_done: false, completed_at: null })
+          .eq("task_id", taskId);
+      }
     }
 
     if (dueDate !== undefined) {
