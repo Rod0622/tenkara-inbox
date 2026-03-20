@@ -49,7 +49,6 @@ function isMissingJoinError(error: any) {
     error?.code === "42P01" ||
     error?.code === "PGRST200" ||
     error?.code === "PGRST201" ||
-    message.includes("task_assignees") ||
     message.includes("could not find") ||
     message.includes("more than one relationship was found")
   );
@@ -200,21 +199,24 @@ export async function POST(req: NextRequest) {
     }
 
     if (assigneeIds.length > 0) {
+      const assigneeRows = assigneeIds.map((teamMemberId) => ({
+        task_id: insert.data.id,
+        team_member_id: teamMemberId,
+      }));
+      console.log("Inserting task_assignees:", JSON.stringify(assigneeRows));
+
       const assigneeInsert = await supabase
         .from("task_assignees")
-        .insert(
-          assigneeIds.map((teamMemberId) => ({
-            task_id: insert.data.id,
-            team_member_id: teamMemberId,
-          }))
-        );
+        .insert(assigneeRows);
 
-      if (assigneeInsert.error && !isMissingJoinError(assigneeInsert.error)) {
-        console.error("POST /api/tasks assignee insert failed:", assigneeInsert.error);
-        return NextResponse.json(
-          { error: assigneeInsert.error.message },
-          { status: 500 }
-        );
+      if (assigneeInsert.error) {
+        console.error("POST /api/tasks assignee insert error:", JSON.stringify(assigneeInsert.error));
+        if (!isMissingJoinError(assigneeInsert.error)) {
+          return NextResponse.json(
+            { error: assigneeInsert.error.message },
+            { status: 500 }
+          );
+        }
       }
     }
 
