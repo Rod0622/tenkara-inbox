@@ -12,6 +12,11 @@ export interface TeamMember {
   created_at: string;
 }
 
+export interface TaskAssignee extends TeamMember {
+  is_done: boolean;
+  completed_at: string | null;
+}
+
 export interface Mailbox {
   id: string;
   name: string;
@@ -77,7 +82,7 @@ export interface Task {
   created_at: string;
   updated_at?: string;
   assignee?: TeamMember;
-  assignees?: TeamMember[];
+  assignees?: TaskAssignee[];
   category?: TaskCategory;
   task_assignees?: {
     team_member_id: string;

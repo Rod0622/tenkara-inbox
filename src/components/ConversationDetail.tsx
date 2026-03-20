@@ -2517,18 +2517,35 @@ export default function ConversationDetail({
                           </span>
                         )}
 
-                        {assignees.map((member: TeamMember) => (
-                          <span
+                        {assignees.map((member: any) => (
+                          <button
                             key={member.id}
-                            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px]"
+                            onClick={async () => {
+                              try {
+                                await fetch("/api/tasks", {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ task_id: task.id, toggle_assignee_id: member.id }),
+                                });
+                                await refetchDetail();
+                              } catch (e) { console.error(e); }
+                            }}
+                            title={member.is_done ? `${member.name} — completed. Click to undo` : `${member.name} — click to mark done`}
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-all ${
+                              member.is_done ? "line-through opacity-60" : ""
+                            }`}
                             style={{
-                              background: `${member.color}20`,
-                              color: member.color,
+                              background: member.is_done ? "rgba(74,222,128,0.15)" : `${member.color}20`,
+                              color: member.is_done ? "#4ADE80" : member.color,
                             }}
                           >
-                            <Avatar initials={member.initials} color={member.color} size={16} />
+                            {member.is_done ? (
+                              <CheckCircle size={14} className="text-[#4ADE80]" />
+                            ) : (
+                              <Avatar initials={member.initials} color={member.color} size={16} />
+                            )}
                             {member.name}
-                          </span>
+                          </button>
                         ))}
                       </div>
                     </div>

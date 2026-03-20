@@ -23,13 +23,22 @@ function normalizeAssigneeIds(body: any): string[] {
 }
 
 function normalizeTask(task: any): Task {
+  const taskAssigneeEntries = task?.task_assignees || [];
   const assignees =
-    task?.task_assignees?.map((entry: any) => entry.team_member).filter(Boolean) ||
-    (task?.assignee ? [task.assignee] : []);
+    taskAssigneeEntries.map((entry: any) => ({
+      ...entry.team_member,
+      is_done: entry.is_done || false,
+      completed_at: entry.completed_at || null,
+    })).filter((a: any) => a && a.id) ||
+    (task?.assignee ? [{ ...task.assignee, is_done: false }] : []);
+
+  // Task is fully completed only when ALL assignees are done (or legacy is_done/status)
+  const allAssigneesDone = assignees.length > 0 && assignees.every((a: any) => a.is_done);
+  const effectiveStatus = task?.status === "completed" || task?.is_done || allAssigneesDone ? "completed" : (task?.status || "todo");
 
   return {
     ...task,
-    status: task?.status || (task?.is_done ? "completed" : "todo"),
+    status: effectiveStatus,
     assignees,
   } as Task;
 }
@@ -50,7 +59,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees(*)), category:task_categories(*)"
     )
     .eq("id", taskId)
     .single();
@@ -78,7 +87,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, team_member:team_members!task_assignees(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees(*)), category:task_categories(*)"
     )
     .order("created_at", { ascending: false });
 
@@ -242,9 +251,50 @@ export async function PATCH(req: NextRequest) {
     const dueDate = body.due_date ?? body.dueDate;
     const text = typeof body.text === "string" ? body.text.trim() : undefined;
     const assigneeIds = body.assignee_ids || body.assigneeIds;
+    const toggleAssigneeId = body.toggle_assignee_id;
 
     if (!taskId) {
       return NextResponse.json({ error: "task_id is required" }, { status: 400 });
+    }
+
+    // Toggle individual assignee completion
+    if (toggleAssigneeId) {
+      const { data: existing } = await supabase
+        .from("task_assignees")
+        .select("is_done")
+        .eq("task_id", taskId)
+        .eq("team_member_id", toggleAssigneeId)
+        .single();
+
+      const newDone = !(existing?.is_done);
+      await supabase
+        .from("task_assignees")
+        .update({
+          is_done: newDone,
+          completed_at: newDone ? new Date().toISOString() : null,
+        })
+        .eq("task_id", taskId)
+        .eq("team_member_id", toggleAssigneeId);
+
+      // Check if ALL assignees are now done
+      const { data: allAssignees } = await supabase
+        .from("task_assignees")
+        .select("is_done")
+        .eq("task_id", taskId);
+
+      const allDone = allAssignees && allAssignees.length > 0 && allAssignees.every((a: any) => a.is_done);
+
+      // Update task status accordingly
+      await supabase
+        .from("tasks")
+        .update({
+          status: allDone ? "completed" : "in_progress",
+          is_done: allDone,
+        })
+        .eq("id", taskId);
+
+      const task = await selectTaskById(supabase, taskId);
+      return NextResponse.json({ task });
     }
 
     const update: any = {};
