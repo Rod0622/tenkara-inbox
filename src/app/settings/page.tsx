@@ -1075,6 +1075,12 @@ function TeamTab() {
                     <option value="member">Member</option>
                     <option value="admin">Admin</option>
                   </select>
+                  <label className="flex items-center gap-1 text-[10px] text-[#7D8590] cursor-pointer">
+                    <input type="checkbox" defaultChecked={m.has_call_skillset}
+                      onChange={(e) => handleUpdateMember(m.id, { has_call_skillset: e.target.checked })}
+                      className="accent-[#4ADE80]" />
+                    📞 Caller
+                  </label>
                   <button onClick={() => setEditingId(null)} className="text-[#484F58] hover:text-[#7D8590]">
                     <X size={14} />
                   </button>
@@ -1085,6 +1091,9 @@ function TeamTab() {
                   <span className={`text-[10px] font-bold px-2 py-1 rounded ${
                     m.role === "admin" ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]" : "bg-[#1E242C] text-[#7D8590]"
                   }`}>{m.role}</span>
+                  {m.has_call_skillset && (
+                    <span className="text-[10px] font-bold px-2 py-1 rounded bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">📞 Caller</span>
+                  )}
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => setManagingAccessId(managingAccessId === m.id ? null : m.id)}
