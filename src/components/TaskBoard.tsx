@@ -482,11 +482,13 @@ export default function TaskBoard({
                       <TaskCard
                         key={task.id}
                         task={task}
+                        currentUser={currentUser}
                         selected={selectedTaskIds.includes(task.id)}
                         onSelectedChange={(checked) => toggleTaskSelection(task.id, checked)}
                         onStatusChange={updateTaskStatus}
                         onDelete={() => deleteTasks([task.id])}
                         onOpenConversation={onOpenConversation}
+                        onRefetch={refetch}
                         deleting={deleting}
                       />
                     ))}
@@ -503,21 +505,52 @@ export default function TaskBoard({
 
 function TaskCard({
   task,
+  currentUser,
   selected,
   onSelectedChange,
   onStatusChange,
   onDelete,
   onOpenConversation,
+  onRefetch,
   deleting,
 }: {
   task: Task;
+  currentUser: TeamMember | null;
   selected: boolean;
   onSelectedChange: (checked: boolean) => void;
   onStatusChange: (taskId: string, status: TaskStatus) => Promise<void>;
   onDelete: () => void;
   onOpenConversation?: (conversationId: string) => void;
+  onRefetch?: () => Promise<void>;
   deleting: boolean;
 }) {
+  const assignees = task.assignees || [];
+  const isMulti = assignees.length > 1;
+  const doneCount = assignees.filter((a: any) => a.is_done).length;
+
+  const toggleMyCompletion = async () => {
+    if (!currentUser) return;
+    try {
+      await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: task.id, toggle_assignee_id: currentUser.id }),
+      });
+      await onRefetch?.();
+    } catch (e) { console.error(e); }
+  };
+
+  const toggleAssignee = async (memberId: string) => {
+    try {
+      await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: task.id, toggle_assignee_id: memberId }),
+      });
+      await onRefetch?.();
+    } catch (e) { console.error(e); }
+  };
+
   return (
     <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3">
       <div className="flex items-start gap-2 mb-2">
@@ -528,16 +561,41 @@ function TaskCard({
           className="mt-1 accent-[#4ADE80]"
         />
 
-        {task.status === "completed" ? (
-          <CheckCircle2 size={16} className="text-[#4ADE80] mt-0.5" />
-        ) : (
-          <Circle size={16} className="text-[#484F58] mt-0.5" />
-        )}
+        <button
+          onClick={isMulti ? toggleMyCompletion : () => onStatusChange(task.id, task.status === "completed" ? "todo" : "completed")}
+          title={isMulti ? "Mark my part as done" : "Toggle completion"}
+          className="mt-0.5"
+        >
+          {(() => {
+            if (isMulti && currentUser) {
+              const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+              if (doneCount === assignees.length) return <CheckCircle2 size={16} className="text-[#4ADE80]" />;
+              if (myEntry?.is_done) return <CheckCircle2 size={16} className="text-[#58A6FF]" />;
+              return <Circle size={16} className="text-[#484F58]" />;
+            }
+            return task.status === "completed"
+              ? <CheckCircle2 size={16} className="text-[#4ADE80]" />
+              : <Circle size={16} className="text-[#484F58]" />;
+          })()}
+        </button>
 
         <div className="flex-1 min-w-0">
           <div className={`text-sm font-medium ${task.status === "completed" ? "text-[#7D8590] line-through" : "text-[#E6EDF3]"}`}>
             {task.text}
           </div>
+
+          {/* Progress for multi-assignee */}
+          {isMulti && (
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-1.5 rounded-full bg-[#1E242C] max-w-[100px]">
+                <div className="h-full rounded-full transition-all" style={{
+                  width: `${(doneCount / assignees.length) * 100}%`,
+                  background: doneCount === assignees.length ? "#4ADE80" : "#58A6FF",
+                }} />
+              </div>
+              <span className="text-[10px] text-[#484F58]">{doneCount}/{assignees.length}</span>
+            </div>
+          )}
 
           {task.conversation && (
             <button
@@ -572,15 +630,22 @@ function TaskCard({
           </span>
         )}
 
-        {task.assignees?.map((member) => (
-          <span
+        {assignees.map((member: any) => (
+          <button
             key={member.id}
-            className="inline-flex items-center gap-1 rounded-full bg-[rgba(88,166,255,0.12)] px-2 py-1 text-[11px]"
-            style={{ color: member.color }}
+            onClick={() => toggleAssignee(member.id)}
+            title={member.is_done ? `${member.name} — done. Click to undo` : `${member.name} — click to mark done`}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-all ${
+              member.is_done ? "line-through opacity-60" : ""
+            }`}
+            style={{
+              background: member.is_done ? "rgba(74,222,128,0.15)" : "rgba(88,166,255,0.12)",
+              color: member.is_done ? "#4ADE80" : member.color,
+            }}
           >
-            <User2 size={11} />
+            {member.is_done ? <CheckCircle2 size={11} className="text-[#4ADE80]" /> : <User2 size={11} />}
             {member.name}
-          </span>
+          </button>
         ))}
 
         {task.due_date && (
