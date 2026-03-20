@@ -2466,14 +2466,37 @@ export default function ConversationDetail({
                 <div key={task.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4">
                   <div className="flex items-start gap-3">
                     <button
-                      onClick={() => onToggleTask(task.id, !(task.status === "completed" || task.is_done))}
+                      onClick={async () => {
+                        if (assignees.length > 1 && currentUser) {
+                          // Multi-assignee: toggle current user's completion
+                          try {
+                            await fetch("/api/tasks", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ task_id: task.id, toggle_assignee_id: currentUser.id }),
+                            });
+                            await refetchDetail();
+                          } catch (e) { console.error(e); }
+                        } else {
+                          // Single assignee: toggle whole task
+                          onToggleTask(task.id, !(task.status === "completed" || task.is_done));
+                        }
+                      }}
+                      title={assignees.length > 1 ? "Mark my part as done" : "Toggle task completion"}
                       className="mt-0.5"
                     >
-                      {task.status === "completed" || task.is_done ? (
-                        <CheckCircle size={18} className="text-[#4ADE80]" />
-                      ) : (
-                        <Circle size={18} className="text-[#7D8590]" />
-                      )}
+                      {(() => {
+                        if (assignees.length > 1 && currentUser) {
+                          const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+                          const allDone = assignees.every((a: any) => a.is_done);
+                          if (allDone) return <CheckCircle size={18} className="text-[#4ADE80]" />;
+                          if (myEntry?.is_done) return <CheckCircle size={18} className="text-[#58A6FF]" />;
+                          return <Circle size={18} className="text-[#7D8590]" />;
+                        }
+                        return (task.status === "completed" || task.is_done)
+                          ? <CheckCircle size={18} className="text-[#4ADE80]" />
+                          : <Circle size={18} className="text-[#7D8590]" />;
+                      })()}
                     </button>
 
                     <div className="flex-1 min-w-0">
@@ -2486,6 +2509,22 @@ export default function ConversationDetail({
                       >
                         {task.text}
                       </div>
+
+                      {/* Progress for multi-assignee tasks */}
+                      {assignees.length > 1 && (() => {
+                        const doneCount = assignees.filter((a: any) => a.is_done).length;
+                        return (
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="flex-1 h-1.5 rounded-full bg-[#1E242C] max-w-[120px]">
+                              <div className="h-full rounded-full transition-all" style={{
+                                width: `${(doneCount / assignees.length) * 100}%`,
+                                background: doneCount === assignees.length ? "#4ADE80" : "#58A6FF",
+                              }} />
+                            </div>
+                            <span className="text-[10px] text-[#484F58]">{doneCount}/{assignees.length} done</span>
+                          </div>
+                        );
+                      })()}
 
                       <div className="flex flex-wrap gap-2 mt-2">
                         {/* Category badge */}
