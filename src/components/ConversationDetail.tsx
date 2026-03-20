@@ -1456,14 +1456,52 @@ export default function ConversationDetail({
     generateSummary,
   } = useThreadSummary(convo?.id || null);
 
-  // Load task categories and user groups
+  // Load task categories and user groups (including account-based groups)
   useEffect(() => {
     import("@/lib/supabase").then(({ createBrowserClient }) => {
       const sb = createBrowserClient();
       sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
         .then(({ data }) => setTaskCategories(data || []));
+
+      // Load manual user groups
       sb.from("user_groups").select("*, user_group_members(team_member_id)").eq("is_active", true).order("created_at")
-        .then(({ data }) => setUserGroups(data || []));
+        .then(async ({ data: manualGroups }) => {
+          const groups = [...(manualGroups || [])];
+
+          // Also create virtual groups from account_access
+          const [accRes, accessRes] = await Promise.all([
+            sb.from("email_accounts").select("id, name, icon, color").eq("is_active", true),
+            sb.from("account_access").select("email_account_id, team_member_id"),
+          ]);
+
+          const accounts = accRes.data || [];
+          const accessRows = accessRes.data || [];
+
+          // Build account -> members map
+          const accountMembers: Record<string, string[]> = {};
+          for (const row of accessRows) {
+            if (!accountMembers[row.email_account_id]) accountMembers[row.email_account_id] = [];
+            accountMembers[row.email_account_id].push(row.team_member_id);
+          }
+
+          // Create virtual groups for accounts that have access restrictions
+          for (const acc of accounts) {
+            const memberIds = accountMembers[acc.id];
+            if (memberIds && memberIds.length > 0) {
+              groups.push({
+                id: `account:${acc.id}`,
+                name: acc.name,
+                icon: acc.icon || "📬",
+                color: acc.color || "#58A6FF",
+                is_active: true,
+                _isAccountGroup: true,
+                user_group_members: memberIds.map((id) => ({ team_member_id: id })),
+              });
+            }
+          }
+
+          setUserGroups(groups);
+        });
     });
   }, []);
 
