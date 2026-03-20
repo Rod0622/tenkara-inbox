@@ -58,7 +58,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
     )
     .eq("id", taskId)
     .single();
@@ -86,13 +86,17 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
     )
     .order("created_at", { ascending: false });
 
   if (!primary.error) {
-    return (primary.data || []).map(normalizeTask);
+    const tasks = (primary.data || []).map(normalizeTask);
+    console.log(`selectAllTasks: primary OK, ${tasks.length} tasks, first task assignees: ${tasks[0]?.assignees?.length || 0}`);
+    return tasks;
   }
+
+  console.log("selectAllTasks: primary failed, using fallback:", primary.error?.message);
 
   const fallback = await supabase
     .from("tasks")
