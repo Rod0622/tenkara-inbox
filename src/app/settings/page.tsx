@@ -316,60 +316,21 @@ function SignatureEditor({
 
 function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [accounts, setAccounts] = useState<any[]>([]);
-  const [teamMembers, setTeamMembers] = useState<any[]>([]);
-  const [accessMap, setAccessMap] = useState<Record<string, string[]>>({}); // accountId -> memberIds[]
   const [loading, setLoading] = useState(true);
   const [editingSignatureId, setEditingSignatureId] = useState<string | null>(null);
-  const [managingAccessId, setManagingAccessId] = useState<string | null>(null);
 
-  const fetchAccounts = async () => {
-    const [accRes, membersRes, accessRes] = await Promise.all([
-      supabase.from("email_accounts").select("*").order("created_at", { ascending: true }),
-      supabase.from("team_members").select("*").eq("is_active", true).order("name"),
-      supabase.from("account_access").select("*"),
-    ]);
-    setAccounts(accRes.data || []);
-    setTeamMembers(membersRes.data || []);
-    // Build access map
-    const map: Record<string, string[]> = {};
-    for (const row of (accessRes.data || [])) {
-      if (!map[row.email_account_id]) map[row.email_account_id] = [];
-      map[row.email_account_id].push(row.team_member_id);
-    }
-    setAccessMap(map);
-    setLoading(false);
+  const fetchAccounts = () => {
+    supabase
+      .from("email_accounts")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        setAccounts(data || []);
+        setLoading(false);
+      });
   };
 
   useEffect(() => { fetchAccounts(); }, []);
-
-  const toggleAccess = async (accountId: string, memberId: string) => {
-    const current = accessMap[accountId] || [];
-    if (current.includes(memberId)) {
-      await supabase.from("account_access").delete()
-        .eq("email_account_id", accountId).eq("team_member_id", memberId);
-    } else {
-      await supabase.from("account_access").insert({
-        email_account_id: accountId, team_member_id: memberId,
-      });
-    }
-    fetchAccounts();
-  };
-
-  const grantAllAccess = async (accountId: string) => {
-    const current = accessMap[accountId] || [];
-    const toAdd = teamMembers.filter((m) => !current.includes(m.id));
-    if (toAdd.length > 0) {
-      await supabase.from("account_access").insert(
-        toAdd.map((m) => ({ email_account_id: accountId, team_member_id: m.id }))
-      );
-    }
-    fetchAccounts();
-  };
-
-  const revokeAllAccess = async (accountId: string) => {
-    await supabase.from("account_access").delete().eq("email_account_id", accountId);
-    fetchAccounts();
-  };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Remove this email account? This won't delete any emails from the provider.")) return;
@@ -442,15 +403,6 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                   </div>
                   <div className="flex gap-1">
                     <button
-                      onClick={() => setManagingAccessId(managingAccessId === account.id ? null : account.id)}
-                      title="Manage access"
-                      className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
-                        managingAccessId === account.id ? "text-[#58A6FF] bg-[#1E242C]" : "text-[#7D8590] hover:bg-[#1E242C]"
-                      }`}
-                    >
-                      <Users size={14} />
-                    </button>
-                    <button
                       onClick={() => setEditingSignatureId(isEditingSig ? null : account.id)}
                       title="Edit signature"
                       className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
@@ -479,41 +431,6 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                     initialEnabled={account.signature_enabled ?? false}
                     onSaved={() => { setEditingSignatureId(null); fetchAccounts(); }}
                   />
-                )}
-
-                {/* Access Management */}
-                {managingAccessId === account.id && (
-                  <div className="px-4 pb-4 border-t border-[#1E242C]">
-                    <div className="flex items-center justify-between mt-3 mb-2">
-                      <div className="text-[11px] font-bold text-[#484F58] uppercase tracking-wider">Team Access</div>
-                      <div className="flex gap-2">
-                        <button onClick={() => grantAllAccess(account.id)}
-                          className="text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold">Grant all</button>
-                        <button onClick={() => revokeAllAccess(account.id)}
-                          className="text-[10px] text-[#F85149] hover:text-[#FF6B6B] font-semibold">Revoke all</button>
-                      </div>
-                    </div>
-                    <div className="text-[10px] text-[#484F58] mb-2">
-                      {(accessMap[account.id] || []).length === 0
-                        ? "⚠️ No access restrictions — all team members can see this account. Add members to restrict."
-                        : `${(accessMap[account.id] || []).length} member${(accessMap[account.id] || []).length !== 1 ? "s" : ""} have access`}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      {teamMembers.map((m) => {
-                        const hasAccess = (accessMap[account.id] || []).includes(m.id);
-                        return (
-                          <button key={m.id} onClick={() => toggleAccess(account.id, m.id)}
-                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] text-left transition-all ${
-                              hasAccess ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
-                            }`}>
-                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[#0B0E11] shrink-0" style={{ background: m.color }}>{m.initials}</span>
-                            <span className="flex-1 truncate" style={{ color: hasAccess ? "#4ADE80" : "#7D8590" }}>{m.name}</span>
-                            {hasAccess && <Check size={12} className="text-[#4ADE80] shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
                 )}
               </div>
             );
@@ -879,12 +796,15 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 // ── Team Members Tab ─────────────────────────────────
 function TeamTab() {
   const [members, setMembers] = useState<any[]>([]);
+  const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
+  const [accessMap, setAccessMap] = useState<Record<string, string[]>>({}); // memberId -> accountIds[]
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteData, setInviteData] = useState({ email: "", name: "", role: "member", department: "Uncategorized" });
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [managingAccessId, setManagingAccessId] = useState<string | null>(null);
 
   const DEPARTMENTS = ["Operations", "Management", "Dev", "Sales", "Support", "Uncategorized"];
 
@@ -893,9 +813,50 @@ function TeamTab() {
   }, []);
 
   const fetchMembers = async () => {
-    const { data } = await supabase.from("team_members").select("*").order("created_at");
-    setMembers(data || []);
+    const [membersRes, accountsRes, accessRes] = await Promise.all([
+      supabase.from("team_members").select("*").order("created_at"),
+      supabase.from("email_accounts").select("id, name, email, icon, color").eq("is_active", true).order("created_at"),
+      supabase.from("account_access").select("*"),
+    ]);
+    setMembers(membersRes.data || []);
+    setEmailAccounts(accountsRes.data || []);
+    // Build access map by member
+    const map: Record<string, string[]> = {};
+    for (const row of (accessRes.data || [])) {
+      if (!map[row.team_member_id]) map[row.team_member_id] = [];
+      map[row.team_member_id].push(row.email_account_id);
+    }
+    setAccessMap(map);
     setLoading(false);
+  };
+
+  const toggleAccountAccess = async (memberId: string, accountId: string) => {
+    const current = accessMap[memberId] || [];
+    if (current.includes(accountId)) {
+      await supabase.from("account_access").delete()
+        .eq("team_member_id", memberId).eq("email_account_id", accountId);
+    } else {
+      await supabase.from("account_access").insert({
+        team_member_id: memberId, email_account_id: accountId,
+      });
+    }
+    fetchMembers();
+  };
+
+  const grantAllAccounts = async (memberId: string) => {
+    const current = accessMap[memberId] || [];
+    const toAdd = emailAccounts.filter((a) => !current.includes(a.id));
+    if (toAdd.length > 0) {
+      await supabase.from("account_access").insert(
+        toAdd.map((a) => ({ team_member_id: memberId, email_account_id: a.id }))
+      );
+    }
+    fetchMembers();
+  };
+
+  const revokeAllAccounts = async (memberId: string) => {
+    await supabase.from("account_access").delete().eq("team_member_id", memberId);
+    fetchMembers();
   };
 
   const handleInvite = async () => {
@@ -1126,6 +1087,15 @@ function TeamTab() {
                   }`}>{m.role}</span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
+                      onClick={() => setManagingAccessId(managingAccessId === m.id ? null : m.id)}
+                      title="Manage account access"
+                      className={`px-1.5 py-1 rounded text-[10px] font-semibold transition-all ${
+                        managingAccessId === m.id ? "text-[#58A6FF] bg-[#1E242C]" : "text-[#484F58] hover:text-[#58A6FF] hover:bg-[#1E242C]"
+                      }`}
+                    >
+                      <Mail size={13} />
+                    </button>
+                    <button
                       onClick={() => setEditingId(m.id)}
                       className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
                       title="Edit"
@@ -1141,6 +1111,43 @@ function TeamTab() {
                     </button>
                   </div>
                 </>
+              )}
+
+              {/* Account Access Panel */}
+              {managingAccessId === m.id && (
+                <div className="col-span-full mt-2 pt-2 border-t border-[#1E242C]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+                      Email Account Access
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => grantAllAccounts(m.id)}
+                        className="text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold">Grant all</button>
+                      <button onClick={() => revokeAllAccounts(m.id)}
+                        className="text-[10px] text-[#F85149] hover:text-[#FF6B6B] font-semibold">Revoke all</button>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-[#484F58] mb-2">
+                    {(accessMap[m.id] || []).length === 0
+                      ? "No restrictions — sees all accounts. Add access to restrict."
+                      : `Has access to ${(accessMap[m.id] || []).length} of ${emailAccounts.length} account${emailAccounts.length !== 1 ? "s" : ""}`}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {emailAccounts.map((acc) => {
+                      const hasAccess = (accessMap[m.id] || []).includes(acc.id);
+                      return (
+                        <button key={acc.id} onClick={() => toggleAccountAccess(m.id, acc.id)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] text-left transition-all ${
+                            hasAccess ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
+                          }`}>
+                          <span className="text-[13px]">{acc.icon || "📬"}</span>
+                          <span style={{ color: hasAccess ? "#4ADE80" : "#7D8590" }}>{acc.name}</span>
+                          {hasAccess && <Check size={11} className="text-[#4ADE80]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
             </div>
           ))}

@@ -114,8 +114,6 @@ export function useEmailAccounts(currentUserEmail?: string | null) {
       }
 
       const filtered = (allAccounts || []).filter((account: any) => {
-        // Admin sees everything
-        if (currentUserRole === "admin") return true;
         // No access restrictions for this account = everyone sees it
         const restrictedTo = accessByAccount[account.id];
         if (!restrictedTo || restrictedTo.length === 0) return true;
