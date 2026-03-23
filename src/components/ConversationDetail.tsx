@@ -2746,9 +2746,34 @@ export default function ConversationDetail({
                         })()}
 
                         {assignees.length > 1 ? (
-                          <span className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#7D8590] flex items-center">
-                            {(() => { const dc = assignees.filter((a: any) => a.is_done).length; return dc === assignees.length ? "✅ Completed" : dc > 0 ? `🔄 In progress` : "📋 To do"; })()}
-                          </span>
+                          <select
+                            value={(() => {
+                              if (!currentUser) return "todo";
+                              const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+                              return myEntry?.is_done ? "completed" : assignees.some((a: any) => a.is_done) ? "in_progress" : "todo";
+                            })()}
+                            onChange={async (e) => {
+                              if (!currentUser) return;
+                              const newVal = e.target.value;
+                              const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+                              const currentlyDone = myEntry?.is_done || false;
+                              if ((newVal === "completed" && !currentlyDone) || (newVal !== "completed" && currentlyDone)) {
+                                try {
+                                  await fetch("/api/tasks", {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ task_id: task.id, toggle_assignee_id: currentUser.id }),
+                                  });
+                                  await refetchDetail();
+                                } catch (e2) { console.error(e2); }
+                              }
+                            }}
+                            className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#E6EDF3] outline-none"
+                          >
+                            <option value="todo">📋 To do</option>
+                            <option value="in_progress">🔄 In progress</option>
+                            <option value="completed">✅ Done (me)</option>
+                          </select>
                         ) : (
                           <select
                             value={task.status || (task.is_done ? "completed" : "todo")}

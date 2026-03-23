@@ -663,10 +663,33 @@ function TaskCard({
       </div>
 
       {isMulti ? (
-        <div className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#7D8590]">
-          {doneCount === assignees.length ? "✅ Completed" : doneCount > 0 ? `🔄 In progress (${doneCount}/${assignees.length})` : "📋 To do"} 
-          <span className="text-[10px] text-[#484F58] ml-2">— each assignee marks their part done</span>
-        </div>
+        <select
+          value={(() => {
+            if (!currentUser) return "todo";
+            const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+            return myEntry?.is_done ? "completed" : doneCount > 0 ? "in_progress" : "todo";
+          })()}
+          onChange={async (e) => {
+            if (!currentUser) return;
+            const newVal = e.target.value;
+            const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+            const currentlyDone = myEntry?.is_done || false;
+
+            if (newVal === "completed" && !currentlyDone) {
+              await toggleMyCompletion();
+            } else if (newVal === "todo" && currentlyDone) {
+              await toggleMyCompletion();
+            } else if (newVal === "in_progress") {
+              // If I'm done, undo; "in_progress" means I'm working on it but not done
+              if (currentlyDone) await toggleMyCompletion();
+            }
+          }}
+          className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+        >
+          <option value="todo">📋 To do (my part)</option>
+          <option value="in_progress">🔄 In progress (my part)</option>
+          <option value="completed">✅ Completed (my part)</option>
+        </select>
       ) : (
         <select
           value={task.status}
