@@ -2750,14 +2750,14 @@ export default function ConversationDetail({
                             value={(() => {
                               if (!currentUser) return "todo";
                               const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-                              return myEntry?.is_done ? "completed" : assignees.some((a: any) => a.is_done) ? "in_progress" : "todo";
+                              return myEntry?.is_done ? "completed" : "todo";
                             })()}
                             onChange={async (e) => {
                               if (!currentUser) return;
                               const newVal = e.target.value;
                               const myEntry = assignees.find((a: any) => a.id === currentUser.id);
                               const currentlyDone = myEntry?.is_done || false;
-                              if ((newVal === "completed" && !currentlyDone) || (newVal !== "completed" && currentlyDone)) {
+                              if ((newVal === "completed" && !currentlyDone) || (newVal === "todo" && currentlyDone)) {
                                 try {
                                   await fetch("/api/tasks", {
                                     method: "PATCH",
@@ -2771,7 +2771,6 @@ export default function ConversationDetail({
                             className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#E6EDF3] outline-none"
                           >
                             <option value="todo">📋 To do</option>
-                            <option value="in_progress">🔄 In progress</option>
                             <option value="completed">✅ Done (me)</option>
                           </select>
                         ) : (
