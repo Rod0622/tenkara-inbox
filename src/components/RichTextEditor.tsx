@@ -4,7 +4,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import {
   Bold, Italic, Underline, Strikethrough, Link2, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Type, Palette, Smile, ChevronDown,
-  Undo2, Redo2, X, Check, Paperclip, FolderOpen, FileSignature,
+  Undo2, Redo2, X, Check, Paperclip, FolderOpen, FileSignature, Table2,
 } from "lucide-react";
 
 // ── Font options ────────────────────────────────────
@@ -110,6 +110,8 @@ export default function RichTextEditor({
   const [showEmoji, setShowEmoji] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
+  const [showTablePicker, setShowTablePicker] = useState(false);
+  const [tableHover, setTableHover] = useState<{ rows: number; cols: number }>({ rows: 0, cols: 0 });
   const [currentFont, setCurrentFont] = useState("Arial");
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
@@ -175,6 +177,28 @@ export default function RichTextEditor({
     document.execCommand("insertText", false, emoji);
     handleInput();
     setShowEmoji(false);
+  };
+
+  const handleInsertTable = (rows: number, cols: number) => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+
+    const headerCells = Array.from({ length: cols }, (_, i) => 
+      `<th style="border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;">Header ${i + 1}</th>`
+    ).join("");
+    const bodyRows = Array.from({ length: rows - 1 }, () => {
+      const cells = Array.from({ length: cols }, () => 
+        `<td style="border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px;"></td>`
+      ).join("");
+      return `<tr>${cells}</tr>`;
+    }).join("");
+
+    const tableHtml = `<br><table style="border-collapse:collapse;width:100%;margin:8px 0;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table><br>`;
+
+    document.execCommand("insertHTML", false, tableHtml);
+    handleInput();
+    setShowTablePicker(false);
+    setTableHover({ rows: 0, cols: 0 });
   };
 
   // Get current selection state for active buttons
@@ -340,6 +364,43 @@ export default function RichTextEditor({
             </div>
           )}
         </div>
+
+        {/* Table insert */}
+        <ToolbarDropdown
+          open={showTablePicker} setOpen={setShowTablePicker}
+          trigger={
+            <button className="w-7 h-7 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] transition-all" title="Insert table">
+              <Table2 size={13} />
+            </button>
+          }
+        >
+          <div className="p-2.5">
+            <div className="text-[10px] text-[#484F58] font-semibold mb-2">
+              {tableHover.rows > 0 ? `${tableHover.rows} × ${tableHover.cols}` : "Select size"}
+            </div>
+            <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+              {Array.from({ length: 6 }, (_, row) =>
+                Array.from({ length: 6 }, (_, col) => {
+                  const r = row + 1;
+                  const c = col + 1;
+                  const highlighted = r <= tableHover.rows && c <= tableHover.cols;
+                  return (
+                    <button
+                      key={`${r}-${c}`}
+                      onMouseEnter={() => setTableHover({ rows: r, cols: c })}
+                      onMouseDown={(e) => { e.preventDefault(); handleInsertTable(r, c); }}
+                      className={`w-5 h-5 rounded-sm border transition-all ${
+                        highlighted
+                          ? "bg-[rgba(74,222,128,0.25)] border-[#4ADE80]"
+                          : "bg-[#0B0E11] border-[#1E242C] hover:border-[#484F58]"
+                      }`}
+                    />
+                  );
+                })
+              ).flat()}
+            </div>
+          </div>
+        </ToolbarDropdown>
 
         {/* Emoji */}
         <ToolbarDropdown
