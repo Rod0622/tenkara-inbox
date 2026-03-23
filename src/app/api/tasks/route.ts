@@ -344,6 +344,11 @@ export async function PATCH(req: NextRequest) {
       update.text = text;
     }
 
+    const categoryId = body.category_id;
+    if (categoryId !== undefined) {
+      update.category_id = categoryId || null;
+    }
+
     if (Array.isArray(assigneeIds)) {
       update.assignee_id = assigneeIds[0] || null;
     }

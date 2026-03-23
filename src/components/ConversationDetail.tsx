@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Paperclip,
   Phone,
+  Pencil,
   Plus,
   Reply,
   Send,
@@ -1575,6 +1576,11 @@ export default function ConversationDetail({
   const [showTaskInput, setShowTaskInput] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [deletingTasks, setDeletingTasks] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editTaskText, setEditTaskText] = useState("");
+  const [editTaskAssigneeIds, setEditTaskAssigneeIds] = useState<string[]>([]);
+  const [editTaskDueDate, setEditTaskDueDate] = useState("");
+  const [editTaskCategoryId, setEditTaskCategoryId] = useState("");
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
@@ -1787,6 +1793,54 @@ export default function ConversationDetail({
       await refetchDetail();
     } catch (e) { console.error(e); }
     setDeletingTasks(false);
+  };
+
+  const startEditTask = (task: any) => {
+    const assignees = task.assignees || [];
+    setEditingTaskId(task.id);
+    setEditTaskText(task.text || "");
+    setEditTaskAssigneeIds(assignees.map((a: any) => a.id));
+    setEditTaskDueDate(task.due_date || "");
+    setEditTaskCategoryId(task.category_id || "");
+  };
+
+  const cancelEditTask = () => {
+    setEditingTaskId(null);
+    setEditTaskText("");
+    setEditTaskAssigneeIds([]);
+    setEditTaskDueDate("");
+    setEditTaskCategoryId("");
+  };
+
+  const saveEditTask = async () => {
+    if (!editingTaskId || !editTaskText.trim()) return;
+    try {
+      // Update task fields
+      await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task_id: editingTaskId,
+          text: editTaskText.trim(),
+          due_date: editTaskDueDate || null,
+          assignee_ids: editTaskAssigneeIds,
+          category_id: editTaskCategoryId || null,
+        }),
+      });
+
+      // Update task_assignees: rebuild the join table
+      const { createBrowserClient } = await import("@/lib/supabase");
+      const sb = createBrowserClient();
+      await sb.from("task_assignees").delete().eq("task_id", editingTaskId);
+      if (editTaskAssigneeIds.length > 0) {
+        await sb.from("task_assignees").insert(
+          editTaskAssigneeIds.map((mid) => ({ task_id: editingTaskId, team_member_id: mid }))
+        );
+      }
+
+      cancelEditTask();
+      await refetchDetail();
+    } catch (e) { console.error(e); }
   };
 
   const openReplyTemplatePicker = async () => {
@@ -2659,6 +2713,87 @@ export default function ConversationDetail({
             {tasks.map((task: any) => {
               const assignees = getTaskAssignees(task);
 
+              if (editingTaskId === task.id) {
+                return (
+                  <div key={task.id} className="rounded-xl border border-[#4ADE80]/30 bg-[#12161B] p-4 space-y-3">
+                    <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Edit Task</div>
+                    <textarea
+                      value={editTaskText}
+                      onChange={(e) => setEditTaskText(e.target.value)}
+                      rows={2}
+                      className="w-full rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 py-2 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]"
+                    />
+                    {/* Category */}
+                    {taskCategories.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button onClick={() => setEditTaskCategoryId("")}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-medium ${!editTaskCategoryId ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C]"}`}>
+                          None
+                        </button>
+                        {taskCategories.map((cat: any) => (
+                          <button key={cat.id} onClick={() => setEditTaskCategoryId(cat.id)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1 ${editTaskCategoryId === cat.id ? "ring-1 ring-[#4ADE80]" : "border border-[#1E242C]"}`}
+                            style={{ background: `${cat.color}18`, color: cat.color }}>
+                            <span>{cat.icon}</span> {cat.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {/* Due date */}
+                    <input type="date" value={editTaskDueDate} onChange={(e) => setEditTaskDueDate(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
+                    {/* Assignees */}
+                    <div>
+                      <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Assignees</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {/* Select all / Deselect all */}
+                        <button
+                          onClick={() => setEditTaskAssigneeIds(editTaskAssigneeIds.length === teamMembers.length ? [] : teamMembers.map((m) => m.id))}
+                          className="px-2 py-1 rounded-lg text-[10px] font-medium bg-[#0B0E11] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
+                        >
+                          {editTaskAssigneeIds.length === teamMembers.length ? "Deselect all" : "Select all"}
+                        </button>
+                        {/* User groups */}
+                        {userGroups.map((g: any) => {
+                          const gMembers = (g.user_group_members || []).map((gm: any) => gm.team_member_id);
+                          return (
+                            <button key={g.id} onClick={() => {
+                              const allSelected = gMembers.every((id: string) => editTaskAssigneeIds.includes(id));
+                              setEditTaskAssigneeIds(allSelected
+                                ? editTaskAssigneeIds.filter((id) => !gMembers.includes(id))
+                                : Array.from(new Set([...editTaskAssigneeIds, ...gMembers]))
+                              );
+                            }}
+                              className="px-2 py-1 rounded-lg text-[10px] font-medium border border-[#1E242C] bg-[#0B0E11] hover:text-[#E6EDF3]"
+                              style={{ color: g.color }}>
+                              {g.icon || "👥"} {g.name}
+                            </button>
+                          );
+                        })}
+                        {teamMembers.map((m) => {
+                          const selected = editTaskAssigneeIds.includes(m.id);
+                          return (
+                            <button key={m.id} onClick={() => setEditTaskAssigneeIds(selected ? editTaskAssigneeIds.filter((id) => id !== m.id) : [...editTaskAssigneeIds, m.id])}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-all ${selected ? "ring-1 ring-[#4ADE80]" : "border border-[#1E242C]"}`}
+                              style={{ background: selected ? `${m.color}20` : "#0B0E11", color: selected ? m.color : "#7D8590" }}>
+                              <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div className="flex justify-end gap-2">
+                      <button onClick={cancelEditTask}
+                        className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+                      <button onClick={saveEditTask} disabled={!editTaskText.trim()}
+                        className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">Save</button>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div key={task.id} className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 group/task">
                   <div className="flex items-start gap-3">
@@ -2825,6 +2960,13 @@ export default function ConversationDetail({
                         ))}
                       </div>
                     </div>
+                    <button
+                      onClick={() => startEditTask(task)}
+                      className="p-1 rounded text-[#484F58] hover:text-[#58A6FF] hover:bg-[rgba(88,166,255,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                      title="Edit task"
+                    >
+                      <Pencil size={13} />
+                    </button>
                     <button
                       onClick={() => handleDeleteTasks([task.id])}
                       className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
