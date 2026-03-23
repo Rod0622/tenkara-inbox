@@ -29,11 +29,11 @@ function normalizeTask(task: any): Task {
       ...entry.team_member,
       is_done: entry.is_done || false,
       completed_at: entry.completed_at || null,
+      personal_status: entry.status || (entry.is_done ? "completed" : "todo"),
     })).filter((a: any) => a && a.id) ||
-    (task?.assignee ? [{ ...task.assignee, is_done: false }] : []);
+    (task?.assignee ? [{ ...task.assignee, is_done: false, personal_status: "todo" }] : []);
 
-  // For multi-assignee tasks: status is driven entirely by per-user completion
-  // For single-assignee or legacy tasks: use task-level status
+  // For multi-assignee tasks: status is driven by per-user completion
   let effectiveStatus: string;
   if (assignees.length > 1) {
     const allDone = assignees.every((a: any) => a.is_done);
@@ -66,7 +66,7 @@ async function selectTaskById(supabase: any, taskId: string): Promise<Task> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, status, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
     )
     .eq("id", taskId)
     .single();
@@ -94,7 +94,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
   const primary = await supabase
     .from("tasks")
     .select(
-      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
+      "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, status, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
     )
     .order("created_at", { ascending: false });
 
@@ -266,29 +266,46 @@ export async function PATCH(req: NextRequest) {
     const text = typeof body.text === "string" ? body.text.trim() : undefined;
     const assigneeIds = body.assignee_ids || body.assigneeIds;
     const toggleAssigneeId = body.toggle_assignee_id;
+    const assigneeStatus = body.assignee_status; // "todo" | "in_progress" | "completed"
 
     if (!taskId) {
       return NextResponse.json({ error: "task_id is required" }, { status: 400 });
     }
 
-    // Toggle individual assignee completion
+    // Update individual assignee status
     if (toggleAssigneeId) {
-      const { data: existing } = await supabase
-        .from("task_assignees")
-        .select("is_done")
-        .eq("task_id", taskId)
-        .eq("team_member_id", toggleAssigneeId)
-        .single();
+      if (assigneeStatus) {
+        // Explicit status set (todo / in_progress / completed)
+        const isDone = assigneeStatus === "completed";
+        await supabase
+          .from("task_assignees")
+          .update({
+            status: assigneeStatus,
+            is_done: isDone,
+            completed_at: isDone ? new Date().toISOString() : null,
+          })
+          .eq("task_id", taskId)
+          .eq("team_member_id", toggleAssigneeId);
+      } else {
+        // Legacy toggle behavior
+        const { data: existing } = await supabase
+          .from("task_assignees")
+          .select("is_done")
+          .eq("task_id", taskId)
+          .eq("team_member_id", toggleAssigneeId)
+          .single();
 
-      const newDone = !(existing?.is_done);
-      await supabase
-        .from("task_assignees")
-        .update({
-          is_done: newDone,
-          completed_at: newDone ? new Date().toISOString() : null,
-        })
-        .eq("task_id", taskId)
-        .eq("team_member_id", toggleAssigneeId);
+        const newDone = !(existing?.is_done);
+        await supabase
+          .from("task_assignees")
+          .update({
+            status: newDone ? "completed" : "todo",
+            is_done: newDone,
+            completed_at: newDone ? new Date().toISOString() : null,
+          })
+          .eq("task_id", taskId)
+          .eq("team_member_id", toggleAssigneeId);
+      }
 
       // Check if ALL assignees are now done
       const { data: allAssignees } = await supabase

@@ -132,10 +132,9 @@ export default function TaskBoard({
     const assignees = task.assignees || [];
     if (assignees.length > 1 && currentUser) {
       const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-      if (myEntry?.is_done) return "completed";
-      // If some others are done but not me, I'm still working
-      const anyDone = assignees.some((a: any) => a.is_done);
-      if (anyDone) return task.status === "todo" ? "todo" : "in_progress";
+      if (myEntry) {
+        return (myEntry as any).personal_status || (myEntry.is_done ? "completed" : "todo");
+      }
     }
     return task.status as TaskStatus;
   }, [currentUser]);
@@ -681,21 +680,27 @@ function TaskCard({
           value={(() => {
             if (!currentUser) return "todo";
             const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-            return myEntry?.is_done ? "completed" : "todo";
+            return myEntry?.personal_status || (myEntry?.is_done ? "completed" : "todo");
           })()}
           onChange={async (e) => {
             if (!currentUser) return;
-            const newVal = e.target.value;
-            const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-            const currentlyDone = myEntry?.is_done || false;
-            // Only toggle if state actually changes
-            if ((newVal === "completed" && !currentlyDone) || (newVal === "todo" && currentlyDone)) {
-              await toggleMyCompletion();
-            }
+            try {
+              await fetch("/api/tasks", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  task_id: task.id,
+                  toggle_assignee_id: currentUser.id,
+                  assignee_status: e.target.value,
+                }),
+              });
+              await onRefetch?.();
+            } catch (err) { console.error(err); }
           }}
           className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
         >
           <option value="todo">📋 To do (my part)</option>
+          <option value="in_progress">🔄 In progress (my part)</option>
           <option value="completed">✅ Completed (my part)</option>
         </select>
       ) : (
