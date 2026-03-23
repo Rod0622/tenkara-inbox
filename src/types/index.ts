@@ -15,6 +15,7 @@ export interface TeamMember {
 export interface TaskAssignee extends TeamMember {
   is_done: boolean;
   completed_at: string | null;
+  personal_status: "todo" | "in_progress" | "completed";
 }
 
 export interface Mailbox {
