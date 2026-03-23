@@ -32,9 +32,17 @@ function normalizeTask(task: any): Task {
     })).filter((a: any) => a && a.id) ||
     (task?.assignee ? [{ ...task.assignee, is_done: false }] : []);
 
-  // Task is fully completed only when ALL assignees are done (or legacy is_done/status)
-  const allAssigneesDone = assignees.length > 0 && assignees.every((a: any) => a.is_done);
-  const effectiveStatus = task?.status === "completed" || task?.is_done || allAssigneesDone ? "completed" : (task?.status || "todo");
+  // For multi-assignee tasks: status is driven entirely by per-user completion
+  // For single-assignee or legacy tasks: use task-level status
+  let effectiveStatus: string;
+  if (assignees.length > 1) {
+    const allDone = assignees.every((a: any) => a.is_done);
+    const anyDone = assignees.some((a: any) => a.is_done);
+    effectiveStatus = allDone ? "completed" : anyDone ? "in_progress" : (task?.status === "completed" ? "todo" : (task?.status || "todo"));
+  } else {
+    const allAssigneesDone = assignees.length === 1 && assignees[0].is_done;
+    effectiveStatus = task?.status === "completed" || task?.is_done || allAssigneesDone ? "completed" : (task?.status || "todo");
+  }
 
   return {
     ...task,
@@ -289,12 +297,13 @@ export async function PATCH(req: NextRequest) {
         .eq("task_id", taskId);
 
       const allDone = allAssignees && allAssignees.length > 0 && allAssignees.every((a: any) => a.is_done);
+      const anyDone = allAssignees && allAssignees.some((a: any) => a.is_done);
 
       // Update task status accordingly
       await supabase
         .from("tasks")
         .update({
-          status: allDone ? "completed" : "in_progress",
+          status: allDone ? "completed" : anyDone ? "in_progress" : "todo",
           is_done: allDone,
         })
         .eq("id", taskId);
