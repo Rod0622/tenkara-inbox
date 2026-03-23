@@ -2745,17 +2745,23 @@ export default function ConversationDetail({
                           ) : null;
                         })()}
 
-                        <select
-                          value={task.status || (task.is_done ? "completed" : "todo")}
-                          onChange={(e) =>
-                            onUpdateTask(task.id, { status: e.target.value as any })
-                          }
-                          className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none"
-                        >
-                          <option value="todo">To do</option>
-                          <option value="in_progress">In progress</option>
-                          <option value="completed">Completed</option>
-                        </select>
+                        {assignees.length > 1 ? (
+                          <span className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#7D8590] flex items-center">
+                            {(() => { const dc = assignees.filter((a: any) => a.is_done).length; return dc === assignees.length ? "✅ Completed" : dc > 0 ? `🔄 In progress` : "📋 To do"; })()}
+                          </span>
+                        ) : (
+                          <select
+                            value={task.status || (task.is_done ? "completed" : "todo")}
+                            onChange={(e) =>
+                              onUpdateTask(task.id, { status: e.target.value as any })
+                            }
+                            className="h-8 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none"
+                          >
+                            <option value="todo">To do</option>
+                            <option value="in_progress">In progress</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                        )}
 
                         {task.due_date && (
                           <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">

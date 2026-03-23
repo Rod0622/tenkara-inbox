@@ -662,17 +662,24 @@ function TaskCard({
         )}
       </div>
 
-      <select
-        value={task.status}
-        onChange={(e) => onStatusChange(task.id, e.target.value as TaskStatus)}
-        className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
-      >
-        {STATUS_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      {isMulti ? (
+        <div className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#7D8590]">
+          {doneCount === assignees.length ? "✅ Completed" : doneCount > 0 ? `🔄 In progress (${doneCount}/${assignees.length})` : "📋 To do"} 
+          <span className="text-[10px] text-[#484F58] ml-2">— each assignee marks their part done</span>
+        </div>
+      ) : (
+        <select
+          value={task.status}
+          onChange={(e) => onStatusChange(task.id, e.target.value as TaskStatus)}
+          className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
