@@ -1581,6 +1581,7 @@ export default function ConversationDetail({
   const [editTaskAssigneeIds, setEditTaskAssigneeIds] = useState<string[]>([]);
   const [editTaskDueDate, setEditTaskDueDate] = useState("");
   const [editTaskCategoryId, setEditTaskCategoryId] = useState("");
+  const [editTaskDueTime, setEditTaskDueTime] = useState("");
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
@@ -1801,6 +1802,7 @@ export default function ConversationDetail({
     setEditTaskText(task.text || "");
     setEditTaskAssigneeIds(assignees.map((a: any) => a.id));
     setEditTaskDueDate(task.due_date || "");
+    setEditTaskDueTime(task.due_time || "");
     setEditTaskCategoryId(task.category_id || "");
   };
 
@@ -1809,20 +1811,34 @@ export default function ConversationDetail({
     setEditTaskText("");
     setEditTaskAssigneeIds([]);
     setEditTaskDueDate("");
+    setEditTaskDueTime("");
     setEditTaskCategoryId("");
   };
 
   const saveEditTask = async () => {
     if (!editingTaskId || !editTaskText.trim()) return;
     try {
-      // Update task fields
+      // Calculate due_time from hours
+      let computedDueDate = editTaskDueDate || null;
+      let computedDueTime: string | null = editTaskDueTime || null;
+      if (editTaskDueTime && !editTaskDueTime.includes(":")) {
+        // It's hours, not a time string
+        const hours = parseInt(editTaskDueTime);
+        if (hours > 0) {
+          const deadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+          computedDueDate = computedDueDate || deadline.toISOString().split("T")[0];
+          computedDueTime = deadline.toTimeString().slice(0, 5);
+        }
+      }
+
       await fetch("/api/tasks", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           task_id: editingTaskId,
           text: editTaskText.trim(),
-          due_date: editTaskDueDate || null,
+          due_date: computedDueDate,
+          due_time: computedDueTime,
           assignee_ids: editTaskAssigneeIds,
           category_id: editTaskCategoryId || null,
         }),
@@ -2739,9 +2755,21 @@ export default function ConversationDetail({
                         ))}
                       </div>
                     )}
-                    {/* Due date */}
-                    <input type="date" value={editTaskDueDate} onChange={(e) => setEditTaskDueDate(e.target.value)}
-                      className="px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
+                    {/* Due date + hours */}
+                    <div className="flex items-center gap-2">
+                      <input type="date" value={editTaskDueDate} onChange={(e) => setEditTaskDueDate(e.target.value)}
+                        className="px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
+                      <select value={editTaskDueTime} onChange={(e) => setEditTaskDueTime(e.target.value)}
+                        className="px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">No time limit</option>
+                        {[1,2,3,4,5,6,8,10,12,16,24,36,48].map((h) => (
+                          <option key={h} value={String(h)}>{h}h</option>
+                        ))}
+                      </select>
+                      {editTaskDueTime && editTaskDueTime.includes(":") && (
+                        <span className="text-[10px] text-[#484F58]">Current: {editTaskDueTime.slice(0, 5)}</span>
+                      )}
+                    </div>
                     {/* Assignees */}
                     <div>
                       <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Assignees</div>

@@ -340,6 +340,11 @@ export async function PATCH(req: NextRequest) {
       update.due_date = dueDate || null;
     }
 
+    const dueTime = body.due_time;
+    if (dueTime !== undefined) {
+      update.due_time = dueTime || null;
+    }
+
     if (text) {
       update.text = text;
     }
