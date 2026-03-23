@@ -126,13 +126,27 @@ export default function TaskBoard({
     });
   }, []);
 
+  // For multi-assignee tasks, use the current user's personal completion status
+  // For single-assignee tasks, use the task-level status
+  const getMyStatus = useCallback((task: Task): TaskStatus => {
+    const assignees = task.assignees || [];
+    if (assignees.length > 1 && currentUser) {
+      const myEntry = assignees.find((a: any) => a.id === currentUser.id);
+      if (myEntry?.is_done) return "completed";
+      // If some others are done but not me, I'm still working
+      const anyDone = assignees.some((a: any) => a.is_done);
+      if (anyDone) return task.status === "todo" ? "todo" : "in_progress";
+    }
+    return task.status as TaskStatus;
+  }, [currentUser]);
+
   const grouped = useMemo(
     () => ({
-      todo: tasks.filter((task) => task.status === "todo"),
-      in_progress: tasks.filter((task) => task.status === "in_progress"),
-      completed: tasks.filter((task) => task.status === "completed"),
+      todo: tasks.filter((task) => getMyStatus(task) === "todo"),
+      in_progress: tasks.filter((task) => getMyStatus(task) === "in_progress"),
+      completed: tasks.filter((task) => getMyStatus(task) === "completed"),
     }),
-    [tasks]
+    [tasks, getMyStatus]
   );
 
   const createTask = async () => {
@@ -667,7 +681,7 @@ function TaskCard({
           value={(() => {
             if (!currentUser) return "todo";
             const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-            return myEntry?.is_done ? "completed" : doneCount > 0 ? "in_progress" : "todo";
+            return myEntry?.is_done ? "completed" : "todo";
           })()}
           onChange={async (e) => {
             if (!currentUser) return;
