@@ -113,6 +113,7 @@ export default function RichTextEditor({
   const [showTablePicker, setShowTablePicker] = useState(false);
   const [tableRows, setTableRows] = useState("3");
   const [tableCols, setTableCols] = useState("3");
+  const [hoveredTable, setHoveredTable] = useState<HTMLElement | null>(null);
   const [currentFont, setCurrentFont] = useState("Arial");
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
@@ -215,31 +216,6 @@ export default function RichTextEditor({
     document.execCommand("insertHTML", false, wrap.innerHTML);
     handleInput();
     setShowTablePicker(false);
-  };
-
-  const deleteTableAtCursor = () => {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    let node: Node | null = sel.anchorNode;
-    while (node && node !== editorRef.current) {
-      if (node instanceof HTMLElement && node.tagName === "TABLE") {
-        node.remove();
-        handleInput();
-        return;
-      }
-      node = node.parentNode;
-    }
-  };
-
-  const isCursorInTable = (): boolean => {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return false;
-    let node: Node | null = sel.anchorNode;
-    while (node && node !== editorRef.current) {
-      if (node instanceof HTMLElement && node.tagName === "TABLE") return true;
-      node = node.parentNode;
-    }
-    return false;
   };
 
   // Get current selection state for active buttons
@@ -443,11 +419,6 @@ export default function RichTextEditor({
                   Insert
                 </button>
                 <button
-                  onClick={() => { deleteTableAtCursor(); setShowTablePicker(false); }}
-                  className="px-3 py-2 rounded-lg border border-[rgba(248,81,73,0.3)] bg-[rgba(248,81,73,0.08)] text-[11px] text-[#F85149] font-semibold hover:bg-[rgba(248,81,73,0.14)]">
-                  Delete Table
-                </button>
-                <button
                   onClick={() => setShowTablePicker(false)}
                   className="px-3 py-2 rounded-lg border border-[#1E242C] text-[11px] text-[#7D8590] hover:text-[#E6EDF3]">
                   Cancel
@@ -507,27 +478,65 @@ export default function RichTextEditor({
       </div>
 
       {/* Editor area */}
-      <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={(e) => {
-          // Keyboard shortcuts
-          if (e.metaKey || e.ctrlKey) {
-            if (e.key === "b") { e.preventDefault(); exec("bold"); }
-            if (e.key === "i") { e.preventDefault(); exec("italic"); }
-            if (e.key === "u") { e.preventDefault(); exec("underline"); }
-          }
-        }}
-        data-placeholder={placeholder}
-        className="px-4 py-3 text-[13.5px] text-[#E6EDF3] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
-        style={{
-          minHeight: compact ? 80 : minHeight,
-          maxHeight: compact ? 300 : 500,
-          fontFamily: "Arial, sans-serif",
-        }}
-      />
+      <div className="relative" style={{ position: "relative" }}>
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={handleInput}
+          onKeyDown={(e) => {
+            // Keyboard shortcuts
+            if (e.metaKey || e.ctrlKey) {
+              if (e.key === "b") { e.preventDefault(); exec("bold"); }
+              if (e.key === "i") { e.preventDefault(); exec("italic"); }
+              if (e.key === "u") { e.preventDefault(); exec("underline"); }
+            }
+          }}
+          onMouseOver={(e) => {
+            // Find if hovering over a table
+            let node: HTMLElement | null = e.target as HTMLElement;
+            while (node && node !== editorRef.current) {
+              if (node.tagName === "TABLE") {
+                setHoveredTable(node);
+                return;
+              }
+              node = node.parentElement;
+            }
+          }}
+          onMouseLeave={() => {
+            // Delay clearing so user can click the delete button
+            setTimeout(() => setHoveredTable(null), 200);
+          }}
+          data-placeholder={placeholder}
+          className="px-4 py-3 text-[13.5px] text-[#E6EDF3] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
+          style={{
+            minHeight: compact ? 80 : minHeight,
+            maxHeight: compact ? 300 : 500,
+            fontFamily: "Arial, sans-serif",
+          }}
+        />
+        {hoveredTable && editorRef.current && (() => {
+          const editorRect = editorRef.current.getBoundingClientRect();
+          const tableRect = hoveredTable.getBoundingClientRect();
+          const top = tableRect.top - editorRect.top + editorRef.current.scrollTop;
+          const right = editorRect.right - tableRect.right;
+          return (
+            <button
+              onMouseEnter={() => setHoveredTable(hoveredTable)}
+              onClick={() => {
+                hoveredTable.remove();
+                handleInput();
+                setHoveredTable(null);
+              }}
+              className="absolute flex items-center justify-center w-5 h-5 rounded-full bg-[#F85149] text-white hover:bg-[#FF6B6B] shadow-lg transition-all"
+              style={{ top: top - 8, right: right - 8, zIndex: 10 }}
+              title="Delete table"
+            >
+              <X size={11} />
+            </button>
+          );
+        })()}
+      </div>
     </div>
   );
 }
