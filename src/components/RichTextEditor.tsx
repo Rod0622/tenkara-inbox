@@ -185,18 +185,19 @@ export default function RichTextEditor({
     editorRef.current.focus();
     const table = document.createElement("table");
     table.style.cssText = "border-collapse:collapse;width:100%;margin:8px 0";
+    table.setAttribute("data-editor-table", "true");
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
     for (let i = 0; i < cols; i++) {
       const th = document.createElement("th");
-      th.style.cssText = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left";
+      th.style.cssText = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;overflow:hidden;resize:horizontal";
       th.textContent = "Header " + String(i + 1);
       hr.appendChild(th);
     }
     thead.appendChild(hr);
     table.appendChild(thead);
     const tbody = document.createElement("tbody");
-    for (let r = 1; r < rows; r++) {
+    for (let r = 0; r < rows; r++) {
       const tr = document.createElement("tr");
       for (let c = 0; c < cols; c++) {
         const td = document.createElement("td");
@@ -216,9 +217,34 @@ export default function RichTextEditor({
     setShowTablePicker(false);
   };
 
+  const deleteTableAtCursor = () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    let node: Node | null = sel.anchorNode;
+    while (node && node !== editorRef.current) {
+      if (node instanceof HTMLElement && node.tagName === "TABLE") {
+        node.remove();
+        handleInput();
+        return;
+      }
+      node = node.parentNode;
+    }
+  };
+
+  const isCursorInTable = (): boolean => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    let node: Node | null = sel.anchorNode;
+    while (node && node !== editorRef.current) {
+      if (node instanceof HTMLElement && node.tagName === "TABLE") return true;
+      node = node.parentNode;
+    }
+    return false;
+  };
+
   // Get current selection state for active buttons
   const isActive = (command: string) => {
-    try { return document.queryCommandState(command); } catch { return false; }
+    try { return document.queryCommandState(command); } catch (_e) { return false; }
   };
 
   return (
@@ -404,6 +430,7 @@ export default function RichTextEditor({
                     className="w-16 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
                 </div>
               </div>
+              <div className="text-[9px] text-[#484F58] mb-3">Rows do not include the header row</div>
               <div className="flex gap-2">
                 <button
                   onClick={() => {
@@ -414,6 +441,11 @@ export default function RichTextEditor({
                   }}
                   className="flex-1 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold hover:bg-[#3BC96E]">
                   Insert
+                </button>
+                <button
+                  onClick={() => { deleteTableAtCursor(); setShowTablePicker(false); }}
+                  className="px-3 py-2 rounded-lg border border-[rgba(248,81,73,0.3)] bg-[rgba(248,81,73,0.08)] text-[11px] text-[#F85149] font-semibold hover:bg-[rgba(248,81,73,0.14)]">
+                  Delete Table
                 </button>
                 <button
                   onClick={() => setShowTablePicker(false)}
@@ -491,8 +523,8 @@ export default function RichTextEditor({
         data-placeholder={placeholder}
         className="px-4 py-3 text-[13.5px] text-[#E6EDF3] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none"
         style={{
-          minHeight: compact ? 40 : minHeight,
-          maxHeight: compact ? 150 : 500,
+          minHeight: compact ? 80 : minHeight,
+          maxHeight: compact ? 300 : 500,
           fontFamily: "Arial, sans-serif",
         }}
       />
