@@ -381,49 +381,49 @@ export default function RichTextEditor({
         </div>
 
         {/* Table insert */}
-        <div className="relative">
-          <ToolbarBtn onClick={() => setShowTablePicker(!showTablePicker)} title="Insert table">
-            <Table2 size={13} />
-          </ToolbarBtn>
-          {showTablePicker && (
-            <div className="absolute left-0 bottom-8 z-50 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-2xl shadow-black/40 p-3 w-48">
-              <div className="text-[10px] font-semibold text-[#484F58] mb-2">Insert Table</div>
-              <div className="flex items-center gap-2 mb-2">
+        <ToolbarBtn onClick={() => setShowTablePicker(!showTablePicker)} title="Insert table">
+          <Table2 size={13} />
+        </ToolbarBtn>
+        {showTablePicker && (
+          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40" onClick={() => setShowTablePicker(false)}>
+            <div className="bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl p-4 w-52" onClick={(e) => e.stopPropagation()}>
+              <div className="text-[11px] font-bold text-[#E6EDF3] mb-3">Insert Table</div>
+              <div className="flex items-center gap-3 mb-3">
                 <div>
-                  <div className="text-[9px] text-[#484F58] mb-0.5">Rows</div>
+                  <div className="text-[9px] text-[#484F58] font-semibold mb-1">Rows</div>
                   <input type="number" min="1" max="50" value={tableRows}
                     onChange={(e) => setTableRows(e.target.value)}
-                    className="w-14 px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
+                    autoFocus
+                    className="w-16 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
                 </div>
-                <span className="text-[#484F58] mt-3">x</span>
+                <span className="text-[#484F58] mt-4 font-bold">x</span>
                 <div>
-                  <div className="text-[9px] text-[#484F58] mb-0.5">Cols</div>
+                  <div className="text-[9px] text-[#484F58] font-semibold mb-1">Columns</div>
                   <input type="number" min="1" max="20" value={tableCols}
                     onChange={(e) => setTableCols(e.target.value)}
-                    className="w-14 px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
+                    className="w-16 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
                 </div>
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex gap-2">
                 <button
-                  onMouseDown={(e) => {
-                    e.preventDefault();
+                  onClick={() => {
                     handleInsertTable(
                       Math.max(1, Math.min(50, parseInt(tableRows) || 3)),
                       Math.max(1, Math.min(20, parseInt(tableCols) || 3))
                     );
                   }}
-                  className="flex-1 px-2 py-1.5 rounded bg-[#4ADE80] text-[#0B0E11] text-[10px] font-bold">
+                  className="flex-1 px-3 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold hover:bg-[#3BC96E]">
                   Insert
                 </button>
                 <button
-                  onMouseDown={(e) => { e.preventDefault(); setShowTablePicker(false); }}
-                  className="px-2 py-1.5 rounded border border-[#1E242C] text-[10px] text-[#7D8590]">
+                  onClick={() => setShowTablePicker(false)}
+                  className="px-3 py-2 rounded-lg border border-[#1E242C] text-[11px] text-[#7D8590] hover:text-[#E6EDF3]">
                   Cancel
                 </button>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Emoji */}
         <ToolbarDropdown
