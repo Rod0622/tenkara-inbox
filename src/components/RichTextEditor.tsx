@@ -190,23 +190,39 @@ export default function RichTextEditor({
     const tdStyle = "border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px;";
     const tblStyle = "border-collapse:collapse;width:100%;margin:8px 0;";
 
-    const headerCells: string[] = [];
+    // Build table using DOM to avoid SWC parser issues with HTML strings
+    const table = document.createElement("table");
+    table.setAttribute("style", tblStyle);
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
     for (let i = 0; i < cols; i++) {
-      headerCells.push("<th style=\"" + thStyle + "\">Header " + (i + 1) + "</th>");
+      const th = document.createElement("th");
+      th.setAttribute("style", thStyle);
+      th.textContent = "Header " + (i + 1);
+      headerRow.appendChild(th);
     }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
 
-    const bodyRowsArr: string[] = [];
+    const tbody = document.createElement("tbody");
     for (let r = 1; r < rows; r++) {
-      const cells: string[] = [];
+      const tr = document.createElement("tr");
       for (let c = 0; c < cols; c++) {
-        cells.push("<td style=\"" + tdStyle + "\"></td>");
+        const td = document.createElement("td");
+        td.setAttribute("style", tdStyle);
+        td.innerHTML = "&nbsp;";
+        tr.appendChild(td);
       }
-      bodyRowsArr.push("<tr>" + cells.join("") + "</tr>");
+      tbody.appendChild(tr);
     }
+    table.appendChild(tbody);
 
-    const html = "<br><table style=\"" + tblStyle + "\"><thead><tr>" + headerCells.join("") + "</tr></thead><tbody>" + bodyRowsArr.join("") + "</tbody></table><br>";
+    const wrapper = document.createElement("div");
+    wrapper.appendChild(document.createElement("br"));
+    wrapper.appendChild(table);
+    wrapper.appendChild(document.createElement("br"));
 
-    document.execCommand("insertHTML", false, html);
+    document.execCommand("insertHTML", false, wrapper.innerHTML);
     handleInput();
     setShowTablePicker(false);
     setTableHover({ rows: 0, cols: 0 });
