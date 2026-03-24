@@ -251,6 +251,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">From</span>
           <div className="relative flex-1">
             <button
+              ref={(el) => { (el as any)?.__btnRef && delete (el as any).__btnRef; if (el) (el as any).__btnRef = el; }}
               onClick={() => setShowAccountPicker(!showAccountPicker)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] text-[#E6EDF3] hover:bg-[#181D24] transition-all w-full"
             >
@@ -262,8 +263,19 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             </button>
             {showAccountPicker && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowAccountPicker(false)} />
-                <div className="absolute left-0 top-full mt-1 z-50 w-full bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1">
+                <div className="fixed inset-0 z-[60]" onClick={() => setShowAccountPicker(false)} />
+                <div className="fixed z-[61] bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1"
+                  style={{ width: 320 }}
+                  ref={(el) => {
+                    if (!el) return;
+                    const btn = el.parentElement?.querySelector("button");
+                    if (btn) {
+                      const rect = btn.getBoundingClientRect();
+                      el.style.top = (rect.bottom + 4) + "px";
+                      el.style.left = rect.left + "px";
+                    }
+                  }}
+                >
                   {accounts.map((acc) => (
                     <button
                       key={acc.id}
