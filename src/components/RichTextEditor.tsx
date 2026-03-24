@@ -214,7 +214,7 @@ export default function RichTextEditor({
 
   // Get current selection state for active buttons
   const isActive = (command: string) => {
-    try { return document.queryCommandState(command); } catch { return false; }
+    try { return document.queryCommandState(command); } catch (_e) { return false; }
   };
 
   return (
