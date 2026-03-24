@@ -111,10 +111,8 @@ export default function RichTextEditor({
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [showTablePicker, setShowTablePicker] = useState(false);
-  const [tableHover, setTableHover] = useState<{ rows: number; cols: number }>({ rows: 0, cols: 0 });
-  const [customTableRows, setCustomTableRows] = useState("3");
-  const [customTableCols, setCustomTableCols] = useState("3");
-  const [showCustomTable, setShowCustomTable] = useState(false);
+  const [tableRows, setTableRows] = useState("3");
+  const [tableCols, setTableCols] = useState("3");
   const [currentFont, setCurrentFont] = useState("Arial");
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
@@ -185,52 +183,42 @@ export default function RichTextEditor({
   const handleInsertTable = (rows: number, cols: number) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
-
-    const thStyle = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;";
-    const tdStyle = "border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px;";
-    const tblStyle = "border-collapse:collapse;width:100%;margin:8px 0;";
-
-    // Build table using DOM to avoid SWC parser issues with HTML strings
     const table = document.createElement("table");
-    table.setAttribute("style", tblStyle);
+    table.style.cssText = "border-collapse:collapse;width:100%;margin:8px 0";
     const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
+    const hr = document.createElement("tr");
     for (let i = 0; i < cols; i++) {
       const th = document.createElement("th");
-      th.setAttribute("style", thStyle);
-      th.textContent = "Header " + (i + 1);
-      headerRow.appendChild(th);
+      th.style.cssText = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left";
+      th.textContent = "Header " + String(i + 1);
+      hr.appendChild(th);
     }
-    thead.appendChild(headerRow);
+    thead.appendChild(hr);
     table.appendChild(thead);
-
     const tbody = document.createElement("tbody");
     for (let r = 1; r < rows; r++) {
       const tr = document.createElement("tr");
       for (let c = 0; c < cols; c++) {
         const td = document.createElement("td");
-        td.setAttribute("style", tdStyle);
-        td.innerHTML = "&nbsp;";
+        td.style.cssText = "border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px";
+        td.innerHTML = "\u00a0";
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
-
-    const wrapper = document.createElement("div");
-    wrapper.appendChild(document.createElement("br"));
-    wrapper.appendChild(table);
-    wrapper.appendChild(document.createElement("br"));
-
-    document.execCommand("insertHTML", false, wrapper.innerHTML);
+    const wrap = document.createElement("div");
+    wrap.appendChild(document.createElement("br"));
+    wrap.appendChild(table);
+    wrap.appendChild(document.createElement("br"));
+    document.execCommand("insertHTML", false, wrap.innerHTML);
     handleInput();
     setShowTablePicker(false);
-    setTableHover({ rows: 0, cols: 0 });
   };
 
   // Get current selection state for active buttons
   const isActive = (command: string) => {
-    try { return document.queryCommandState(command); } catch (_e) { return false; }
+    try { return document.queryCommandState(command); } catch { return false; }
   };
 
   return (
@@ -394,81 +382,46 @@ export default function RichTextEditor({
 
         {/* Table insert */}
         <div className="relative">
-          <div onMouseDown={(e) => { e.preventDefault(); setShowTablePicker(!showTablePicker); setShowCustomTable(false); }}>
-            <button className="w-7 h-7 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] transition-all" title="Insert table">
-              <Table2 size={13} />
-            </button>
-          </div>
+          <ToolbarBtn onClick={() => setShowTablePicker(!showTablePicker)} title="Insert table">
+            <Table2 size={13} />
+          </ToolbarBtn>
           {showTablePicker && (
-            <>
-              <div className="fixed inset-0 z-40" onMouseDown={() => { setShowTablePicker(false); setShowCustomTable(false); }} />
-              <div className="absolute left-0 bottom-full mb-1 z-50 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-2xl shadow-black/40 py-1">
-              <div className="p-2.5">
-                <div className="text-[10px] text-[#484F58] font-semibold mb-2">
-                  {tableHover.rows > 0 ? `${tableHover.rows} × ${tableHover.cols}` : "Select size"}
+            <div className="absolute left-0 bottom-8 z-50 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-2xl shadow-black/40 p-3 w-48">
+              <div className="text-[10px] font-semibold text-[#484F58] mb-2">Insert Table</div>
+              <div className="flex items-center gap-2 mb-2">
+                <div>
+                  <div className="text-[9px] text-[#484F58] mb-0.5">Rows</div>
+                  <input type="number" min="1" max="50" value={tableRows}
+                    onChange={(e) => setTableRows(e.target.value)}
+                    className="w-14 px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
                 </div>
-                <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
-                  {Array.from({ length: 6 }, (_, row) =>
-                    Array.from({ length: 6 }, (_, col) => {
-                      const r = row + 1;
-                      const c = col + 1;
-                      const highlighted = r <= tableHover.rows && c <= tableHover.cols;
-                      return (
-                        <button
-                          key={`${r}-${c}`}
-                          onMouseEnter={() => setTableHover({ rows: r, cols: c })}
-                          onMouseDown={(e) => { e.preventDefault(); handleInsertTable(r, c); }}
-                          className={`w-5 h-5 rounded-sm border transition-all ${
-                            highlighted
-                              ? "bg-[rgba(74,222,128,0.25)] border-[#4ADE80]"
-                              : "bg-[#0B0E11] border-[#1E242C] hover:border-[#484F58]"
-                          }`}
-                        />
-                      );
-                    })
-                  ).flat()}
-                </div>
-                <div className="border-t border-[#1E242C] mt-2 pt-2">
-                  {!showCustomTable ? (
-                    <button
-                      onMouseDown={(e) => { e.preventDefault(); setShowCustomTable(true); }}
-                      className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold"
-                    >
-                      Custom size...
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number" min="1" max="50" value={customTableRows}
-                        onChange={(e) => setCustomTableRows(e.target.value)}
-                        className="w-12 px-1.5 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center"
-                        placeholder="Rows"
-                      />
-                      <span className="text-[10px] text-[#484F58]">×</span>
-                      <input
-                        type="number" min="1" max="20" value={customTableCols}
-                        onChange={(e) => setCustomTableCols(e.target.value)}
-                        className="w-12 px-1.5 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center"
-                        placeholder="Cols"
-                      />
-                      <button
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          const r = Math.max(1, Math.min(50, parseInt(customTableRows) || 3));
-                          const c = Math.max(1, Math.min(20, parseInt(customTableCols) || 3));
-                          handleInsertTable(r, c);
-                        }}
-                        className="px-2 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-[10px] font-bold"
-                      >
-                        Insert
-                      </button>
-                    </div>
-                  )}
+                <span className="text-[#484F58] mt-3">x</span>
+                <div>
+                  <div className="text-[9px] text-[#484F58] mb-0.5">Cols</div>
+                  <input type="number" min="1" max="20" value={tableCols}
+                    onChange={(e) => setTableCols(e.target.value)}
+                    className="w-14 px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center" />
                 </div>
               </div>
+              <div className="flex gap-1.5">
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleInsertTable(
+                      Math.max(1, Math.min(50, parseInt(tableRows) || 3)),
+                      Math.max(1, Math.min(20, parseInt(tableCols) || 3))
+                    );
+                  }}
+                  className="flex-1 px-2 py-1.5 rounded bg-[#4ADE80] text-[#0B0E11] text-[10px] font-bold">
+                  Insert
+                </button>
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); setShowTablePicker(false); }}
+                  className="px-2 py-1.5 rounded border border-[#1E242C] text-[10px] text-[#7D8590]">
+                  Cancel
+                </button>
               </div>
             </div>
-            </>
           )}
         </div>
 
