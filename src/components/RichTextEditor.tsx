@@ -186,19 +186,27 @@ export default function RichTextEditor({
     if (!editorRef.current) return;
     editorRef.current.focus();
 
-    const headerCells = Array.from({ length: cols }, (_, i) => 
-      `<th style="border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;">Header ${i + 1}</th>`
-    ).join("");
-    const bodyRows = Array.from({ length: rows - 1 }, () => {
-      const cells = Array.from({ length: cols }, () => 
-        `<td style="border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px;"></td>`
-      ).join("");
-      return `<tr>${cells}</tr>`;
-    }).join("");
+    const thStyle = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;";
+    const tdStyle = "border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px;";
+    const tblStyle = "border-collapse:collapse;width:100%;margin:8px 0;";
 
-    const tableHtml = `<br><table style="border-collapse:collapse;width:100%;margin:8px 0;"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table><br>`;
+    const headerCells: string[] = [];
+    for (let i = 0; i < cols; i++) {
+      headerCells.push("<th style=\"" + thStyle + "\">Header " + (i + 1) + "</th>");
+    }
 
-    document.execCommand("insertHTML", false, tableHtml);
+    const bodyRowsArr: string[] = [];
+    for (let r = 1; r < rows; r++) {
+      const cells: string[] = [];
+      for (let c = 0; c < cols; c++) {
+        cells.push("<td style=\"" + tdStyle + "\"></td>");
+      }
+      bodyRowsArr.push("<tr>" + cells.join("") + "</tr>");
+    }
+
+    const html = "<br><table style=\"" + tblStyle + "\"><thead><tr>" + headerCells.join("") + "</tr></thead><tbody>" + bodyRowsArr.join("") + "</tbody></table><br>";
+
+    document.execCommand("insertHTML", false, html);
     handleInput();
     setShowTablePicker(false);
     setTableHover({ rows: 0, cols: 0 });
