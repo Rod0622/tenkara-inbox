@@ -387,7 +387,7 @@ export default function RichTextEditor({
           <Table2 size={13} />
         </ToolbarBtn>
         {showTablePicker && (
-          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40" onClick={() => setShowTablePicker(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowTablePicker(false)}>
             <div className="bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl p-4 w-52" onClick={(e) => e.stopPropagation()}>
               <div className="text-[11px] font-bold text-[#E6EDF3] mb-3">Insert Table</div>
               <div className="flex items-center gap-3 mb-3">
