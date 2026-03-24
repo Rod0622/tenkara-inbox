@@ -112,6 +112,9 @@ export default function RichTextEditor({
   const [linkUrl, setLinkUrl] = useState("");
   const [showTablePicker, setShowTablePicker] = useState(false);
   const [tableHover, setTableHover] = useState<{ rows: number; cols: number }>({ rows: 0, cols: 0 });
+  const [customTableRows, setCustomTableRows] = useState("3");
+  const [customTableCols, setCustomTableCols] = useState("3");
+  const [showCustomTable, setShowCustomTable] = useState(false);
   const [currentFont, setCurrentFont] = useState("Arial");
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
@@ -366,41 +369,84 @@ export default function RichTextEditor({
         </div>
 
         {/* Table insert */}
-        <ToolbarDropdown
-          open={showTablePicker} setOpen={setShowTablePicker}
-          trigger={
+        <div className="relative">
+          <div onMouseDown={(e) => { e.preventDefault(); setShowTablePicker(!showTablePicker); setShowCustomTable(false); }}>
             <button className="w-7 h-7 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] transition-all" title="Insert table">
               <Table2 size={13} />
             </button>
-          }
-        >
-          <div className="p-2.5">
-            <div className="text-[10px] text-[#484F58] font-semibold mb-2">
-              {tableHover.rows > 0 ? `${tableHover.rows} × ${tableHover.cols}` : "Select size"}
-            </div>
-            <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
-              {Array.from({ length: 6 }, (_, row) =>
-                Array.from({ length: 6 }, (_, col) => {
-                  const r = row + 1;
-                  const c = col + 1;
-                  const highlighted = r <= tableHover.rows && c <= tableHover.cols;
-                  return (
-                    <button
-                      key={`${r}-${c}`}
-                      onMouseEnter={() => setTableHover({ rows: r, cols: c })}
-                      onMouseDown={(e) => { e.preventDefault(); handleInsertTable(r, c); }}
-                      className={`w-5 h-5 rounded-sm border transition-all ${
-                        highlighted
-                          ? "bg-[rgba(74,222,128,0.25)] border-[#4ADE80]"
-                          : "bg-[#0B0E11] border-[#1E242C] hover:border-[#484F58]"
-                      }`}
-                    />
-                  );
-                })
-              ).flat()}
-            </div>
           </div>
-        </ToolbarDropdown>
+          {showTablePicker && (
+            <>
+              <div className="fixed inset-0 z-40" onMouseDown={() => { setShowTablePicker(false); setShowCustomTable(false); }} />
+              <div className="absolute left-0 bottom-full mb-1 z-50 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-2xl shadow-black/40 py-1">
+              <div className="p-2.5">
+                <div className="text-[10px] text-[#484F58] font-semibold mb-2">
+                  {tableHover.rows > 0 ? `${tableHover.rows} × ${tableHover.cols}` : "Select size"}
+                </div>
+                <div className="grid gap-[3px]" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+                  {Array.from({ length: 6 }, (_, row) =>
+                    Array.from({ length: 6 }, (_, col) => {
+                      const r = row + 1;
+                      const c = col + 1;
+                      const highlighted = r <= tableHover.rows && c <= tableHover.cols;
+                      return (
+                        <button
+                          key={`${r}-${c}`}
+                          onMouseEnter={() => setTableHover({ rows: r, cols: c })}
+                          onMouseDown={(e) => { e.preventDefault(); handleInsertTable(r, c); }}
+                          className={`w-5 h-5 rounded-sm border transition-all ${
+                            highlighted
+                              ? "bg-[rgba(74,222,128,0.25)] border-[#4ADE80]"
+                              : "bg-[#0B0E11] border-[#1E242C] hover:border-[#484F58]"
+                          }`}
+                        />
+                      );
+                    })
+                  ).flat()}
+                </div>
+                <div className="border-t border-[#1E242C] mt-2 pt-2">
+                  {!showCustomTable ? (
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); setShowCustomTable(true); }}
+                      className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold"
+                    >
+                      Custom size...
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number" min="1" max="50" value={customTableRows}
+                        onChange={(e) => setCustomTableRows(e.target.value)}
+                        className="w-12 px-1.5 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center"
+                        placeholder="Rows"
+                      />
+                      <span className="text-[10px] text-[#484F58]">×</span>
+                      <input
+                        type="number" min="1" max="20" value={customTableCols}
+                        onChange={(e) => setCustomTableCols(e.target.value)}
+                        className="w-12 px-1.5 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] text-center"
+                        placeholder="Cols"
+                      />
+                      <button
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          const r = Math.max(1, Math.min(50, parseInt(customTableRows) || 3));
+                          const c = Math.max(1, Math.min(20, parseInt(customTableCols) || 3));
+                          handleInsertTable(r, c);
+                        }}
+                        className="px-2 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-[10px] font-bold"
+                      >
+                        Insert
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              </div>
+            </div>
+            </>
+          )}
+        </div>
 
         {/* Emoji */}
         <ToolbarDropdown
