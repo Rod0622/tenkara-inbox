@@ -114,13 +114,15 @@ export function useEmailAccounts(currentUserEmail?: string | null) {
       }
 
       const filtered = (allAccounts || []).filter((account: any) => {
+        // If no user email provided, skip access check (return all)
+        if (!currentUserId) return true;
         // Admin sees everything
         if (currentUserRole === "admin") return true;
         // No access restrictions for this account = everyone sees it
         const restrictedTo = accessByAccount[account.id];
         if (!restrictedTo || restrictedTo.length === 0) return true;
         // User must be in the access list
-        return currentUserId ? restrictedTo.includes(currentUserId) : false;
+        return restrictedTo.includes(currentUserId);
       });
 
       setAccounts(filtered);
