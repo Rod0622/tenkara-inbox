@@ -16,9 +16,12 @@ const supabase = createBrowserClient();
 
 // ── Provider definitions matching the DB presets ─────
 const PROVIDERS = [
-  { id: "microsoft_oauth", name: "Microsoft 365 / GoDaddy Email", icon: "🟠", color: "#D83B01",
+  { id: "microsoft_oauth", name: "Microsoft 365 / GoDaddy (Our Company)", icon: "🟠", color: "#D83B01",
     imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
-    help: "Connects via Microsoft Graph API. Just enter the email address — no password needed." },
+    help: "Connects via Microsoft Graph API. For accounts where we have Azure AD admin access." },
+  { id: "microsoft_password", name: "Microsoft 365 / GoDaddy (Client Email)", icon: "🟡", color: "#F0883E",
+    imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
+    help: "Connect using client's email + password. Tries OAuth2 password flow first, then IMAP." },
   { id: "gmail", name: "Gmail or Google Workspace", icon: "🔵", color: "#4285F4",
     imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 587,
     help: "Requires an App Password. Go to myaccount.google.com → Security → 2-Step Verification → App Passwords → Generate one for 'Mail'." },
@@ -531,7 +534,30 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
     setError("");
 
     try {
-      // Save to Supabase
+      if (selectedProvider?.id === "microsoft_password") {
+        // Try password-based Microsoft connection
+        const res = await fetch("/api/auth/microsoft-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formData.email.trim(),
+            password: formData.password,
+            name: formData.name || formData.email.split("@")[0],
+          }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          setSuccess(true);
+          setTimeout(() => { onClose(); window.location.reload(); }, 1500);
+        } else {
+          setError(data.error || "Connection failed");
+        }
+        setTesting(false);
+        return;
+      }
+
+      // Standard IMAP/SMTP connection
       const { data, error: dbError } = await supabase.from("email_accounts").insert({
         name: formData.name || formData.email.split("@")[0],
         email: formData.email,
