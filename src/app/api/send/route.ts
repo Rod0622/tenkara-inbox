@@ -4,7 +4,15 @@ import nodemailer from "nodemailer";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { sendGraphEmail } from "@/lib/microsoft-graph";
 
-const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
+const MICROSOFT_PROVIDERS = ["microsoft"];
+
+function shouldSendViaGraph(account: any): boolean {
+  if (account.provider === "microsoft") return true;
+  // If account has IMAP/SMTP credentials, send via SMTP
+  if (account.smtp_host && account.smtp_password) return false;
+  if (account.microsoft_client_id) return true;
+  return false;
+}
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -75,7 +83,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (MICROSOFT_PROVIDERS.includes(account.provider)) {
+    if (shouldSendViaGraph(account)) {
       // Microsoft Graph API
       const graphResult = await sendGraphEmail(
         account.email,

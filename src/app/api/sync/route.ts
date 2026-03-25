@@ -6,7 +6,18 @@ import { syncMicrosoftAccount } from "@/lib/microsoft-graph";
 import { createServerClient } from "@/lib/supabase";
 
 // Providers that use Microsoft Graph instead of IMAP
-const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
+const MICROSOFT_GRAPH_PROVIDERS = ["microsoft"];
+
+// Determine if account should sync via Graph or IMAP
+function shouldUseGraph(account: any): boolean {
+  // If provider is explicitly "microsoft" (Graph API with Azure AD)
+  if (account.provider === "microsoft") return true;
+  // If account has IMAP credentials, use IMAP regardless of provider name
+  if (account.imap_host && account.imap_password) return false;
+  // If account has Microsoft Graph credentials stored per-account
+  if (account.microsoft_client_id) return true;
+  return false;
+}
 
 // POST /api/sync — Sync one or all email accounts
 export async function POST(req: NextRequest) {
@@ -24,11 +35,11 @@ export async function POST(req: NextRequest) {
       // Get the account to determine provider
       const { data: account } = await supabase
         .from("email_accounts")
-        .select("provider")
+        .select("provider, imap_host, imap_password, microsoft_client_id")
         .eq("id", accountId)
         .single();
 
-      if (account && MICROSOFT_PROVIDERS.includes(account.provider)) {
+      if (account && shouldUseGraph(account)) {
         const result = await syncMicrosoftAccount(accountId);
         return NextResponse.json(result);
       } else {
@@ -40,7 +51,7 @@ export async function POST(req: NextRequest) {
     // Otherwise sync all active accounts
     const { data: accounts } = await supabase
       .from("email_accounts")
-      .select("id, provider")
+      .select("id, provider, imap_host, imap_password, microsoft_client_id")
       .eq("is_active", true);
 
     if (!accounts || accounts.length === 0) {
@@ -50,7 +61,7 @@ export async function POST(req: NextRequest) {
     const results = [];
     for (const account of accounts) {
       try {
-        if (MICROSOFT_PROVIDERS.includes(account.provider)) {
+        if (shouldUseGraph(account)) {
           const result = await syncMicrosoftAccount(account.id);
           results.push({ accountId: account.id, provider: account.provider, ...result });
         } else {
