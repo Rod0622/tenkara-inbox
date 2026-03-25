@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import Imap from "imap";
 
 function maskEmail(email: string) {
   const [name, domain] = email.split("@");
@@ -19,8 +20,51 @@ function safeError(error: any) {
   };
 }
 
+function testImapConnection(email: string, password: string) {
+  return new Promise<void>((resolve, reject) => {
+    const imap = new Imap({
+      user: email,
+      password,
+      host: "outlook.office365.com",
+      port: 993,
+      tls: true,
+      tlsOptions: { rejectUnauthorized: false },
+      authTimeout: 15000,
+      connTimeout: 15000,
+    });
+
+    let settled = false;
+
+    imap.once("ready", () => {
+      if (settled) return;
+      settled = true;
+      try {
+        imap.end();
+      } catch {}
+      resolve();
+    });
+
+    imap.once("error", (err: any) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    try {
+      imap.connect();
+    } catch (err) {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    }
+  });
+}
+
 export async function POST(req: NextRequest) {
-  const requestId = `ms365pwd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestId = `godaddy-ms365-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
   const supabase = createServerClient();
 
   console.log(`[${requestId}] /api/auth/microsoft/password START`);
@@ -65,6 +109,30 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    console.log(`[${requestId}] Testing IMAP login`, {
+      email: maskEmail(email),
+      host: "outlook.office365.com",
+      port: 993,
+    });
+
+    try {
+      await testImapConnection(email, password);
+      console.log(`[${requestId}] IMAP login success`, {
+        email: maskEmail(email),
+      });
+    } catch (imapError: any) {
+      console.error(`[${requestId}] IMAP login failed`, safeError(imapError));
+      return NextResponse.json(
+        {
+          error:
+            "Failed to connect to Microsoft 365 mailbox. Check the email/password and confirm this mailbox is actually hosted on Microsoft 365.",
+          requestId,
+          debug: safeError(imapError),
+        },
+        { status: 400 }
+      );
+    }
+
     console.log(`[${requestId}] Checking existing account`, {
       email: maskEmail(email),
     });
@@ -76,7 +144,10 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (existingError) {
-      console.error(`[${requestId}] Existing-account lookup failed`, safeError(existingError));
+      console.error(
+        `[${requestId}] Existing-account lookup failed`,
+        safeError(existingError)
+      );
       return NextResponse.json(
         {
           error: existingError.message || "Failed to check existing account",
@@ -96,19 +167,15 @@ export async function POST(req: NextRequest) {
     const accountData = {
       email,
       name,
-      provider: "microsoft", // IMPORTANT: must match your DB check constraint
+      provider: "godaddy", // IMPORTANT: allowed by your DB constraint
       imap_host: "outlook.office365.com",
       imap_port: 993,
-      imap_user: email,
-      imap_password: password,
-      imap_tls: true,
+      username: email,
+      password,
       smtp_host: "smtp.office365.com",
       smtp_port: 587,
-      smtp_user: email,
-      smtp_password: password,
-      smtp_tls: true,
-      icon: "🟡",
-      color: "#F0883E",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       is_active: true,
       sync_error: null,
     };
@@ -151,7 +218,7 @@ export async function POST(req: NextRequest) {
         success: true,
         requestId,
         account: updated,
-        message: `Connected ${email} via IMAP/SMTP (outlook.office365.com)`,
+        message: `Connected ${email} via Microsoft 365 / GoDaddy IMAP-SMTP`,
       });
     }
 
@@ -183,7 +250,7 @@ export async function POST(req: NextRequest) {
       success: true,
       requestId,
       account: inserted,
-      message: `Connected ${email} via IMAP/SMTP (outlook.office365.com)`,
+      message: `Connected ${email} via Microsoft 365 / GoDaddy IMAP-SMTP`,
     });
   } catch (error: any) {
     console.error(`[${requestId}] Unhandled route error`, safeError(error));
