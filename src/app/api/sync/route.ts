@@ -40,9 +40,11 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (account && shouldUseGraph(account)) {
+        console.log(`Sync account ${accountId}: using Graph API (provider: ${account.provider})`);
         const result = await syncMicrosoftAccount(accountId);
         return NextResponse.json(result);
       } else {
+        console.log(`Sync account ${accountId}: using IMAP (provider: ${account?.provider}, host: ${account?.imap_host})`);
         const result = await syncEmailAccount(accountId);
         return NextResponse.json(result);
       }
@@ -62,11 +64,12 @@ export async function POST(req: NextRequest) {
     for (const account of accounts) {
       try {
         if (shouldUseGraph(account)) {
+          console.log(`Batch sync ${account.id}: Graph API (provider: ${account.provider})`);
           const result = await syncMicrosoftAccount(account.id);
           results.push({ accountId: account.id, provider: account.provider, ...result });
         } else {
+          console.log(`Batch sync ${account.id}: IMAP (provider: ${account.provider}, host: ${(account as any).imap_host})`);
           const result = await syncEmailAccount(account.id);
-          results.push({ accountId: account.id, provider: account.provider, ...result });
         }
       } catch (err: any) {
         results.push({ accountId: account.id, provider: account.provider, success: false, errors: [err.message] });

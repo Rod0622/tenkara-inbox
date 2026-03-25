@@ -92,8 +92,19 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
     const gmail = isGmailAccount(account as EmailAccount);
 
+    console.log(`IMAP sync ${accountId}: connecting to ${account.imap_host}:${account.imap_port} as ${account.imap_user}`);
+
     // 2. Connect to IMAP and fetch emails
-    const emails = await fetchEmailsViaImap(account as EmailAccount);
+    let emails: ParsedEmail[];
+    try {
+      emails = await fetchEmailsViaImap(account as EmailAccount);
+      console.log(`IMAP sync ${accountId}: fetched ${emails.length} emails`);
+    } catch (imapErr: any) {
+      console.error(`IMAP sync ${accountId}: connection failed:`, imapErr.message);
+      await supabase.from("email_accounts").update({ sync_error: imapErr.message }).eq("id", accountId);
+      result.errors.push(imapErr.message);
+      return result;
+    }
 
     if (emails.length === 0) {
       result.success = true;
