@@ -167,17 +167,16 @@ export async function POST(req: NextRequest) {
     const accountData = {
       email,
       name,
-      provider: "godaddy", // IMPORTANT: allowed by your DB constraint
+      provider: "godaddy",
       imap_host: "outlook.office365.com",
       imap_port: 993,
       username: email,
       password,
       smtp_host: "smtp.office365.com",
       smtp_port: 587,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
       is_active: true,
       sync_error: null,
+      updated_at: new Date().toISOString(),
     };
 
     console.log(`[${requestId}] Prepared accountData`, {
@@ -228,7 +227,10 @@ export async function POST(req: NextRequest) {
 
     const { data: inserted, error: insertError } = await supabase
       .from("email_accounts")
-      .insert(accountData)
+      .insert({
+        ...accountData,
+        created_at: new Date().toISOString(),
+      })
       .select("id,email,provider")
       .single();
 
