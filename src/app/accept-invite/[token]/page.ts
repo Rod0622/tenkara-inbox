@@ -34,7 +34,9 @@ export default function AcceptInvitePage() {
       }
     }
 
-    if (token) loadInvite();
+    if (token) {
+      loadInvite();
+    }
   }, [token]);
 
   const handleAccept = async (e: React.FormEvent) => {
@@ -57,6 +59,7 @@ export default function AcceptInvitePage() {
       }
 
       setSuccess(true);
+
       setTimeout(() => {
         router.push("/login");
       }, 1200);
@@ -82,7 +85,9 @@ export default function AcceptInvitePage() {
           </p>
         </div>
 
-        {loading && <div className="text-sm text-[#7D8590]">Loading invite...</div>}
+        {loading && (
+          <div className="text-sm text-[#7D8590]">Loading invite...</div>
+        )}
 
         {!loading && error && (
           <div className="text-[#F85149] text-xs bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.2)] rounded-lg px-3 py-2">
