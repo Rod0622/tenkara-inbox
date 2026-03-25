@@ -545,13 +545,13 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
             name: formData.name || formData.email.split("@")[0],
           }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
 
         if (res.ok) {
           setSuccess(true);
           setTimeout(() => { onClose(); window.location.reload(); }, 1500);
         } else {
-          setError(data.error || "Connection failed");
+          setError(data.error || "Connection failed — but account may have been saved. Try refreshing.");
         }
         setTesting(false);
         return;
