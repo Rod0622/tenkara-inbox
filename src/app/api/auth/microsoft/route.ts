@@ -50,38 +50,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log("🔐 Testing IMAP connection for:", email);
+    console.log("🔐 Testing IMAP connection:", email);
 
-    // ✅ Test IMAP LOGIN FIRST
+    // ✅ TEST LOGIN FIRST
     try {
       await testImapConnection(email, password);
-      console.log("✅ IMAP login success:", email);
+      console.log("✅ IMAP login success");
     } catch (imapError: any) {
-      console.error("❌ IMAP login failed:", imapError);
+      console.error("❌ IMAP failed:", imapError);
 
       return NextResponse.json(
         {
           error:
-            "Failed to connect to mailbox. Check email/password or mailbox type.",
+            "Cannot connect to mailbox. Check credentials or mailbox type.",
         },
         { status: 400 }
       );
     }
 
-    // ✅ Save account if IMAP works
+    // ✅ SAVE TO DB (FIXED PROVIDER VALUE)
     const { data, error } = await supabase
       .from("email_accounts")
       .insert([
         {
           email,
           name,
-          provider: "microsoft_password",
+          provider: "microsoft", // ✅ FIXED HERE
           imap_host: "outlook.office365.com",
           imap_port: 993,
           smtp_host: "smtp.office365.com",
           smtp_port: 587,
           username: email,
-          password, // (later we encrypt this)
+          password,
           created_at: new Date().toISOString(),
         },
       ])
@@ -90,13 +90,14 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("❌ DB error:", error);
+
       return NextResponse.json(
-        { error: "Failed to save account" },
+        { error: error.message },
         { status: 500 }
       );
     }
 
-    console.log("✅ Account saved:", email);
+    console.log("✅ Account saved");
 
     return NextResponse.json({
       success: true,
@@ -104,6 +105,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("❌ Route error:", err);
+
     return NextResponse.json(
       { error: "Unexpected server error" },
       { status: 500 }
