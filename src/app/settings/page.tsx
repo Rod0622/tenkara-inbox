@@ -1,4 +1,4 @@
-"use client";
+\"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
@@ -453,6 +453,10 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
     imap_port: 993,
     smtp_host: "",
     smtp_port: 587,
+    ms_client_id: "",
+    ms_tenant_id: "",
+    ms_client_secret: "",
+    showAzureCreds: false,
   });
   const [showPassword, setShowPassword] = useState(false);
   const [testing, setTesting] = useState(false);
