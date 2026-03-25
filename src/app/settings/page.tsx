@@ -588,7 +588,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
     try {
       if (selectedProvider?.id === "microsoft_password") {
         // Try password-based Microsoft connection
-        const res = await fetch("/api/auth/microsoft-password", {
+        const res = await fetch("/api/auth/microsoft/password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
