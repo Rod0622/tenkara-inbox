@@ -336,14 +336,61 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   useEffect(() => { fetchAccounts(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Remove this email account? This won't delete any emails from the provider.")) return;
-    const { error } = await supabase.from("email_accounts").delete().eq("id", id);
-    if (error) {
-      console.error("Delete account failed:", error);
-      alert("Failed to delete: " + error.message);
-      return;
+    if (!confirm("Remove this email account and ALL its conversations, messages, and data? This cannot be undone.")) return;
+
+    try {
+      // Get all conversation IDs for this account
+      const { data: convos } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("email_account_id", id);
+
+      const convoIds = (convos || []).map((c: any) => c.id);
+
+      if (convoIds.length > 0) {
+        // Delete in batches of 100 to avoid Supabase .in() limits
+        for (let i = 0; i < convoIds.length; i += 100) {
+          const batch = convoIds.slice(i, i + 100);
+          
+          // Delete conversation labels
+          await supabase.from("conversation_labels").delete().in("conversation_id", batch);
+          
+          // Delete task assignees via tasks
+          const { data: batchTasks } = await supabase.from("tasks").select("id").in("conversation_id", batch);
+          const taskIds = (batchTasks || []).map((t: any) => t.id);
+          if (taskIds.length > 0) {
+            await supabase.from("task_assignees").delete().in("task_id", taskIds);
+          }
+          
+          // Delete tasks, notes, messages, activity, summaries
+          await supabase.from("tasks").delete().in("conversation_id", batch);
+          await supabase.from("notes").delete().in("conversation_id", batch);
+          await supabase.from("messages").delete().in("conversation_id", batch);
+          await supabase.from("activity_log").delete().in("conversation_id", batch);
+          await supabase.from("thread_summaries").delete().in("conversation_id", batch);
+        }
+        
+        // Delete all conversations for this account
+        const { error: convoErr } = await supabase.from("conversations").delete().eq("email_account_id", id);
+        if (convoErr) {
+          alert("Failed to delete conversations: " + convoErr.message);
+          return;
+        }
+      }
+
+      // Delete account access entries
+      await supabase.from("account_access").delete().eq("email_account_id", id);
+
+      // Finally delete the account
+      const { error } = await supabase.from("email_accounts").delete().eq("id", id);
+      if (error) {
+        alert("Failed to delete account: " + error.message);
+        return;
+      }
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+    } catch (err: any) {
+      alert("Delete failed: " + (err.message || "Unknown error"));
     }
-    setAccounts((prev) => prev.filter((a) => a.id !== id));
   };
 
   return (
