@@ -485,13 +485,22 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
     setError("");
 
     try {
+      const payload: any = {
+        email: formData.email.trim(),
+        name: formData.name || formData.email.split("@")[0],
+      };
+
+      // Include per-account credentials if provided
+      if (formData.ms_client_id && formData.ms_tenant_id && formData.ms_client_secret) {
+        payload.microsoft_client_id = formData.ms_client_id.trim();
+        payload.microsoft_tenant_id = formData.ms_tenant_id.trim();
+        payload.microsoft_client_secret = formData.ms_client_secret.trim();
+      }
+
       const res = await fetch("/api/auth/microsoft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: formData.email.trim(),
-          name: formData.name || formData.email.split("@")[0],
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
 
@@ -502,7 +511,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
       } else {
         setError(data.error || "Connection failed");
       }
-    } catch {
+    } catch (_e) {
       setError("Network error — check your connection");
     }
     setTesting(false);
@@ -588,7 +597,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Microsoft OAuth - simple email-only form */}
+        {/* Microsoft OAuth - email + optional credentials form */}
         {step === "credentials" && selectedProvider?.id === "microsoft_oauth" && (
           <div className="p-6 space-y-4">
             <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[#58A6FF] leading-relaxed">
@@ -614,6 +623,52 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
                 placeholder="info@yourcompany.com"
                 className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
               />
+            </div>
+
+            {/* Azure AD Credentials - for different tenants */}
+            <div className="border border-[#1E242C] rounded-lg overflow-hidden">
+              <button
+                onClick={() => setFormData((p) => ({ ...p, showAzureCreds: !p.showAzureCreds }))}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-xs text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#12161B] transition-colors"
+              >
+                <span>Azure AD Credentials (for different tenant)</span>
+                <ChevronDown size={12} className={formData.showAzureCreds ? "rotate-180 transition-transform" : "transition-transform"} />
+              </button>
+              {formData.showAzureCreds && (
+                <div className="px-3 pb-3 space-y-3 border-t border-[#1E242C]">
+                  <div className="pt-2 text-[10px] text-[#484F58] leading-relaxed">
+                    Leave blank to use the default Bobber Labs credentials. Fill in if connecting a mailbox from a different Microsoft 365 tenant.
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Client ID</label>
+                    <input
+                      value={formData.ms_client_id || ""}
+                      onChange={(e) => setFormData((p) => ({ ...p, ms_client_id: e.target.value }))}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Tenant ID</label>
+                    <input
+                      value={formData.ms_tenant_id || ""}
+                      onChange={(e) => setFormData((p) => ({ ...p, ms_tenant_id: e.target.value }))}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Client Secret</label>
+                    <input
+                      type="password"
+                      value={formData.ms_client_secret || ""}
+                      onChange={(e) => setFormData((p) => ({ ...p, ms_client_secret: e.target.value }))}
+                      placeholder="Secret value from Azure AD"
+                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && (

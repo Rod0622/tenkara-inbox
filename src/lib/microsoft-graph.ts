@@ -30,17 +30,23 @@ interface GraphMessage {
 }
 
 // ── Get access token via client credentials flow ─────
-export async function getGraphToken(): Promise<string> {
-  if (!MICROSOFT_CLIENT_ID || !MICROSOFT_TENANT_ID || !MICROSOFT_CLIENT_SECRET) {
-    throw new Error("Microsoft Graph credentials not configured. Set MICROSOFT_CLIENT_ID, MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_SECRET env vars.");
+export async function getGraphToken(
+  credentials?: { clientId?: string; tenantId?: string; clientSecret?: string }
+): Promise<string> {
+  const clientId = credentials?.clientId || MICROSOFT_CLIENT_ID;
+  const tenantId = credentials?.tenantId || MICROSOFT_TENANT_ID;
+  const clientSecret = credentials?.clientSecret || MICROSOFT_CLIENT_SECRET;
+
+  if (!clientId || !tenantId || !clientSecret) {
+    throw new Error("Microsoft Graph credentials not configured. Provide per-account credentials or set MICROSOFT_CLIENT_ID, MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_SECRET env vars.");
   }
 
-  const tokenUrl = `https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/token`;
+  const tokenUrl = "https://login.microsoftonline.com/" + tenantId + "/oauth2/v2.0/token";
 
   const params = new URLSearchParams({
-    client_id: MICROSOFT_CLIENT_ID,
+    client_id: clientId,
     scope: "https://graph.microsoft.com/.default",
-    client_secret: MICROSOFT_CLIENT_SECRET,
+    client_secret: clientSecret,
     grant_type: "client_credentials",
   });
 
@@ -52,11 +58,52 @@ export async function getGraphToken(): Promise<string> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`Token request failed: ${err.error_description || err.error || res.statusText}`);
+    throw new Error("Token request failed: " + (err.error_description || err.error || res.statusText));
   }
 
   const data: GraphToken = await res.json();
   return data.access_token;
+}
+
+// Helper to get credentials for a specific account from Supabase
+export async function getAccountCredentials(accountId: string) {
+  const supabase = createServerClient();
+  const { data: account } = await supabase
+    .from("email_accounts")
+    .select("microsoft_client_id, microsoft_tenant_id, microsoft_client_secret")
+    .eq("id", accountId)
+    .single();
+
+  if (account?.microsoft_client_id && account?.microsoft_tenant_id && account?.microsoft_client_secret) {
+    return {
+      clientId: account.microsoft_client_id,
+      tenantId: account.microsoft_tenant_id,
+      clientSecret: account.microsoft_client_secret,
+    };
+  }
+  return undefined; // Fall back to env vars
+}
+
+// Get token for a specific email account (checks per-account creds first, then env vars)
+export async function getGraphTokenForAccount(accountId: string): Promise<string> {
+  const creds = await getAccountCredentials(accountId);
+  return getGraphToken(creds);
+}
+
+// Get token by email address (looks up account in DB)
+export async function getGraphTokenForEmail(email: string): Promise<string> {
+  const supabase = createServerClient();
+  const { data: account } = await supabase
+    .from("email_accounts")
+    .select("microsoft_client_id, microsoft_tenant_id, microsoft_client_secret")
+    .eq("email", email.toLowerCase())
+    .single();
+
+  const creds = (account?.microsoft_client_id && account?.microsoft_tenant_id && account?.microsoft_client_secret)
+    ? { clientId: account.microsoft_client_id, tenantId: account.microsoft_tenant_id, clientSecret: account.microsoft_client_secret }
+    : undefined;
+
+  return getGraphToken(creds);
 }
 
 // ── Fetch emails from a mailbox ─────────────────────
@@ -65,7 +112,7 @@ export async function fetchGraphEmails(
   sinceDateTime?: string,
   top: number = 50
 ): Promise<GraphMessage[]> {
-  const token = await getGraphToken();
+  const token = await getGraphTokenForEmail(userEmail);
 
   // Per-page size (Graph max is 1000, but 50 is safe for body content)
   const pageSize = Math.min(top, 50);
@@ -113,7 +160,7 @@ export async function sendGraphEmail(
   cc?: string,
   attachments?: { name: string; type: string; data: string }[]
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const token = await getGraphToken();
+  const token = await getGraphTokenForEmail(fromEmail);
 
   const toRecipients = to.split(",").map((addr) => ({
     emailAddress: { address: addr.trim() },
@@ -186,7 +233,7 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
     const BATCH_SIZE = 10;
-    const token = await getGraphToken();
+    const token = await getGraphTokenForAccount(accountId);
     let emails: GraphMessage[];
 
     if (account.last_sync_at) {
