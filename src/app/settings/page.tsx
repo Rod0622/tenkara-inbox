@@ -337,7 +337,12 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Remove this email account? This won't delete any emails from the provider.")) return;
-    await supabase.from("email_accounts").delete().eq("id", id);
+    const { error } = await supabase.from("email_accounts").delete().eq("id", id);
+    if (error) {
+      console.error("Delete account failed:", error);
+      alert("Failed to delete: " + error.message);
+      return;
+    }
     setAccounts((prev) => prev.filter((a) => a.id !== id));
   };
 
