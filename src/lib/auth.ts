@@ -15,33 +15,26 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) return null;
 
         const supabase = createServerClient();
+
         const { data: member } = await supabase
           .from("team_members")
           .select("*")
-          .eq("email", credentials.email)
+          .eq("email", credentials.email.trim().toLowerCase())
           .eq("is_active", true)
           .single();
 
         if (!member) return null;
 
-        // If no password set yet, allow first login to set it
-        if (!member.password_hash) {
-          const hash = await bcrypt.hash(credentials.password, 10);
-          await supabase
-            .from("team_members")
-            .update({ password_hash: hash })
-            .eq("id", member.id);
-          
-          return {
-            id: member.id,
-            email: member.email,
-            name: member.name,
-            image: member.avatar_url,
-          };
+        // Do not allow login until invite has been accepted
+        if (!member.password_hash || !member.accepted_at) {
+          return null;
         }
 
-        // Verify password
-        const valid = await bcrypt.compare(credentials.password, member.password_hash);
+        const valid = await bcrypt.compare(
+          credentials.password,
+          member.password_hash
+        );
+
         if (!valid) return null;
 
         return {
@@ -55,16 +48,13 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-      }
+      if (user) token.id = user.id;
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         (session.user as any).id = token.id;
 
-        // Attach team member data
         const supabase = createServerClient();
         const { data: member } = await supabase
           .from("team_members")
@@ -86,3 +76,6 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
 };
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };

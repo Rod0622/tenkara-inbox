@@ -3,67 +3,172 @@ import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 
-// POST /api/invite — invite a new team member
+function getAppUrl() {
+  if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
+function makeInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function pickColor() {
+  const colors = [
+    "#4ADE80",
+    "#58A6FF",
+    "#BC8CFF",
+    "#F0883E",
+    "#F85149",
+    "#39D2C0",
+    "#F5D547",
+  ];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// POST /api/invite
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
-  const { email, name, role, department, invited_by } = body;
+  const {
+    email,
+    name,
+    role,
+    department,
+    invited_by,
+    email_account_ids = [],
+    can_send = true,
+    can_manage = false,
+  } = body || {};
 
-  if (!email?.trim() || !name?.trim()) {
-    return NextResponse.json({ error: "Email and name are required" }, { status: 400 });
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedName = String(name || "").trim();
+
+  if (!normalizedEmail || !normalizedName) {
+    return NextResponse.json(
+      { error: "Email and name are required" },
+      { status: 400 }
+    );
   }
 
-  // Check if user already exists
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("team_members")
-    .select("id, email, is_active")
-    .eq("email", email.trim().toLowerCase())
-    .single();
+    .select("id, email, is_active, accepted_at")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
 
-  if (existing) {
+  if (existingError) {
     return NextResponse.json(
-      { error: existing.is_active ? "User already exists" : "User was previously deactivated. Reactivate them instead." },
+      { error: existingError.message },
+      { status: 500 }
+    );
+  }
+
+  if (existing?.accepted_at) {
+    return NextResponse.json(
+      { error: "User already exists" },
       { status: 409 }
     );
   }
 
-  // Generate invite token
   const inviteToken = crypto.randomBytes(32).toString("hex");
-  const initials = name
-    .trim()
-    .split(" ")
-    .map((w: string) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  const inviteExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(); // 7 days
+  const initials = makeInitials(normalizedName);
+  const color = pickColor();
 
-  // Random avatar color
-  const colors = ["#4ADE80", "#58A6FF", "#BC8CFF", "#F0883E", "#F85149", "#39D2C0", "#F5D547"];
-  const color = colors[Math.floor(Math.random() * colors.length)];
+  let memberId: string | null = null;
 
-  // Insert the team member with invite_token (password_hash is null = pending)
-  const { data: member, error: insertErr } = await supabase
-    .from("team_members")
-    .insert({
-      email: email.trim().toLowerCase(),
-      name: name.trim(),
-      initials,
-      color,
-      role: role || "member",
-      department: department || "Uncategorized",
-      is_active: true,
-      password_hash: null,
-    })
-    .select()
-    .single();
+  if (existing?.id) {
+    const { data: updated, error: updateErr } = await supabase
+      .from("team_members")
+      .update({
+        name: normalizedName,
+        initials,
+        color,
+        role: role || "member",
+        department: department || "Uncategorized",
+        is_active: true,
+        invite_token: inviteToken,
+        invite_expires_at: inviteExpiresAt,
+        invited_at: new Date().toISOString(),
+        accepted_at: null,
+        password_hash: null,
+      })
+      .eq("id", existing.id)
+      .select("id")
+      .single();
 
-  if (insertErr) {
-    return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    memberId = updated.id;
+  } else {
+    const { data: member, error: insertErr } = await supabase
+      .from("team_members")
+      .insert({
+        email: normalizedEmail,
+        name: normalizedName,
+        initials,
+        color,
+        role: role || "member",
+        department: department || "Uncategorized",
+        is_active: true,
+        password_hash: null,
+        invite_token: inviteToken,
+        invite_expires_at: inviteExpiresAt,
+        invited_at: new Date().toISOString(),
+        accepted_at: null,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    }
+
+    memberId = member.id;
   }
 
-  // Try to send invite email via first active email account
+  if (!memberId) {
+    return NextResponse.json(
+      { error: "Failed to create invited member" },
+      { status: 500 }
+    );
+  }
+
+  if (Array.isArray(email_account_ids) && email_account_ids.length > 0) {
+    await supabase.from("account_access").delete().eq("team_member_id", memberId);
+
+    const rows = email_account_ids.map((email_account_id: string) => ({
+      team_member_id: memberId,
+      email_account_id,
+      can_send: Boolean(can_send),
+      can_manage: Boolean(can_manage),
+    }));
+
+    const { error: accessErr } = await supabase
+      .from("account_access")
+      .insert(rows);
+
+    if (accessErr) {
+      return NextResponse.json({ error: accessErr.message }, { status: 500 });
+    }
+  }
+
+  const appUrl = getAppUrl();
+  const acceptUrl = `${appUrl}/accept-invite/${inviteToken}`;
+
   let emailSent = false;
+  let emailError: string | null = null;
+
   try {
     const { data: accounts } = await supabase
       .from("email_accounts")
@@ -72,11 +177,8 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     const account = accounts?.[0];
-    if (account?.smtp_host && account?.smtp_password) {
-      const appUrl = process.env.NEXTAUTH_URL || process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : "http://localhost:3000";
 
+    if (account?.smtp_host && (account?.smtp_password || account?.imap_password)) {
       const transport = nodemailer.createTransport({
         host: account.smtp_host,
         port: account.smtp_port || 587,
@@ -90,52 +192,58 @@ export async function POST(req: NextRequest) {
 
       await transport.sendMail({
         from: `"Tenkara Inbox" <${account.email}>`,
-        to: email.trim(),
+        to: normalizedEmail,
         subject: "You've been invited to Tenkara Inbox",
         html: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-            <div style="text-align: center; margin-bottom: 32px;">
-              <div style="display: inline-block; width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #4ADE80, #39D2C0); line-height: 56px; text-align: center; font-size: 28px; font-weight: 900; color: #0B0E11;">T</div>
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:40px 20px;">
+            <div style="text-align:center;margin-bottom:32px;">
+              <div style="display:inline-block;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#4ADE80,#39D2C0);line-height:56px;text-align:center;font-size:28px;font-weight:900;color:#0B0E11;">T</div>
             </div>
-            <h1 style="font-size: 24px; font-weight: 700; color: #1a1a1a; text-align: center; margin-bottom: 8px;">
+            <h1 style="font-size:24px;font-weight:700;color:#111827;text-align:center;margin-bottom:8px;">
               You're invited to Tenkara Inbox
             </h1>
-            <p style="font-size: 15px; color: #666; text-align: center; margin-bottom: 32px; line-height: 1.5;">
-              ${invited_by || "An admin"} has invited you to join the team. Sign in with your email and create a password to get started.
+            <p style="font-size:15px;color:#4B5563;text-align:center;margin-bottom:28px;line-height:1.6;">
+              ${invited_by || "An admin"} invited you to access the shared inbox app.
             </p>
-            <div style="text-align: center; margin-bottom: 32px;">
-              <a href="${appUrl}/login" style="display: inline-block; padding: 14px 32px; background: #4ADE80; color: #0B0E11; border-radius: 10px; font-size: 15px; font-weight: 700; text-decoration: none;">
-                Sign In to Tenkara Inbox
+            <div style="text-align:center;margin-bottom:28px;">
+              <a href="${acceptUrl}" style="display:inline-block;padding:14px 28px;background:#4ADE80;color:#0B0E11;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none;">
+                Accept Invite
               </a>
             </div>
-            <p style="font-size: 13px; color: #999; text-align: center; line-height: 1.5;">
-              Your email: <strong>${email.trim()}</strong><br>
-              Use this email to sign in. On your first login, choose any password — it will be saved automatically.
+            <p style="font-size:13px;color:#6B7280;text-align:center;line-height:1.6;">
+              This invite expires in 7 days.<br/>
+              If the button does not work, open this link:<br/>
+              <span style="word-break:break-all;">${acceptUrl}</span>
             </p>
           </div>
         `,
       });
+
       emailSent = true;
+    } else {
+      emailError = "No active SMTP account available to send invite email.";
     }
-  } catch (emailErr: any) {
-    console.error("Invite email failed:", emailErr.message);
-    // Don't fail the invite — user was created, just no email sent
+  } catch (err: any) {
+    console.error("Invite email failed:", err);
+    emailError = err?.message || "Failed to send invite email";
   }
 
   return NextResponse.json({
-    member,
+    success: true,
     emailSent,
+    emailError,
+    inviteUrl: acceptUrl,
     message: emailSent
-      ? `Invitation sent to ${email.trim()}`
-      : `User created. Email could not be sent — share the login link manually.`,
+      ? `Invitation sent to ${normalizedEmail}`
+      : `Invite created. Share this link manually: ${acceptUrl}`,
   });
 }
 
-// DELETE /api/invite — deactivate a team member
+// DELETE /api/invite
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { member_id } = body;
+  const { member_id } = body || {};
 
   if (!member_id) {
     return NextResponse.json({ error: "member_id is required" }, { status: 400 });
@@ -153,11 +261,11 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ success: true });
 }
 
-// PATCH /api/invite — update a team member's role/department
+// PATCH /api/invite
 export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { member_id, role, department, is_active } = body;
+  const { member_id, role, department, is_active } = body || {};
 
   if (!member_id) {
     return NextResponse.json({ error: "member_id is required" }, { status: 400 });
