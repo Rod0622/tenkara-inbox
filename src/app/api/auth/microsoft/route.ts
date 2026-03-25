@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@/lib/supabase";
 import Imap from "imap";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 function testImapConnection(email: string, password: string) {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const imap = new Imap({
       user: email,
       password,
@@ -18,96 +13,139 @@ function testImapConnection(email: string, password: string) {
       tlsOptions: { rejectUnauthorized: false },
     });
 
-    imap.once("ready", function () {
-      imap.end();
-      resolve(true);
+    let settled = false;
+
+    imap.once("ready", () => {
+      if (settled) return;
+      settled = true;
+      try {
+        imap.end();
+      } catch {}
+      resolve();
     });
 
-    imap.once("error", function (err: any) {
+    imap.once("error", (err: any) => {
+      if (settled) return;
+      settled = true;
       reject(err);
     });
 
     try {
       imap.connect();
     } catch (err) {
+      if (settled) return;
+      settled = true;
       reject(err);
     }
   });
 }
 
+// POST /api/auth/microsoft/password
+// Connects a Microsoft 365 mailbox using email + password
+// Saves as IMAP/SMTP account using outlook.office365.com
 export async function POST(req: NextRequest) {
+  const supabase = createServerClient();
+
+  let body: any;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
 
-    const email = body.email?.trim();
-    const password = body.password;
-    const name = body.name || email?.split("@")[0];
+  const { email, password, name } = body || {};
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: "Missing email or password" },
-        { status: 400 }
-      );
-    }
+  if (!email?.trim() || !password) {
+    return NextResponse.json(
+      { error: "Email and password are required" },
+      { status: 400 }
+    );
+  }
 
-    console.log("🔐 Testing IMAP connection:", email);
+  const trimmedEmail = String(email).trim().toLowerCase();
+  const displayName = name?.trim() || trimmedEmail.split("@")[0];
 
-    // ✅ TEST LOGIN FIRST
+  try {
+    // 1) Test IMAP login first so we do not save broken accounts
     try {
-      await testImapConnection(email, password);
-      console.log("✅ IMAP login success");
-    } catch (imapError: any) {
-      console.error("❌ IMAP failed:", imapError);
-
+      await testImapConnection(trimmedEmail, password);
+    } catch (imapErr: any) {
       return NextResponse.json(
         {
           error:
-            "Cannot connect to mailbox. Check credentials or mailbox type.",
+            "Failed to connect to Microsoft 365 mailbox. Please check the email/password and confirm IMAP basic auth is allowed for this account.",
+          details: imapErr?.message || "IMAP login failed",
         },
         { status: 400 }
       );
     }
 
-    // ✅ SAVE TO DB (FIXED PROVIDER VALUE)
-    const { data, error } = await supabase
+    // 2) Check for existing account
+    const { data: existing, error: existingError } = await supabase
       .from("email_accounts")
-      .insert([
-        {
-          email,
-          name,
-          provider: "microsoft", // ✅ FIXED HERE
-          imap_host: "outlook.office365.com",
-          imap_port: 993,
-          smtp_host: "smtp.office365.com",
-          smtp_port: 587,
-          username: email,
-          password,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-      .single();
+      .select("id")
+      .eq("email", trimmedEmail)
+      .maybeSingle();
 
-    if (error) {
-      console.error("❌ DB error:", error);
-
+    if (existingError) {
       return NextResponse.json(
-        { error: error.message },
+        { error: existingError.message },
         { status: 500 }
       );
     }
 
-    console.log("✅ Account saved");
+    const accountData = {
+      email: trimmedEmail,
+      name: displayName,
+      provider: "microsoft", // FIXED
+      imap_host: "outlook.office365.com",
+      imap_port: 993,
+      imap_user: trimmedEmail,
+      imap_password: password,
+      imap_tls: true,
+      smtp_host: "smtp.office365.com",
+      smtp_port: 587,
+      smtp_user: trimmedEmail,
+      smtp_password: password,
+      smtp_tls: true,
+      icon: "🟡",
+      color: "#F0883E",
+      is_active: true,
+      sync_error: null,
+    };
+
+    if (existing?.id) {
+      const { error: updateError } = await supabase
+        .from("email_accounts")
+        .update(accountData)
+        .eq("id", existing.id);
+
+      if (updateError) {
+        return NextResponse.json(
+          { error: updateError.message },
+          { status: 500 }
+        );
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from("email_accounts")
+        .insert(accountData);
+
+      if (insertError) {
+        return NextResponse.json(
+          { error: insertError.message },
+          { status: 500 }
+        );
+      }
+    }
 
     return NextResponse.json({
       success: true,
-      account: data,
+      message: `Connected ${trimmedEmail} via IMAP/SMTP (outlook.office365.com)`,
     });
   } catch (err: any) {
-    console.error("❌ Route error:", err);
-
     return NextResponse.json(
-      { error: "Unexpected server error" },
+      { error: "Failed to connect: " + (err?.message || "Unknown error") },
       { status: 500 }
     );
   }
