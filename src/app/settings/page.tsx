@@ -22,9 +22,12 @@ const PROVIDERS = [
   { id: "microsoft_password", name: "Microsoft 365 / GoDaddy (Client Email)", icon: "🟡", color: "#F0883E",
     imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
     help: "Connect using client's email + password. Tries OAuth2 password flow first, then IMAP." },
-  { id: "gmail", name: "Gmail or Google Workspace", icon: "🔵", color: "#4285F4",
+  { id: "google_oauth", name: "Gmail / Google Workspace", icon: "🔵", color: "#4285F4",
     imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 587,
-    help: "Requires an App Password. Go to myaccount.google.com → Security → 2-Step Verification → App Passwords → Generate one for 'Mail'." },
+    help: "Sign in with your Google account. Works with any Gmail or Google Workspace email." },
+  { id: "gmail", name: "Gmail (App Password)", icon: "🔵", color: "#4285F4",
+    imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 587,
+    help: "Manual setup with App Password. Go to myaccount.google.com → Security → App Passwords." },
   { id: "outlook_com", name: "Outlook.com (personal)", icon: "🔷", color: "#0078D4",
     imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
     help: "Use your full Outlook.com email as username." },
@@ -520,6 +523,12 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
   const handleSelectProvider = (provider: typeof PROVIDERS[0]) => {
     setSelectedProvider(provider);
+    if (provider.id === "google_oauth") {
+      // Redirect to Google OAuth login
+      const name = prompt("Display name for this account (e.g. Rove Essentials):") || "";
+      window.location.href = "/api/auth/google-email/start?name=" + encodeURIComponent(name);
+      return;
+    }
     if (provider.id === "microsoft_oauth") {
       // Microsoft OAuth doesn't need IMAP/SMTP settings
       setStep("credentials");

@@ -103,15 +103,26 @@ export async function POST(req: NextRequest) {
 
       messageId = `graph:${Date.now()}`;
     } else {
-      // Traditional SMTP
+      // Traditional SMTP (with XOAUTH2 support for google_oauth)
+      const smtpAuth: any = {
+        user: account.smtp_user || account.imap_user || account.email,
+      };
+
+      if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+        // Use XOAUTH2 for Google OAuth accounts
+        const { refreshGoogleToken, buildXOAuth2Token } = await import("@/lib/google-oauth");
+        const accessToken = await refreshGoogleToken(account.id);
+        smtpAuth.type = "OAuth2";
+        smtpAuth.accessToken = accessToken;
+      } else {
+        smtpAuth.pass = account.smtp_password || account.imap_password;
+      }
+
       const transport = nodemailer.createTransport({
         host: account.smtp_host,
         port: account.smtp_port || 587,
         secure: account.smtp_port === 465,
-        auth: {
-          user: account.smtp_user || account.imap_user || account.email,
-          pass: account.smtp_password || account.imap_password,
-        },
+        auth: smtpAuth,
         tls: { rejectUnauthorized: false },
       });
 

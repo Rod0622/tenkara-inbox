@@ -2,6 +2,7 @@ import Imap from "imap";
 import { simpleParser, ParsedMail } from "mailparser";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForMessage } from "@/lib/rule-engine";
+import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -15,6 +16,8 @@ interface EmailAccount {
   imap_password: string;
   imap_tls: boolean;
   last_sync_uid: string | null;
+  oauth_refresh_token?: string | null;
+  _xoauth2Token?: string; // Populated at runtime for OAuth accounts
 }
 
 interface ParsedEmail {
@@ -94,10 +97,25 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
     console.log(`IMAP sync ${accountId}: connecting to ${account.imap_host}:${account.imap_port} as ${account.imap_user}`);
 
+    // For OAuth accounts, get a fresh access token
+    const acct = account as EmailAccount;
+    if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+      try {
+        const accessToken = await refreshGoogleToken(accountId);
+        acct._xoauth2Token = buildXOAuth2Token(account.email, accessToken);
+        console.log(`IMAP sync ${accountId}: using XOAUTH2 authentication`);
+      } catch (oauthErr: any) {
+        console.error(`IMAP sync ${accountId}: OAuth token refresh failed:`, oauthErr.message);
+        await supabase.from("email_accounts").update({ sync_error: "OAuth refresh failed: " + oauthErr.message }).eq("id", accountId);
+        result.errors.push("OAuth refresh failed: " + oauthErr.message);
+        return result;
+      }
+    }
+
     // 2. Connect to IMAP and fetch emails
     let emails: ParsedEmail[];
     try {
-      emails = await fetchEmailsViaImap(account as EmailAccount);
+      emails = await fetchEmailsViaImap(acct);
       console.log(`IMAP sync ${accountId}: fetched ${emails.length} emails`);
     } catch (imapErr: any) {
       console.error(`IMAP sync ${accountId}: connection failed:`, imapErr.message);
@@ -246,16 +264,24 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
     const lastUid = account.last_sync_uid ? parseInt(account.last_sync_uid) : 0;
     const gmail = isGmailAccount(account);
 
-    const imap = new Imap({
+    const imapConfig: any = {
       user: account.imap_user || account.email,
-      password: account.imap_password,
       host: account.imap_host,
       port: account.imap_port || 993,
       tls: account.imap_tls !== false,
       tlsOptions: { rejectUnauthorized: false },
       connTimeout: 10000,
       authTimeout: 10000,
-    });
+    };
+
+    // Use XOAUTH2 for OAuth accounts, password for others
+    if (account._xoauth2Token) {
+      imapConfig.xoauth2 = account._xoauth2Token;
+    } else {
+      imapConfig.password = account.imap_password;
+    }
+
+    const imap = new Imap(imapConfig);
 
     imap.once("ready", () => {
       imap.openBox("INBOX", true, (err, box) => {
