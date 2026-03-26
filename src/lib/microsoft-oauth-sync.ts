@@ -149,7 +149,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
           // Run rules
           try {
-            await runRulesForMessage(supabase, conversationId, {
+            await runRulesForMessage(conversationId, {
               conversation_id: conversationId,
               subject, from_email: fromEmail, from_name: fromName,
               to_addresses: toAddresses, body_text: snippet,
