@@ -16,12 +16,12 @@ const supabase = createBrowserClient();
 
 // ── Provider definitions matching the DB presets ─────
 const PROVIDERS = [
-  { id: "microsoft_oauth", name: "Microsoft 365 / GoDaddy (Our Company)", icon: "🟠", color: "#D83B01",
+  { id: "microsoft_consent", name: "Microsoft 365 / GoDaddy / Outlook", icon: "🟠", color: "#D83B01",
     imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
-    help: "Connects via Microsoft Graph API. For accounts where we have Azure AD admin access." },
-  { id: "microsoft_password", name: "Microsoft 365 / GoDaddy (Client Email)", icon: "🟡", color: "#F0883E",
-    imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587,
-    help: "Connect using client's email + password. Tries OAuth2 password flow first, then IMAP." },
+    help: "Sign in with your Microsoft account. Works with any Microsoft 365, GoDaddy, or Outlook email." },
+  { id: "microsoft_oauth", name: "Microsoft 365 (Azure AD - Admin)", icon: "🟡", color: "#F0883E",
+    imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
+    help: "Connect via Azure AD app credentials. For accounts where you have admin access." },
   { id: "google_oauth", name: "Gmail / Google Workspace", icon: "🔵", color: "#4285F4",
     imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 587,
     help: "Sign in with your Google account. Works with any Gmail or Google Workspace email." },
@@ -527,6 +527,12 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
       // Redirect to Google OAuth login
       const name = prompt("Display name for this account (e.g. Rove Essentials):") || "";
       window.location.href = "/api/connect/google?name=" + encodeURIComponent(name);
+      return;
+    }
+    if (provider.id === "microsoft_consent") {
+      // Redirect to Microsoft OAuth login
+      const name = prompt("Display name for this account (e.g. Bobber Labs):") || "";
+      window.location.href = "/api/connect/microsoft?name=" + encodeURIComponent(name);
       return;
     }
     if (provider.id === "microsoft_oauth") {

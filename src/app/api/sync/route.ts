@@ -3,20 +3,18 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { syncEmailAccount } from "@/lib/imap-sync";
 import { syncMicrosoftAccount } from "@/lib/microsoft-graph";
+import { syncMicrosoftOAuthAccount } from "@/lib/microsoft-oauth-sync";
 import { createServerClient } from "@/lib/supabase";
 
-// Providers that use Microsoft Graph instead of IMAP
-const MICROSOFT_GRAPH_PROVIDERS = ["microsoft"];
-
-// Determine if account should sync via Graph or IMAP
-function shouldUseGraph(account: any): boolean {
-  // If provider is explicitly "microsoft" (Graph API with Azure AD)
-  if (account.provider === "microsoft") return true;
-  // If account has IMAP credentials, use IMAP regardless of provider name
-  if (account.imap_host && account.imap_password) return false;
-  // If account has Microsoft Graph credentials stored per-account
-  if (account.microsoft_client_id) return true;
-  return false;
+// Determine sync method for an account
+function getSyncMethod(account: any): "microsoft_oauth" | "graph" | "imap" {
+  // Microsoft OAuth (delegated token via user consent)
+  if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) return "microsoft_oauth";
+  // Microsoft Graph (application token via Azure AD)
+  if (account.provider === "microsoft") return "graph";
+  if (account.microsoft_client_id && !account.imap_host) return "graph";
+  // Everything else: IMAP
+  return "imap";
 }
 
 // POST /api/sync — Sync one or all email accounts
@@ -35,16 +33,20 @@ export async function POST(req: NextRequest) {
       // Get the account to determine provider
       const { data: account } = await supabase
         .from("email_accounts")
-        .select("provider, imap_host, imap_password, microsoft_client_id")
+        .select("provider, imap_host, imap_password, microsoft_client_id, oauth_refresh_token")
         .eq("id", accountId)
         .single();
 
-      if (account && shouldUseGraph(account)) {
-        console.log(`Sync account ${accountId}: using Graph API (provider: ${account.provider})`);
+      const method = account ? getSyncMethod(account) : "imap";
+      console.log(`Sync account ${accountId}: using ${method} (provider: ${account?.provider})`);
+
+      if (method === "microsoft_oauth") {
+        const result = await syncMicrosoftOAuthAccount(accountId);
+        return NextResponse.json(result);
+      } else if (method === "graph") {
         const result = await syncMicrosoftAccount(accountId);
         return NextResponse.json(result);
       } else {
-        console.log(`Sync account ${accountId}: using IMAP (provider: ${account?.provider}, host: ${account?.imap_host})`);
         const result = await syncEmailAccount(accountId);
         return NextResponse.json(result);
       }
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
     // Otherwise sync all active accounts
     const { data: accounts } = await supabase
       .from("email_accounts")
-      .select("id, provider, imap_host, imap_password, microsoft_client_id")
+      .select("id, provider, imap_host, imap_password, microsoft_client_id, oauth_refresh_token")
       .eq("is_active", true);
 
     if (!accounts || accounts.length === 0) {
@@ -63,14 +65,18 @@ export async function POST(req: NextRequest) {
     const results = [];
     for (const account of accounts) {
       try {
-        if (shouldUseGraph(account)) {
-          console.log(`Batch sync ${account.id}: Graph API (provider: ${account.provider})`);
-          const result = await syncMicrosoftAccount(account.id);
-          results.push({ accountId: account.id, provider: account.provider, ...result });
+        const method = getSyncMethod(account);
+        console.log(`Batch sync ${account.id}: ${method} (provider: ${account.provider})`);
+
+        let result;
+        if (method === "microsoft_oauth") {
+          result = await syncMicrosoftOAuthAccount(account.id);
+        } else if (method === "graph") {
+          result = await syncMicrosoftAccount(account.id);
         } else {
-          console.log(`Batch sync ${account.id}: IMAP (provider: ${account.provider}, host: ${(account as any).imap_host})`);
-          const result = await syncEmailAccount(account.id);
+          result = await syncEmailAccount(account.id);
         }
+        results.push({ accountId: account.id, provider: account.provider, ...result });
       } catch (err: any) {
         results.push({ accountId: account.id, provider: account.provider, success: false, errors: [err.message] });
       }

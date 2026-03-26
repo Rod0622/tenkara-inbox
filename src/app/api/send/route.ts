@@ -83,7 +83,46 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (shouldSendViaGraph(account)) {
+    if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
+      // Send via Graph API with delegated token
+      const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
+      const token = await refreshMicrosoftToken(account.id);
+
+      const toRecipients = to.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } }));
+      const ccRecipients = cc ? cc.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } })) : [];
+
+      const graphBody: any = {
+        message: {
+          subject,
+          body: { contentType: "HTML", content: finalBody },
+          toRecipients,
+          ccRecipients,
+        },
+        saveToSentItems: true,
+      };
+
+      if (body.attachments?.length) {
+        graphBody.message.attachments = body.attachments.map((att: any) => ({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: att.name,
+          contentType: att.type,
+          contentBytes: att.data,
+        }));
+      }
+
+      const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify(graphBody),
+      });
+
+      if (!sendRes.ok) {
+        const err = await sendRes.json().catch(() => ({}));
+        return NextResponse.json({ error: "Graph send failed: " + (err.error?.message || sendRes.statusText) }, { status: 500 });
+      }
+
+      messageId = "graph-oauth:" + Date.now();
+    } else if (shouldSendViaGraph(account)) {
       // Microsoft Graph API
       const graphResult = await sendGraphEmail(
         account.email,
