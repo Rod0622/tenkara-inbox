@@ -526,7 +526,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
     if (provider.id === "google_oauth") {
       // Redirect to Google OAuth login
       const name = prompt("Display name for this account (e.g. Rove Essentials):") || "";
-      window.location.href = "/api/auth/google-email/start?name=" + encodeURIComponent(name);
+      window.location.href = "/api/connect/google?name=" + encodeURIComponent(name);
       return;
     }
     if (provider.id === "microsoft_oauth") {
