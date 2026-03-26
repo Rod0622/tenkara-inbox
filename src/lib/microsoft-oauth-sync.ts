@@ -36,7 +36,9 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     let url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
 
     if (account.last_sync_at) {
-      url += "&$filter=receivedDateTime ge " + account.last_sync_at;
+      // Graph API requires ISO format without milliseconds
+      const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
+      url += "&$filter=receivedDateTime ge " + syncDate;
     }
 
     const res = await fetch(url, {
