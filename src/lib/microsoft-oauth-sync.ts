@@ -115,7 +115,6 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
               snippet: snippet,
               last_message_at: sentAt,
               is_unread: !isOutbound,
-              is_outbound: isOutbound,
               has_attachments: msg.hasAttachments || false,
               status: "open",
             })
