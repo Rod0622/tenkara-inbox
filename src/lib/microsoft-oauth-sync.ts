@@ -1,6 +1,5 @@
 import { createServerClient } from "@/lib/supabase";
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
-import { runRulesForMessage } from "@/lib/rule-engine";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -33,10 +32,9 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
     // Fetch emails using delegated token (/me/ endpoint)
     const BATCH_SIZE = 25;
-    let url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
+    let url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
 
     if (account.last_sync_at) {
-      // Graph API requires ISO format without milliseconds
       const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
       url += "&$filter=receivedDateTime ge " + syncDate;
     }
@@ -64,111 +62,124 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
       return result;
     }
 
+    // Load rules engine
+    let runRulesFn: any = null;
+    try {
+      const mod = await import("@/lib/rule-engine");
+      runRulesFn = mod.runRulesForMessage;
+    } catch (_e) { /* rules optional */ }
+
     // Process each message
-    for (const msg of messages) {
+    for (const email of messages) {
       try {
-        const fromAddr = msg.from?.emailAddress || {};
-        const fromEmail = (fromAddr.address || "").toLowerCase();
-        const fromName = fromAddr.name || fromEmail;
-        const subject = msg.subject || "(No subject)";
-        const toAddresses = (msg.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
-        const ccAddresses = (msg.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
-        const bodyText = msg.body?.content || msg.bodyPreview || "";
-        const snippet = (msg.bodyPreview || "").slice(0, 200);
-        const sentAt = msg.sentDateTime || msg.receivedDateTime;
-        const isOutbound = fromEmail === account.email.toLowerCase();
-        const providerId = "graph:" + msg.id;
+        const msgId = email.internetMessageId || email.id;
+        const providerId = "ms:" + msgId;
 
         // Check if already synced
         const { data: existing } = await supabase
           .from("messages").select("id").eq("provider_message_id", providerId).maybeSingle();
         if (existing) continue;
 
-        // Find or create conversation by subject + participants
-        const normalizedSubject = subject.replace(/^(Re|Fwd|Fw):\s*/i, "").trim();
-        const { data: existingConvo } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("email_account_id", accountId)
-          .ilike("subject", normalizedSubject)
-          .maybeSingle();
+        const isOutbound = (email.from?.emailAddress?.address || "").toLowerCase() === account.email.toLowerCase();
+        let conversationId: string | null = null;
 
-        let conversationId: string;
+        // Thread by Graph conversationId
+        if (email.conversationId) {
+          const { data: c } = await supabase.from("conversations").select("id")
+            .eq("thread_id", "ms:" + email.conversationId).eq("email_account_id", accountId).maybeSingle();
+          if (c) conversationId = c.id;
+        }
 
-        if (existingConvo) {
-          conversationId = existingConvo.id;
-          await supabase.from("conversations").update({
-            last_message_at: sentAt,
-            snippet: snippet,
+        // Thread by subject
+        if (!conversationId) {
+          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+          if (subj) {
+            const { data: m } = await supabase.from("conversations").select("id")
+              .eq("email_account_id", accountId).eq("subject", subj)
+              .gte("last_message_at", new Date(Date.now() - 30*24*60*60*1000).toISOString())
+              .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+            if (m) conversationId = m.id;
+          }
+        }
+
+        // Create conversation
+        if (!conversationId) {
+          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+          const { data: nc, error: ce } = await supabase.from("conversations").insert({
+            email_account_id: accountId,
+            thread_id: email.conversationId ? "ms:" + email.conversationId : "ms:" + email.id,
+            subject: subj,
+            from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
+            from_email: email.from?.emailAddress?.address || "",
+            preview: (email.bodyPreview || "").slice(0, 200),
             is_unread: !isOutbound,
-            has_attachments: msg.hasAttachments || false,
-          }).eq("id", conversationId);
-        } else {
-          const { data: newConvo, error: convoErr } = await supabase
-            .from("conversations")
-            .insert({
-              email_account_id: accountId,
-              subject: subject,
-              from_name: fromName,
-              from_email: fromEmail,
-              to_addresses: toAddresses,
-              snippet: snippet,
-              last_message_at: sentAt,
-              is_unread: !isOutbound,
-              has_attachments: msg.hasAttachments || false,
-              status: "open",
-            })
-            .select("id")
-            .single();
+            status: "open",
+            last_message_at: email.receivedDateTime || new Date().toISOString(),
+          }).select("id").single();
 
-          if (convoErr || !newConvo) {
-            console.error("MS OAuth sync: conversation insert failed:", convoErr?.message, "subject:", subject);
+          if (ce) {
+            console.error("MS OAuth sync: conversation insert failed:", ce.message, "subject:", email.subject);
             continue;
           }
-          conversationId = newConvo.id;
+          conversationId = nc.id;
           result.newConversations++;
         }
 
         // Insert message
-        const { error: msgErr } = await supabase.from("messages").insert({
+        const bodyText = email.bodyPreview || "";
+        const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
+        const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
+
+        const { error: me } = await supabase.from("messages").insert({
           conversation_id: conversationId,
           provider_message_id: providerId,
-          message_id: msg.internetMessageId || providerId,
-          from_name: fromName,
-          from_email: fromEmail,
-          to_addresses: toAddresses,
-          cc_addresses: ccAddresses,
-          subject: subject,
-          body_text: bodyText,
-          body_html: msg.body?.contentType === "html" ? bodyText : null,
-          snippet: snippet,
-          sent_at: sentAt,
+          from_name: email.from?.emailAddress?.name || "Unknown",
+          from_email: email.from?.emailAddress?.address || "",
+          to_addresses: toAddr,
+          cc_addresses: ccAddr,
+          subject: email.subject || "(No Subject)",
+          body_text: bodyText.slice(0, 5000),
+          body_html: null,
+          snippet: bodyText.slice(0, 200),
           is_outbound: isOutbound,
-          is_read: msg.isRead || false,
-          has_attachments: msg.hasAttachments || false,
+          has_attachments: email.hasAttachments || false,
+          sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
         });
 
-        if (msgErr) {
-          console.error("MS OAuth sync: message insert failed:", msgErr.message, "providerId:", providerId);
-        } else {
-          result.newMessages++;
+        if (me) {
+          console.error("MS OAuth sync: message insert failed:", me.message);
+          continue;
+        }
 
-          // Run rules
+        result.newMessages++;
+
+        // Update conversation preview
+        await supabase.from("conversations").update({
+          preview: bodyText.slice(0, 200),
+          last_message_at: email.receivedDateTime || new Date().toISOString(),
+          is_unread: !isOutbound,
+        }).eq("id", conversationId);
+
+        // Run rules
+        if (runRulesFn) {
           try {
-            await runRulesForMessage(conversationId, {
+            await runRulesFn(conversationId, {
               conversation_id: conversationId,
-              subject, from_email: fromEmail, from_name: fromName,
-              to_addresses: toAddresses, body_text: snippet,
+              subject: email.subject || "",
+              from_email: email.from?.emailAddress?.address || "",
+              from_name: email.from?.emailAddress?.name || "",
+              to_addresses: toAddr,
+              body_text: bodyText.slice(0, 200),
             });
-          } catch (_e) { /* rules are best-effort */ }
+          } catch (_e) { /* best-effort */ }
         }
       } catch (msgErr: any) {
         console.error("MS OAuth sync msg error:", msgErr.message);
       }
     }
 
-    // Update sync timestamp
     console.log("MS OAuth sync " + accountId + ": done. " + result.newConversations + " new convos, " + result.newMessages + " new msgs");
+
     await supabase.from("email_accounts").update({
       last_sync_at: new Date().toISOString(),
       sync_error: null,
