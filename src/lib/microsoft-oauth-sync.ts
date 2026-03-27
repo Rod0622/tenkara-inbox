@@ -33,15 +33,16 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     // Fetch emails using delegated token (/me/ endpoint)
     const BATCH_SIZE = 10;
     let url: string;
+    const fields = "id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
 
     if (account.last_sync_at) {
-      // Incremental sync — fetch only new messages
+      // Incremental sync — fetch only new inbox messages
       const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
-      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId&$filter=receivedDateTime ge " + syncDate;
+      url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=" + fields + "&$filter=receivedDateTime ge " + syncDate;
     } else {
-      // Initial sync — use skip offset for pagination across multiple sync calls
+      // Initial sync — use skip offset for pagination
       const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
-      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$skip=" + skipOffset + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
+      url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$skip=" + skipOffset + "&$orderby=receivedDateTime desc&$select=" + fields;
     }
 
     const res = await fetch(url, {

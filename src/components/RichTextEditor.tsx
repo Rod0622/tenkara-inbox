@@ -118,6 +118,15 @@ export default function RichTextEditor({
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
 
+  // Re-initialize when signature changes (e.g., switching accounts in compose)
+  const prevSignatureRef = useRef(signature);
+  useEffect(() => {
+    if (prevSignatureRef.current !== signature) {
+      prevSignatureRef.current = signature;
+      setInitialized(false);
+    }
+  }, [signature]);
+
   // Initialize content
   useEffect(() => {
     if (editorRef.current && !initialized) {

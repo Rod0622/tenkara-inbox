@@ -62,10 +62,10 @@ export async function POST(req: NextRequest) {
     }
 
     case "delete": {
-      // Soft delete via status, or hard delete — using status for safety
+      // Move to trash
       const { error: e } = await supabase
         .from("conversations")
-        .update({ status: "closed" })
+        .update({ status: "trash" })
         .in("id", ids);
       error = e;
       break;
