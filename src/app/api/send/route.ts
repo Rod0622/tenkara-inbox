@@ -84,24 +84,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Clean signature wrapper from RichTextEditor (dark theme border)
+    // Clean signature wrapper from RichTextEditor (dark theme styles)
     finalBody = finalBody
       .replace(/border-top:\s*1px solid #1E242C;?\s*/g, "")
       .replace(/color:\s*#7D8590;?\s*/g, "")
       .replace(/border-top:\s*1px solid #ddd;?\s*/g, "");
 
-    // Clean HTML for email clients: strip Tailwind CSS vars, convert dark theme to light
+    // AGGRESSIVE HTML cleanup for email clients (Gmail clips at ~102KB)
+    // Strip --tw-* CSS variables from style attributes but keep useful styles
+    finalBody = finalBody.replace(/style="([^"]*)"/g, (_match: string, styles: string) => {
+      const cleaned = styles
+        .replace(/--tw-[^;:]+:[^;]+;?\s*/g, "")
+        .replace(/^\s*;\s*/, "")
+        .replace(/;\s*;/g, ";")
+        .trim();
+      if (!cleaned || cleaned === ";") return "";
+      return 'style="' + cleaned + '"';
+    });
+
+    // Convert dark theme colors to email-safe light colors
     finalBody = finalBody
-      .replace(/style="[^"]*--tw-[^"]*"/g, (match: string) => {
-        return match.replace(/--tw-[^;:]+:[^;]+;?\s*/g, "");
-      })
       .replace(/rgb\(22,\s*27,\s*34\)/g, "#f0f0f0")
       .replace(/rgb\(30,\s*36,\s*44\)/g, "#ddd")
       .replace(/rgb\(11,\s*14,\s*17\)/g, "#ffffff")
+      .replace(/rgb\(16,\s*21,\s*27\)/g, "#ffffff")
       .replace(/rgb\(230,\s*237,\s*243\)/g, "#333333")
+      .replace(/rgb\(125,\s*133,\s*144\)/g, "#666666")
       .replace(/font-size:\s*12px/g, "font-size: 14px")
-      .replace(/resize:\s*horizontal;?/g, "")
-      .replace(/data-editor-table="true"\s*/g, "");
+      .replace(/resize:\s*horizontal;?\s*/g, "")
+      .replace(/overflow:\s*hidden;?\s*/g, "")
+      .replace(/data-editor-table="true"\s*/g, "")
+
+    // 4. Clean up any remaining --tw- variables that might be inline
+    finalBody = finalBody.replace(/--tw-[^;:]+:[^;]+;?\s*/g, "");
 
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
