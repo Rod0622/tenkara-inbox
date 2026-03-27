@@ -62,7 +62,14 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     console.log("MS OAuth sync " + accountId + ": fetched " + messages.length + " messages");
 
     if (messages.length === 0) {
-      await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+      if (account.last_sync_at) {
+        // Incremental sync found no new messages — that's fine, update timestamp
+        await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+      } else {
+        // Initial sync with skip offset found no more messages — mark complete
+        await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+        console.log("MS OAuth sync " + accountId + ": initial sync complete (no more messages at offset " + (account.last_sync_uid || "0") + ")");
+      }
       result.success = true;
       return result;
     }
