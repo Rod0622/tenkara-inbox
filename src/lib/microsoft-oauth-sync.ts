@@ -31,12 +31,17 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     console.log("MS OAuth sync " + accountId + ": token refreshed, fetching emails");
 
     // Fetch emails using delegated token (/me/ endpoint)
-    const BATCH_SIZE = 25;
-    let url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
+    const BATCH_SIZE = 10;
+    let url: string;
 
     if (account.last_sync_at) {
+      // Incremental sync — fetch only new messages
       const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
-      url += "&$filter=receivedDateTime ge " + syncDate;
+      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId&$filter=receivedDateTime ge " + syncDate;
+    } else {
+      // Initial sync — use skip offset for pagination across multiple sync calls
+      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
+      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$skip=" + skipOffset + "&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
     }
 
     const res = await fetch(url, {
@@ -180,10 +185,34 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
     console.log("MS OAuth sync " + accountId + ": done. " + result.newConversations + " new convos, " + result.newMessages + " new msgs");
 
-    await supabase.from("email_accounts").update({
-      last_sync_at: new Date().toISOString(),
-      sync_error: null,
-    }).eq("id", accountId);
+    if (account.last_sync_at) {
+      // Incremental sync — update timestamp
+      await supabase.from("email_accounts").update({
+        last_sync_at: new Date().toISOString(),
+        sync_error: null,
+      }).eq("id", accountId);
+    } else {
+      // Initial sync — save skip offset for next batch, or mark complete if no more
+      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
+      const newOffset = skipOffset + messages.length;
+
+      if (messages.length < BATCH_SIZE) {
+        // No more messages — initial sync complete
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(),
+          last_sync_uid: String(newOffset),
+          sync_error: null,
+        }).eq("id", accountId);
+      } else {
+        // More messages to fetch — save offset, don't set last_sync_at yet
+        await supabase.from("email_accounts").update({
+          last_sync_uid: String(newOffset),
+          sync_error: null,
+        }).eq("id", accountId);
+        result.success = true;
+        return result;
+      }
+    }
 
     result.success = true;
     return result;
