@@ -122,7 +122,10 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
             .select("id")
             .single();
 
-          if (convoErr || !newConvo) continue;
+          if (convoErr || !newConvo) {
+            console.error("MS OAuth sync: conversation insert failed:", convoErr?.message, "subject:", subject);
+            continue;
+          }
           conversationId = newConvo.id;
           result.newConversations++;
         }
@@ -146,7 +149,9 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           has_attachments: msg.hasAttachments || false,
         });
 
-        if (!msgErr) {
+        if (msgErr) {
+          console.error("MS OAuth sync: message insert failed:", msgErr.message, "providerId:", providerId);
+        } else {
           result.newMessages++;
 
           // Run rules
@@ -164,6 +169,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     }
 
     // Update sync timestamp
+    console.log("MS OAuth sync " + accountId + ": done. " + result.newConversations + " new convos, " + result.newMessages + " new msgs");
     await supabase.from("email_accounts").update({
       last_sync_at: new Date().toISOString(),
       sync_error: null,
