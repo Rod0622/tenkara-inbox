@@ -2444,8 +2444,17 @@ export default function ConversationDetail({
                     {msg.sent_at ? new Date(msg.sent_at).toLocaleString() : ""}
                   </span>
                 </div>
-                <div className="text-[13px] leading-relaxed text-[#7D8590] whitespace-pre-wrap">
-                  {msg.body_text || msg.snippet || "(No text content)"}
+                <div className="text-[13px] leading-relaxed text-[#7D8590]">
+                  {msg.body_html ? (
+                    <div
+                      className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#1E242C] [&_td]:p-2 [&_th]:border [&_th]:border-[#1E242C] [&_th]:p-2 [&_th]:bg-[#161B22] [&_img]:max-w-full"
+                      dangerouslySetInnerHTML={{ __html: msg.body_html }}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap">
+                      {msg.body_text || msg.snippet || "(No text content)"}
+                    </div>
+                  )}
                 </div>
                 {msg.has_attachments && (
                   <MessageAttachments messageId={msg.id} />

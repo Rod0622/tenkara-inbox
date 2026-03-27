@@ -133,7 +133,7 @@ export default function RichTextEditor({
       if (value) {
         editorRef.current.innerHTML = value;
       } else if (signature) {
-        editorRef.current.innerHTML = `<br><br><div style="border-top: 1px solid #1E242C; padding-top: 8px; margin-top: 8px; color: #7D8590; font-size: 12px;">${signature}</div>`;
+        editorRef.current.innerHTML = `<br><br><div style="padding-top: 8px; margin-top: 8px; font-size: 12px;">${signature}</div>`;
       }
       setInitialized(true);
       if (autoFocus) {

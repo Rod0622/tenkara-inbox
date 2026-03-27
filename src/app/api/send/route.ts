@@ -79,22 +79,29 @@ export async function POST(req: NextRequest) {
     if (account.signature_enabled && account.signature) {
       const sigText = (account.signature || "").replace(/<[^>]*>/g, "").trim();
       if (sigText && !emailBody.includes(sigText.slice(0, 30))) {
-        finalBody = emailBody + '<br><div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 16px;">' + account.signature + '</div>';
+        // Signature not in body yet — append it without border line
+        finalBody = emailBody + '<br><div style="padding-top: 8px; margin-top: 8px;">' + account.signature + '</div>';
       }
     }
+
+    // Clean signature wrapper from RichTextEditor (dark theme border)
+    finalBody = finalBody
+      .replace(/border-top:\s*1px solid #1E242C;?\s*/g, "")
+      .replace(/color:\s*#7D8590;?\s*/g, "")
+      .replace(/border-top:\s*1px solid #ddd;?\s*/g, "");
 
     // Clean HTML for email clients: strip Tailwind CSS vars, convert dark theme to light
     finalBody = finalBody
       .replace(/style="[^"]*--tw-[^"]*"/g, (match: string) => {
-        // Remove --tw-* CSS variables but keep other styles
         return match.replace(/--tw-[^;:]+:[^;]+;?\s*/g, "");
       })
-      .replace(/rgb\(22,\s*27,\s*34\)/g, "#f0f0f0")  // Dark header bg -> light
-      .replace(/rgb\(30,\s*36,\s*44\)/g, "#ddd")      // Dark border -> light
-      .replace(/rgb\(11,\s*14,\s*17\)/g, "#ffffff")    // Dark bg -> white
-      .replace(/rgb\(230,\s*237,\s*243\)/g, "#333333") // Light text -> dark
-      .replace(/font-size:\s*12px/g, "font-size: 14px") // Slightly larger for email
-      .replace(/resize:\s*horizontal;?/g, "");          // Remove resize (not email-safe)
+      .replace(/rgb\(22,\s*27,\s*34\)/g, "#f0f0f0")
+      .replace(/rgb\(30,\s*36,\s*44\)/g, "#ddd")
+      .replace(/rgb\(11,\s*14,\s*17\)/g, "#ffffff")
+      .replace(/rgb\(230,\s*237,\s*243\)/g, "#333333")
+      .replace(/font-size:\s*12px/g, "font-size: 14px")
+      .replace(/resize:\s*horizontal;?/g, "")
+      .replace(/data-editor-table="true"\s*/g, "");
 
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
