@@ -71,9 +71,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (existing?.accepted_at) {
+  if (existing?.accepted_at && existing?.is_active) {
     return NextResponse.json(
-      { error: "User already exists" },
+      { error: "User already exists and is active" },
       { status: 409 }
     );
   }
