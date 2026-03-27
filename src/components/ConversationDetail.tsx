@@ -1570,6 +1570,27 @@ export default function ConversationDetail({
   const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
+  const [replySignature, setReplySignature] = useState("");
+
+  // Fetch account signature for replies
+  useEffect(() => {
+    if (convo?.email_account_id) {
+      import("@/lib/supabase").then(({ createBrowserClient }) => {
+        const sb = createBrowserClient();
+        sb.from("email_accounts")
+          .select("signature, signature_enabled")
+          .eq("id", convo.email_account_id)
+          .single()
+          .then(({ data }: any) => {
+            if (data?.signature_enabled && data?.signature) {
+              setReplySignature(data.signature);
+            } else {
+              setReplySignature("");
+            }
+          });
+      });
+    }
+  }, [convo?.email_account_id]);
   const [noteText, setNoteText] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
@@ -3499,6 +3520,7 @@ export default function ConversationDetail({
                 compact
                 minHeight={50}
                 autoFocus
+                signature={replySignature}
                 onAttach={() => replyFileInputRef.current?.click()}
                 onDrive={() => openReplyDrivePicker()}
                 onTemplate={() => openReplyTemplatePicker()}

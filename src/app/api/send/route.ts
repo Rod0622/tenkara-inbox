@@ -79,9 +79,22 @@ export async function POST(req: NextRequest) {
     if (account.signature_enabled && account.signature) {
       const sigText = (account.signature || "").replace(/<[^>]*>/g, "").trim();
       if (sigText && !emailBody.includes(sigText.slice(0, 30))) {
-        finalBody = `${emailBody}<br><div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 16px;">${account.signature}</div>`;
+        finalBody = emailBody + '<br><div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 16px;">' + account.signature + '</div>';
       }
     }
+
+    // Clean HTML for email clients: strip Tailwind CSS vars, convert dark theme to light
+    finalBody = finalBody
+      .replace(/style="[^"]*--tw-[^"]*"/g, (match: string) => {
+        // Remove --tw-* CSS variables but keep other styles
+        return match.replace(/--tw-[^;:]+:[^;]+;?\s*/g, "");
+      })
+      .replace(/rgb\(22,\s*27,\s*34\)/g, "#f0f0f0")  // Dark header bg -> light
+      .replace(/rgb\(30,\s*36,\s*44\)/g, "#ddd")      // Dark border -> light
+      .replace(/rgb\(11,\s*14,\s*17\)/g, "#ffffff")    // Dark bg -> white
+      .replace(/rgb\(230,\s*237,\s*243\)/g, "#333333") // Light text -> dark
+      .replace(/font-size:\s*12px/g, "font-size: 14px") // Slightly larger for email
+      .replace(/resize:\s*horizontal;?/g, "");          // Remove resize (not email-safe)
 
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
@@ -187,20 +200,30 @@ export async function POST(req: NextRequest) {
       messageId = info.messageId;
     }
 
-    // If compose (no existing conversation), create one
+    // If compose (no existing conversation), create one in Sent folder
     if (!isReply) {
+      // Look up the Sent system folder for this account
+      const { data: sentFolder } = await supabase
+        .from("folders")
+        .select("id")
+        .eq("email_account_id", accountId)
+        .eq("is_system", true)
+        .ilike("name", "sent")
+        .maybeSingle();
+
       const { data: newConvo } = await supabase
         .from("conversations")
         .insert({
           email_account_id: accountId,
-          thread_id: messageId || `sent:${Date.now()}`,
+          thread_id: messageId || "sent:" + Date.now(),
           subject: subject.replace(/^Re:\s*/i, ""),
           from_name: account.name,
           from_email: account.email,
-          preview: emailBody.slice(0, 200),
+          preview: emailBody.replace(/<[^>]*>/g, "").slice(0, 200),
           is_unread: false,
           status: "open",
           last_message_at: new Date().toISOString(),
+          folder_id: sentFolder?.id || null,
         })
         .select("id")
         .single();
@@ -210,19 +233,20 @@ export async function POST(req: NextRequest) {
 
     // Store sent message locally
     if (conversationId) {
+      const cleanBodyText = finalBody.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
       await supabase.from("messages").insert({
         conversation_id: conversationId,
-        provider_message_id: messageId || `sent:${Date.now()}`,
+        provider_message_id: messageId || "sent:" + Date.now(),
         from_name: account.name,
         from_email: account.email,
         to_addresses: to,
         cc_addresses: cc,
         subject,
-        body_text: emailBody,
-        body_html: emailBody.replace(/\n/g, "<br>"),
-        snippet: emailBody.slice(0, 200),
+        body_text: cleanBodyText.slice(0, 5000),
+        body_html: finalBody,
+        snippet: cleanBodyText.slice(0, 200),
         is_outbound: true,
-        has_attachments: false,
+        has_attachments: (body.attachments || []).length > 0,
         sent_at: new Date().toISOString(),
       });
 
