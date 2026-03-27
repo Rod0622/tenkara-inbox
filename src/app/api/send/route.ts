@@ -87,36 +87,29 @@ export async function POST(req: NextRequest) {
     // Clean signature wrapper from RichTextEditor (dark theme styles)
     finalBody = finalBody
       .replace(/border-top:\s*1px solid #1E242C;?\s*/g, "")
-      .replace(/color:\s*#7D8590;?\s*/g, "")
       .replace(/border-top:\s*1px solid #ddd;?\s*/g, "");
 
-    // AGGRESSIVE HTML cleanup for email clients (Gmail clips at ~102KB)
-    // Strip --tw-* CSS variables from style attributes but keep useful styles
-    finalBody = finalBody.replace(/style="([^"]*)"/g, (_match: string, styles: string) => {
-      const cleaned = styles
-        .replace(/--tw-[^;:]+:[^;]+;?\s*/g, "")
-        .replace(/^\s*;\s*/, "")
-        .replace(/;\s*;/g, ";")
-        .trim();
-      if (!cleaned || cleaned === ";") return "";
-      return 'style="' + cleaned + '"';
-    });
+    // ── NUCLEAR HTML CLEANUP for email clients ──
+    // Gmail clips emails > 102KB. The RTE contenteditable injects Tailwind CSS
+    // variables on EVERY element (~2KB each), making even simple emails huge.
+    // Solution: strip ALL style attributes, then rebuild clean minimal styles.
 
-    // Convert dark theme colors to email-safe light colors
+    // Step 1: Strip ALL style attributes (removes ~95% of bloat)
+    finalBody = finalBody.replace(/\s*style="[^"]*"/g, "");
+
+    // Step 2: Strip data attributes
+    finalBody = finalBody.replace(/\s*data-[a-z-]+="[^"]*"/g, "");
+
+    // Step 3: Add clean email-safe styles back to tables
     finalBody = finalBody
-      .replace(/rgb\(22,\s*27,\s*34\)/g, "#f0f0f0")
-      .replace(/rgb\(30,\s*36,\s*44\)/g, "#ddd")
-      .replace(/rgb\(11,\s*14,\s*17\)/g, "#ffffff")
-      .replace(/rgb\(16,\s*21,\s*27\)/g, "#ffffff")
-      .replace(/rgb\(230,\s*237,\s*243\)/g, "#333333")
-      .replace(/rgb\(125,\s*133,\s*144\)/g, "#666666")
-      .replace(/font-size:\s*12px/g, "font-size: 14px")
-      .replace(/resize:\s*horizontal;?\s*/g, "")
-      .replace(/overflow:\s*hidden;?\s*/g, "")
-      .replace(/data-editor-table="true"\s*/g, "")
+      .replace(/<table/g, '<table style="width:100%;border-collapse:collapse;margin:8px 0"')
+      .replace(/<th(?=[\s>])/g, '<th style="border:1px solid #ddd;padding:8px;background:#f5f5f5;text-align:left;font-size:14px"')
+      .replace(/<td(?=[\s>])/g, '<td style="border:1px solid #ddd;padding:8px;font-size:14px"');
 
-    // 4. Clean up any remaining --tw- variables that might be inline
-    finalBody = finalBody.replace(/--tw-[^;:]+:[^;]+;?\s*/g, "");
+    // Step 4: Clean up empty tags and excessive whitespace
+    finalBody = finalBody
+      .replace(/<span>\s*<\/span>/g, "")
+      .replace(/class="[^"]*"/g, "");
 
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
