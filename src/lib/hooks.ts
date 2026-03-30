@@ -619,11 +619,21 @@ export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "min
 }
 
 export function useActions() {
-  // Get current user session for actor_id tracking
+  // Get current user ID for actor_id tracking
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/api/auth/session").then(r => r.json()).then(s => {
-      setCurrentUserId(s?.teamMember?.id || null);
+    // Get session email, then look up team member ID
+    fetch("/api/auth/session").then(r => r.json()).then(async (s) => {
+      const email = s?.user?.email;
+      if (email) {
+        const sb = createBrowserClient();
+        const { data: member } = await sb
+          .from("team_members")
+          .select("id")
+          .eq("email", email.toLowerCase())
+          .single();
+        if (member) setCurrentUserId(member.id);
+      }
     }).catch(() => {});
   }, []);
 
