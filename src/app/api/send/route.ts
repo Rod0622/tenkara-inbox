@@ -263,6 +263,7 @@ export async function POST(req: NextRequest) {
         is_outbound: true,
         has_attachments: (body.attachments || []).length > 0,
         sent_at: new Date().toISOString(),
+        sent_by_user_id: body.actor_id || null,
       });
 
       // Update conversation

@@ -185,50 +185,42 @@ export default function DashboardPage() {
     if (effectiveDateTo) convosQuery = convosQuery.lte("last_message_at", effectiveDateTo);
     const { data: conversations } = await convosQuery;
 
-    // Sent emails — count outbound messages per email account, then attribute to users via account_access
-    
-    // Get outbound message counts grouped by email_account_id (via conversation)
+    // Sent emails — count by sent_by_user_id (most accurate), fallback to account_access
     let outboundQuery = supabase
       .from("messages")
-      .select("id, conversation_id, sent_at")
+      .select("id, conversation_id, sent_at, sent_by_user_id")
       .eq("is_outbound", true);
     if (effectiveDateFrom) outboundQuery = outboundQuery.gte("sent_at", effectiveDateFrom);
     if (effectiveDateTo) outboundQuery = outboundQuery.lte("sent_at", effectiveDateTo);
     const { data: outboundMessages } = await outboundQuery;
 
-    // Map conversation_id -> email_account_id
+    // Map conversation_id -> email_account_id for fallback attribution
     const convoToAccount: Record<string, string> = {};
     for (const c of (conversations || [])) {
       if ((c as any).email_account_id) convoToAccount[c.id] = (c as any).email_account_id;
     }
 
-    // Count outbound per account
-    const sentByAccount: Record<string, number> = {};
-    for (const msg of (outboundMessages || [])) {
-      const accId = convoToAccount[msg.conversation_id];
-      if (accId) sentByAccount[accId] = (sentByAccount[accId] || 0) + 1;
-    }
-
-    // Get account_access to know which users have access to which accounts
+    // Get account_access for fallback
     const { data: accessData } = await supabase.from("account_access").select("team_member_id, email_account_id");
-    const userAccounts: Record<string, string[]> = {};
+    const accountToUsers: Record<string, string[]> = {};
     for (const row of (accessData || [])) {
-      if (!userAccounts[row.team_member_id]) userAccounts[row.team_member_id] = [];
-      userAccounts[row.team_member_id].push(row.email_account_id);
+      if (!accountToUsers[row.email_account_id]) accountToUsers[row.email_account_id] = [];
+      accountToUsers[row.email_account_id].push(row.team_member_id);
     }
 
-    // Also check activity_log for app-sent emails (most accurate per-user tracking)
-    let sentActivityQuery = supabase
-      .from("activity_log")
-      .select("actor_id")
-      .in("action", ["reply_sent", "email_composed"]);
-    if (effectiveDateFrom) sentActivityQuery = sentActivityQuery.gte("created_at", effectiveDateFrom);
-    if (effectiveDateTo) sentActivityQuery = sentActivityQuery.lte("created_at", effectiveDateTo);
-    const { data: sentActivities } = await sentActivityQuery;
+    // Count sent per user
+    const sentByUser: Record<string, number> = {};
+    const unattributed: Record<string, number> = {}; // per account, for messages without sent_by_user_id
 
-    const appSentByUser: Record<string, number> = {};
-    for (const act of (sentActivities || [])) {
-      if (act.actor_id) appSentByUser[act.actor_id] = (appSentByUser[act.actor_id] || 0) + 1;
+    for (const msg of (outboundMessages || [])) {
+      if (msg.sent_by_user_id) {
+        // Attributed to a specific user
+        sentByUser[msg.sent_by_user_id] = (sentByUser[msg.sent_by_user_id] || 0) + 1;
+      } else {
+        // Unattributed — count per account for fallback display
+        const accId = convoToAccount[msg.conversation_id];
+        if (accId) unattributed[accId] = (unattributed[accId] || 0) + 1;
+      }
     }
 
     const now = new Date();
@@ -254,16 +246,9 @@ export default function DashboardPage() {
 
       const assignedConvos = (conversations || []).filter((c: any) => c.assignee_id === member.id);
 
-      // Sent count: app-sent (activity_log) + account-level sent (for accounts user has access to)
-      const appSent = appSentByUser[member.id] || 0;
-      // For account-level: sum sent from all accounts this user has access to
-      const memberAccountIds = userAccounts[member.id] || [];
-      let accountSent = 0;
-      for (const accId of memberAccountIds) {
-        accountSent += sentByAccount[accId] || 0;
-      }
-      // If user has no account_access entries (admin), show total across all accounts
-      const sentCount = memberAccountIds.length > 0 ? Math.max(appSent, accountSent) : appSent;
+      // Sent count: attributed (sent_by_user_id) + share of unattributed from accessible accounts
+      const attributedSent = sentByUser[member.id] || 0;
+      const sentCount = attributedSent;
 
       return {
         id: member.id, name: member.name, email: member.email,
@@ -367,55 +352,21 @@ export default function DashboardPage() {
       email_account_name: c.email_account?.name || "", folder_name: c.folder?.name || null,
     }));
 
-    // Fetch sent emails — get outbound messages from accounts this user has access to
-    
-    // Get accounts this user has access to
-    const { data: userAccessData } = await supabase
-      .from("account_access")
-      .select("email_account_id")
-      .eq("team_member_id", userId);
-    
-    const userAccountIds = (userAccessData || []).map((a: any) => a.email_account_id);
-    
-    // If admin with no specific access entries, get all accounts
-    let sentAccountIds = userAccountIds;
-    if (sentAccountIds.length === 0 && user?.role === "admin") {
-      const { data: allAccounts } = await supabase.from("email_accounts").select("id").eq("is_active", true);
-      sentAccountIds = (allAccounts || []).map((a: any) => a.id);
-    }
+    // Fetch sent emails — filter by sent_by_user_id for accurate per-user tracking
+    let sentQuery = supabase
+      .from("messages")
+      .select("id, subject, to_addresses, sent_at, conversation_id, from_email, sent_by_user_id")
+      .eq("is_outbound", true)
+      .eq("sent_by_user_id", userId)
+      .order("sent_at", { ascending: false })
+      .limit(100);
 
-    // Get conversations from those accounts that have outbound messages
-    let outboundMsgs: any[] = [];
-    if (sentAccountIds.length > 0) {
-      // Get conversation IDs for these accounts
-      const { data: accConvos } = await supabase
-        .from("conversations")
-        .select("id")
-        .in("email_account_id", sentAccountIds);
-      
-      const accConvoIds = (accConvos || []).map((c: any) => c.id);
-      
-      if (accConvoIds.length > 0) {
-        for (let i = 0; i < accConvoIds.length; i += 50) {
-          const batch = accConvoIds.slice(i, i + 50);
-          let obQuery = supabase
-            .from("messages")
-            .select("id, subject, to_addresses, sent_at, conversation_id, from_email")
-            .eq("is_outbound", true)
-            .in("conversation_id", batch)
-            .order("sent_at", { ascending: false });
-          if (effectiveDateFrom) obQuery = obQuery.gte("sent_at", effectiveDateFrom);
-          if (effectiveDateTo) obQuery = obQuery.lte("sent_at", effectiveDateTo);
-          const { data: batchMsgs } = await obQuery;
-          outboundMsgs = outboundMsgs.concat(batchMsgs || []);
-        }
-      }
-    }
+    if (effectiveDateFrom) sentQuery = sentQuery.gte("sent_at", effectiveDateFrom);
+    if (effectiveDateTo) sentQuery = sentQuery.lte("sent_at", effectiveDateTo);
 
-    // Sort and build sent list
-    outboundMsgs.sort((a: any, b: any) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
-    
-    const uSent: SentEmail[] = outboundMsgs.slice(0, 100).map((msg: any) => ({
+    const { data: sentMsgs } = await sentQuery;
+
+    const uSent: SentEmail[] = (sentMsgs || []).map((msg: any) => ({
       id: msg.id,
       subject: msg.subject || "Unknown",
       to_addresses: msg.to_addresses || "",
