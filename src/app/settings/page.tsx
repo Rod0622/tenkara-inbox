@@ -66,6 +66,12 @@ export default function SettingsPage() {
 
   if (!session) redirect("/login");
 
+  // Check if user is admin
+  const isAdmin = (session as any)?.teamMember?.role === "admin";
+  if (!isAdmin) {
+    redirect("/");
+  }
+
   return (
     <div className="h-screen w-screen flex bg-[#0B0E11] text-[#E6EDF3]">
       {/* Sidebar */}
