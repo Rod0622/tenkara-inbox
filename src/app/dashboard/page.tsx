@@ -554,7 +554,7 @@ export default function DashboardPage() {
                 {userDetailTab === "emails" && (
                   <div className="space-y-1">
                     {userConversations.length === 0 ? <Empty text="No assigned conversations" /> : userConversations.map((c) => (
-                      <Link key={c.id} href={"/?conversation=" + c.id}
+                      <Link key={c.id} href={"/#conversation=" + c.id}
                         className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#58A6FF]/30 transition-all"
                       >
                         <div className={`w-2 h-2 rounded-full flex-shrink-0 ${c.is_unread ? "bg-[#58A6FF]" : "bg-transparent"}`} />
@@ -573,7 +573,7 @@ export default function DashboardPage() {
                 {userDetailTab === "sent" && (
                   <div className="space-y-1">
                     {userSentEmails.length === 0 ? <Empty text="No sent emails in this period" /> : userSentEmails.map((s) => (
-                      <Link key={s.id} href={"/?conversation=" + s.conversation_id}
+                      <Link key={s.id} href={"/#conversation=" + s.conversation_id}
                         className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all"
                       >
                         <Send size={14} className="text-[#4ADE80] flex-shrink-0" />
@@ -628,12 +628,14 @@ function TaskRow({ task }: { task: TaskDetail }) {
   const isOverdue = task.due_date && new Date(task.due_date) < new Date();
 
   return (
-    <div className={`rounded-xl border bg-[#0F1318] p-4 ${isOverdue ? "border-[#F85149]/30" : "border-[#1E242C]"}`}>
+    <Link href={"/#conversation=" + task.conversation_id}
+      className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#58A6FF]/30 transition-all cursor-pointer ${isOverdue ? "border-[#F85149]/30" : "border-[#1E242C]"}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-medium mb-1">{task.text}</div>
           <div className="flex items-center gap-3 text-[11px] text-[#484F58]">
-            <Link href={"/?conversation=" + task.conversation_id} className="hover:text-[#58A6FF] transition-colors truncate max-w-[300px]">{task.conversation_subject}</Link>
+            <span className="truncate max-w-[300px]">{task.conversation_subject}</span>
             {task.category_name && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: (task.category_color || "#1E242C") + "20", color: task.category_color || "#7D8590" }}>{task.category_name}</span>
             )}
@@ -660,7 +662,7 @@ function TaskRow({ task }: { task: TaskDetail }) {
           <div className="h-full rounded-full bg-[#4ADE80] transition-all" style={{ width: totalCount > 0 ? (completedCount / totalCount * 100) + "%" : "0%" }} />
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
