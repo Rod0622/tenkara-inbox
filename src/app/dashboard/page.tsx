@@ -149,6 +149,13 @@ export default function DashboardPage() {
 
   useEffect(() => { loadDashboardData(); }, [dateFrom, dateTo]);
 
+  // Reload user detail when dates change
+  useEffect(() => {
+    if (selectedUserId && viewMode === "user-detail") {
+      loadUserDetail(selectedUserId);
+    }
+  }, [dateFrom, dateTo]);
+
   const effectiveDateFrom = dateFrom || null;
   const effectiveDateTo = dateTo ? dateTo + "T23:59:59.999Z" : null;
 
@@ -263,7 +270,7 @@ export default function DashboardPage() {
 
     const user = userStats.find((u) => u.id === userId);
 
-    // Fetch user's tasks
+    // Fetch user's tasks WITH date filter
     let tasksQuery = supabase
       .from("task_assignees")
       .select("task_id, is_done, status, task:tasks(id, text, due_date, due_time, status, is_done, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))")
@@ -271,7 +278,7 @@ export default function DashboardPage() {
 
     const { data: assigneeRows } = await tasksQuery;
 
-    const uTasks: TaskDetail[] = (assigneeRows || [])
+    let uTasks: TaskDetail[] = (assigneeRows || [])
       .filter((r: any) => r.task)
       .map((r: any) => {
         const t = r.task;
@@ -290,7 +297,15 @@ export default function DashboardPage() {
       })
       .sort((a: TaskDetail, b: TaskDetail) => (a.due_date || "z").localeCompare(b.due_date || "z"));
 
-    // Fetch user's assigned conversations
+    // Apply date filter on tasks
+    if (effectiveDateFrom) {
+      uTasks = uTasks.filter((t) => t.created_at >= effectiveDateFrom!);
+    }
+    if (effectiveDateTo) {
+      uTasks = uTasks.filter((t) => t.created_at <= effectiveDateTo!);
+    }
+
+    // Fetch user's assigned conversations WITH date filter
     let convosQuery = supabase
       .from("conversations")
       .select("id, subject, from_name, from_email, preview, status, is_unread, last_message_at, assignee_id, email_account_id, folder_id, email_account:email_accounts(name), folder:folders(name)")
@@ -311,7 +326,7 @@ export default function DashboardPage() {
       email_account_name: c.email_account?.name || "", folder_name: c.folder?.name || null,
     }));
 
-    // Fetch user's sent emails
+    // Fetch sent emails — outbound messages sent by this user
     let sentQuery = supabase
       .from("messages")
       .select("id, subject, to_addresses, sent_at, conversation_id, from_email")
@@ -319,22 +334,26 @@ export default function DashboardPage() {
       .order("sent_at", { ascending: false })
       .limit(100);
 
-    if (user) {
-      // Match by any email account the user might send from
-      // For now, match by from_email = member email or by conversation assignment
-      sentQuery = sentQuery.or("from_email.eq." + user.email);
-    }
-
     if (effectiveDateFrom) sentQuery = sentQuery.gte("sent_at", effectiveDateFrom);
     if (effectiveDateTo) sentQuery = sentQuery.lte("sent_at", effectiveDateTo);
 
-    const { data: sent } = await sentQuery;
+    const { data: allSent } = await sentQuery;
 
-    const uSent: SentEmail[] = (sent || []).map((s: any) => ({
-      id: s.id, subject: s.subject, to_addresses: s.to_addresses,
-      sent_at: s.sent_at, conversation_id: s.conversation_id,
-      from_email: s.from_email,
-    }));
+    // Filter sent by user — match member email or find conversations assigned to this user
+    const userEmail = user?.email?.toLowerCase() || "";
+    const userConvoIds = new Set((convos || []).map((c: any) => c.id));
+
+    const uSent: SentEmail[] = (allSent || [])
+      .filter((s: any) => {
+        const fromEmail = (s.from_email || "").toLowerCase();
+        // Match if from_email matches user email OR the sent message is in a conversation assigned to this user
+        return fromEmail === userEmail || userConvoIds.has(s.conversation_id);
+      })
+      .map((s: any) => ({
+        id: s.id, subject: s.subject, to_addresses: s.to_addresses,
+        sent_at: s.sent_at, conversation_id: s.conversation_id,
+        from_email: s.from_email,
+      }));
 
     setUserTasks(uTasks);
     setUserConversations(uConvos);

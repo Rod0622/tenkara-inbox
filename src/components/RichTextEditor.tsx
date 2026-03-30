@@ -190,9 +190,32 @@ export default function RichTextEditor({
     setShowEmoji(false);
   };
 
+  // Save selection before opening modals
+  const savedSelectionRef = useRef<Range | null>(null);
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    if (savedSelectionRef.current && editorRef.current) {
+      editorRef.current.focus();
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedSelectionRef.current);
+      }
+    }
+  };
+
   const handleInsertTable = (rows: number, cols: number) => {
     if (!editorRef.current) return;
-    editorRef.current.focus();
+
+    // Restore cursor position before inserting
+    restoreSelection();
+
     const table = document.createElement("table");
     table.style.cssText = "border-collapse:collapse;width:100%;margin:8px 0";
     table.setAttribute("data-editor-table", "true");
@@ -392,7 +415,7 @@ export default function RichTextEditor({
         </div>
 
         {/* Table insert */}
-        <ToolbarBtn onClick={() => setShowTablePicker(!showTablePicker)} title="Insert table">
+        <ToolbarBtn onClick={() => { saveSelection(); setShowTablePicker(!showTablePicker); }} title="Insert table">
           <Table2 size={13} />
         </ToolbarBtn>
         {showTablePicker && (
