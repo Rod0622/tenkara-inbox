@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { notifyEmailAssigned } from "@/lib/notifications";
 
 // PATCH /api/conversations/assign — assign or unassign a conversation
 export async function PATCH(req: NextRequest) {
@@ -50,6 +51,12 @@ export async function PATCH(req: NextRequest) {
       action: "assigned",
       details: { assignee_id },
     });
+
+    // Notify the assigned user
+    try {
+      const subject = data?.subject || "Conversation";
+      await notifyEmailAssigned(conversation_id, assignee_id, logActorId || assignee_id, subject);
+    } catch (_e) { /* notifications are best-effort */ }
   } else if (previousAssigneeId) {
     await supabase.from("activity_log").insert({
       conversation_id,

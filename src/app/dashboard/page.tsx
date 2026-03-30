@@ -499,35 +499,30 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Date Filter */}
+        {/* Date Filter — Dropdown */}
         <div className="flex items-center gap-2">
-          {[
-            { val: "all", label: "All Time" },
-            { val: "today", label: "Today" },
-            { val: "yesterday", label: "Yesterday" },
-            { val: "this_week", label: "This Week" },
-            { val: "last_week", label: "Last Week" },
-            { val: "this_month", label: "This Month" },
-            { val: "last_month", label: "Last Month" },
-            { val: "custom", label: "Custom" },
-          ].map((opt) => (
-            <button
-              key={opt.val}
-              onClick={() => handleDatePreset(opt.val)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
-                datePreset === opt.val ? "bg-[#4ADE80] text-[#0B0E11]" : "text-[#484F58] hover:text-[#7D8590] hover:bg-[#12161B]"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+          <CalendarClock size={14} className="text-[#484F58]" />
+          <select
+            value={datePreset}
+            onChange={(e) => handleDatePreset(e.target.value)}
+            className="px-3 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] cursor-pointer"
+          >
+            <option value="all">All Time</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="this_week">This Week</option>
+            <option value="last_week">Last Week</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+            <option value="custom">Custom Range</option>
+          </select>
           {datePreset === "custom" && (
-            <div className="flex items-center gap-1 ml-1">
+            <div className="flex items-center gap-1.5">
               <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none" />
+                className="px-2 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
               <span className="text-[#484F58] text-[10px]">to</span>
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                className="px-2 py-1 rounded bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none" />
+                className="px-2 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
             </div>
           )}
         </div>

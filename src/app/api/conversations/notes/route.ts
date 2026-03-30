@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { notifyMention } from "@/lib/notifications";
 import { getServerSession } from "next-auth";
 
 // POST /api/conversations/notes — create a note
@@ -61,6 +62,23 @@ export async function POST(req: NextRequest) {
     action: "note_added",
     details: { note_id: note?.id, preview: text.trim().slice(0, 80) },
   });
+
+  // Check for @mentions in note text and notify
+  try {
+    const mentionRegex = /@([a-zA-Z0-9_.]+)/g;
+    const mentions = [...text.matchAll(mentionRegex)].map((m) => m[1].toLowerCase());
+    if (mentions.length > 0) {
+      const { data: allMembers } = await supabase.from("team_members").select("id, name, email").eq("is_active", true);
+      const mentionedIds = (allMembers || [])
+        .filter((m: any) => mentions.some((mention) =>
+          m.name?.toLowerCase().includes(mention) || m.email?.toLowerCase().split("@")[0] === mention
+        ))
+        .map((m: any) => m.id);
+      if (mentionedIds.length > 0) {
+        await notifyMention(mentionedIds, authorId, text, conversationId);
+      }
+    }
+  } catch (_e) { /* best-effort */ }
 
   return NextResponse.json({ note });
 }

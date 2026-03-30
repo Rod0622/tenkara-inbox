@@ -334,6 +334,7 @@ export default function InboxPage() {
         conversations={conversations}
         currentUser={currentUser}
         taskCount={personalTasks.filter((task) => task.status !== "completed").length}
+        mySentCount={mySentConvoIds.size}
         onMoveToFolder={handleMoveToFolder}
       />
 

@@ -19,6 +19,7 @@ import {
   ChevronDown,
   MailPlus,
   BarChart3,
+  Bell,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 
@@ -117,6 +118,7 @@ export default function Sidebar({
   conversations,
   currentUser,
   taskCount = 0,
+  mySentCount: mySentCountProp,
   onMoveToFolder,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
@@ -126,6 +128,58 @@ export default function Sidebar({
   const [newFolderName, setNewFolderName] = useState("");
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
+  // Fetch notifications
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fetchNotifs = async () => {
+      try {
+        const res = await fetch("/api/notifications?user_id=" + currentUser.id);
+        const data = await res.json();
+        const notifs = data.notifications || [];
+        setNotifications(notifs);
+        setUnreadNotifCount(notifs.filter((n: any) => !n.is_read).length);
+      } catch (_e) {}
+    };
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 30000); // Poll every 30s
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
+
+  const markAllRead = async () => {
+    if (!currentUser?.id) return;
+    await fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: currentUser.id, mark_all: true }),
+    });
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadNotifCount(0);
+  };
+
+  const handleNotifClick = (notif: any) => {
+    // Mark as read
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notification_ids: [notif.id] }),
+    });
+    setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, is_read: true } : n));
+    setUnreadNotifCount((prev) => Math.max(0, prev - (notif.is_read ? 0 : 1)));
+    setShowNotifications(false);
+
+    // Navigate based on type
+    if (notif.conversation_id) {
+      window.location.hash = "conversation=" + notif.conversation_id;
+    } else if (notif.task_id) {
+      setActiveView("tasks");
+      setActiveMailbox(null);
+      setActiveFolder(null);
+    }
+  };
 
   const accountEmails = new Set(mailboxes.map((a: any) => a.email?.toLowerCase()));
   const isOutbound = (c: any) => accountEmails.has(c.from_email?.toLowerCase());
@@ -135,7 +189,7 @@ export default function Sidebar({
   );
   const myTotalCount = myConvos.length;
   const myUnreadCount = myConvos.filter((c) => c.is_unread).length;
-  const mySentCount = conversations.filter((c) => isOutbound(c)).length;
+  const mySentCount = mySentCountProp ?? conversations.filter((c) => isOutbound(c)).length;
 
   useEffect(() => {
     fetchFolders();
@@ -239,9 +293,17 @@ export default function Sidebar({
     <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
       <div className="p-4 pb-3 border-b border-[#161B22]">
   <div className="flex items-center gap-2.5">
-    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11]">
+    <button
+      onClick={() => setShowNotifications(!showNotifications)}
+      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11] hover:opacity-90 transition-opacity"
+    >
       T
-    </div>
+      {unreadNotifCount > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#F85149] text-[9px] font-bold text-white flex items-center justify-center">
+          {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+        </span>
+      )}
+    </button>
 
     <div className="flex-1 min-w-0">
       <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
@@ -269,6 +331,50 @@ export default function Sidebar({
     />
   </div>
 </div>
+
+      {/* Notification Panel */}
+      {showNotifications && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
+          <div className="absolute left-0 top-14 z-50 w-[300px] max-h-[400px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden flex flex-col ml-2">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[#1E242C]">
+              <span className="text-xs font-bold text-[#E6EDF3]">Notifications</span>
+              {unreadNotifCount > 0 && (
+                <button onClick={markAllRead} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Mark all read</button>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {notifications.length === 0 ? (
+                <div className="text-center py-8 text-[#484F58] text-xs">No notifications</div>
+              ) : (
+                notifications.slice(0, 30).map((notif) => (
+                  <button
+                    key={notif.id}
+                    onClick={() => handleNotifClick(notif)}
+                    className={"w-full text-left px-3 py-2.5 border-b border-[#1E242C]/50 hover:bg-[#12161B] transition-colors " + (notif.is_read ? "opacity-60" : "")}
+                  >
+                    <div className="flex items-start gap-2">
+                      {notif.actor && (
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11] flex-shrink-0 mt-0.5"
+                          style={{ background: notif.actor.color || "#4ADE80" }}>
+                          {notif.actor.initials || "?"}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-semibold text-[#E6EDF3]">{notif.title}</div>
+                        {notif.body && <div className="text-[10px] text-[#7D8590] truncate">{notif.body}</div>}
+                        {notif.conversation?.subject && <div className="text-[10px] text-[#484F58] truncate">{notif.conversation.subject}</div>}
+                        <div className="text-[9px] text-[#484F58] mt-0.5">{new Date(notif.created_at).toLocaleString()}</div>
+                      </div>
+                      {!notif.is_read && <div className="w-2 h-2 rounded-full bg-[#58A6FF] flex-shrink-0 mt-1" />}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="px-2 pt-2 flex flex-col gap-0.5">
         <div className="px-2.5 pb-1">
