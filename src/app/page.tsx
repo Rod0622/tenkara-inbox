@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
+import { createBrowserClient } from "@/lib/supabase";
 import {
   useActions,
   useConversations,
@@ -60,6 +61,20 @@ export default function InboxPage() {
 
   const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
 
+  // Fetch conversation IDs where current user sent a message
+  const [mySentConvoIds, setMySentConvoIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const sb = createBrowserClient();
+    sb.from("messages")
+      .select("conversation_id")
+      .eq("is_outbound", true)
+      .eq("sent_by_user_id", currentUser.id)
+      .then(({ data }) => {
+        setMySentConvoIds(new Set((data || []).map((m: any) => m.conversation_id)));
+      });
+  }, [currentUser?.id]);
+
   const accountEmails = useMemo(
     () => new Set(emailAccounts.map((a) => a.email?.toLowerCase()).filter(Boolean)),
     [emailAccounts]
@@ -115,7 +130,8 @@ export default function InboxPage() {
       filtered = conversations.filter((c) => c.email_account_id === activeMailbox);
     } else if (!activeMailbox && currentUser) {
       if (activeView === "sent") {
-        filtered = conversations.filter((c) => isOutboundConvo(c));
+        // Personal sent: show conversations where I actually sent a message
+        filtered = conversations.filter((c) => mySentConvoIds.has(c.id));
       } else if (activeView === "inbox") {
         // Personal inbox: show ALL conversations assigned to me
         filtered = conversations.filter(

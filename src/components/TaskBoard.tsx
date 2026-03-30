@@ -12,6 +12,7 @@ import {
   Plus,
   Trash2,
   User2,
+  Search,
 } from "lucide-react";
 import { useTasks } from "@/lib/hooks";
 import type { Task, TaskStatus, TeamMember } from "@/types";
@@ -54,6 +55,7 @@ export default function TaskBoard({
 }) {
   const { tasks, loading, refetch } = useTasks(currentUser?.id || null, "mine");
   const [showComposer, setShowComposer] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
   const [text, setText] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueHours, setDueHours] = useState("");
@@ -139,13 +141,31 @@ export default function TaskBoard({
     return task.status as TaskStatus;
   }, [currentUser]);
 
+  // Filter by search and sort by nearest deadline
+  const filteredTasks = useMemo(() => {
+    let filtered = tasks;
+    if (taskSearch.trim()) {
+      const q = taskSearch.toLowerCase();
+      filtered = filtered.filter((t) =>
+        t.text?.toLowerCase().includes(q) ||
+        (t as any).conversation?.subject?.toLowerCase().includes(q) ||
+        t.assignees?.some((a: any) => a.name?.toLowerCase().includes(q))
+      );
+    }
+    return [...filtered].sort((a, b) => {
+      const aDate = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+      const bDate = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+      return aDate - bDate;
+    });
+  }, [tasks, taskSearch]);
+
   const grouped = useMemo(
     () => ({
-      todo: tasks.filter((task) => getMyStatus(task) === "todo"),
-      in_progress: tasks.filter((task) => getMyStatus(task) === "in_progress"),
-      completed: tasks.filter((task) => getMyStatus(task) === "completed"),
+      todo: filteredTasks.filter((task) => getMyStatus(task) === "todo"),
+      in_progress: filteredTasks.filter((task) => getMyStatus(task) === "in_progress"),
+      completed: filteredTasks.filter((task) => getMyStatus(task) === "completed"),
     }),
-    [tasks, getMyStatus]
+    [filteredTasks, getMyStatus]
   );
 
   const createTask = async () => {
@@ -270,6 +290,15 @@ export default function TaskBoard({
             <p className="text-sm text-[#7D8590] mt-1">Tasks assigned to you across threads and standalone work.</p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#484F58]" />
+              <input
+                value={taskSearch}
+                onChange={(e) => setTaskSearch(e.target.value)}
+                placeholder="Search tasks..."
+                className="w-56 pl-9 pr-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+              />
+            </div>
             {selectedTaskIds.length > 0 && (
               <button
                 onClick={() => deleteTasks(selectedTaskIds)}

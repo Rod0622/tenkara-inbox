@@ -69,22 +69,79 @@ type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail";
 
 // ── Helpers ───────────────────────────────────────────
 
+// Calculate business hours remaining (EST 9am-8pm = 11 hours/day)
+function getBusinessHoursRemaining(dueDate: string): number {
+  const due = new Date(dueDate);
+  const now = new Date();
+  if (due <= now) return -getBusinessHoursElapsed(dueDate);
+  
+  let hours = 0;
+  const current = new Date(now);
+  
+  while (current < due) {
+    // Convert to EST
+    const estHour = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
+    const dayOfWeek = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getDay();
+    
+    // Count only Mon-Fri 9am-8pm EST
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && estHour >= 9 && estHour < 20) {
+      hours++;
+    }
+    current.setTime(current.getTime() + 60 * 60 * 1000); // advance 1 hour
+    if (hours > 500) break; // safety limit
+  }
+  return hours;
+}
+
+function getBusinessHoursElapsed(dueDate: string): number {
+  const due = new Date(dueDate);
+  const now = new Date();
+  if (due >= now) return 0;
+  
+  let hours = 0;
+  const current = new Date(due);
+  
+  while (current < now) {
+    const estHour = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
+    const dayOfWeek = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getDay();
+    
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && estHour >= 9 && estHour < 20) {
+      hours++;
+    }
+    current.setTime(current.getTime() + 60 * 60 * 1000);
+    if (hours > 500) break;
+  }
+  return hours;
+}
+
 function formatDueDate(date: string | null): string {
   if (!date) return "";
   const d = new Date(date);
   const now = new Date();
-  const diffDays = Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) return Math.abs(diffDays) + "d overdue";
-  if (diffDays === 0) return "Due today";
-  if (diffDays === 1) return "Due tomorrow";
-  return "Due in " + diffDays + "d";
+  
+  if (d < now) {
+    const bh = getBusinessHoursElapsed(date);
+    if (bh < 11) return bh + "h overdue";
+    const days = Math.floor(bh / 11);
+    return days + "d " + (bh % 11) + "h overdue";
+  }
+  
+  const bh = getBusinessHoursRemaining(date);
+  if (bh === 0) return "Due now";
+  if (bh < 11) return "Due in " + bh + "h";
+  const days = Math.floor(bh / 11);
+  const remHours = bh % 11;
+  if (remHours === 0) return "Due in " + days + "d";
+  return "Due in " + days + "d " + remHours + "h";
 }
 
 function getDueColor(date: string | null): string {
   if (!date) return "#484F58";
-  const diffHours = (new Date(date).getTime() - Date.now()) / (1000 * 60 * 60);
-  if (diffHours < 0) return "#F85149";
-  if (diffHours < 48) return "#F0883E";
+  const d = new Date(date);
+  if (d < new Date()) return "#F85149"; // overdue
+  const bh = getBusinessHoursRemaining(date);
+  if (bh <= 11) return "#F85149"; // less than 1 business day
+  if (bh <= 22) return "#F0883E"; // less than 2 business days
   return "#58A6FF";
 }
 
@@ -146,6 +203,7 @@ export default function DashboardPage() {
 
   // Selected user filter for all-tasks view
   const [taskFilterUser, setTaskFilterUser] = useState<string | null>(null);
+  const [dashTaskSearch, setDashTaskSearch] = useState("");
 
   useEffect(() => { loadDashboardData(); }, [dateFrom, dateTo]);
 
@@ -395,9 +453,22 @@ export default function DashboardPage() {
     }), { totalTasks: 0, todo: 0, inProgress: 0, completed: 0, overdue: 0, dueSoon: 0, totalConvos: 0, unreadConvos: 0, totalSent: 0 });
   }, [userStats]);
 
-  const filteredAllTasks = taskFilterUser
-    ? allTasks.filter((t) => t.assignees.some((a) => a.name === userStats.find((u) => u.id === taskFilterUser)?.name))
-    : allTasks;
+  const filteredAllTasks = useMemo(() => {
+    let filtered = allTasks;
+    if (taskFilterUser) {
+      filtered = filtered.filter((t) => t.assignees.some((a) => a.name === userStats.find((u) => u.id === taskFilterUser)?.name));
+    }
+    if (dashTaskSearch.trim()) {
+      const q = dashTaskSearch.toLowerCase();
+      filtered = filtered.filter((t) =>
+        t.text.toLowerCase().includes(q) ||
+        t.conversation_subject.toLowerCase().includes(q) ||
+        t.assignees.some((a) => a.name.toLowerCase().includes(q)) ||
+        (t.category_name || "").toLowerCase().includes(q)
+      );
+    }
+    return filtered;
+  }, [allTasks, taskFilterUser, dashTaskSearch, userStats]);
 
   const selectedUser = userStats.find((u) => u.id === selectedUserId);
 
@@ -542,6 +613,14 @@ export default function DashboardPage() {
                 <FilterPill key={u.id} active={taskFilterUser === u.id} onClick={() => setTaskFilterUser(taskFilterUser === u.id ? null : u.id)}
                   label={u.name.split(" ")[0]} avatar={{ initials: u.initials, color: u.color }} />
               ))}
+              <div className="ml-auto relative">
+                <input
+                  value={dashTaskSearch}
+                  onChange={(e) => setDashTaskSearch(e.target.value)}
+                  placeholder="Search tasks..."
+                  className="w-56 pl-3 pr-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+              </div>
             </div>
             {filteredAllTasks.length === 0 ? <Empty text="No open tasks" /> : filteredAllTasks.map((t) => <TaskRow key={t.id} task={t} />)}
           </div>
