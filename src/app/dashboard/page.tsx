@@ -185,17 +185,20 @@ export default function DashboardPage() {
     if (effectiveDateTo) convosQuery = convosQuery.lte("last_message_at", effectiveDateTo);
     const { data: conversations } = await convosQuery;
 
-    // Sent emails count per user
-    let sentQuery = supabase.from("messages").select("from_email").eq("is_outbound", true);
-    if (effectiveDateFrom) sentQuery = sentQuery.gte("sent_at", effectiveDateFrom);
-    if (effectiveDateTo) sentQuery = sentQuery.lte("sent_at", effectiveDateTo);
-    const { data: sentMessages } = await sentQuery;
+    // Sent emails count per user — use activity_log which tracks actor_id
+    let sentActivityQuery = supabase
+      .from("activity_log")
+      .select("actor_id, created_at, conversation_id")
+      .in("action", ["reply_sent", "email_composed"]);
+    if (effectiveDateFrom) sentActivityQuery = sentActivityQuery.gte("created_at", effectiveDateFrom);
+    if (effectiveDateTo) sentActivityQuery = sentActivityQuery.lte("created_at", effectiveDateTo);
+    const { data: sentActivities } = await sentActivityQuery;
 
-    const sentByEmail: Record<string, number> = {};
-    for (const msg of (sentMessages || [])) {
-      const e = (msg.from_email || "").toLowerCase();
-      // Map account email to all members (simplified: count by from_email)
-      sentByEmail[e] = (sentByEmail[e] || 0) + 1;
+    const sentByUser: Record<string, number> = {};
+    for (const act of (sentActivities || [])) {
+      if (act.actor_id) {
+        sentByUser[act.actor_id] = (sentByUser[act.actor_id] || 0) + 1;
+      }
     }
 
     const now = new Date();
@@ -221,8 +224,8 @@ export default function DashboardPage() {
 
       const assignedConvos = (conversations || []).filter((c: any) => c.assignee_id === member.id);
 
-      // Count sent by matching member email to from_email of sent messages
-      const sentCount = sentByEmail[member.email.toLowerCase()] || 0;
+      // Count sent by actor_id matching this member
+      const sentCount = sentByUser[member.id] || 0;
 
       return {
         id: member.id, name: member.name, email: member.email,
@@ -326,34 +329,45 @@ export default function DashboardPage() {
       email_account_name: c.email_account?.name || "", folder_name: c.folder?.name || null,
     }));
 
-    // Fetch sent emails — outbound messages sent by this user
-    let sentQuery = supabase
-      .from("messages")
-      .select("id, subject, to_addresses, sent_at, conversation_id, from_email")
-      .eq("is_outbound", true)
-      .order("sent_at", { ascending: false })
+    // Fetch sent emails — find via activity_log (tracks who actually sent)
+    let sentActivityQuery = supabase
+      .from("activity_log")
+      .select("conversation_id, created_at, details")
+      .eq("actor_id", userId)
+      .in("action", ["reply_sent", "email_composed"])
+      .order("created_at", { ascending: false })
       .limit(100);
 
-    if (effectiveDateFrom) sentQuery = sentQuery.gte("sent_at", effectiveDateFrom);
-    if (effectiveDateTo) sentQuery = sentQuery.lte("sent_at", effectiveDateTo);
+    if (effectiveDateFrom) sentActivityQuery = sentActivityQuery.gte("created_at", effectiveDateFrom);
+    if (effectiveDateTo) sentActivityQuery = sentActivityQuery.lte("created_at", effectiveDateTo);
 
-    const { data: allSent } = await sentQuery;
+    const { data: sentActs } = await sentActivityQuery;
 
-    // Filter sent by user — match member email or find conversations assigned to this user
-    const userEmail = user?.email?.toLowerCase() || "";
-    const userConvoIds = new Set((convos || []).map((c: any) => c.id));
+    // Get conversation details for each sent activity
+    const sentConvoIds = [...new Set((sentActs || []).map((a: any) => a.conversation_id).filter(Boolean))];
+    let sentConvos: Record<string, any> = {};
+    if (sentConvoIds.length > 0) {
+      const { data: sConvos } = await supabase
+        .from("conversations")
+        .select("id, subject, from_email, email_account:email_accounts(email)")
+        .in("id", sentConvoIds);
+      for (const c of (sConvos || [])) {
+        sentConvos[c.id] = c;
+      }
+    }
 
-    const uSent: SentEmail[] = (allSent || [])
-      .filter((s: any) => {
-        const fromEmail = (s.from_email || "").toLowerCase();
-        // Match if from_email matches user email OR the sent message is in a conversation assigned to this user
-        return fromEmail === userEmail || userConvoIds.has(s.conversation_id);
-      })
-      .map((s: any) => ({
-        id: s.id, subject: s.subject, to_addresses: s.to_addresses,
-        sent_at: s.sent_at, conversation_id: s.conversation_id,
-        from_email: s.from_email,
-      }));
+    const uSent: SentEmail[] = (sentActs || []).map((a: any) => {
+      const convo = sentConvos[a.conversation_id] || {};
+      const details = a.details || {};
+      return {
+        id: a.conversation_id + ":" + a.created_at,
+        subject: details.subject || convo.subject || "Unknown",
+        to_addresses: details.to || "",
+        sent_at: a.created_at,
+        conversation_id: a.conversation_id,
+        from_email: convo.email_account?.email || convo.from_email || "",
+      };
+    });
 
     setUserTasks(uTasks);
     setUserConversations(uConvos);
