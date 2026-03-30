@@ -619,6 +619,14 @@ export function useTasks(assigneeId: string | null, scope: "mine" | "all" = "min
 }
 
 export function useActions() {
+  // Get current user session for actor_id tracking
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/session").then(r => r.json()).then(s => {
+      setCurrentUserId(s?.teamMember?.id || null);
+    }).catch(() => {});
+  }, []);
+
   const addNote = async (conversationId: string, text: string, title?: string) => {
     const res = await fetch("/api/conversations/notes", {
       method: "POST",
@@ -698,7 +706,7 @@ export function useActions() {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, body, attachments: attachments || undefined }),
+      body: JSON.stringify({ conversation_id: conversationId, body, attachments: attachments || undefined, actor_id: currentUserId }),
     });
 
     if (!res.ok) {
@@ -718,7 +726,7 @@ export function useActions() {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ ...params, actor_id: currentUserId }),
     });
     return res.json();
   };
