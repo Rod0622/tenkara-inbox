@@ -344,7 +344,7 @@ export default function DashboardPage() {
     const { data: sentActs } = await sentActivityQuery;
 
     // Get conversation details for each sent activity
-    const sentConvoIds = [...new Set((sentActs || []).map((a: any) => a.conversation_id).filter(Boolean))];
+    const sentConvoIds = Array.from(new Set((sentActs || []).map((a: any) => a.conversation_id).filter(Boolean)));
     let sentConvos: Record<string, any> = {};
     if (sentConvoIds.length > 0) {
       const { data: sConvos } = await supabase
