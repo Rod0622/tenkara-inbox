@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlarmClock,
   Archive,
   Check,
   CheckCircle,
@@ -1559,6 +1560,11 @@ export default function ConversationDetail({
   onMoveToFolder,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpCustomDate, setFollowUpCustomDate] = useState("");
+  const [followUpCustomTime, setFollowUpCustomTime] = useState("");
+  const [followUpNote, setFollowUpNote] = useState("");
+  const [settingFollowUp, setSettingFollowUp] = useState(false);
   const [replyAttachments, setReplyAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const [showReplyDrive, setShowReplyDrive] = useState(false);
@@ -2111,6 +2117,59 @@ export default function ConversationDetail({
     }
   };
 
+  const handleSetFollowUp = async (remindAt: string) => {
+    if (!convo || !currentUser?.id) return;
+    setSettingFollowUp(true);
+    try {
+      await fetch("/api/reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          user_id: currentUser.id,
+          remind_at: remindAt,
+          note: followUpNote.trim() || null,
+        }),
+      });
+      setShowFollowUp(false);
+      setFollowUpNote("");
+      setFollowUpCustomDate("");
+      setFollowUpCustomTime("");
+    } catch (e) {
+      console.error("Failed to set follow-up:", e);
+    } finally {
+      setSettingFollowUp(false);
+    }
+  };
+
+  const getFollowUpTime = (preset: string): string => {
+    const now = new Date();
+    switch (preset) {
+      case "2h": return new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
+      case "4h": return new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString();
+      case "tomorrow_9am": {
+        const d = new Date(now);
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+        return d.toISOString();
+      }
+      case "tomorrow_2pm": {
+        const d = new Date(now);
+        d.setDate(d.getDate() + 1);
+        d.setHours(14, 0, 0, 0);
+        return d.toISOString();
+      }
+      case "next_monday": {
+        const d = new Date(now);
+        const daysUntilMonday = (8 - d.getDay()) % 7 || 7;
+        d.setDate(d.getDate() + daysUntilMonday);
+        d.setHours(9, 0, 0, 0);
+        return d.toISOString();
+      }
+      default: return now.toISOString();
+    }
+  };
+
   const handleToggleRead = async () => {
     if (!convo) return;
     try {
@@ -2367,6 +2426,88 @@ export default function ConversationDetail({
             >
               <Forward size={16} />
             </button>
+
+            {/* Follow-up / Snooze */}
+            <div className="relative">
+              <button
+                onClick={() => setShowFollowUp(!showFollowUp)}
+                title="Set follow-up reminder"
+                className={`w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24] ${
+                  showFollowUp ? "text-[#F0883E] border-[#F0883E]/30" : "text-[#7D8590]"
+                }`}
+              >
+                <AlarmClock size={16} />
+              </button>
+
+              {showFollowUp && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowFollowUp(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-[260px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden">
+                    <div className="px-3 py-2 border-b border-[#1E242C]">
+                      <div className="text-xs font-bold text-[#E6EDF3]">Follow-up Reminder</div>
+                      <div className="text-[10px] text-[#484F58] mt-0.5">Get notified to follow up on this email</div>
+                    </div>
+
+                    {/* Quick presets */}
+                    <div className="p-2 space-y-0.5">
+                      {[
+                        { key: "2h", label: "In 2 hours", sub: "" },
+                        { key: "4h", label: "In 4 hours", sub: "" },
+                        { key: "tomorrow_9am", label: "Tomorrow 9:00 AM", sub: "" },
+                        { key: "tomorrow_2pm", label: "Tomorrow 2:00 PM", sub: "" },
+                        { key: "next_monday", label: "Next Monday 9:00 AM", sub: "" },
+                      ].map((preset) => (
+                        <button
+                          key={preset.key}
+                          disabled={settingFollowUp}
+                          onClick={() => handleSetFollowUp(getFollowUpTime(preset.key))}
+                          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-[#12161B] transition-colors disabled:opacity-50"
+                        >
+                          <AlarmClock size={13} className="text-[#F0883E] flex-shrink-0" />
+                          <span className="text-xs text-[#E6EDF3]">{preset.label}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Custom date/time */}
+                    <div className="px-3 py-2 border-t border-[#1E242C] space-y-2">
+                      <div className="text-[10px] text-[#484F58] font-semibold uppercase">Custom</div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="date"
+                          value={followUpCustomDate}
+                          onChange={(e) => setFollowUpCustomDate(e.target.value)}
+                          className="flex-1 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                        />
+                        <input
+                          type="time"
+                          value={followUpCustomTime}
+                          onChange={(e) => setFollowUpCustomTime(e.target.value)}
+                          className="w-24 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={followUpNote}
+                        onChange={(e) => setFollowUpNote(e.target.value)}
+                        placeholder="Add a note (optional)"
+                        className="w-full px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                      />
+                      <button
+                        disabled={!followUpCustomDate || settingFollowUp}
+                        onClick={() => {
+                          const dateStr = followUpCustomDate + "T" + (followUpCustomTime || "09:00") + ":00";
+                          handleSetFollowUp(new Date(dateStr).toISOString());
+                        }}
+                        className="w-full px-3 py-1.5 rounded-lg bg-[#F0883E] text-[#0B0E11] text-xs font-semibold hover:bg-[#f09e5e] disabled:opacity-50 transition-colors"
+                      >
+                        {settingFollowUp ? "Setting..." : "Set Reminder"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             <button
               onClick={handleTrashConversation}

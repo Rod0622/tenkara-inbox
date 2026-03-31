@@ -132,16 +132,20 @@ export default function Sidebar({
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
-  // Fetch notifications
+  // Fetch notifications and check due reminders
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchNotifs = async () => {
       try {
+        // Fetch notifications
         const res = await fetch("/api/notifications?user_id=" + currentUser.id);
         const data = await res.json();
         const notifs = data.notifications || [];
         setNotifications(notifs);
         setUnreadNotifCount(notifs.filter((n: any) => !n.is_read).length);
+
+        // Check for due follow-up reminders (fires them and creates notifications)
+        await fetch("/api/reminders?user_id=" + currentUser.id + "&check_due=true");
       } catch (_e) {}
     };
     fetchNotifs();
