@@ -424,6 +424,7 @@ export default function Sidebar({
             <button
               key={item.id}
               onClick={() => {
+                window.location.hash = "";
                 setActiveView(item.id);
                 setActiveMailbox(null);
                 setActiveFolder(null);
@@ -525,6 +526,7 @@ export default function Sidebar({
                       <div key={folder.id} className="flex items-center group/folder">
                         <button
                           onClick={() => {
+                          window.location.hash = "";
                           setActiveFolder(folder.id);
                           setActiveMailbox(mb.id);
                           setActiveView("inbox");
