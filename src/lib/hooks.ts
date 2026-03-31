@@ -641,7 +641,7 @@ export function useActions() {
     const res = await fetch("/api/conversations/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, text, title: title || "" }),
+      body: JSON.stringify({ conversation_id: conversationId, text, title: title || "", author_id: currentUserId }),
     });
 
     if (!res.ok) {
@@ -662,6 +662,7 @@ export function useActions() {
         category_id: categoryId || null,
         due_time: dueTime || null,
         status: "todo",
+        actor_id: currentUserId,
       }),
     });
 
