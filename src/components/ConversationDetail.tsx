@@ -18,6 +18,7 @@ import {
   Forward,
   GitBranch,
   Image,
+  Loader2,
   Mail,
   MessageSquare,
   Paperclip,
@@ -1566,6 +1567,11 @@ export default function ConversationDetail({
   const [followUpCustomTime, setFollowUpCustomTime] = useState("");
   const [followUpNote, setFollowUpNote] = useState("");
   const [settingFollowUp, setSettingFollowUp] = useState(false);
+  const [showInlineCompose, setShowInlineCompose] = useState(false);
+  const [inlineComposeTo, setInlineComposeTo] = useState("");
+  const [inlineComposeSubject, setInlineComposeSubject] = useState("");
+  const [inlineComposeBody, setInlineComposeBody] = useState("");
+  const [sendingInlineCompose, setSendingInlineCompose] = useState(false);
   const [activeReminder, setActiveReminder] = useState<any>(null);
 
   // Fetch existing reminder for this conversation
@@ -2175,6 +2181,40 @@ export default function ConversationDetail({
     }
   };
 
+  const handleInlineComposeSend = async () => {
+    if (!convo || !inlineComposeTo.trim()) return;
+    setSendingInlineCompose(true);
+    try {
+      const subject = inlineComposeSubject.trim() || convo.subject;
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          account_id: convo.email_account_id,
+          to: inlineComposeTo.trim(),
+          subject,
+          body: inlineComposeBody,
+          actor_id: currentUser?.id,
+        }),
+      });
+      if (res.ok) {
+        setShowInlineCompose(false);
+        setInlineComposeTo("");
+        setInlineComposeSubject("");
+        setInlineComposeBody("");
+        refetchDetail();
+      } else {
+        const err = await res.json();
+        alert("Send failed: " + (err.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      alert("Send failed: " + e.message);
+    } finally {
+      setSendingInlineCompose(false);
+    }
+  };
+
   const getFollowUpTime = (preset: string): string => {
     const now = new Date();
     switch (preset) {
@@ -2426,6 +2466,22 @@ export default function ConversationDetail({
           />
 
           <div className="flex gap-1">
+            {/* Compose Email button for internal/team conversations */}
+            {convo.from_email === "internal" && (
+              <button
+                onClick={() => setShowInlineCompose(!showInlineCompose)}
+                title="Compose email to supplier"
+                className={`h-8 px-3 rounded-md border flex items-center gap-1.5 text-xs font-semibold transition-colors ${
+                  showInlineCompose
+                    ? "border-[#4ADE80]/40 bg-[#4ADE80]/10 text-[#4ADE80]"
+                    : "border-[#1E242C] bg-[#12161B] text-[#7D8590] hover:bg-[#181D24] hover:text-[#E6EDF3]"
+                }`}
+              >
+                <Mail size={14} />
+                Compose Email
+              </button>
+            )}
+
             <button
               onClick={handleToggleStar}
               title={convo.is_starred ? "Unstar" : "Star"}
@@ -2669,8 +2725,73 @@ export default function ConversationDetail({
             ))}
 
             {messages.length === 0 && (
-              <div className="text-center py-10 text-[#484F58] text-sm">
-                No messages yet. Click the sync button in the sidebar to fetch emails.
+              <div className="text-center py-10">
+                {convo.from_email === "internal" ? (
+                  <div className="space-y-3">
+                    <MessageSquare size={32} className="mx-auto text-[#484F58]" />
+                    <p className="text-[#484F58] text-sm">Team conversation — no emails yet</p>
+                    <button
+                      onClick={() => setShowInlineCompose(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] transition-colors"
+                    >
+                      <Send size={14} />
+                      Compose Email
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[#484F58] text-sm">No messages yet. Click the sync button in the sidebar to fetch emails.</p>
+                )}
+              </div>
+            )}
+
+            {/* Inline compose for internal conversations */}
+            {showInlineCompose && convo.from_email === "internal" && (
+              <div className="mt-4 rounded-xl border border-[#4ADE80]/20 bg-[#0F1318] p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-[#E6EDF3]">New Email</div>
+                  <button onClick={() => setShowInlineCompose(false)} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={14} /></button>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#484F58] font-semibold mb-1">To *</label>
+                  <input
+                    value={inlineComposeTo}
+                    onChange={(e) => setInlineComposeTo(e.target.value)}
+                    placeholder="supplier@example.com"
+                    className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Subject</label>
+                  <input
+                    value={inlineComposeSubject}
+                    onChange={(e) => setInlineComposeSubject(e.target.value)}
+                    placeholder={convo.subject}
+                    className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Message</label>
+                  <RichTextEditor
+                    value={inlineComposeBody}
+                    onChange={setInlineComposeBody}
+                    compact
+                    signature={replySignature}
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setShowInlineCompose(false)}
+                    className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590] hover:text-[#E6EDF3]">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleInlineComposeSend}
+                    disabled={sendingInlineCompose || !inlineComposeTo.trim() || !inlineComposeBody.replace(/<[^>]*>/g, "").trim()}
+                    className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {sendingInlineCompose ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    {sendingInlineCompose ? "Sending..." : "Send Email"}
+                  </button>
+                </div>
               </div>
             )}
           </>

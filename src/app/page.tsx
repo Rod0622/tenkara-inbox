@@ -354,14 +354,20 @@ export default function InboxPage() {
           teamMembers={teamMembers}
           emailAccounts={emailAccounts}
           onCreated={(conversationId) => {
+            // Clear hash first to prevent stale navigation
+            window.location.hash = "";
             refetch();
             setActiveView("inbox");
-            // Navigate to the new conversation
+            setActiveConvo(null);
+            // Navigate to the new conversation after data refreshes
             setTimeout(() => {
               window.location.hash = "conversation=" + conversationId + "&highlight=true";
-            }, 500);
+            }, 800);
           }}
-          onClose={() => setActiveView("inbox")}
+          onClose={() => {
+            window.location.hash = "";
+            setActiveView("inbox");
+          }}
         />
       ) : isTaskView ? (
         <TaskBoard
