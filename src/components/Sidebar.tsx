@@ -171,13 +171,16 @@ export default function Sidebar({
     setUnreadNotifCount((prev) => Math.max(0, prev - (notif.is_read ? 0 : 1)));
     setShowNotifications(false);
 
-    // Navigate based on type
-    if (notif.conversation_id) {
-      window.location.hash = "conversation=" + notif.conversation_id;
-    } else if (notif.task_id) {
+    // Navigate based on type — include highlight param
+    if (notif.type === "task_assigned" && notif.task_id) {
+      // Go to tasks view with highlight
       setActiveView("tasks");
       setActiveMailbox(null);
       setActiveFolder(null);
+      window.location.hash = "highlight_task=" + notif.task_id;
+    } else if (notif.conversation_id) {
+      // Go to conversation with highlight
+      window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true";
     }
   };
 

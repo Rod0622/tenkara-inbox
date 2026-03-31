@@ -271,6 +271,36 @@ export default function ConversationList({
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [highlightedConvoId, setHighlightedConvoId] = useState<string | null>(null);
+  const highlightConvoRef = useRef<HTMLDivElement>(null);
+
+  // Check URL hash for highlight param
+  useEffect(() => {
+    const checkHash = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      const params = new URLSearchParams(hash);
+      if (params.get("highlight") === "true" && params.get("conversation")) {
+        setHighlightedConvoId(params.get("conversation"));
+        const timer = setTimeout(() => {
+          setHighlightedConvoId(null);
+          // Clean the highlight param but keep conversation
+          const convoId = params.get("conversation");
+          if (convoId) window.location.hash = "conversation=" + convoId;
+        }, 5000);
+        return () => clearTimeout(timer);
+      }
+    };
+    checkHash();
+    window.addEventListener("hashchange", checkHash);
+    return () => window.removeEventListener("hashchange", checkHash);
+  }, []);
+
+  // Scroll highlighted conversation into view
+  useEffect(() => {
+    if (highlightedConvoId && highlightConvoRef.current) {
+      highlightConvoRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightedConvoId]);
 
   const hasActiveFilters =
     filters.dateRange !== "all" ||
@@ -495,9 +525,9 @@ export default function ConversationList({
               return (
                 <div
                   key={c.id}
+                  ref={c.id === highlightedConvoId ? highlightConvoRef : undefined}
                   draggable
                   onDragStart={(e) => {
-                    // If selected, drag all selected. Otherwise just this one.
                     const dragIds = isSelected && selectedIds.size > 0
                       ? Array.from(selectedIds)
                       : [c.id];
@@ -505,7 +535,9 @@ export default function ConversationList({
                     e.dataTransfer.effectAllowed = "move";
                   }}
                   className={`relative flex gap-2 p-2.5 mb-0.5 rounded-lg w-full text-left transition-all cursor-pointer group ${
-                    isActive ? "bg-[#1E242C]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[#181D24]"
+                    c.id === highlightedConvoId
+                      ? "bg-[#4ADE80]/10 ring-2 ring-[#4ADE80]/30 border border-[#4ADE80]"
+                      : isActive ? "bg-[#1E242C]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[#181D24]"
                   }`}
                   onClick={() => setActiveConvo(c)}
                 >

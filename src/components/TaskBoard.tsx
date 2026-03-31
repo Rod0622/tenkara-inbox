@@ -56,6 +56,31 @@ export default function TaskBoard({
   const { tasks, loading, refetch } = useTasks(currentUser?.id || null, "mine");
   const [showComposer, setShowComposer] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  // Check URL hash for highlight_task param
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(hash);
+    const taskId = params.get("highlight_task");
+    if (taskId) {
+      setHighlightedTaskId(taskId);
+      // Clear highlight after 5 seconds
+      const timer = setTimeout(() => {
+        setHighlightedTaskId(null);
+        window.location.hash = "";
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // Scroll highlighted task into view
+  useEffect(() => {
+    if (highlightedTaskId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightedTaskId]);
   const [text, setText] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueHours, setDueHours] = useState("");
@@ -532,6 +557,8 @@ export default function TaskBoard({
                         onOpenConversation={onOpenConversation}
                         onRefetch={refetch}
                         deleting={deleting}
+                        isHighlighted={task.id === highlightedTaskId}
+                        highlightRef={task.id === highlightedTaskId ? highlightRef : undefined}
                       />
                     ))}
                   </div>
@@ -555,6 +582,8 @@ function TaskCard({
   onOpenConversation,
   onRefetch,
   deleting,
+  isHighlighted,
+  highlightRef,
 }: {
   task: Task;
   currentUser: TeamMember | null;
@@ -565,6 +594,8 @@ function TaskCard({
   onOpenConversation?: (conversationId: string) => void;
   onRefetch?: () => Promise<void>;
   deleting: boolean;
+  isHighlighted?: boolean;
+  highlightRef?: React.RefObject<HTMLDivElement>;
 }) {
   const assignees = task.assignees || [];
   const isMulti = assignees.length > 1;
@@ -594,7 +625,14 @@ function TaskCard({
   };
 
   return (
-    <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3">
+    <div
+      ref={highlightRef as any}
+      className={`rounded-xl border bg-[#0B0E11] p-3 transition-all duration-500 ${
+        isHighlighted
+          ? "border-[#4ADE80] ring-2 ring-[#4ADE80]/30 bg-[#4ADE80]/5"
+          : "border-[#1E242C]"
+      }`}
+    >
       <div className="flex items-start gap-2 mb-2">
         <input
           type="checkbox"
