@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase";
@@ -172,38 +172,52 @@ export default function InboxPage() {
     accountEmails,
   ]);
 
+  // Handle hash-based navigation (notifications, task links, direct URLs)
+  const processedHashRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (conversations.length === 0) return;
-    // Don't auto-navigate when user is in create/compose views
-    if (activeView === "new-conversation" || activeView === "compose" || activeView === "new-task") return;
+    const handleHashNav = () => {
+      if (activeView === "new-conversation" || activeView === "compose" || activeView === "new-task") return;
+      if (conversations.length === 0) return;
 
-    const { conversation, mailbox, folder } = parseHashParams();
-    if (!conversation) return;
+      const { conversation, mailbox, folder } = parseHashParams();
+      if (!conversation) return;
 
-    if (mailbox) {
-      setActiveMailbox(mailbox);
-      setActiveView("inbox");
-    }
+      // Don't re-process the same hash
+      const hashKey = conversation + (mailbox || "") + (folder || "");
+      if (processedHashRef.current === hashKey) return;
+      processedHashRef.current = hashKey;
 
-    if (folder) {
-      setActiveFolder(folder);
-    } else if (mailbox) {
-      setActiveFolder(null);
-    }
-
-    const match = conversations.find((item) => item.id === conversation);
-    if (match) {
-      setActiveConvo(match);
-      setActiveView("inbox");
-
-      if (match.email_account_id) {
-        setActiveMailbox(match.email_account_id);
+      if (mailbox) {
+        setActiveMailbox(mailbox);
+        setActiveView("inbox");
       }
-      if (match.folder_id) {
-        setActiveFolder(match.folder_id);
+      if (folder) {
+        setActiveFolder(folder);
       }
-    }
-  }, [conversations]);
+
+      const match = conversations.find((item) => item.id === conversation);
+      if (match) {
+        setActiveConvo(match);
+        setActiveView("inbox");
+
+        if (match.email_account_id) {
+          setActiveMailbox(match.email_account_id);
+        }
+        if (match.folder_id) {
+          setActiveFolder(match.folder_id);
+        }
+      }
+    };
+
+    handleHashNav();
+    const onHashChange = () => {
+      processedHashRef.current = null;
+      handleHashNav();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [conversations, activeView]);
 
   const handleAssign = async (
     conversationId: string,
