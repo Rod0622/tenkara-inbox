@@ -20,15 +20,18 @@ import {
   MailPlus,
   BarChart3,
   Bell,
+  MessageSquare,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 
 function QuickCreateMenu({
   onCompose,
   onNewTask,
+  onNewConversation,
 }: {
   onCompose: () => void;
   onNewTask: () => void;
+  onNewConversation: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -90,6 +93,17 @@ function QuickCreateMenu({
             >
               <CheckSquare size={14} className="text-[#58A6FF]" />
               New task
+            </button>
+
+            <button
+              onClick={() => {
+                onNewConversation();
+                setOpen(false);
+              }}
+              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+            >
+              <MessageSquare size={14} className="text-[#F0883E]" />
+              Create conversation
             </button>
 
             <Link
@@ -332,6 +346,11 @@ export default function Sidebar({
       onCompose={() => setActiveView("compose")}
       onNewTask={() => {
         setActiveView("new-task");
+        setActiveMailbox(null);
+        setActiveFolder(null);
+      }}
+      onNewConversation={() => {
+        setActiveView("new-conversation");
         setActiveMailbox(null);
         setActiveFolder(null);
       }}

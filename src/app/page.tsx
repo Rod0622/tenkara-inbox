@@ -18,6 +18,7 @@ import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
 import AISidebar from "@/components/AISidebar";
 import TaskBoard from "@/components/TaskBoard";
+import CreateConversation from "@/components/CreateConversation";
 import type { Conversation, TaskStatus } from "@/types";
 
 function parseHashParams() {
@@ -84,6 +85,7 @@ export default function InboxPage() {
     accountEmails.has(c.from_email?.toLowerCase?.() || "");
 
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
+  const isNewConversation = activeView === "new-conversation";
 
   const displayConversations = useMemo(() => {
     let filtered = conversations;
@@ -345,6 +347,21 @@ export default function InboxPage() {
             refetch();
             setActiveView("inbox");
           }}
+        />
+      ) : isNewConversation ? (
+        <CreateConversation
+          currentUser={currentUser}
+          teamMembers={teamMembers}
+          emailAccounts={emailAccounts}
+          onCreated={(conversationId) => {
+            refetch();
+            setActiveView("inbox");
+            // Navigate to the new conversation
+            setTimeout(() => {
+              window.location.hash = "conversation=" + conversationId + "&highlight=true";
+            }, 500);
+          }}
+          onClose={() => setActiveView("inbox")}
         />
       ) : isTaskView ? (
         <TaskBoard
