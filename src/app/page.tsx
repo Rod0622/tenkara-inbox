@@ -174,6 +174,8 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (conversations.length === 0) return;
+    // Don't auto-navigate when user is in create/compose views
+    if (activeView === "new-conversation" || activeView === "compose" || activeView === "new-task") return;
 
     const { conversation, mailbox, folder } = parseHashParams();
     if (!conversation) return;

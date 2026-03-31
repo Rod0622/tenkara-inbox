@@ -43,9 +43,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
       }
 
-      accountId = convo.email_account_id;
-      to = convo.from_email;
-      subject = `Re: ${convo.subject}`;
+      accountId = body.account_id || convo.email_account_id;
+      // Use body.to if provided (for internal conversations composing first email)
+      to = body.to || convo.from_email;
+      subject = body.subject || `Re: ${convo.subject}`;
     } else {
       // Compose mode
       accountId = body.account_id;
