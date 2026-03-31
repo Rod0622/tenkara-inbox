@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
+import { createBrowserClient } from "@/lib/supabase";
 
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
   return (
@@ -273,6 +274,23 @@ export default function ConversationList({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [highlightedConvoId, setHighlightedConvoId] = useState<string | null>(null);
   const highlightConvoRef = useRef<HTMLDivElement>(null);
+  const [reminderConvoIds, setReminderConvoIds] = useState<Record<string, string>>({}); // convo_id -> remind_at
+
+  // Fetch active reminders to show alarm icons
+  useEffect(() => {
+    const sb = createBrowserClient();
+    sb.from("follow_up_reminders")
+      .select("conversation_id, remind_at")
+      .eq("is_fired", false)
+      .eq("is_dismissed", false)
+      .then(({ data }) => {
+        const map: Record<string, string> = {};
+        for (const r of (data || [])) {
+          map[r.conversation_id] = r.remind_at;
+        }
+        setReminderConvoIds(map);
+      });
+  }, [conversations]); // refresh when conversations change
 
   // Check URL hash for highlight param
   useEffect(() => {
@@ -570,6 +588,11 @@ export default function ConversationList({
                         {c.from_name}
                       </span>
                       {c.is_starred && <span className="text-[#F5D547] text-[12px]">★</span>}
+                      {reminderConvoIds[c.id] && (
+                        <span className="text-[#F0883E] flex-shrink-0" title={"Follow-up: " + new Date(reminderConvoIds[c.id]).toLocaleString()}>
+                          <AlarmClock size={12} />
+                        </span>
+                      )}
                       <span className="text-[11px] text-[#484F58] tabular-nums whitespace-nowrap">
                         {formatTime(c.last_message_at)}
                       </span>

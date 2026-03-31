@@ -40,6 +40,7 @@ import {
   useThreadSummary,
 } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
+import { createBrowserClient } from "@/lib/supabase";
 import RichTextEditor from "@/components/RichTextEditor";
 
 type SuggestedTaskItem = {
@@ -1565,6 +1566,21 @@ export default function ConversationDetail({
   const [followUpCustomTime, setFollowUpCustomTime] = useState("");
   const [followUpNote, setFollowUpNote] = useState("");
   const [settingFollowUp, setSettingFollowUp] = useState(false);
+  const [activeReminder, setActiveReminder] = useState<any>(null);
+
+  // Fetch existing reminder for this conversation
+  useEffect(() => {
+    if (!convo?.id || !currentUser?.id) { setActiveReminder(null); return; }
+    fetch("/api/reminders?user_id=" + currentUser.id)
+      .then((r) => r.json())
+      .then((data) => {
+        const match = (data.reminders || []).find(
+          (r: any) => r.conversation_id === convo.id && !r.is_dismissed
+        );
+        setActiveReminder(match || null);
+      })
+      .catch(() => setActiveReminder(null));
+  }, [convo?.id, currentUser?.id, showFollowUp]); // re-fetch after setting a reminder
   const [replyAttachments, setReplyAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const [showReplyDrive, setShowReplyDrive] = useState(false);
@@ -2121,7 +2137,7 @@ export default function ConversationDetail({
     if (!convo || !currentUser?.id) return;
     setSettingFollowUp(true);
     try {
-      await fetch("/api/reminders", {
+      const res = await fetch("/api/reminders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2131,6 +2147,8 @@ export default function ConversationDetail({
           note: followUpNote.trim() || null,
         }),
       });
+      const data = await res.json();
+      setActiveReminder(data.reminder || { remind_at: remindAt, note: followUpNote.trim() || null });
       setShowFollowUp(false);
       setFollowUpNote("");
       setFollowUpCustomDate("");
@@ -2139,6 +2157,21 @@ export default function ConversationDetail({
       console.error("Failed to set follow-up:", e);
     } finally {
       setSettingFollowUp(false);
+    }
+  };
+
+  const handleDismissReminder = async () => {
+    if (!activeReminder?.id) return;
+    try {
+      await fetch("/api/reminders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeReminder.id, dismiss: true }),
+      });
+      setActiveReminder(null);
+      setShowFollowUp(false);
+    } catch (e) {
+      console.error("Failed to dismiss reminder:", e);
     }
   };
 
@@ -2431,40 +2464,72 @@ export default function ConversationDetail({
             <div className="relative">
               <button
                 onClick={() => setShowFollowUp(!showFollowUp)}
-                title="Set follow-up reminder"
-                className={`w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24] ${
-                  showFollowUp ? "text-[#F0883E] border-[#F0883E]/30" : "text-[#7D8590]"
+                title={activeReminder ? "Follow-up set — click to view" : "Set follow-up reminder"}
+                className={`w-8 h-8 rounded-md border flex items-center justify-center hover:bg-[#181D24] relative ${
+                  activeReminder
+                    ? "text-[#F0883E] border-[#F0883E]/40 bg-[#F0883E]/10"
+                    : showFollowUp ? "text-[#F0883E] border-[#F0883E]/30 bg-[#12161B]" : "text-[#7D8590] border-[#1E242C] bg-[#12161B]"
                 }`}
               >
                 <AlarmClock size={16} />
+                {activeReminder && !activeReminder.is_fired && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#F0883E] border border-[#0B0E11]" />
+                )}
               </button>
 
               {showFollowUp && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowFollowUp(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 w-[260px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden">
+                  <div className="absolute right-0 top-full mt-1 z-50 w-[280px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden">
                     <div className="px-3 py-2 border-b border-[#1E242C]">
                       <div className="text-xs font-bold text-[#E6EDF3]">Follow-up Reminder</div>
                       <div className="text-[10px] text-[#484F58] mt-0.5">Get notified to follow up on this email</div>
                     </div>
 
+                    {/* Show existing active reminder */}
+                    {activeReminder && (
+                      <div className="mx-2 mt-2 p-2.5 rounded-lg border border-[#F0883E]/20 bg-[#F0883E]/5">
+                        <div className="flex items-center gap-2 mb-1">
+                          <AlarmClock size={12} className="text-[#F0883E]" />
+                          <span className="text-[11px] font-semibold text-[#F0883E]">
+                            {activeReminder.is_fired ? "Reminder fired" : "Reminder set"}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#E6EDF3]">
+                          {new Date(activeReminder.remind_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                        {activeReminder.note && (
+                          <div className="text-[10px] text-[#7D8590] mt-0.5">{activeReminder.note}</div>
+                        )}
+                        <button
+                          onClick={handleDismissReminder}
+                          className="mt-2 w-full px-2 py-1 rounded-md border border-[#1E242C] text-[10px] text-[#7D8590] hover:text-[#F85149] hover:border-[#F85149]/30 transition-colors"
+                        >
+                          Dismiss reminder
+                        </button>
+                      </div>
+                    )}
+
                     {/* Quick presets */}
                     <div className="p-2 space-y-0.5">
+                      <div className="px-2.5 py-1 text-[10px] text-[#484F58] font-semibold uppercase">
+                        {activeReminder ? "Reschedule" : "Quick set"}
+                      </div>
                       {[
-                        { key: "2h", label: "In 2 hours", sub: "" },
-                        { key: "4h", label: "In 4 hours", sub: "" },
-                        { key: "tomorrow_9am", label: "Tomorrow 9:00 AM", sub: "" },
-                        { key: "tomorrow_2pm", label: "Tomorrow 2:00 PM", sub: "" },
-                        { key: "next_monday", label: "Next Monday 9:00 AM", sub: "" },
+                        { key: "2h", label: "In 2 hours" },
+                        { key: "4h", label: "In 4 hours" },
+                        { key: "tomorrow_9am", label: "Tomorrow 9:00 AM" },
+                        { key: "tomorrow_2pm", label: "Tomorrow 2:00 PM" },
+                        { key: "next_monday", label: "Next Monday 9:00 AM" },
                       ].map((preset) => (
                         <button
                           key={preset.key}
                           disabled={settingFollowUp}
                           onClick={() => handleSetFollowUp(getFollowUpTime(preset.key))}
-                          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-[#12161B] transition-colors disabled:opacity-50"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-[#12161B] transition-colors disabled:opacity-50"
                         >
-                          <AlarmClock size={13} className="text-[#F0883E] flex-shrink-0" />
-                          <span className="text-xs text-[#E6EDF3]">{preset.label}</span>
+                          <AlarmClock size={12} className="text-[#F0883E] flex-shrink-0" />
+                          <span className="text-[11px] text-[#E6EDF3]">{preset.label}</span>
                         </button>
                       ))}
                     </div>
@@ -2501,7 +2566,7 @@ export default function ConversationDetail({
                         }}
                         className="w-full px-3 py-1.5 rounded-lg bg-[#F0883E] text-[#0B0E11] text-xs font-semibold hover:bg-[#f09e5e] disabled:opacity-50 transition-colors"
                       >
-                        {settingFollowUp ? "Setting..." : "Set Reminder"}
+                        {settingFollowUp ? "Setting..." : activeReminder ? "Reschedule" : "Set Reminder"}
                       </button>
                     </div>
                   </div>
