@@ -93,7 +93,8 @@ export async function GET(req: NextRequest) {
     const { data } = await q;
 
     result.tasks = [];
-    for (const t of (data || [])) {
+    for (const _t of (data || [])) {
+      const t = _t as any;
       const assignees = (t.task_assignees || []).map((a: any) => ({
         name: a.team_member?.name || "",
         email: a.team_member?.email || "",
@@ -112,7 +113,7 @@ export async function GET(req: NextRequest) {
           task_id: t.id,
           task_text: t.text,
           task_status: t.status || "todo",
-          category: (t.category as any)?.name || "",
+          category: t.category?.name || "",
           due_date: t.due_date || "",
           due_time: t.due_time || "",
           conversation_id: t.conversation_id || "",
