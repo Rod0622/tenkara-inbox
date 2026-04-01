@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
           task_id: t.id,
           task_text: t.text,
           task_status: t.status || "todo",
-          category: t.category?.name || "",
+          category: (t.category as any)?.name || "",
           due_date: t.due_date || "",
           due_time: t.due_time || "",
           conversation_id: t.conversation_id || "",
