@@ -1064,18 +1064,32 @@ const DATASETS = [
 ] as const;
 
 function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: string | null }) {
+  const [exportMode, setExportMode] = useState<"single" | "custom">("single");
   const [selectedDataset, setSelectedDataset] = useState<string>("conversations");
   const [exportFormat, setExportFormat] = useState<"xlsx" | "csv" | "json" | "pdf">("xlsx");
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Single dataset mode
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [allColumns, setAllColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
-  const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Fetch preview when dataset changes
+  // Custom mode — all datasets loaded
+  const [allData, setAllData] = useState<Record<string, any[]>>({});
+  const [allDataColumns, setAllDataColumns] = useState<Record<string, string[]>>({});
+  const [customSelectedColumns, setCustomSelectedColumns] = useState<Record<string, Set<string>>>({});
+  const [customLoading, setCustomLoading] = useState(false);
+
+  // Fetch single dataset preview
   useEffect(() => {
-    loadPreview();
-  }, [selectedDataset]);
+    if (exportMode === "single") loadPreview();
+  }, [selectedDataset, exportMode]);
+
+  // Fetch all datasets for custom mode
+  useEffect(() => {
+    if (exportMode === "custom") loadAllData();
+  }, [exportMode]);
 
   async function loadPreview() {
     setPreviewLoading(true);
@@ -1087,169 +1101,289 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       const data = await res.json();
       const rows = data[selectedDataset] || [];
       setPreviewData(rows);
-
       if (rows.length > 0) {
         const cols = Object.keys(rows[0]);
         setAllColumns(cols);
-        setSelectedColumns(new Set(cols)); // All selected by default
-      } else {
-        setAllColumns([]);
-        setSelectedColumns(new Set());
+        setSelectedColumns(new Set(cols));
+      } else { setAllColumns([]); setSelectedColumns(new Set()); }
+    } catch (_e) { setPreviewData([]); setAllColumns([]); }
+    finally { setPreviewLoading(false); }
+  }
+
+  async function loadAllData() {
+    setCustomLoading(true);
+    try {
+      let url = "/api/export?dataset=all";
+      if (dateFrom) url += "&date_from=" + dateFrom;
+      if (dateTo) url += "&date_to=" + dateTo;
+      const res = await fetch(url);
+      const data = await res.json();
+      setAllData(data);
+      const colMap: Record<string, string[]> = {};
+      const selMap: Record<string, Set<string>> = {};
+      for (const ds of DATASETS) {
+        const rows = data[ds.id] || [];
+        colMap[ds.id] = rows.length > 0 ? Object.keys(rows[0]) : [];
+        selMap[ds.id] = new Set(); // Start with none selected in custom mode
       }
-    } catch (_e) {
-      setPreviewData([]);
-      setAllColumns([]);
-    } finally {
-      setPreviewLoading(false);
-    }
+      setAllDataColumns(colMap);
+      setCustomSelectedColumns(selMap);
+    } catch (_e) {}
+    finally { setCustomLoading(false); }
   }
 
   function toggleColumn(col: string) {
-    setSelectedColumns((prev) => {
-      const next = new Set(prev);
-      if (next.has(col)) next.delete(col);
-      else next.add(col);
-      return next;
+    setSelectedColumns((prev) => { const n = new Set(prev); if (n.has(col)) n.delete(col); else n.add(col); return n; });
+  }
+
+  function toggleCustomColumn(dsId: string, col: string) {
+    setCustomSelectedColumns((prev) => {
+      const n = { ...prev };
+      const s = new Set(n[dsId] || []);
+      if (s.has(col)) s.delete(col); else s.add(col);
+      n[dsId] = s;
+      return n;
     });
   }
 
-  function selectAll() { setSelectedColumns(new Set(allColumns)); }
-  function deselectAll() { setSelectedColumns(new Set()); }
+  function selectAllCustom(dsId: string) {
+    setCustomSelectedColumns((prev) => ({ ...prev, [dsId]: new Set(allDataColumns[dsId] || []) }));
+  }
+  function deselectAllCustom(dsId: string) {
+    setCustomSelectedColumns((prev) => ({ ...prev, [dsId]: new Set() }));
+  }
+
+  // Count total custom selected columns
+  const totalCustomSelected = Object.values(customSelectedColumns).reduce((sum, s) => sum + s.size, 0);
+
+  // Build custom export data — merge selected columns from all datasets into one flat table
+  function buildCustomExportData(): { rows: any[]; columns: string[] } {
+    const cols: string[] = [];
+    const dsWithCols: { dsId: string; columns: string[] }[] = [];
+
+    for (const ds of DATASETS) {
+      const sel = customSelectedColumns[ds.id];
+      if (!sel || sel.size === 0) continue;
+      const dsCols = (allDataColumns[ds.id] || []).filter((c) => sel.has(c));
+      // Prefix columns with dataset name to avoid collision
+      const prefixed = dsCols.map((c) => ds.label + " — " + c.replace(/_/g, " "));
+      cols.push(...prefixed);
+      dsWithCols.push({ dsId: ds.id, columns: dsCols });
+    }
+
+    // Find the dataset with the most rows to drive the export
+    let maxRows = 0;
+    for (const { dsId } of dsWithCols) {
+      maxRows = Math.max(maxRows, (allData[dsId] || []).length);
+    }
+
+    const rows: any[] = [];
+    for (let i = 0; i < maxRows; i++) {
+      const row: any = {};
+      for (const { dsId, columns: dsCols } of dsWithCols) {
+        const dsLabel = DATASETS.find((d) => d.id === dsId)?.label || dsId;
+        const srcRow = (allData[dsId] || [])[i] || {};
+        for (const c of dsCols) {
+          row[dsLabel + " — " + c.replace(/_/g, " ")] = srcRow[c] ?? "";
+        }
+      }
+      rows.push(row);
+    }
+
+    return { rows, columns: cols };
+  }
 
   async function handleExport() {
-    if (!previewData || selectedColumns.size === 0) return;
     setLoading(true);
-
     try {
-      const cols = allColumns.filter((c) => selectedColumns.has(c));
-      const filtered = previewData.map((row) => {
-        const obj: any = {};
-        for (const c of cols) obj[c] = row[c] ?? "";
-        return obj;
-      });
+      let exportRows: any[];
+      let exportCols: string[];
+      let filename: string;
 
-      const filename = "tenkara_" + selectedDataset + "_" + new Date().toISOString().slice(0, 10);
-
-      if (exportFormat === "json") {
-        downloadJSON(filtered, filename);
-      } else if (exportFormat === "csv") {
-        downloadCSV(filtered, cols, filename);
-      } else if (exportFormat === "xlsx") {
-        await downloadXLSX(filtered, cols, filename, selectedDataset);
-      } else if (exportFormat === "pdf") {
-        downloadPDFTable(filtered, cols, filename, selectedDataset);
+      if (exportMode === "custom") {
+        const { rows, columns } = buildCustomExportData();
+        exportRows = rows;
+        exportCols = columns;
+        filename = "tenkara_custom_export_" + new Date().toISOString().slice(0, 10);
+      } else {
+        const cols = allColumns.filter((c) => selectedColumns.has(c));
+        exportRows = (previewData || []).map((row) => {
+          const obj: any = {};
+          for (const c of cols) obj[c] = row[c] ?? "";
+          return obj;
+        });
+        exportCols = cols;
+        filename = "tenkara_" + selectedDataset + "_" + new Date().toISOString().slice(0, 10);
       }
+
+      if (exportRows.length === 0) { alert("No data to export"); setLoading(false); return; }
+
+      if (exportFormat === "json") downloadJSON(exportRows, filename);
+      else if (exportFormat === "csv") downloadCSV(exportRows, exportCols, filename);
+      else if (exportFormat === "xlsx") {
+        if (exportMode === "custom") {
+          await downloadXLSXMultiSheet(allData, allDataColumns, customSelectedColumns, filename);
+        } else {
+          await downloadXLSX(exportRows, exportCols, filename, selectedDataset);
+        }
+      }
+      else if (exportFormat === "pdf") downloadPDFTable(exportRows, exportCols, filename, exportMode === "custom" ? "Custom Export" : selectedDataset);
     } catch (e) {
       console.error("Export failed:", e);
       alert("Export failed: " + (e as any)?.message);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
-
-  const dsInfo = DATASETS.find((d) => d.id === selectedDataset);
 
   return (
     <div className="space-y-4">
-      {/* Dataset selector */}
-      <div className="grid grid-cols-3 gap-2">
-        {DATASETS.map((ds) => (
-          <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
-            className={`p-3 rounded-xl border text-left transition-all ${
-              selectedDataset === ds.id ? "border-[#4ADE80]/40 bg-[#4ADE80]/5" : "border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/20"
-            }`}
-          >
-            <div className="text-xs font-semibold text-[#E6EDF3]">{ds.label}</div>
-            <div className="text-[10px] text-[#484F58] mt-0.5">{ds.desc}</div>
-          </button>
-        ))}
+      {/* Mode switcher */}
+      <div className="flex items-center gap-2">
+        <button onClick={() => setExportMode("single")}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "single" ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"}`}
+        >Single Dataset</button>
+        <button onClick={() => setExportMode("custom")}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "custom" ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"}`}
+        >Custom (Mix Columns)</button>
       </div>
 
-      {previewLoading ? (
-        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
-      ) : (
+      {/* ── SINGLE DATASET MODE ── */}
+      {exportMode === "single" && (
         <>
-          {/* Column picker */}
-          <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-xs font-bold text-[#E6EDF3]">Select Columns</div>
-                <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {previewData?.length || 0} rows</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={selectAll} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Select all</button>
-                <span className="text-[#1E242C]">|</span>
-                <button onClick={deselectAll} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Deselect all</button>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {allColumns.map((col) => (
-                <button key={col} onClick={() => toggleColumn(col)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                    selectedColumns.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
-                  }`}
-                >
-                  {col.replace(/_/g, " ")}
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-3 gap-2">
+            {DATASETS.map((ds) => (
+              <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
+                className={`p-3 rounded-xl border text-left transition-all ${selectedDataset === ds.id ? "border-[#4ADE80]/40 bg-[#4ADE80]/5" : "border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/20"}`}
+              >
+                <div className="text-xs font-semibold text-[#E6EDF3]">{ds.label}</div>
+                <div className="text-[10px] text-[#484F58] mt-0.5">{ds.desc}</div>
+              </button>
+            ))}
           </div>
 
-          {/* Preview table */}
-          {previewData && previewData.length > 0 && selectedColumns.size > 0 && (
-            <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] overflow-hidden">
-              <div className="px-4 py-2 border-b border-[#1E242C] text-[10px] text-[#484F58]">Preview (first 5 rows)</div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-[#1E242C]">
-                      {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
-                        <th key={col} className="px-3 py-2 text-left text-[10px] text-[#484F58] font-semibold uppercase whitespace-nowrap">{col.replace(/_/g, " ")}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewData.slice(0, 5).map((row, i) => (
-                      <tr key={i} className="border-b border-[#1E242C]/50">
+          {previewLoading ? (
+            <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+          ) : (
+            <>
+              <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-xs font-bold text-[#E6EDF3]">Select Columns</div>
+                    <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {previewData?.length || 0} rows</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setSelectedColumns(new Set(allColumns))} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Select all</button>
+                    <span className="text-[#1E242C]">|</span>
+                    <button onClick={() => setSelectedColumns(new Set())} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Deselect all</button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {allColumns.map((col) => (
+                    <button key={col} onClick={() => toggleColumn(col)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${selectedColumns.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}
+                    >{col.replace(/_/g, " ")}</button>
+                  ))}
+                </div>
+              </div>
+
+              {previewData && previewData.length > 0 && selectedColumns.size > 0 && (
+                <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] overflow-hidden">
+                  <div className="px-4 py-2 border-b border-[#1E242C] text-[10px] text-[#484F58]">Preview (first 5 rows)</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead><tr className="border-b border-[#1E242C]">
                         {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
-                          <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">{String(row[col] ?? "")}</td>
+                          <th key={col} className="px-3 py-2 text-left text-[10px] text-[#484F58] font-semibold uppercase whitespace-nowrap">{col.replace(/_/g, " ")}</th>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                      </tr></thead>
+                      <tbody>
+                        {previewData.slice(0, 5).map((row, i) => (
+                          <tr key={i} className="border-b border-[#1E242C]/50">
+                            {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
+                              <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">{String(row[col] ?? "")}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-
-          {/* Export format + button */}
-          <div className="flex items-center justify-between p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#484F58]">Format:</span>
-              {([
-                { id: "xlsx" as const, label: "Excel (.xlsx)", icon: <FileSpreadsheet size={14} /> },
-                { id: "csv" as const, label: "CSV", icon: <FileText size={14} /> },
-                { id: "json" as const, label: "JSON", icon: <FileJson size={14} /> },
-                { id: "pdf" as const, label: "PDF", icon: <FileText size={14} /> },
-              ]).map((fmt) => (
-                <button key={fmt.id} onClick={() => setExportFormat(fmt.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    exportFormat === fmt.id ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
-                  }`}
-                >{fmt.icon} {fmt.label}</button>
-              ))}
-            </div>
-            <button
-              onClick={handleExport}
-              disabled={loading || selectedColumns.size === 0 || !previewData?.length}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors"
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {loading ? "Exporting..." : `Export ${previewData?.length || 0} rows`}
-            </button>
-          </div>
         </>
       )}
+
+      {/* ── CUSTOM MODE — pick columns from all datasets ── */}
+      {exportMode === "custom" && (
+        <>
+          {customLoading ? (
+            <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-xs text-[#484F58]">Pick columns from any dataset. For XLSX, each dataset becomes a separate sheet. For CSV/JSON/PDF, columns are merged into one table.</div>
+
+              {DATASETS.map((ds) => {
+                const cols = allDataColumns[ds.id] || [];
+                const sel = customSelectedColumns[ds.id] || new Set();
+                const rowCount = (allData[ds.id] || []).length;
+                if (cols.length === 0) return null;
+
+                return (
+                  <div key={ds.id} className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="text-xs font-bold text-[#E6EDF3]">{ds.label}</span>
+                        <span className="text-[10px] text-[#484F58] ml-2">{sel.size}/{cols.length} columns · {rowCount} rows</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => selectAllCustom(ds.id)} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">All</button>
+                        <span className="text-[#1E242C]">|</span>
+                        <button onClick={() => deselectAllCustom(ds.id)} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">None</button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {cols.map((col) => (
+                        <button key={col} onClick={() => toggleCustomColumn(ds.id, col)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${sel.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}
+                        >{col.replace(/_/g, " ")}</button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="text-xs text-[#7D8590]">{totalCustomSelected} columns selected across all datasets</div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Export format + button */}
+      <div className="flex items-center justify-between p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[#484F58]">Format:</span>
+          {([
+            { id: "xlsx" as const, label: "Excel (.xlsx)", icon: <FileSpreadsheet size={14} /> },
+            { id: "csv" as const, label: "CSV", icon: <FileText size={14} /> },
+            { id: "json" as const, label: "JSON", icon: <FileJson size={14} /> },
+            { id: "pdf" as const, label: "PDF", icon: <FileText size={14} /> },
+          ]).map((fmt) => (
+            <button key={fmt.id} onClick={() => setExportFormat(fmt.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                exportFormat === fmt.id ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+              }`}
+            >{fmt.icon} {fmt.label}</button>
+          ))}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={loading || (exportMode === "single" ? (selectedColumns.size === 0 || !previewData?.length) : totalCustomSelected === 0)}
+          className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors"
+        >
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {loading ? "Exporting..." : "Export"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1275,19 +1409,49 @@ function downloadCSV(data: any[], columns: string[], filename: string) {
 }
 
 async function downloadXLSX(data: any[], columns: string[], filename: string, sheetName: string) {
-  // Dynamic import of SheetJS
   const XLSX = await import("xlsx");
   const ws = XLSX.utils.json_to_sheet(data, { header: columns });
-
-  // Auto-width columns
   const colWidths = columns.map((col) => {
     const maxLen = Math.max(col.length, ...data.slice(0, 100).map((r) => String(r[col] ?? "").length));
     return { wch: Math.min(maxLen + 2, 50) };
   });
   ws["!cols"] = colWidths;
-
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  triggerDownload(blob, filename + ".xlsx");
+}
+
+async function downloadXLSXMultiSheet(
+  allData: Record<string, any[]>,
+  allDataColumns: Record<string, string[]>,
+  customSelectedColumns: Record<string, Set<string>>,
+  filename: string
+) {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+
+  for (const ds of DATASETS) {
+    const sel = customSelectedColumns[ds.id];
+    if (!sel || sel.size === 0) continue;
+    const cols = (allDataColumns[ds.id] || []).filter((c) => sel.has(c));
+    const rows = (allData[ds.id] || []).map((row) => {
+      const obj: any = {};
+      for (const c of cols) obj[c] = row[c] ?? "";
+      return obj;
+    });
+    if (rows.length === 0) continue;
+
+    const ws = XLSX.utils.json_to_sheet(rows, { header: cols });
+    const colWidths = cols.map((col) => {
+      const maxLen = Math.max(col.length, ...rows.slice(0, 100).map((r) => String(r[col] ?? "").length));
+      return { wch: Math.min(maxLen + 2, 50) };
+    });
+    ws["!cols"] = colWidths;
+    XLSX.utils.book_append_sheet(wb, ws, ds.label.slice(0, 31));
+  }
+
   const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   triggerDownload(blob, filename + ".xlsx");
