@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, Loader2, Users, CheckCircle2, AlertTriangle,
   ListTodo, Mail, CalendarClock, Send, ChevronDown, X,
-  ExternalLink, Inbox, Eye
+  ExternalLink, Inbox, Eye, Download, FileSpreadsheet, FileJson, FileText
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -67,7 +67,7 @@ interface SentEmail {
   from_email: string;
 }
 
-type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla";
+type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -609,6 +609,7 @@ export default function DashboardPage() {
           { id: "critical", label: "Critical Tasks (" + criticalTasks.length + ")" },
           { id: "all-tasks", label: "All Tasks (" + allTasks.length + ")" },
           { id: "sla", label: "SLA / Response Times" },
+          { id: "export", label: "Export Data" },
         ] as { id: ViewMode; label: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => { setViewMode(tab.id); setSelectedUserId(null); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
@@ -968,6 +969,11 @@ export default function DashboardPage() {
             )}
           </div>
         )}
+
+        {/* ── EXPORT DATA ─── */}
+        {viewMode === "export" && (
+          <ExportPanel dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} />
+        )}
       </div>
     </div>
   );
@@ -1044,4 +1050,273 @@ function TaskRow({ task }: { task: TaskDetail }) {
 
 function Empty({ text }: { text: string }) {
   return <div className="text-center py-16 text-[#484F58] text-sm">{text}</div>;
+}
+
+// ── Export Panel ──────────────────────────────────────
+
+const DATASETS = [
+  { id: "conversations", label: "Conversations", desc: "All email threads with assignee, account, status" },
+  { id: "messages", label: "Messages", desc: "Individual emails with sender, recipient, timestamps" },
+  { id: "tasks", label: "Tasks", desc: "All tasks with assignees, categories, due dates, completion" },
+  { id: "team_members", label: "Team Members", desc: "User profiles, roles, departments" },
+  { id: "sla", label: "SLA Metrics", desc: "Response times, waiting times, reply status per conversation" },
+  { id: "activity", label: "Activity Log", desc: "All actions: assignments, replies, status changes" },
+] as const;
+
+function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: string | null }) {
+  const [selectedDataset, setSelectedDataset] = useState<string>("conversations");
+  const [exportFormat, setExportFormat] = useState<"xlsx" | "csv" | "json" | "pdf">("xlsx");
+  const [loading, setLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<any[] | null>(null);
+  const [allColumns, setAllColumns] = useState<string[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Fetch preview when dataset changes
+  useEffect(() => {
+    loadPreview();
+  }, [selectedDataset]);
+
+  async function loadPreview() {
+    setPreviewLoading(true);
+    try {
+      let url = "/api/export?dataset=" + selectedDataset;
+      if (dateFrom) url += "&date_from=" + dateFrom;
+      if (dateTo) url += "&date_to=" + dateTo;
+      const res = await fetch(url);
+      const data = await res.json();
+      const rows = data[selectedDataset] || [];
+      setPreviewData(rows);
+
+      if (rows.length > 0) {
+        const cols = Object.keys(rows[0]);
+        setAllColumns(cols);
+        setSelectedColumns(new Set(cols)); // All selected by default
+      } else {
+        setAllColumns([]);
+        setSelectedColumns(new Set());
+      }
+    } catch (_e) {
+      setPreviewData([]);
+      setAllColumns([]);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  function toggleColumn(col: string) {
+    setSelectedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(col)) next.delete(col);
+      else next.add(col);
+      return next;
+    });
+  }
+
+  function selectAll() { setSelectedColumns(new Set(allColumns)); }
+  function deselectAll() { setSelectedColumns(new Set()); }
+
+  async function handleExport() {
+    if (!previewData || selectedColumns.size === 0) return;
+    setLoading(true);
+
+    try {
+      const cols = allColumns.filter((c) => selectedColumns.has(c));
+      const filtered = previewData.map((row) => {
+        const obj: any = {};
+        for (const c of cols) obj[c] = row[c] ?? "";
+        return obj;
+      });
+
+      const filename = "tenkara_" + selectedDataset + "_" + new Date().toISOString().slice(0, 10);
+
+      if (exportFormat === "json") {
+        downloadJSON(filtered, filename);
+      } else if (exportFormat === "csv") {
+        downloadCSV(filtered, cols, filename);
+      } else if (exportFormat === "xlsx") {
+        await downloadXLSX(filtered, cols, filename, selectedDataset);
+      } else if (exportFormat === "pdf") {
+        downloadPDFTable(filtered, cols, filename, selectedDataset);
+      }
+    } catch (e) {
+      console.error("Export failed:", e);
+      alert("Export failed: " + (e as any)?.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const dsInfo = DATASETS.find((d) => d.id === selectedDataset);
+
+  return (
+    <div className="space-y-4">
+      {/* Dataset selector */}
+      <div className="grid grid-cols-3 gap-2">
+        {DATASETS.map((ds) => (
+          <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
+            className={`p-3 rounded-xl border text-left transition-all ${
+              selectedDataset === ds.id ? "border-[#4ADE80]/40 bg-[#4ADE80]/5" : "border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/20"
+            }`}
+          >
+            <div className="text-xs font-semibold text-[#E6EDF3]">{ds.label}</div>
+            <div className="text-[10px] text-[#484F58] mt-0.5">{ds.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {previewLoading ? (
+        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <>
+          {/* Column picker */}
+          <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-xs font-bold text-[#E6EDF3]">Select Columns</div>
+                <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {previewData?.length || 0} rows</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={selectAll} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Select all</button>
+                <span className="text-[#1E242C]">|</span>
+                <button onClick={deselectAll} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Deselect all</button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {allColumns.map((col) => (
+                <button key={col} onClick={() => toggleColumn(col)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                    selectedColumns.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
+                  }`}
+                >
+                  {col.replace(/_/g, " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview table */}
+          {previewData && previewData.length > 0 && selectedColumns.size > 0 && (
+            <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[#1E242C] text-[10px] text-[#484F58]">Preview (first 5 rows)</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-[#1E242C]">
+                      {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
+                        <th key={col} className="px-3 py-2 text-left text-[10px] text-[#484F58] font-semibold uppercase whitespace-nowrap">{col.replace(/_/g, " ")}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.slice(0, 5).map((row, i) => (
+                      <tr key={i} className="border-b border-[#1E242C]/50">
+                        {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
+                          <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">{String(row[col] ?? "")}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Export format + button */}
+          <div className="flex items-center justify-between p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#484F58]">Format:</span>
+              {([
+                { id: "xlsx" as const, label: "Excel (.xlsx)", icon: <FileSpreadsheet size={14} /> },
+                { id: "csv" as const, label: "CSV", icon: <FileText size={14} /> },
+                { id: "json" as const, label: "JSON", icon: <FileJson size={14} /> },
+                { id: "pdf" as const, label: "PDF", icon: <FileText size={14} /> },
+              ]).map((fmt) => (
+                <button key={fmt.id} onClick={() => setExportFormat(fmt.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    exportFormat === fmt.id ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+                  }`}
+                >{fmt.icon} {fmt.label}</button>
+              ))}
+            </div>
+            <button
+              onClick={handleExport}
+              disabled={loading || selectedColumns.size === 0 || !previewData?.length}
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              {loading ? "Exporting..." : `Export ${previewData?.length || 0} rows`}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Export helpers ─────────────────────────────────────
+
+function downloadJSON(data: any[], filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  triggerDownload(blob, filename + ".json");
+}
+
+function downloadCSV(data: any[], columns: string[], filename: string) {
+  const header = columns.join(",");
+  const rows = data.map((row) =>
+    columns.map((col) => {
+      const val = String(row[col] ?? "").replace(/"/g, '""');
+      return val.includes(",") || val.includes('"') || val.includes("\n") ? `"${val}"` : val;
+    }).join(",")
+  );
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  triggerDownload(blob, filename + ".csv");
+}
+
+async function downloadXLSX(data: any[], columns: string[], filename: string, sheetName: string) {
+  // Dynamic import of SheetJS
+  const XLSX = await import("xlsx");
+  const ws = XLSX.utils.json_to_sheet(data, { header: columns });
+
+  // Auto-width columns
+  const colWidths = columns.map((col) => {
+    const maxLen = Math.max(col.length, ...data.slice(0, 100).map((r) => String(r[col] ?? "").length));
+    return { wch: Math.min(maxLen + 2, 50) };
+  });
+  ws["!cols"] = colWidths;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  triggerDownload(blob, filename + ".xlsx");
+}
+
+function downloadPDFTable(data: any[], columns: string[], filename: string, title: string) {
+  // Generate a simple HTML table and trigger print-to-PDF
+  const headerCells = columns.map((c) => `<th style="border:1px solid #ccc;padding:4px 8px;background:#f0f0f0;font-size:10px;white-space:nowrap">${c.replace(/_/g, " ")}</th>`).join("");
+  const bodyRows = data.map((row) =>
+    "<tr>" + columns.map((c) => `<td style="border:1px solid #eee;padding:3px 6px;font-size:9px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${String(row[c] ?? "")}</td>`).join("") + "</tr>"
+  ).join("");
+
+  const html = `<!DOCTYPE html><html><head><title>${title}</title><style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:16px;margin-bottom:8px}p{font-size:11px;color:#666;margin-bottom:16px}table{border-collapse:collapse;width:100%}</style></head><body><h1>Tenkara Inbox — ${title}</h1><p>Exported ${new Date().toLocaleString()} · ${data.length} rows</p><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`;
+
+  const w = window.open("", "_blank");
+  if (w) {
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+  }
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
