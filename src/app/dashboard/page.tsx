@@ -54,6 +54,8 @@ interface ConversationDetail {
   assignee_id: string | null;
   email_account_name: string;
   folder_name: string | null;
+  reply_status: "awaiting_our_reply" | "awaiting_supplier_reply" | "internal" | "unknown";
+  waiting_hours: number;
 }
 
 interface SentEmail {
@@ -439,12 +441,48 @@ export default function DashboardPage() {
 
     const { data: convos } = await convosQuery;
 
-    const uConvos: ConversationDetail[] = (convos || []).map((c: any) => ({
-      id: c.id, subject: c.subject, from_name: c.from_name, from_email: c.from_email,
-      preview: c.preview || "", status: c.status, is_unread: c.is_unread,
-      last_message_at: c.last_message_at, assignee_id: c.assignee_id,
-      email_account_name: c.email_account?.name || "", folder_name: c.folder?.name || null,
-    }));
+    // Fetch last message per conversation to determine reply status
+    const convoIds = (convos || []).map((c: any) => c.id);
+    let lastMsgMap: Record<string, { is_outbound: boolean; sent_at: string }> = {};
+    if (convoIds.length > 0) {
+      for (let i = 0; i < convoIds.length; i += 50) {
+        const batch = convoIds.slice(i, i + 50);
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("conversation_id, is_outbound, sent_at")
+          .in("conversation_id", batch)
+          .order("sent_at", { ascending: false });
+        // Keep only the latest message per conversation
+        for (const msg of (msgs || [])) {
+          if (!lastMsgMap[msg.conversation_id]) {
+            lastMsgMap[msg.conversation_id] = { is_outbound: msg.is_outbound, sent_at: msg.sent_at };
+          }
+        }
+      }
+    }
+
+    const now = new Date();
+    const uConvos: ConversationDetail[] = (convos || []).map((c: any) => {
+      const lastMsg = lastMsgMap[c.id];
+      let replyStatus: ConversationDetail["reply_status"] = "unknown";
+      let waitingHours = 0;
+
+      if (c.from_email === "internal") {
+        replyStatus = "internal";
+      } else if (lastMsg) {
+        const msgTime = new Date(lastMsg.sent_at);
+        waitingHours = Math.round((now.getTime() - msgTime.getTime()) / (1000 * 60 * 60) * 10) / 10;
+        replyStatus = lastMsg.is_outbound ? "awaiting_supplier_reply" : "awaiting_our_reply";
+      }
+
+      return {
+        id: c.id, subject: c.subject, from_name: c.from_name, from_email: c.from_email,
+        preview: c.preview || "", status: c.status, is_unread: c.is_unread,
+        last_message_at: c.last_message_at, assignee_id: c.assignee_id,
+        email_account_name: c.email_account?.name || "", folder_name: c.folder?.name || null,
+        reply_status: replyStatus, waiting_hours: waitingHours,
+      };
+    });
 
     // Fetch sent emails — filter by sent_by_user_id for accurate per-user tracking
     let sentQuery = supabase
@@ -668,11 +706,13 @@ export default function DashboardPage() {
                 <div className="text-lg font-bold">{selectedUser.name}</div>
                 <div className="text-xs text-[#484F58]">{selectedUser.email} · {selectedUser.department} · {selectedUser.role}</div>
               </div>
-              <div className="grid grid-cols-4 gap-6 text-center">
+              <div className="grid grid-cols-6 gap-4 text-center">
                 <div><div className="text-xl font-bold text-[#58A6FF]">{selectedUser.tasks.todo + selectedUser.tasks.in_progress}</div><div className="text-[10px] text-[#484F58]">Open Tasks</div></div>
                 <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.tasks.completed}</div><div className="text-[10px] text-[#484F58]">Completed</div></div>
                 <div><div className="text-xl font-bold" style={{ color: selectedUser.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{selectedUser.tasks.overdue}</div><div className="text-[10px] text-[#484F58]">Overdue</div></div>
-                <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[#484F58]">Emails Sent</div></div>
+                <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[#484F58]">Sent</div></div>
+                <div><div className="text-xl font-bold text-[#F85149]">{userConversations.filter((c) => c.reply_status === "awaiting_our_reply").length}</div><div className="text-[10px] text-[#484F58]">Need Reply</div></div>
+                <div><div className="text-xl font-bold text-[#F0883E]">{userConversations.filter((c) => c.reply_status === "awaiting_supplier_reply").length}</div><div className="text-[10px] text-[#484F58]">Waiting Supplier</div></div>
               </div>
             </div>
 
@@ -705,13 +745,43 @@ export default function DashboardPage() {
                   <div className="space-y-1">
                     {userConversations.length === 0 ? <Empty text="No assigned conversations" /> : userConversations.map((c) => (
                       <Link key={c.id} href={"/#conversation=" + c.id}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#58A6FF]/30 transition-all"
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border bg-[#0F1318] hover:border-[#58A6FF]/30 transition-all ${
+                          c.reply_status === "awaiting_our_reply" && c.waiting_hours > 24 ? "border-[#F85149]/30" : "border-[#1E242C]"
+                        }`}
                       >
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${c.is_unread ? "bg-[#58A6FF]" : "bg-transparent"}`} />
+                        {/* Status indicator */}
+                        <div className="flex-shrink-0 w-2.5">
+                          {c.is_unread ? (
+                            <div className="w-2 h-2 rounded-full bg-[#58A6FF]" />
+                          ) : c.reply_status === "awaiting_our_reply" ? (
+                            <div className="w-2 h-2 rounded-full bg-[#F85149]" title="Awaiting our reply" />
+                          ) : c.reply_status === "awaiting_supplier_reply" ? (
+                            <div className="w-2 h-2 rounded-full bg-[#F0883E]" title="Awaiting supplier reply" />
+                          ) : (
+                            <div className="w-2 h-2 rounded-full bg-transparent" />
+                          )}
+                        </div>
+
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-medium truncate">{c.subject}</div>
                           <div className="text-[11px] text-[#484F58] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
                         </div>
+
+                        {/* Reply status badge */}
+                        <div className="flex-shrink-0">
+                          {c.reply_status === "awaiting_our_reply" ? (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                              c.waiting_hours > 24 ? "bg-[#F85149]/15 text-[#F85149]" : "bg-[#F85149]/10 text-[#F85149]"
+                            }`}>
+                              Needs reply · {formatBusinessTime(c.waiting_hours)}
+                            </span>
+                          ) : c.reply_status === "awaiting_supplier_reply" ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F0883E]/10 text-[#F0883E]">
+                              Waiting supplier · {formatBusinessTime(c.waiting_hours)}
+                            </span>
+                          ) : null}
+                        </div>
+
                         <div className="text-[10px] text-[#484F58] flex-shrink-0">{c.email_account_name}</div>
                         <div className="text-[10px] text-[#484F58] flex-shrink-0">{new Date(c.last_message_at).toLocaleDateString()}</div>
                         <ExternalLink size={12} className="text-[#484F58]" />
