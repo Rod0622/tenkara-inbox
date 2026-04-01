@@ -65,7 +65,7 @@ interface SentEmail {
   from_email: string;
 }
 
-type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail";
+type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -112,6 +112,16 @@ function getBusinessHoursElapsed(dueDate: string): number {
     if (hours > 500) break;
   }
   return hours;
+}
+
+function formatBusinessTime(hours: number): string {
+  if (hours === 0) return "0h";
+  if (hours < 1) return "<1h";
+  if (hours < 11) return Math.round(hours) + "h";
+  const days = Math.floor(hours / 11);
+  const remHours = Math.round(hours % 11);
+  if (remHours === 0) return days + "d";
+  return days + "d " + remHours + "h";
 }
 
 function formatDueDate(date: string | null): string {
@@ -205,7 +215,33 @@ export default function DashboardPage() {
   const [taskFilterUser, setTaskFilterUser] = useState<string | null>(null);
   const [dashTaskSearch, setDashTaskSearch] = useState("");
 
+  // SLA/KPI metrics
+  const [slaData, setSlaData] = useState<any>(null);
+  const [slaLoading, setSlaLoading] = useState(false);
+  const [slaSubTab, setSlaSubTab] = useState<"response-times" | "awaiting-ours" | "awaiting-supplier">("response-times");
+
   useEffect(() => { loadDashboardData(); }, [dateFrom, dateTo]);
+
+  // Load SLA data when switching to SLA tab or when dates change
+  useEffect(() => {
+    if (viewMode === "sla") loadSlaData();
+  }, [viewMode, dateFrom, dateTo]);
+
+  async function loadSlaData() {
+    setSlaLoading(true);
+    try {
+      let url = "/api/metrics?";
+      if (effectiveDateFrom) url += "date_from=" + effectiveDateFrom + "&";
+      if (effectiveDateTo) url += "date_to=" + effectiveDateTo + "&";
+      const res = await fetch(url);
+      const data = await res.json();
+      setSlaData(data);
+    } catch (_e) {
+      console.error("Failed to load SLA metrics");
+    } finally {
+      setSlaLoading(false);
+    }
+  }
 
   // Reload user detail when dates change
   useEffect(() => {
@@ -534,6 +570,7 @@ export default function DashboardPage() {
           { id: "overview", label: "Team Overview" },
           { id: "critical", label: "Critical Tasks (" + criticalTasks.length + ")" },
           { id: "all-tasks", label: "All Tasks (" + allTasks.length + ")" },
+          { id: "sla", label: "SLA / Response Times" },
         ] as { id: ViewMode; label: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => { setViewMode(tab.id); setSelectedUserId(null); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
@@ -702,6 +739,162 @@ export default function DashboardPage() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── SLA / RESPONSE TIMES ─── */}
+        {viewMode === "sla" && (
+          <div>
+            {slaLoading ? (
+              <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+            ) : slaData ? (
+              <>
+                {/* KPI Summary Cards */}
+                <div className="grid grid-cols-4 gap-3 mb-4">
+                  <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+                    <div className="text-[10px] text-[#484F58] uppercase font-semibold mb-1">Avg Response Time</div>
+                    <div className="text-2xl font-bold text-[#4ADE80]">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
+                    <div className="text-[10px] text-[#484F58] mt-1">business hours</div>
+                  </div>
+                  <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+                    <div className="text-[10px] text-[#484F58] uppercase font-semibold mb-1">Total Responses</div>
+                    <div className="text-2xl font-bold text-[#E6EDF3]">{slaData.overall.total_responses}</div>
+                  </div>
+                  <div className="rounded-xl border border-[#F85149]/20 bg-[#F85149]/5 p-4">
+                    <div className="text-[10px] text-[#F85149] uppercase font-semibold mb-1">Awaiting Our Reply</div>
+                    <div className="text-2xl font-bold text-[#F85149]">{slaData.overall.awaiting_our_reply}</div>
+                    <div className="text-[10px] text-[#484F58] mt-1">supplier waiting on us</div>
+                  </div>
+                  <div className="rounded-xl border border-[#F0883E]/20 bg-[#F0883E]/5 p-4">
+                    <div className="text-[10px] text-[#F0883E] uppercase font-semibold mb-1">Awaiting Supplier Reply</div>
+                    <div className="text-2xl font-bold text-[#F0883E]">{slaData.overall.awaiting_supplier_reply}</div>
+                    <div className="text-[10px] text-[#484F58] mt-1">we sent last message</div>
+                  </div>
+                </div>
+
+                {/* Sub tabs */}
+                <div className="flex items-center gap-1 mb-3">
+                  {([
+                    { id: "response-times" as const, label: "Response Times by User" },
+                    { id: "awaiting-ours" as const, label: "Awaiting Our Reply (" + slaData.overall.awaiting_our_reply + ")" },
+                    { id: "awaiting-supplier" as const, label: "Awaiting Supplier Reply (" + slaData.overall.awaiting_supplier_reply + ")" },
+                  ]).map((t) => (
+                    <button key={t.id} onClick={() => setSlaSubTab(t.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        slaSubTab === t.id ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"
+                      }`}
+                    >{t.label}</button>
+                  ))}
+                </div>
+
+                {/* Response Times by User */}
+                {slaSubTab === "response-times" && (
+                  <div className="space-y-1">
+                    <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+                      <span>Team Member</span><span className="text-center">Avg Response</span><span className="text-center">Fastest</span><span className="text-center">Slowest</span><span className="text-center">Responses</span>
+                    </div>
+                    {slaData.per_user.map((stat: any) => {
+                      const user = userStats.find((u) => u.id === stat.user_id);
+                      return (
+                        <div key={stat.user_id} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center">
+                          <div className="flex items-center gap-3">
+                            {user ? (
+                              <>
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11]" style={{ background: user.color }}>{user.initials}</div>
+                                <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[#484F58]">{user.department}</div></div>
+                              </>
+                            ) : (
+                              <div className="text-[13px] text-[#484F58]">Unassigned</div>
+                            )}
+                          </div>
+                          <div className="text-center text-sm font-semibold" style={{ color: stat.avg_response_hours <= 4 ? "#4ADE80" : stat.avg_response_hours <= 11 ? "#F0883E" : "#F85149" }}>
+                            {formatBusinessTime(stat.avg_response_hours)}
+                          </div>
+                          <div className="text-center text-sm text-[#4ADE80]">{formatBusinessTime(stat.fastest_response_hours)}</div>
+                          <div className="text-center text-sm text-[#F0883E]">{formatBusinessTime(stat.slowest_response_hours)}</div>
+                          <div className="text-center text-sm text-[#E6EDF3]">{stat.total_responses}</div>
+                        </div>
+                      );
+                    })}
+                    {slaData.per_user.length === 0 && <Empty text="No response data yet" />}
+                  </div>
+                )}
+
+                {/* Awaiting Our Reply */}
+                {slaSubTab === "awaiting-ours" && (
+                  <div className="space-y-1">
+                    {slaData.awaiting_our_reply.length === 0 ? <Empty text="No emails awaiting our reply" /> : (
+                      slaData.awaiting_our_reply.map((item: any) => {
+                        const assignee = userStats.find((u) => u.id === item.assignee_id);
+                        return (
+                          <a key={item.conversation_id} href={"/#conversation=" + item.conversation_id}
+                            className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#F85149]/30 transition-all ${item.waiting_business_hours > 11 ? "border-[#F85149]/30" : "border-[#1E242C]"}`}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[13px] font-medium mb-1">{item.subject}</div>
+                                <div className="text-[11px] text-[#484F58]">{item.from_name} &lt;{item.from_email}&gt;</div>
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                {assignee && (
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: assignee.color }}>{assignee.initials}</div>
+                                    <span className="text-[10px] text-[#484F58]">{assignee.name.split(" ")[0]}</span>
+                                  </div>
+                                )}
+                                <div className="text-right">
+                                  <div className="text-xs font-semibold" style={{ color: item.waiting_business_hours > 11 ? "#F85149" : item.waiting_business_hours > 4 ? "#F0883E" : "#58A6FF" }}>
+                                    {formatBusinessTime(item.waiting_business_hours)} waiting
+                                  </div>
+                                  <div className="text-[10px] text-[#484F58]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                                </div>
+                              </div>
+                            </div>
+                          </a>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* Awaiting Supplier Reply */}
+                {slaSubTab === "awaiting-supplier" && (
+                  <div className="space-y-1">
+                    {slaData.awaiting_supplier_reply.length === 0 ? <Empty text="No emails awaiting supplier reply" /> : (
+                      slaData.awaiting_supplier_reply.map((item: any) => {
+                        const assignee = userStats.find((u) => u.id === item.assignee_id);
+                        return (
+                          <a key={item.conversation_id} href={"/#conversation=" + item.conversation_id}
+                            className="block rounded-xl border border-[#1E242C] bg-[#0F1318] p-4 hover:border-[#F0883E]/30 transition-all">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[13px] font-medium mb-1">{item.subject}</div>
+                                <div className="text-[11px] text-[#484F58]">{item.from_name} &lt;{item.from_email}&gt;</div>
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                {assignee && (
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: assignee.color }}>{assignee.initials}</div>
+                                    <span className="text-[10px] text-[#484F58]">{assignee.name.split(" ")[0]}</span>
+                                  </div>
+                                )}
+                                <div className="text-right">
+                                  <div className="text-xs font-semibold text-[#F0883E]">
+                                    {formatBusinessTime(item.waiting_business_hours)} waiting
+                                  </div>
+                                  <div className="text-[10px] text-[#484F58]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                                </div>
+                              </div>
+                            </div>
+                          </a>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <Empty text="No SLA data available" />
             )}
           </div>
         )}
