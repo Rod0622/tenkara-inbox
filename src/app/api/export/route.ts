@@ -92,7 +92,8 @@ export async function GET(req: NextRequest) {
 
     const { data } = await q;
 
-    result.tasks = (data || []).map((t: any) => {
+    result.tasks = [];
+    for (const t of (data || [])) {
       const assignees = (t.task_assignees || []).map((a: any) => ({
         name: a.team_member?.name || "",
         email: a.team_member?.email || "",
@@ -100,23 +101,32 @@ export async function GET(req: NextRequest) {
         status: a.status || (a.is_done ? "completed" : "todo"),
       }));
 
-      return {
-        task_id: t.id,
-        task_text: t.text,
-        status: t.status || "todo",
-        is_done: t.is_done ? "Yes" : "No",
-        category: t.category?.name || "",
-        due_date: t.due_date || "",
-        due_time: t.due_time || "",
-        conversation_id: t.conversation_id || "",
-        conversation_subject: t.conversation?.subject || "",
-        primary_assignee: t.assignee?.name || "",
-        all_assignees: assignees.map((a: any) => a.name).join(", "),
-        assignee_statuses: assignees.map((a: any) => `${a.name}: ${a.status}`).join(", "),
-        completed_count: assignees.filter((a: any) => a.is_done).length + "/" + assignees.length,
-        created_at: t.created_at,
-      };
-    });
+      const totalAssignees = assignees.length;
+      const completedCount = assignees.filter((a: any) => a.is_done).length;
+
+      // One row per assignee (or one row if no assignees)
+      const rows = assignees.length > 0 ? assignees : [{ name: "", email: "", is_done: false, status: "todo" }];
+
+      for (const assignee of rows) {
+        result.tasks.push({
+          task_id: t.id,
+          task_text: t.text,
+          task_status: t.status || "todo",
+          category: t.category?.name || "",
+          due_date: t.due_date || "",
+          due_time: t.due_time || "",
+          conversation_id: t.conversation_id || "",
+          conversation_subject: t.conversation?.subject || "",
+          assignee_name: assignee.name,
+          assignee_email: assignee.email,
+          assignee_status: assignee.status,
+          assignee_done: assignee.is_done ? "Yes" : "No",
+          total_assignees: totalAssignees,
+          completed_count: completedCount + "/" + totalAssignees,
+          created_at: t.created_at,
+        });
+      }
+    }
   }
 
   // ── TEAM MEMBERS ──
