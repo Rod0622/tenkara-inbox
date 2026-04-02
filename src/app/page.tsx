@@ -55,6 +55,13 @@ export default function InboxPage() {
   const [searchResultIds, setSearchResultIds] = useState<Set<string> | null>(null);
   const searchTimerRef = useRef<any>(null);
 
+  const { conversations, refetch } = useConversations(activeMailbox);
+
+  const currentUser = useMemo(
+    () => teamMembers.find((m) => m.email === session?.user?.email) || null,
+    [teamMembers, session]
+  );
+
   // Debounced full-text search across all messages
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
@@ -64,7 +71,7 @@ export default function InboxPage() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()) + "&user_id=" + (currentUser?.id || ""));
+        const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()));
         const data = await res.json();
         setSearchResultIds(new Set(data.conversation_ids || []));
       } catch (_e) {
@@ -72,14 +79,7 @@ export default function InboxPage() {
       }
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery, currentUser?.id]);
-
-  const { conversations, refetch } = useConversations(activeMailbox);
-
-  const currentUser = useMemo(
-    () => teamMembers.find((m) => m.email === session?.user?.email) || null,
-    [teamMembers, session]
-  );
+  }, [searchQuery]);
 
   const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
 
