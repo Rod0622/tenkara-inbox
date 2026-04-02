@@ -1110,11 +1110,24 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       const data = await res.json();
       const rows = data.rows || [];
       setPreviewData(rows);
-      if (rows.length > 0) {
-        const cols = Object.keys(rows[0]);
-        setAllColumns(cols);
-        setSelectedColumns(new Set(cols));
-      } else { setAllColumns([]); setSelectedColumns(new Set()); }
+
+      // Define all available columns (always show even if no data)
+      const UNIFIED_COLUMNS = [
+        "conversation_id", "conversation_subject", "conversation_status", "conversation_from_name", "conversation_from_email",
+        "conversation_is_unread", "conversation_is_starred", "conversation_created_at", "conversation_last_message_at",
+        "account_name", "account_email", "folder_name",
+        "assignee_name", "assignee_email", "assignee_department", "assignee_role",
+        "total_messages", "inbound_messages", "outbound_messages", "reply_status", "waiting_hours",
+        "first_response_hours", "first_response_by",
+        "task_id", "task_text", "task_status", "task_category", "task_due_date", "task_due_time", "task_created_at",
+        "task_assignee_name", "task_assignee_email", "task_assignee_department", "task_assignee_status", "task_assignee_done",
+        "task_total_assignees", "task_completed_count",
+      ];
+
+      // Use columns from data if available, fallback to hardcoded list
+      const cols = rows.length > 0 ? Object.keys(rows[0]) : UNIFIED_COLUMNS;
+      setAllColumns(cols);
+      setSelectedColumns(new Set()); // Start empty so admin picks what they want
     } catch (_e) { setPreviewData([]); setAllColumns([]); }
     finally { setPreviewLoading(false); }
   }

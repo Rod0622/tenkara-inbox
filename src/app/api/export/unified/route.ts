@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
 
   // Group tasks by conversation
   const tasksByConvo: Record<string, any[]> = {};
-  for (const t of (tasks || [])) {
+  for (const _t of (tasks || [])) {
+    const t = _t as any;
     if (!t.conversation_id) continue;
     if (!tasksByConvo[t.conversation_id]) tasksByConvo[t.conversation_id] = [];
     tasksByConvo[t.conversation_id].push(t);
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
   }
 
   const now = new Date();
-  for (const [convoId, msgs] of Object.entries(msgsByConvo)) {
+  for (const [convoId, msgs] of Object.entries(msgsByConvo) as [string, any[]][]) {
     const inbound = msgs.filter((m: any) => !m.is_outbound).length;
     const outbound = msgs.filter((m: any) => m.is_outbound).length;
     const last = msgs[msgs.length - 1];
@@ -97,7 +98,8 @@ export async function GET(req: NextRequest) {
   // ── Build flat rows ──
   const rows: any[] = [];
 
-  for (const convo of (conversations || [])) {
+  for (const _convo of (conversations || [])) {
+    const convo = _convo as any;
     const convoAssignee = memberMap[convo.assignee_id] || null;
     const account = accountMap[convo.email_account_id] || null;
     const folder = folderMap[convo.folder_id] || null;
