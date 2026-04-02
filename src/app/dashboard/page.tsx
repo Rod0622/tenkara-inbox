@@ -1130,7 +1130,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
 
       const UNIFIED_COLUMNS = [
         "conversation_id", "conversation_subject", "conversation_status", "conversation_from_name", "conversation_from_email",
-        "conversation_to_addresses", "conversation_is_unread", "conversation_is_starred", "conversation_created_at", "conversation_last_message_at",
+        "conversation_is_unread", "conversation_is_starred", "conversation_created_at", "conversation_last_message_at",
         "account_name", "account_email", "folder_name",
         "conversation_assignee_name", "conversation_assignee_email", "conversation_assignee_department", "conversation_assignee_role",
         "total_messages", "inbound_messages", "outbound_messages", "reply_status", "waiting_hours",

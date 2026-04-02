@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
 
     let convQ = supabase
       .from("conversations")
-      .select("id, subject, from_name, from_email, to_addresses, preview, status, is_unread, is_starred, assignee_id, email_account_id, folder_id, last_message_at, created_at")
+      .select("id, subject, from_name, from_email, preview, status, is_unread, is_starred, assignee_id, email_account_id, folder_id, last_message_at, created_at")
       .neq("status", "trash")
       .order("last_message_at", { ascending: false })
       .limit(1000);
@@ -96,7 +96,6 @@ export async function GET(req: NextRequest) {
         conversation_status: convo.status || "",
         conversation_from_name: convo.from_name || "",
         conversation_from_email: convo.from_email || "",
-        conversation_to_addresses: convo.to_addresses || "",
         conversation_is_unread: convo.is_unread ? "Yes" : "No",
         conversation_is_starred: convo.is_starred ? "Yes" : "No",
         conversation_created_at: convo.created_at || "",
