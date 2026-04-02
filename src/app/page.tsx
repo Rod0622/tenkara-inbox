@@ -52,6 +52,27 @@ export default function InboxPage() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResultIds, setSearchResultIds] = useState<Set<string> | null>(null);
+  const searchTimerRef = useRef<any>(null);
+
+  // Debounced full-text search across all messages
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setSearchResultIds(null);
+      return;
+    }
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()) + "&user_id=" + (currentUser?.id || ""));
+        const data = await res.json();
+        setSearchResultIds(new Set(data.conversation_ids || []));
+      } catch (_e) {
+        setSearchResultIds(null);
+      }
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery, currentUser?.id]);
 
   const { conversations, refetch } = useConversations(activeMailbox);
 
@@ -149,15 +170,24 @@ export default function InboxPage() {
       filtered = filtered.filter((c) => c.status !== "trash");
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (c) =>
-          c.subject?.toLowerCase().includes(q) ||
-          c.from_name?.toLowerCase().includes(q) ||
-          c.from_email?.toLowerCase().includes(q) ||
-          c.preview?.toLowerCase().includes(q)
-      );
+    if (searchQuery.trim() && searchQuery.trim().length >= 2) {
+      // When searching, search across ALL conversations (not just current view)
+      if (searchResultIds) {
+        filtered = conversations.filter((c) =>
+          searchResultIds.has(c.id) && c.status !== "trash"
+        );
+      } else {
+        // Fallback: local search while API is loading
+        const q = searchQuery.toLowerCase();
+        filtered = conversations.filter(
+          (c) =>
+            c.status !== "trash" && (
+            c.subject?.toLowerCase().includes(q) ||
+            c.from_name?.toLowerCase().includes(q) ||
+            c.from_email?.toLowerCase().includes(q) ||
+            c.preview?.toLowerCase().includes(q))
+        );
+      }
     }
 
     return filtered;
@@ -169,6 +199,7 @@ export default function InboxPage() {
     activeView,
     currentUser,
     searchQuery,
+    searchResultIds,
     accountEmails,
   ]);
 

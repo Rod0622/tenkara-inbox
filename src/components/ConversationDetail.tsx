@@ -2785,7 +2785,7 @@ export default function ConversationDetail({
               const searchQ = threadSearch.trim().toLowerCase();
 
               return messages.map((msg: any) => {
-                const bodyText = msg.body_text || msg.snippet || "";
+                const bodyText = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ") : "") || msg.snippet || "";
                 const matchCountInMsg = searchQ ? (bodyText.toLowerCase().split(searchQ).length - 1) : 0;
                 const msgStartIdx = globalMatchIdx;
                 globalMatchIdx += matchCountInMsg;
