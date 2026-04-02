@@ -6,22 +6,22 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
 
   if (!q || q.length < 2) {
-    return NextResponse.json({ conversations: [] });
+    return NextResponse.json({ conversations: [], match_snippets: {} });
   }
 
   const searchTerm = "%" + q + "%";
 
-  // Search in messages
+  // Search in messages (body_text, snippet, subject)
   const { data: msgMatches } = await supabase
     .from("messages")
-    .select("conversation_id")
+    .select("conversation_id, body_text, snippet, subject")
     .or(`body_text.ilike.${searchTerm},snippet.ilike.${searchTerm},subject.ilike.${searchTerm},from_name.ilike.${searchTerm},from_email.ilike.${searchTerm},to_addresses.ilike.${searchTerm}`)
     .limit(500);
 
   // Search in conversations
   const { data: convoMatches } = await supabase
     .from("conversations")
-    .select("id")
+    .select("id, subject, preview")
     .or(`subject.ilike.${searchTerm},from_name.ilike.${searchTerm},from_email.ilike.${searchTerm},preview.ilike.${searchTerm}`)
     .neq("status", "trash")
     .limit(500);
@@ -29,25 +29,50 @@ export async function GET(req: NextRequest) {
   // Search in notes
   const { data: noteMatches } = await supabase
     .from("notes")
-    .select("conversation_id")
+    .select("conversation_id, text")
     .ilike("text", searchTerm)
     .limit(200);
 
-  // Combine all matching conversation IDs
-  const ids = new Set<string>();
-  for (const m of (msgMatches || [])) { if (m.conversation_id) ids.add(m.conversation_id); }
-  for (const c of (convoMatches || [])) { ids.add(c.id); }
-  for (const n of (noteMatches || [])) { if (n.conversation_id) ids.add(n.conversation_id); }
+  // Build match snippets - extract text around the matched word
+  const matchSnippets: Record<string, string> = {};
+  const qLower = q.toLowerCase();
 
-  if (ids.size === 0) {
-    return NextResponse.json({ conversations: [] });
+  function extractSnippet(text: string, convoId: string) {
+    if (!text || matchSnippets[convoId]) return;
+    const idx = text.toLowerCase().indexOf(qLower);
+    if (idx === -1) return;
+    const start = Math.max(0, idx - 60);
+    const end = Math.min(text.length, idx + q.length + 60);
+    let snippet = (start > 0 ? "..." : "") + text.slice(start, end) + (end < text.length ? "..." : "");
+    matchSnippets[convoId] = snippet;
   }
 
-  // Fetch full conversation objects for all matches
+  // Collect conversation IDs and snippets
+  const ids = new Set<string>();
+  for (const m of (msgMatches || [])) {
+    if (m.conversation_id) {
+      ids.add(m.conversation_id);
+      extractSnippet(m.body_text || m.snippet || m.subject || "", m.conversation_id);
+    }
+  }
+  for (const c of (convoMatches || [])) {
+    ids.add(c.id);
+    extractSnippet(c.subject || c.preview || "", c.id);
+  }
+  for (const n of (noteMatches || [])) {
+    if (n.conversation_id) {
+      ids.add(n.conversation_id);
+      extractSnippet(n.text || "", n.conversation_id);
+    }
+  }
+
+  if (ids.size === 0) {
+    return NextResponse.json({ conversations: [], match_snippets: {} });
+  }
+
+  // Fetch full conversation objects
   const idArray = Array.from(ids);
   const allConvos: any[] = [];
-  
-  // Batch in groups of 50 to avoid query limits
   for (let i = 0; i < idArray.length; i += 50) {
     const batch = idArray.slice(i, i + 50);
     const { data } = await supabase
@@ -59,5 +84,5 @@ export async function GET(req: NextRequest) {
     if (data) allConvos.push(...data);
   }
 
-  return NextResponse.json({ conversations: allConvos });
+  return NextResponse.json({ conversations: allConvos, match_snippets: matchSnippets });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
@@ -48,6 +48,17 @@ function groupByDate(convos: Conversation[]): Record<string, Conversation[]> {
   });
 
   return groups;
+}
+
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query.trim() || !text) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="bg-[#F5D547]/40 text-[#E6EDF3] rounded px-0.5">{part}</mark>
+      : part
+  );
 }
 
 function formatTime(dateStr: string): string {
@@ -325,7 +336,7 @@ function FilterPanel({
 
 // ── Main ConversationList ────────────────────────────
 export default function ConversationList({
-  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery, teamMembers, onBulkAction,
+  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery, teamMembers, onBulkAction, searchSnippets,
 }: ConversationListProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -672,12 +683,16 @@ export default function ConversationList({
                     {/* Subject */}
                     <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[#E6EDF3]" : "text-[#7D8590]"}`}>
                       {(c as any).has_attachments && <Paperclip size={11} className="text-[#484F58] flex-shrink-0" />}
-                      <span className="truncate">{c.subject}</span>
+                      <span className="truncate">{searchQuery.trim().length >= 2 ? highlightText(c.subject, searchQuery) : c.subject}</span>
                     </div>
 
-                    {/* Preview */}
+                    {/* Preview / Search snippet */}
                     <div className="text-[11.5px] text-[#484F58] truncate mb-1.5">
-                      {c.preview}
+                      {searchQuery.trim().length >= 2 && searchSnippets?.[c.id] ? (
+                        <span>{highlightText(searchSnippets[c.id], searchQuery)}</span>
+                      ) : (
+                        c.preview
+                      )}
                     </div>
 
                     {/* Labels */}

@@ -196,6 +196,7 @@ export interface ConversationListProps {
   setSearchQuery: (query: string) => void;
   teamMembers: TeamMember[];
   onBulkAction?: (ids: string[], action: string, payload?: any) => Promise<void>;
+  searchSnippets?: Record<string, string>;
 }
 
 export interface ConversationDetailProps {
@@ -209,6 +210,7 @@ export interface ConversationDetailProps {
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
   onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[]) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
+  globalSearchQuery?: string;
 }
 
 export interface AiSidebarProps {

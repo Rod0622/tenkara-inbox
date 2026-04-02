@@ -1594,6 +1594,7 @@ export default function ConversationDetail({
   onAssign,
   onSendReply,
   onMoveToFolder,
+  globalSearchQuery,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
   const [showFollowUp, setShowFollowUp] = useState(false);
@@ -1721,6 +1722,17 @@ export default function ConversationDetail({
     activities,
     refetch: refetchDetail,
   } = useConversationDetail(convo?.id || null);
+
+  // Auto-activate thread search when coming from global search
+  useEffect(() => {
+    if (globalSearchQuery && convo?.id) {
+      setThreadSearch(globalSearchQuery);
+      setThreadSearchActive(true);
+      setCurrentMatchIndex(0);
+      matchRefs.current = [];
+      setActiveTab("messages");
+    }
+  }, [convo?.id, globalSearchQuery]);
 
   const {
     threads: relatedThreads,

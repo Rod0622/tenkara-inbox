@@ -53,6 +53,7 @@ export default function InboxPage() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
+  const [searchSnippets, setSearchSnippets] = useState<Record<string, string>>({});
   const searchTimerRef = useRef<any>(null);
 
   const { conversations, refetch } = useConversations(activeMailbox);
@@ -66,6 +67,7 @@ export default function InboxPage() {
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
       setSearchResults(null);
+      setSearchSnippets({});
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -74,8 +76,10 @@ export default function InboxPage() {
         const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()));
         const data = await res.json();
         setSearchResults((data.conversations || []) as Conversation[]);
+        setSearchSnippets(data.match_snippets || {});
       } catch (_e) {
         setSearchResults(null);
+        setSearchSnippets({});
       }
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
@@ -432,6 +436,7 @@ export default function InboxPage() {
             setSearchQuery={setSearchQuery}
             teamMembers={teamMembers}
             onBulkAction={handleBulkAction}
+            searchSnippets={searchSnippets}
           />
 
           <ConversationDetail
@@ -445,6 +450,7 @@ export default function InboxPage() {
             onAssign={handleAssign}
             onSendReply={actions.sendReply}
             onMoveToFolder={handleMoveToFolder}
+            globalSearchQuery={searchQuery.trim().length >= 2 ? searchQuery : ""}
           />
         </>
       )}
