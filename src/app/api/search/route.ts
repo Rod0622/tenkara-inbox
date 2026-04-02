@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     const idx = text.toLowerCase().indexOf(qLower);
     if (idx === -1) return;
     const start = Math.max(0, idx - 60);
-    const end = Math.min(text.length, idx + q.length + 60);
+    const end = Math.min(text.length, idx + (q?.length || 0) + 60);
     let snippet = (start > 0 ? "..." : "") + text.slice(start, end) + (end < text.length ? "..." : "");
     matchSnippets[convoId] = snippet;
   }
