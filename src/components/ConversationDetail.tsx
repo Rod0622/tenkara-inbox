@@ -1615,20 +1615,26 @@ export default function ConversationDetail({
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const matchRefs = useRef<(HTMLElement | null)[]>([]);
 
-  // Scroll to current match
+  // Scroll to current match — use timeout to let DOM render first
   useEffect(() => {
-    const validRefs = matchRefs.current.filter(Boolean);
-    if (validRefs.length === 0) return;
-    const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
-    const el = validRefs[idx];
-    if (el) {
-      // Remove previous highlight
+    if (!threadSearchActive || !threadSearch) return;
+    const scrollToMatch = () => {
+      const validRefs = matchRefs.current.filter(Boolean);
+      if (validRefs.length === 0) return;
+      const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
+      // Reset all highlights
       validRefs.forEach((r) => { if (r) r.style.background = "rgba(245,213,71,0.4)"; });
-      // Highlight current
-      el.style.background = "rgba(245,213,71,0.8)";
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [currentMatchIndex, threadSearch]);
+      // Highlight current and scroll
+      const el = validRefs[idx];
+      if (el) {
+        el.style.background = "rgba(245,213,71,0.8)";
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    };
+    // Delay to ensure refs are populated after render
+    const timer = setTimeout(scrollToMatch, 150);
+    return () => clearTimeout(timer);
+  }, [currentMatchIndex, threadSearch, threadSearchActive, messages]);
 
   // Reset search when conversation changes
   useEffect(() => {
