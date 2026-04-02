@@ -1634,7 +1634,7 @@ export default function ConversationDetail({
     // Delay to ensure refs are populated after render
     const timer = setTimeout(scrollToMatch, 150);
     return () => clearTimeout(timer);
-  }, [currentMatchIndex, threadSearch, threadSearchActive, messages]);
+  }, [currentMatchIndex, threadSearch, threadSearchActive]);
 
   // Reset search when conversation changes
   useEffect(() => {
@@ -1739,6 +1739,23 @@ export default function ConversationDetail({
       setActiveTab("messages");
     }
   }, [convo?.id, globalSearchQuery]);
+
+  // Re-scroll when messages load (refs get populated after render)
+  useEffect(() => {
+    if (!threadSearchActive || !threadSearch || messages.length === 0) return;
+    const timer = setTimeout(() => {
+      const validRefs = matchRefs.current.filter(Boolean);
+      if (validRefs.length === 0) return;
+      const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
+      validRefs.forEach((r) => { if (r) r.style.background = "rgba(245,213,71,0.4)"; });
+      const el = validRefs[idx];
+      if (el) {
+        el.style.background = "rgba(245,213,71,0.8)";
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [messages.length, threadSearchActive]);
 
   const {
     threads: relatedThreads,
