@@ -1607,12 +1607,6 @@ export default function ConversationDetail({
   const [inlineComposeSubject, setInlineComposeSubject] = useState("");
   const [inlineComposeBody, setInlineComposeBody] = useState("");
   const [sendingInlineCompose, setSendingInlineCompose] = useState(false);
-
-  // Thread search
-  const [threadSearch, setThreadSearch] = useState("");
-  const [threadSearchActive, setThreadSearchActive] = useState(false);
-  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-  const matchRefs = useRef<(HTMLElement | null)[]>([]);
   const [activeReminder, setActiveReminder] = useState<any>(null);
 
   // In-thread search
