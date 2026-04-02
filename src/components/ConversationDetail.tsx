@@ -143,14 +143,13 @@ function HighlightedText({ text, query, matchRefs, startIndex }: {
   startIndex: number;
 }) {
   if (!query.trim() || !text) return <>{text}</>;
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-  const parts = text.split(regex);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
   let matchIdx = startIndex;
   return (
     <>
       {parts.map((part, i) => {
-        if (regex.test(part)) {
-          regex.lastIndex = 0;
+        if (part.toLowerCase() === query.toLowerCase()) {
           const idx = matchIdx++;
           return (
             <mark
@@ -2745,31 +2744,42 @@ export default function ConversationDetail({
 
             {/* In-thread search bar */}
             {threadSearchActive ? (
-              <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border border-[#4ADE80]/30 bg-[#0F1318]">
-                <Search size={14} className="text-[#484F58] flex-shrink-0" />
-                <input
-                  value={threadSearch}
-                  onChange={(e) => { setThreadSearch(e.target.value); setCurrentMatchIndex(0); matchRefs.current = []; }}
-                  placeholder="Search in this thread..."
-                  autoFocus
-                  className="flex-1 bg-transparent text-sm text-[#E6EDF3] outline-none placeholder:text-[#484F58]"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (e.shiftKey) setCurrentMatchIndex((p) => Math.max(0, p - 1));
-                      else setCurrentMatchIndex((p) => p + 1);
-                    }
-                    if (e.key === "Escape") { setThreadSearchActive(false); setThreadSearch(""); }
-                  }}
-                />
-                {threadSearch && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-[#484F58] tabular-nums">{matchRefs.current.filter(Boolean).length > 0 ? (currentMatchIndex % matchRefs.current.filter(Boolean).length + 1) + "/" + matchRefs.current.filter(Boolean).length : "0/0"}</span>
-                    <button onClick={() => { setCurrentMatchIndex((p) => Math.max(0, p - 1)); }} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronUp size={14} /></button>
-                    <button onClick={() => { setCurrentMatchIndex((p) => p + 1); }} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronDown size={14} /></button>
+              (() => {
+                const sq = threadSearch.trim().toLowerCase();
+                const totalMatches = sq ? messages.reduce((count: number, msg: any) => {
+                  const bt = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ") : "") || msg.snippet || "";
+                  return count + (bt.toLowerCase().split(sq).length - 1);
+                }, 0) : 0;
+                const safeIndex = totalMatches > 0 ? ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches : 0;
+
+                return (
+                  <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border border-[#4ADE80]/30 bg-[#0F1318]">
+                    <Search size={14} className="text-[#484F58] flex-shrink-0" />
+                    <input
+                      value={threadSearch}
+                      onChange={(e) => { setThreadSearch(e.target.value); setCurrentMatchIndex(0); matchRefs.current = []; }}
+                      placeholder="Search in this thread..."
+                      autoFocus
+                      className="flex-1 bg-transparent text-sm text-[#E6EDF3] outline-none placeholder:text-[#484F58]"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          if (e.shiftKey) setCurrentMatchIndex((p) => Math.max(0, p - 1));
+                          else setCurrentMatchIndex((p) => p + 1);
+                        }
+                        if (e.key === "Escape") { setThreadSearchActive(false); setThreadSearch(""); }
+                      }}
+                    />
+                    {threadSearch && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-[#484F58] tabular-nums">{totalMatches > 0 ? (safeIndex + 1) + "/" + totalMatches : "0 results"}</span>
+                        <button onClick={() => setCurrentMatchIndex((p) => Math.max(0, p - 1))} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronUp size={14} /></button>
+                        <button onClick={() => setCurrentMatchIndex((p) => p + 1)} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronDown size={14} /></button>
+                      </div>
+                    )}
+                    <button onClick={() => { setThreadSearchActive(false); setThreadSearch(""); matchRefs.current = []; }} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={14} /></button>
                   </div>
-                )}
-                <button onClick={() => { setThreadSearchActive(false); setThreadSearch(""); matchRefs.current = []; }} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={14} /></button>
-              </div>
+                );
+              })()
             ) : (
               <div className="flex justify-end mb-2">
                 <button onClick={() => setThreadSearchActive(true)} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] text-[#484F58] hover:text-[#7D8590] hover:bg-[#12161B] transition-colors">
