@@ -52,7 +52,7 @@ export default function InboxPage() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResultIds, setSearchResultIds] = useState<Set<string> | null>(null);
+  const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
   const searchTimerRef = useRef<any>(null);
 
   const { conversations, refetch } = useConversations(activeMailbox);
@@ -65,7 +65,7 @@ export default function InboxPage() {
   // Debounced full-text search across all messages
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
-      setSearchResultIds(null);
+      setSearchResults(null);
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -73,9 +73,9 @@ export default function InboxPage() {
       try {
         const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()));
         const data = await res.json();
-        setSearchResultIds(new Set(data.conversation_ids || []));
+        setSearchResults((data.conversations || []) as Conversation[]);
       } catch (_e) {
-        setSearchResultIds(null);
+        setSearchResults(null);
       }
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
@@ -171,11 +171,9 @@ export default function InboxPage() {
     }
 
     if (searchQuery.trim() && searchQuery.trim().length >= 2) {
-      // When searching, search across ALL conversations (not just current view)
-      if (searchResultIds) {
-        filtered = conversations.filter((c) =>
-          searchResultIds.has(c.id) && c.status !== "trash"
-        );
+      // When searching, show results from ALL accounts (returned by search API)
+      if (searchResults) {
+        return searchResults;
       } else {
         // Fallback: local search while API is loading
         const q = searchQuery.toLowerCase();
@@ -199,7 +197,7 @@ export default function InboxPage() {
     activeView,
     currentUser,
     searchQuery,
-    searchResultIds,
+    searchResults,
     accountEmails,
   ]);
 
