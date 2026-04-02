@@ -1108,27 +1108,37 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       if (dateTo) url += "date_to=" + dateTo + "&";
       const res = await fetch(url);
       const data = await res.json();
+
+      if (data.error) {
+        console.error("Unified export API error:", data.error);
+      }
+
       const rows = data.rows || [];
       setPreviewData(rows);
 
-      // Define all available columns (always show even if no data)
       const UNIFIED_COLUMNS = [
         "conversation_id", "conversation_subject", "conversation_status", "conversation_from_name", "conversation_from_email",
-        "conversation_is_unread", "conversation_is_starred", "conversation_created_at", "conversation_last_message_at",
+        "conversation_to_addresses", "conversation_is_unread", "conversation_is_starred", "conversation_created_at", "conversation_last_message_at",
         "account_name", "account_email", "folder_name",
-        "assignee_name", "assignee_email", "assignee_department", "assignee_role",
+        "conversation_assignee_name", "conversation_assignee_email", "conversation_assignee_department", "conversation_assignee_role",
         "total_messages", "inbound_messages", "outbound_messages", "reply_status", "waiting_hours",
         "first_response_hours", "first_response_by",
+        "latest_inbound_from", "latest_inbound_email", "latest_inbound_date", "latest_inbound_snippet",
+        "latest_outbound_to", "latest_outbound_date", "latest_outbound_by", "latest_outbound_snippet",
+        "has_attachments",
         "task_id", "task_text", "task_status", "task_category", "task_due_date", "task_due_time", "task_created_at",
         "task_assignee_name", "task_assignee_email", "task_assignee_department", "task_assignee_status", "task_assignee_done",
         "task_total_assignees", "task_completed_count",
       ];
 
-      // Use columns from data if available, fallback to hardcoded list
       const cols = rows.length > 0 ? Object.keys(rows[0]) : UNIFIED_COLUMNS;
       setAllColumns(cols);
       setSelectedColumns(new Set()); // Start empty so admin picks what they want
-    } catch (_e) { setPreviewData([]); setAllColumns([]); }
+    } catch (_e) {
+      console.error("Unified load failed:", _e);
+      setPreviewData([]);
+      setAllColumns([]);
+    }
     finally { setPreviewLoading(false); }
   }
 
@@ -1141,13 +1151,15 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
     if (exportMode !== "unified") return {};
     const groups: Record<string, string[]> = {};
     for (const col of allColumns) {
-      const prefix = col.split("_")[0]; // conversation, task, account, assignee, etc.
-      const group = prefix === "conversation" ? "Conversation" :
-        prefix === "task" ? "Task" :
-        prefix === "account" ? "Account" :
-        prefix === "assignee" ? "Conversation Assignee" :
-        prefix === "folder" ? "Folder" :
-        col.startsWith("total_") || col.startsWith("inbound_") || col.startsWith("outbound_") || col.startsWith("reply_") || col.startsWith("waiting_") || col.startsWith("first_") ? "SLA Metrics" : "Other";
+      let group = "Other";
+      if (col.startsWith("conversation_")) group = "Conversation";
+      else if (col.startsWith("account_")) group = "Account";
+      else if (col.startsWith("folder_")) group = "Folder";
+      else if (col.startsWith("task_")) group = "Task";
+      else if (col.startsWith("latest_inbound_")) group = "Latest Inbound Message";
+      else if (col.startsWith("latest_outbound_")) group = "Latest Outbound Message";
+      else if (["total_messages", "inbound_messages", "outbound_messages", "reply_status", "waiting_hours", "first_response_hours", "first_response_by", "has_attachments"].includes(col)) group = "SLA Metrics";
+
       if (!groups[group]) groups[group] = [];
       groups[group].push(col);
     }
