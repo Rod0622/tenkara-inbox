@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -64,12 +64,14 @@ function formatTime(dateStr: string): string {
 // ── Filter Panel ─────────────────────────────────────
 interface Filters {
   dateRange: "all" | "today" | "yesterday" | "week" | "month" | "custom";
-  dateFrom: string; // ISO date string, e.g. "2026-03-01"
+  dateFrom: string;
   dateTo: string;
-  assignedTo: string | null; // team member id or null for any
+  assignedTo: string | null;
   unreadOnly: boolean;
   starredOnly: boolean;
   fromEmail: string;
+  labelIds: string[];
+  labelLogic: "and" | "or";
 }
 
 const defaultFilters: Filters = {
@@ -80,7 +82,60 @@ const defaultFilters: Filters = {
   unreadOnly: false,
   starredOnly: false,
   fromEmail: "",
+  labelIds: [],
+  labelLogic: "or",
 };
+
+function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
+  const [labels, setLabels] = useState<any[]>([]);
+
+  useEffect(() => {
+    const sb = createBrowserClient();
+    sb.from("labels").select("*").order("name").then(({ data }) => setLabels(data || []));
+  }, []);
+
+  if (labels.length === 0) return null;
+
+  const toggleLabel = (labelId: string) => {
+    const current = filters.labelIds || [];
+    const next = current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId];
+    setFilters({ ...filters, labelIds: next });
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-semibold text-[#484F58] uppercase">Labels</span>
+        {(filters.labelIds || []).length > 1 && (
+          <button
+            onClick={() => setFilters({ ...filters, labelLogic: filters.labelLogic === "and" ? "or" : "and" })}
+            className="px-2 py-0.5 rounded text-[9px] font-bold border border-[#1E242C] text-[#58A6FF] hover:bg-[#12161B] transition-colors"
+          >
+            {filters.labelLogic === "and" ? "AND" : "OR"}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {labels.map((label) => {
+          const isActive = (filters.labelIds || []).includes(label.id);
+          return (
+            <button
+              key={label.id}
+              onClick={() => toggleLabel(label.id)}
+              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all flex items-center gap-1 ${
+                isActive ? "ring-1 ring-white/30" : "opacity-60 hover:opacity-100"
+              }`}
+              style={{ background: isActive ? label.bg_color : label.bg_color + "60", color: label.color }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: label.color }} />
+              {label.name}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function FilterPanel({
   filters,
@@ -240,6 +295,9 @@ function FilterPanel({
         />
       </div>
 
+      {/* Labels filter */}
+      <LabelFilter filters={filters} setFilters={setFilters} />
+
       {/* Quick toggles */}
       <div className="flex gap-3">
         <label className="flex items-center gap-1.5 text-[10px] text-[#7D8590] cursor-pointer">
@@ -327,7 +385,8 @@ export default function ConversationList({
     filters.starredOnly ||
     filters.fromEmail !== "" ||
     filters.dateFrom !== "" ||
-    filters.dateTo !== "";
+    filters.dateTo !== "" ||
+    (filters.labelIds || []).length > 0;
 
   // Apply filters
   const filteredConversations = useMemo(() => {
@@ -384,6 +443,18 @@ export default function ConversationList({
           c.from_email?.toLowerCase().includes(q) ||
           c.from_name?.toLowerCase().includes(q)
       );
+    }
+
+    // Label filter
+    if ((filters.labelIds || []).length > 0) {
+      result = result.filter((c) => {
+        const convoLabelIds = (c.labels || []).map((cl: any) => cl.label_id || cl.label?.id).filter(Boolean);
+        if (filters.labelLogic === "and") {
+          return filters.labelIds.every((id) => convoLabelIds.includes(id));
+        } else {
+          return filters.labelIds.some((id) => convoLabelIds.includes(id));
+        }
+      });
     }
 
     return result;

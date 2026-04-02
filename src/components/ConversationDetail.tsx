@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle,
   ChevronDown,
+  ChevronUp,
   Circle,
   Download,
   ExternalLink,
@@ -26,6 +27,7 @@ import {
   Pencil,
   Plus,
   Reply,
+  Search,
   Send,
   Star,
   Tag,
@@ -131,6 +133,39 @@ function getTaskMatchMeta(itemText: string, tasks: any[]) {
     score: 0,
     isCompleted: false,
   };
+}
+
+// Highlight search matches in text
+function HighlightedText({ text, query, matchRefs, startIndex }: {
+  text: string;
+  query: string;
+  matchRefs: React.MutableRefObject<(HTMLElement | null)[]>;
+  startIndex: number;
+}) {
+  if (!query.trim() || !text) return <>{text}</>;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  let matchIdx = startIndex;
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (regex.test(part)) {
+          regex.lastIndex = 0;
+          const idx = matchIdx++;
+          return (
+            <mark
+              key={i}
+              ref={(el) => { matchRefs.current[idx] = el; }}
+              className="bg-[#F5D547]/40 text-[#E6EDF3] rounded px-0.5"
+            >
+              {part}
+            </mark>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
 }
 
 function Avatar({
@@ -1572,7 +1607,42 @@ export default function ConversationDetail({
   const [inlineComposeSubject, setInlineComposeSubject] = useState("");
   const [inlineComposeBody, setInlineComposeBody] = useState("");
   const [sendingInlineCompose, setSendingInlineCompose] = useState(false);
+
+  // Thread search
+  const [threadSearch, setThreadSearch] = useState("");
+  const [threadSearchActive, setThreadSearchActive] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const matchRefs = useRef<(HTMLElement | null)[]>([]);
   const [activeReminder, setActiveReminder] = useState<any>(null);
+
+  // In-thread search
+  const [threadSearch, setThreadSearch] = useState("");
+  const [threadSearchActive, setThreadSearchActive] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const matchRefs = useRef<(HTMLElement | null)[]>([]);
+
+  // Scroll to current match
+  useEffect(() => {
+    const validRefs = matchRefs.current.filter(Boolean);
+    if (validRefs.length === 0) return;
+    const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
+    const el = validRefs[idx];
+    if (el) {
+      // Remove previous highlight
+      validRefs.forEach((r) => { if (r) r.style.background = "rgba(245,213,71,0.4)"; });
+      // Highlight current
+      el.style.background = "rgba(245,213,71,0.8)";
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [currentMatchIndex, threadSearch]);
+
+  // Reset search when conversation changes
+  useEffect(() => {
+    setThreadSearch("");
+    setThreadSearchActive(false);
+    setCurrentMatchIndex(0);
+    matchRefs.current = [];
+  }, [convo?.id]);
 
   // Fetch existing reminder for this conversation
   useEffect(() => {
@@ -2679,15 +2749,62 @@ export default function ConversationDetail({
             {/* Attachment summary bar — shows all attachments across all messages */}
             <ThreadAttachmentBar messages={messages} />
 
-            {messages.map((msg: any) => (
-              <div
-                key={msg.id}
-                className={`mb-4 p-4 rounded-xl border ${
-                  msg.is_outbound
-                    ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
-                    : "bg-[#12161B] border-[#161B22]"
-                }`}
-              >
+            {/* In-thread search bar */}
+            {threadSearchActive ? (
+              <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border border-[#4ADE80]/30 bg-[#0F1318]">
+                <Search size={14} className="text-[#484F58] flex-shrink-0" />
+                <input
+                  value={threadSearch}
+                  onChange={(e) => { setThreadSearch(e.target.value); setCurrentMatchIndex(0); matchRefs.current = []; }}
+                  placeholder="Search in this thread..."
+                  autoFocus
+                  className="flex-1 bg-transparent text-sm text-[#E6EDF3] outline-none placeholder:text-[#484F58]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (e.shiftKey) setCurrentMatchIndex((p) => Math.max(0, p - 1));
+                      else setCurrentMatchIndex((p) => p + 1);
+                    }
+                    if (e.key === "Escape") { setThreadSearchActive(false); setThreadSearch(""); }
+                  }}
+                />
+                {threadSearch && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-[#484F58] tabular-nums">{matchRefs.current.filter(Boolean).length > 0 ? (currentMatchIndex % matchRefs.current.filter(Boolean).length + 1) + "/" + matchRefs.current.filter(Boolean).length : "0/0"}</span>
+                    <button onClick={() => { setCurrentMatchIndex((p) => Math.max(0, p - 1)); }} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronUp size={14} /></button>
+                    <button onClick={() => { setCurrentMatchIndex((p) => p + 1); }} className="w-6 h-6 rounded flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C]"><ChevronDown size={14} /></button>
+                  </div>
+                )}
+                <button onClick={() => { setThreadSearchActive(false); setThreadSearch(""); matchRefs.current = []; }} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={14} /></button>
+              </div>
+            ) : (
+              <div className="flex justify-end mb-2">
+                <button onClick={() => setThreadSearchActive(true)} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] text-[#484F58] hover:text-[#7D8590] hover:bg-[#12161B] transition-colors">
+                  <Search size={12} /> Search in thread
+                </button>
+              </div>
+            )}
+
+            {(() => {
+              // Count matches across all messages for navigation
+              matchRefs.current = [];
+              let globalMatchIdx = 0;
+              const searchQ = threadSearch.trim().toLowerCase();
+
+              return messages.map((msg: any) => {
+                const bodyText = msg.body_text || msg.snippet || "";
+                const matchCountInMsg = searchQ ? (bodyText.toLowerCase().split(searchQ).length - 1) : 0;
+                const msgStartIdx = globalMatchIdx;
+                globalMatchIdx += matchCountInMsg;
+
+                return (
+                  <div
+                    key={msg.id}
+                    className={`mb-4 p-4 rounded-xl border ${
+                      msg.is_outbound
+                        ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
+                        : "bg-[#12161B] border-[#161B22]"
+                    } ${searchQ && matchCountInMsg > 0 ? "ring-1 ring-[#F5D547]/20" : ""}`}
+                  >
                 <div className="flex items-center gap-2 mb-2.5">
                   <Avatar
                     initials={(msg.from_name || "?").slice(0, 2).toUpperCase()}
@@ -2707,22 +2824,28 @@ export default function ConversationDetail({
                   </span>
                 </div>
                 <div className="text-[13px] leading-relaxed text-[#7D8590]">
-                  {msg.body_html ? (
+                  {msg.body_html && !searchQ ? (
                     <div
                       className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#1E242C] [&_td]:p-2 [&_th]:border [&_th]:border-[#1E242C] [&_th]:p-2 [&_th]:bg-[#161B22] [&_img]:max-w-full"
                       dangerouslySetInnerHTML={{ __html: msg.body_html }}
                     />
                   ) : (
                     <div className="whitespace-pre-wrap">
-                      {msg.body_text || msg.snippet || "(No text content)"}
+                      {searchQ ? (
+                        <HighlightedText text={bodyText || "(No text content)"} query={searchQ} matchRefs={matchRefs} startIndex={msgStartIdx} />
+                      ) : (
+                        msg.body_text || msg.snippet || "(No text content)"
+                      )}
                     </div>
                   )}
                 </div>
                 {msg.has_attachments && (
                   <MessageAttachments messageId={msg.id} />
                 )}
-              </div>
-            ))}
+                  </div>
+                );
+              });
+            })()}
 
             {messages.length === 0 && (
               <div className="text-center py-10">
