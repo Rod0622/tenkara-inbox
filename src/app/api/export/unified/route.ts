@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
       .from("conversations")
       .select("id, subject, from_name, from_email, to_addresses, preview, status, is_unread, is_starred, assignee_id, email_account_id, folder_id, last_message_at, created_at")
       .neq("status", "trash")
-      .order("last_message_at", { ascending: false });
+      .order("last_message_at", { ascending: false })
+      .limit(1000);
     if (dateFrom) convQ = convQ.gte("created_at", dateFrom);
     if (dateTo) convQ = convQ.lte("created_at", dateTo + "T23:59:59.999Z");
     const { data: conversations, error: convErr } = await convQ;
@@ -43,7 +44,8 @@ export async function GET(req: NextRequest) {
     const { data: rawMessages } = await supabase
       .from("messages")
       .select("conversation_id, is_outbound, sent_at, sent_by_user_id, from_name, from_email, to_addresses, snippet, has_attachments")
-      .order("sent_at", { ascending: true });
+      .order("sent_at", { ascending: true })
+      .limit(5000);
 
     const msgsByConvo: Record<string, any[]> = {};
     for (const m of (rawMessages || [])) {

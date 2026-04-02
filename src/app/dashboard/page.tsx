@@ -1102,12 +1102,24 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
 
   async function loadUnifiedData() {
     setPreviewLoading(true);
+    setPreviewData(null);
     try {
-      let url = "/api/export/unified?";
-      if (dateFrom) url += "date_from=" + dateFrom + "&";
-      if (dateTo) url += "date_to=" + dateTo + "&";
+      let url = "/api/export/unified?x=1";
+      if (dateFrom) url += "&date_from=" + dateFrom;
+      if (dateTo) url += "&date_to=" + dateTo;
       const res = await fetch(url);
-      const data = await res.json();
+      const text = await res.text();
+      
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_e) {
+        console.error("Unified API returned non-JSON:", text.slice(0, 500));
+        setPreviewData([]);
+        setAllColumns([]);
+        setPreviewLoading(false);
+        return;
+      }
 
       if (data.error) {
         console.error("Unified export API error:", data.error);
@@ -1220,8 +1232,11 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       {exportMode === "unified" && !previewLoading && (
         <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-3">
           <div className="text-xs text-[#7D8590]">
-            All data joined through conversations. Each row = one task assignee. Conversations with multiple tasks or multiple assignees are duplicated so every combination gets its own row. Conversations without tasks still appear once.
+            All data joined through conversations. Each row = one task assignee. {previewData ? previewData.length + " rows loaded." : "Loading..."}
           </div>
+          {previewData && previewData.length === 0 && allColumns.length > 0 && (
+            <div className="text-[11px] text-[#F0883E] mt-1">No data found for the selected date range. Columns are still available — try changing the date filter or select "All Time".</div>
+          )}
         </div>
       )}
 
