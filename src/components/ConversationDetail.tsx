@@ -155,6 +155,7 @@ function HighlightedText({ text, query, matchRefs, startIndex }: {
             <mark
               key={i}
               ref={(el) => { matchRefs.current[idx] = el; }}
+              data-match-idx={idx}
               className="bg-[#F5D547]/40 text-[#E6EDF3] rounded px-0.5"
             >
               {part}
@@ -1614,25 +1615,34 @@ export default function ConversationDetail({
   const [threadSearchActive, setThreadSearchActive] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const matchRefs = useRef<(HTMLElement | null)[]>([]);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to current match — use timeout to let DOM render first
+  // Scroll to current match
   useEffect(() => {
     if (!threadSearchActive || !threadSearch) return;
-    const scrollToMatch = () => {
-      const validRefs = matchRefs.current.filter(Boolean);
-      if (validRefs.length === 0) return;
-      const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
-      // Reset all highlights
-      validRefs.forEach((r) => { if (r) r.style.background = "rgba(245,213,71,0.4)"; });
-      // Highlight current and scroll
-      const el = validRefs[idx];
-      if (el) {
-        el.style.background = "rgba(245,213,71,0.8)";
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => {
+      const container = messagesScrollRef.current;
+      if (!container) return;
+      const marks = container.querySelectorAll("mark[data-match-idx]");
+      if (marks.length === 0) return;
+      const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
+      // Reset all
+      marks.forEach((m) => (m as HTMLElement).style.background = "rgba(245,213,71,0.4)");
+      // Highlight and scroll to current
+      const target = marks[idx] as HTMLElement;
+      if (target) {
+        target.style.background = "rgba(245,213,71,0.8)";
+        // Find the closest scrollable parent and scroll
+        const targetTop = target.offsetTop;
+        let parent = target.offsetParent as HTMLElement | null;
+        let accumulatedTop = target.offsetTop;
+        while (parent && parent !== container) {
+          accumulatedTop += parent.offsetTop;
+          parent = parent.offsetParent as HTMLElement | null;
+        }
+        container.scrollTop = accumulatedTop - container.clientHeight / 2;
       }
-    };
-    // Delay to ensure refs are populated after render
-    const timer = setTimeout(scrollToMatch, 150);
+    }, 200);
     return () => clearTimeout(timer);
   }, [currentMatchIndex, threadSearch, threadSearchActive]);
 
@@ -1740,20 +1750,28 @@ export default function ConversationDetail({
     }
   }, [convo?.id, globalSearchQuery]);
 
-  // Re-scroll when messages load (refs get populated after render)
+  // Re-scroll when messages load
   useEffect(() => {
     if (!threadSearchActive || !threadSearch || messages.length === 0) return;
     const timer = setTimeout(() => {
-      const validRefs = matchRefs.current.filter(Boolean);
-      if (validRefs.length === 0) return;
-      const idx = ((currentMatchIndex % validRefs.length) + validRefs.length) % validRefs.length;
-      validRefs.forEach((r) => { if (r) r.style.background = "rgba(245,213,71,0.4)"; });
-      const el = validRefs[idx];
-      if (el) {
-        el.style.background = "rgba(245,213,71,0.8)";
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const container = messagesScrollRef.current;
+      if (!container) return;
+      const marks = container.querySelectorAll("mark[data-match-idx]");
+      if (marks.length === 0) return;
+      const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
+      marks.forEach((m) => (m as HTMLElement).style.background = "rgba(245,213,71,0.4)");
+      const target = marks[idx] as HTMLElement;
+      if (target) {
+        target.style.background = "rgba(245,213,71,0.8)";
+        let accumulatedTop = target.offsetTop;
+        let parent = target.offsetParent as HTMLElement | null;
+        while (parent && parent !== container) {
+          accumulatedTop += parent.offsetTop;
+          parent = parent.offsetParent as HTMLElement | null;
+        }
+        container.scrollTop = accumulatedTop - container.clientHeight / 2;
       }
-    }, 300);
+    }, 500);
     return () => clearTimeout(timer);
   }, [messages.length, threadSearchActive]);
 
@@ -2768,6 +2786,7 @@ export default function ConversationDetail({
       </div>
 
       <div
+        ref={messagesScrollRef}
         className={`${
           isReviewTab ? "flex-1 overflow-hidden px-5 py-4" : "flex-1 overflow-y-auto px-5 py-4"
         }`}
