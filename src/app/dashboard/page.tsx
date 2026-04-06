@@ -1178,12 +1178,56 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
     return groups;
   }, [allColumns, exportMode]);
 
+  // Filter rows based on which column groups are selected
+  const filteredRows = useMemo(() => {
+    if (exportMode !== "unified" || !previewData) return previewData;
+
+    const selectedCols = Array.from(selectedColumns);
+    const hasTaskCols = selectedCols.some((c) => c.startsWith("task_"));
+    const hasConvoCols = selectedCols.some((c) =>
+      c.startsWith("conversation_") || c.startsWith("account_") || c.startsWith("folder_") ||
+      c.startsWith("assignee_") || c.startsWith("latest_") ||
+      ["total_messages", "inbound_messages", "outbound_messages", "reply_status", "waiting_hours", "first_response_hours", "first_response_by", "has_attachments"].includes(c)
+    );
+
+    return previewData.filter((row) => {
+      // If task columns are selected, only include rows that have task data
+      if (hasTaskCols && !hasConvoCols) {
+        return row.task_id && row.task_id !== "";
+      }
+      // If only conversation columns selected, deduplicate (one row per conversation)
+      // But for unified this is handled below
+      return true;
+    });
+  }, [previewData, selectedColumns, exportMode]);
+
+  // Deduplicate conversation-only exports (one row per conversation when no task columns)
+  const exportRows = useMemo(() => {
+    if (exportMode !== "unified" || !filteredRows) return filteredRows;
+
+    const selectedCols = Array.from(selectedColumns);
+    const hasTaskCols = selectedCols.some((c) => c.startsWith("task_"));
+
+    if (!hasTaskCols) {
+      // No task columns selected — deduplicate by conversation_id
+      const seen = new Set<string>();
+      return filteredRows.filter((row) => {
+        if (seen.has(row.conversation_id)) return false;
+        seen.add(row.conversation_id);
+        return true;
+      });
+    }
+
+    return filteredRows;
+  }, [filteredRows, selectedColumns, exportMode]);
+
   async function handleExport() {
-    if (!previewData || selectedColumns.size === 0) return;
+    const sourceRows = exportMode === "unified" ? exportRows : previewData;
+    if (!sourceRows || selectedColumns.size === 0) return;
     setLoading(true);
     try {
       const cols = allColumns.filter((c) => selectedColumns.has(c));
-      const filtered = previewData.map((row) => {
+      const filtered = sourceRows.map((row: any) => {
         const obj: any = {};
         for (const c of cols) obj[c] = row[c] ?? "";
         return obj;
@@ -1232,7 +1276,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       {exportMode === "unified" && !previewLoading && (
         <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-3">
           <div className="text-xs text-[#7D8590]">
-            All data joined through conversations. Each row = one task assignee. {previewData ? previewData.length + " rows loaded." : "Loading..."}
+            All data joined through conversations. {exportRows ? exportRows.length + " rows" : previewData ? previewData.length + " rows loaded." : "Loading..."} {exportRows && previewData && exportRows.length !== previewData.length ? `(filtered from ${previewData.length} total)` : ""}
           </div>
           {previewData && previewData.length === 0 && allColumns.length > 0 && (
             <div className="text-[11px] text-[#F0883E] mt-1">No data found for the selected date range. Columns are still available — try changing the date filter or select "All Time".</div>
@@ -1249,7 +1293,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-xs font-bold text-[#E6EDF3]">Select Columns</div>
-                <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {previewData?.length || 0} rows</div>
+                <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {exportMode === "unified" ? (exportRows?.length || 0) : (previewData?.length || 0)} rows</div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setSelectedColumns(new Set(allColumns))} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Select all</button>
@@ -1292,7 +1336,9 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
           </div>
 
           {/* Preview table */}
-          {previewData && previewData.length > 0 && selectedColumns.size > 0 && (
+          {(() => {
+            const previewSource = exportMode === "unified" ? exportRows : previewData;
+            return previewSource && previewSource.length > 0 && selectedColumns.size > 0 && (
             <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] overflow-hidden">
               <div className="px-4 py-2 border-b border-[#1E242C] text-[10px] text-[#484F58]">Preview (first 5 rows)</div>
               <div className="overflow-x-auto">
@@ -1303,7 +1349,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
                     ))}
                   </tr></thead>
                   <tbody>
-                    {previewData.slice(0, 5).map((row, i) => (
+                    {previewSource.slice(0, 5).map((row: any, i: number) => (
                       <tr key={i} className="border-b border-[#1E242C]/50">
                         {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
                           <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">{String(row[col] ?? "")}</td>
@@ -1314,7 +1360,8 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
                 </table>
               </div>
             </div>
-          )}
+          );
+          })()}
 
           {/* Export format + button */}
           <div className="flex items-center justify-between p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
@@ -1335,11 +1382,11 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             </div>
             <button
               onClick={handleExport}
-              disabled={loading || selectedColumns.size === 0 || !previewData?.length}
+              disabled={loading || selectedColumns.size === 0 || !(exportMode === "unified" ? exportRows?.length : previewData?.length)}
               className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {loading ? "Exporting..." : `Export ${previewData?.length || 0} rows`}
+              {loading ? "Exporting..." : `Export ${exportMode === "unified" ? (exportRows?.length || 0) : (previewData?.length || 0)} rows`}
             </button>
           </div>
         </>
