@@ -7,7 +7,12 @@ import {
 import { createBrowserClient } from "@/lib/supabase";
 import type { TeamMember, Mailbox } from "@/types";
 
-const supabase = createBrowserClient();
+// Lazy-init supabase client (avoid module-level call that breaks static generation)
+let _supabase: ReturnType<typeof createBrowserClient> | null = null;
+function getSupabase() {
+  if (!_supabase) _supabase = createBrowserClient();
+  return _supabase;
+}
 
 export default function CreateConversation({
   currentUser,
@@ -42,7 +47,7 @@ export default function CreateConversation({
   // Get callers (team members with call skillset)
   const [callers, setCallers] = useState<TeamMember[]>([]);
   useEffect(() => {
-    supabase
+    getSupabase()
       .from("team_members")
       .select("*")
       .eq("is_active", true)
@@ -64,7 +69,7 @@ export default function CreateConversation({
       let supplierContactId: string | null = null;
       if (supplierEmail.trim()) {
         // Check if contact exists
-        const { data: existing } = await supabase
+        const { data: existing } = await getSupabase()
           .from("supplier_contacts")
           .select("id")
           .eq("email", supplierEmail.trim().toLowerCase())
@@ -73,7 +78,7 @@ export default function CreateConversation({
         if (existing) {
           supplierContactId = existing.id;
           // Update existing contact
-          await supabase.from("supplier_contacts").update({
+          await getSupabase().from("supplier_contacts").update({
             name: supplierName.trim() || undefined,
             company: supplierCompany.trim() || undefined,
             timezone: supplierTimezone,
@@ -84,7 +89,7 @@ export default function CreateConversation({
           }).eq("id", existing.id);
         } else {
           // Create new contact
-          const { data: newContact } = await supabase.from("supplier_contacts").insert({
+          const { data: newContact } = await getSupabase().from("supplier_contacts").insert({
             email: supplierEmail.trim().toLowerCase(),
             name: supplierName.trim() || null,
             company: supplierCompany.trim() || null,
