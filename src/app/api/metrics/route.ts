@@ -33,9 +33,9 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 2b. Fetch supplier contacts for timezone-aware business hours ──
-  const supplierContactIds = [...new Set(
+  const supplierContactIds = Array.from(new Set(
     (conversations || []).map((c: any) => c.supplier_contact_id).filter(Boolean)
-  )];
+  ));
   const supplierMap: Record<string, SupplierHours> = {};
   if (supplierContactIds.length > 0) {
     const { data: contacts } = await supabase
