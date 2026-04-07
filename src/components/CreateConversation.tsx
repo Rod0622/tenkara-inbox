@@ -30,6 +30,15 @@ export default function CreateConversation({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
+  // Supplier contact fields
+  const [supplierEmail, setSupplierEmail] = useState("");
+  const [supplierName, setSupplierName] = useState("");
+  const [supplierCompany, setSupplierCompany] = useState("");
+  const [supplierTimezone, setSupplierTimezone] = useState("America/New_York");
+  const [supplierWorkStart, setSupplierWorkStart] = useState("09:00");
+  const [supplierWorkEnd, setSupplierWorkEnd] = useState("17:00");
+  const [supplierWorkDays, setSupplierWorkDays] = useState<number[]>([1, 2, 3, 4, 5]);
+
   // Get callers (team members with call skillset)
   const [callers, setCallers] = useState<TeamMember[]>([]);
   useEffect(() => {
@@ -51,6 +60,43 @@ export default function CreateConversation({
     setError("");
 
     try {
+      // Create or update supplier contact if email provided
+      let supplierContactId: string | null = null;
+      if (supplierEmail.trim()) {
+        // Check if contact exists
+        const { data: existing } = await supabase
+          .from("supplier_contacts")
+          .select("id")
+          .eq("email", supplierEmail.trim().toLowerCase())
+          .single();
+
+        if (existing) {
+          supplierContactId = existing.id;
+          // Update existing contact
+          await supabase.from("supplier_contacts").update({
+            name: supplierName.trim() || undefined,
+            company: supplierCompany.trim() || undefined,
+            timezone: supplierTimezone,
+            work_start: supplierWorkStart,
+            work_end: supplierWorkEnd,
+            work_days: supplierWorkDays,
+            updated_at: new Date().toISOString(),
+          }).eq("id", existing.id);
+        } else {
+          // Create new contact
+          const { data: newContact } = await supabase.from("supplier_contacts").insert({
+            email: supplierEmail.trim().toLowerCase(),
+            name: supplierName.trim() || null,
+            company: supplierCompany.trim() || null,
+            timezone: supplierTimezone,
+            work_start: supplierWorkStart,
+            work_end: supplierWorkEnd,
+            work_days: supplierWorkDays,
+          }).select("id").single();
+          supplierContactId = newContact?.id || null;
+        }
+      }
+
       const res = await fetch("/api/conversations/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -61,6 +107,9 @@ export default function CreateConversation({
           actor_id: currentUser?.id,
           notes: notes.trim() || null,
           caller_assignee_id: callerId || null,
+          supplier_contact_id: supplierContactId,
+          from_email: supplierEmail.trim() || null,
+          from_name: supplierName.trim() || supplierCompany.trim() || null,
         }),
       });
 
@@ -163,6 +212,102 @@ export default function CreateConversation({
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
+        </div>
+
+        {/* Supplier Contact Info */}
+        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 space-y-3">
+          <div className="text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider">Supplier Contact</div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Email</label>
+              <input value={supplierEmail} onChange={(e) => setSupplierEmail(e.target.value)}
+                placeholder="supplier@company.com"
+                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            </div>
+            <div>
+              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Contact Name</label>
+              <input value={supplierName} onChange={(e) => setSupplierName(e.target.value)}
+                placeholder="John Smith"
+                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Company</label>
+            <input value={supplierCompany} onChange={(e) => setSupplierCompany(e.target.value)}
+              placeholder="ChemCorp Inc."
+              className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Timezone</label>
+              <select value={supplierTimezone} onChange={(e) => setSupplierTimezone(e.target.value)}
+                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#E6EDF3] outline-none">
+                <optgroup label="Americas">
+                  <option value="America/New_York">Eastern (ET)</option>
+                  <option value="America/Chicago">Central (CT)</option>
+                  <option value="America/Denver">Mountain (MT)</option>
+                  <option value="America/Los_Angeles">Pacific (PT)</option>
+                  <option value="America/Anchorage">Alaska (AKT)</option>
+                  <option value="Pacific/Honolulu">Hawaii (HST)</option>
+                  <option value="America/Sao_Paulo">Brazil (BRT)</option>
+                  <option value="America/Mexico_City">Mexico City</option>
+                </optgroup>
+                <optgroup label="Europe & Africa">
+                  <option value="Europe/London">London (GMT/BST)</option>
+                  <option value="Europe/Paris">Paris (CET)</option>
+                  <option value="Europe/Berlin">Berlin (CET)</option>
+                  <option value="Europe/Moscow">Moscow (MSK)</option>
+                  <option value="Africa/Cairo">Cairo (EET)</option>
+                  <option value="Africa/Lagos">Lagos (WAT)</option>
+                </optgroup>
+                <optgroup label="Asia & Pacific">
+                  <option value="Asia/Dubai">Dubai (GST)</option>
+                  <option value="Asia/Kolkata">India (IST)</option>
+                  <option value="Asia/Shanghai">China (CST)</option>
+                  <option value="Asia/Tokyo">Japan (JST)</option>
+                  <option value="Asia/Seoul">Korea (KST)</option>
+                  <option value="Asia/Manila">Philippines (PHT)</option>
+                  <option value="Asia/Singapore">Singapore (SGT)</option>
+                  <option value="Asia/Bangkok">Thailand (ICT)</option>
+                  <option value="Australia/Sydney">Sydney (AEST)</option>
+                  <option value="Pacific/Auckland">New Zealand (NZST)</option>
+                </optgroup>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Work Start</label>
+              <input type="time" value={supplierWorkStart} onChange={(e) => setSupplierWorkStart(e.target.value)}
+                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]" />
+            </div>
+            <div>
+              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Work End</label>
+              <input type="time" value={supplierWorkEnd} onChange={(e) => setSupplierWorkEnd(e.target.value)}
+                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] text-[#484F58] font-semibold mb-1.5">Work Days</label>
+            <div className="flex gap-1">
+              {[
+                { day: 0, label: "Sun" }, { day: 1, label: "Mon" }, { day: 2, label: "Tue" },
+                { day: 3, label: "Wed" }, { day: 4, label: "Thu" }, { day: 5, label: "Fri" }, { day: 6, label: "Sat" },
+              ].map(({ day, label }) => (
+                <button key={day} onClick={() => {
+                  setSupplierWorkDays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort());
+                }}
+                  className={`w-10 h-8 rounded-lg text-[10px] font-semibold transition-all ${
+                    supplierWorkDays.includes(day) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C]"
+                  }`}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="text-[9px] text-[#484F58]">Task timers will only count down during the supplier&apos;s working hours in their timezone.</div>
         </div>
 
         {/* Initial Notes */}

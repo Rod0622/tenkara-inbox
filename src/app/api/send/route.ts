@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     let accountId: string;
     let to: string;
     let cc: string = body.cc || "";
+    let bcc: string = body.bcc || "";
     let subject: string;
     let emailBody: string = body.body;
     let conversationId: string | null = body.conversation_id || null;
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
 
       const toRecipients = to.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } }));
       const ccRecipients = cc ? cc.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } })) : [];
+      const bccRecipients = bcc ? bcc.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } })) : [];
 
       const graphBody: any = {
         message: {
@@ -126,6 +128,7 @@ export async function POST(req: NextRequest) {
           body: { contentType: "HTML", content: finalBody },
           toRecipients,
           ccRecipients,
+          bccRecipients,
         },
         saveToSentItems: true,
       };
@@ -203,6 +206,7 @@ export async function POST(req: NextRequest) {
         from: `"${account.name}" <${account.email}>`,
         to,
         cc: cc || undefined,
+        bcc: bcc || undefined,
         subject,
         text: plainContent,
         html: htmlContent,

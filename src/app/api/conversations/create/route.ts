@@ -15,6 +15,9 @@ export async function POST(req: NextRequest) {
     notes,
     caller_assignee_id,
     task_category_id,
+    supplier_contact_id,
+    from_email,
+    from_name,
   } = body;
 
   if (!subject?.trim()) {
@@ -32,8 +35,9 @@ export async function POST(req: NextRequest) {
       subject: subject.trim(),
       email_account_id,
       assignee_id: assignee_id || null,
-      from_name: "Internal",
-      from_email: "internal",
+      supplier_contact_id: supplier_contact_id || null,
+      from_name: from_name || "Internal",
+      from_email: from_email || "internal",
       preview: notes?.trim()?.slice(0, 200) || "Team conversation",
       status: "open",
       is_unread: false,

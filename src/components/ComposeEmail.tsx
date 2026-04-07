@@ -23,9 +23,14 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [showAccountPicker, setShowAccountPicker] = useState(false);
-  const [to, setTo] = useState("");
-  const [cc, setCc] = useState("");
+  const [to, setTo] = useState<string[]>([]);
+  const [toInput, setToInput] = useState("");
+  const [cc, setCc] = useState<string[]>([]);
+  const [ccInput, setCcInput] = useState("");
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [bccInput, setBccInput] = useState("");
   const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
   const [sending, setSending] = useState(false);
@@ -172,7 +177,11 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
   const handleSend = async () => {
     const plainText = htmlToPlainText(bodyHtml);
-    if (!to.trim() || !subject.trim() || !plainText.trim()) {
+    const allTo = [...to, ...(toInput.trim() ? [toInput.trim()] : [])];
+    const allCc = [...cc, ...(ccInput.trim() ? [ccInput.trim()] : [])];
+    const allBcc = [...bcc, ...(bccInput.trim() ? [bccInput.trim()] : [])];
+
+    if (allTo.length === 0 || !subject.trim() || !plainText.trim()) {
       setError("Please fill in To, Subject, and Body");
       return;
     }
@@ -188,8 +197,9 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
       const cleanHtml = getCleanHtml(bodyHtml);
       const result = await sendEmail({
         account_id: accountId,
-        to: to.trim(),
-        cc: cc.trim() || undefined,
+        to: allTo.join(", "),
+        cc: allCc.length > 0 ? allCc.join(", ") : undefined,
+        bcc: allBcc.length > 0 ? allBcc.join(", ") : undefined,
         subject: subject.trim(),
         body: cleanHtml,
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -297,32 +307,112 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           </div>
         </div>
 
-        {/* To */}
-        <div className="px-5 py-2.5 border-b border-[#161B22] flex items-center gap-3">
+        {/* To — tag style */}
+        <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
           <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">To</span>
-          <input
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="recipient@example.com"
-            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
-          />
-          {!showCc && (
-            <button onClick={() => setShowCc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors">
-              Cc
-            </button>
-          )}
+          <div className="flex-1 flex flex-wrap items-center gap-1">
+            {to.map((email, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
+                {email}
+                <button onClick={() => setTo((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]">
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            <input
+              value={toInput}
+              onChange={(e) => setToInput(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === "," || e.key === "Tab") && toInput.trim()) {
+                  e.preventDefault();
+                  const email = toInput.trim().replace(/,$/, "");
+                  if (email && !to.includes(email)) setTo((prev) => [...prev, email]);
+                  setToInput("");
+                }
+                if (e.key === "Backspace" && !toInput && to.length > 0) {
+                  setTo((prev) => prev.slice(0, -1));
+                }
+              }}
+              onBlur={() => {
+                if (toInput.trim()) {
+                  const email = toInput.trim().replace(/,$/, "");
+                  if (email && !to.includes(email)) setTo((prev) => [...prev, email]);
+                  setToInput("");
+                }
+              }}
+              placeholder={to.length === 0 ? "recipient@example.com" : "Add another..."}
+              className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
+            />
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {!showCc && (
+              <button onClick={() => setShowCc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590]">Cc</button>
+            )}
+            {!showBcc && (
+              <button onClick={() => setShowBcc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590]">Bcc</button>
+            )}
+          </div>
         </div>
 
-        {/* CC */}
+        {/* CC — tag style */}
         {showCc && (
-          <div className="px-5 py-2.5 border-b border-[#161B22] flex items-center gap-3">
+          <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
             <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">Cc</span>
-            <input
-              value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              placeholder="cc@example.com"
-              className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
-            />
+            <div className="flex-1 flex flex-wrap items-center gap-1">
+              {cc.map((email, i) => (
+                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
+                  {email}
+                  <button onClick={() => setCc((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]"><X size={10} /></button>
+                </span>
+              ))}
+              <input
+                value={ccInput}
+                onChange={(e) => setCcInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === "," || e.key === "Tab") && ccInput.trim()) {
+                    e.preventDefault();
+                    const email = ccInput.trim().replace(/,$/, "");
+                    if (email && !cc.includes(email)) setCc((prev) => [...prev, email]);
+                    setCcInput("");
+                  }
+                  if (e.key === "Backspace" && !ccInput && cc.length > 0) setCc((prev) => prev.slice(0, -1));
+                }}
+                onBlur={() => { if (ccInput.trim()) { const e = ccInput.trim().replace(/,$/, ""); if (e && !cc.includes(e)) setCc((prev) => [...prev, e]); setCcInput(""); }}}
+                placeholder="cc@example.com"
+                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* BCC — tag style */}
+        {showBcc && (
+          <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
+            <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">Bcc</span>
+            <div className="flex-1 flex flex-wrap items-center gap-1">
+              {bcc.map((email, i) => (
+                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
+                  {email}
+                  <button onClick={() => setBcc((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]"><X size={10} /></button>
+                </span>
+              ))}
+              <input
+                value={bccInput}
+                onChange={(e) => setBccInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === "," || e.key === "Tab") && bccInput.trim()) {
+                    e.preventDefault();
+                    const email = bccInput.trim().replace(/,$/, "");
+                    if (email && !bcc.includes(email)) setBcc((prev) => [...prev, email]);
+                    setBccInput("");
+                  }
+                  if (e.key === "Backspace" && !bccInput && bcc.length > 0) setBcc((prev) => prev.slice(0, -1));
+                }}
+                onBlur={() => { if (bccInput.trim()) { const e = bccInput.trim().replace(/,$/, ""); if (e && !bcc.includes(e)) setBcc((prev) => [...prev, e]); setBccInput(""); }}}
+                placeholder="bcc@example.com"
+                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
+              />
+            </div>
           </div>
         )}
 
