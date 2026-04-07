@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyTaskAssigned } from "@/lib/notifications";
+import { addBusinessHours, getSupplierHoursForConversation } from "@/lib/business-hours";
 import type { Task, TaskStatus } from "@/types";
 
 function normalizeAssigneeIds(body: any): string[] {
@@ -167,22 +168,13 @@ export async function POST(req: NextRequest) {
     let dueDate = body.due_date || body.dueDate || null;
     const dueTime = body.due_time || body.dueTime || null;
 
-    // Default deadline: 24 business hours from now (EST 9am-8pm)
+    // Default deadline: 24 business hours using supplier's schedule (or EST 9am-8pm fallback)
     if (!dueDate) {
-      const now = new Date();
-      let hoursToAdd = 24; // 24 business hours
-      const target = new Date(now);
-      while (hoursToAdd > 0) {
-        target.setTime(target.getTime() + 60 * 60 * 1000);
-        const estStr = target.toLocaleString("en-US", { timeZone: "America/New_York" });
-        const est = new Date(estStr);
-        const hour = est.getHours();
-        const day = est.getDay();
-        if (day >= 1 && day <= 5 && hour >= 9 && hour < 20) {
-          hoursToAdd--;
-        }
-      }
-      dueDate = target.toISOString().slice(0, 10);
+      const supplierHours = conversationId
+        ? await getSupplierHoursForConversation(supabase, conversationId)
+        : null;
+      const result = addBusinessHours(new Date(), 24, supplierHours);
+      dueDate = result.dueDate;
     }
     const categoryId = body.category_id || body.categoryId || null;
     const assigneeIds = normalizeAssigneeIds(body);

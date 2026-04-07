@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { calcBusinessHours as sharedCalcBusinessHours, type SupplierHours } from "@/lib/business-hours";
 
 // GET /api/metrics — Compute SLA/KPI metrics
 export async function GET(req: NextRequest) {
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   // ── 1. Fetch all conversations with their messages ──
   let convosQuery = supabase
     .from("conversations")
-    .select("id, subject, from_name, from_email, assignee_id, status, email_account_id, last_message_at, created_at")
+    .select("id, subject, from_name, from_email, assignee_id, status, email_account_id, last_message_at, created_at, supplier_contact_id")
     .neq("status", "trash")
     .neq("from_email", "internal"); // Exclude internal conversations
 
@@ -31,6 +32,21 @@ export async function GET(req: NextRequest) {
     msgsByConvo[msg.conversation_id].push(msg);
   }
 
+  // ── 2b. Fetch supplier contacts for timezone-aware business hours ──
+  const supplierContactIds = [...new Set(
+    (conversations || []).map((c: any) => c.supplier_contact_id).filter(Boolean)
+  )];
+  const supplierMap: Record<string, SupplierHours> = {};
+  if (supplierContactIds.length > 0) {
+    const { data: contacts } = await supabase
+      .from("supplier_contacts")
+      .select("id, timezone, work_start, work_end, work_days")
+      .in("id", supplierContactIds);
+    for (const c of (contacts || [])) {
+      supplierMap[c.id] = { timezone: c.timezone, work_start: c.work_start, work_end: c.work_end, work_days: c.work_days };
+    }
+  }
+
   // ── 3. Compute per-conversation metrics ──
   const now = new Date();
   const awaitingOurReply: any[] = [];
@@ -45,6 +61,7 @@ export async function GET(req: NextRequest) {
     if (dateFrom && convo.last_message_at < dateFrom) continue;
     if (dateTo && convo.created_at > dateTo + "T23:59:59.999Z") continue;
 
+    const supplierHours = convo.supplier_contact_id ? (supplierMap[convo.supplier_contact_id] || null) : null;
     const lastMsg = msgs[msgs.length - 1];
     const lastMsgTime = new Date(lastMsg.sent_at);
     const hoursSinceLastMsg = (now.getTime() - lastMsgTime.getTime()) / (1000 * 60 * 60);
@@ -59,7 +76,7 @@ export async function GET(req: NextRequest) {
         assignee_id: convo.assignee_id,
         last_message_at: lastMsg.sent_at,
         waiting_hours: Math.round(hoursSinceLastMsg * 10) / 10,
-        waiting_business_hours: calcBusinessHours(lastMsgTime, now),
+        waiting_business_hours: sharedCalcBusinessHours(lastMsgTime, now, supplierHours),
       });
     } else {
       // Supplier sent the last message — waiting for our reply
@@ -71,7 +88,7 @@ export async function GET(req: NextRequest) {
         assignee_id: convo.assignee_id,
         last_message_at: lastMsg.sent_at,
         waiting_hours: Math.round(hoursSinceLastMsg * 10) / 10,
-        waiting_business_hours: calcBusinessHours(lastMsgTime, now),
+        waiting_business_hours: sharedCalcBusinessHours(lastMsgTime, now, supplierHours),
       });
     }
 
@@ -86,7 +103,7 @@ export async function GET(req: NextRequest) {
           const inboundTime = new Date(msgs[i].sent_at);
           const responseTime = new Date(msgs[j].sent_at);
           const diffHours = (responseTime.getTime() - inboundTime.getTime()) / (1000 * 60 * 60);
-          const businessHours = calcBusinessHours(inboundTime, responseTime);
+          const businessHours = sharedCalcBusinessHours(inboundTime, responseTime, supplierHours);
 
           // Apply date filter on the response
           if (dateFrom && msgs[j].sent_at < dateFrom) break;
@@ -149,27 +166,4 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// Calculate business hours between two dates (EST 9am-8pm Mon-Fri = 11 hrs/day)
-function calcBusinessHours(start: Date, end: Date): number {
-  if (end <= start) return 0;
-  let hours = 0;
-  const current = new Date(start);
-
-  while (current < end) {
-    try {
-      const estStr = current.toLocaleString("en-US", { timeZone: "America/New_York" });
-      const est = new Date(estStr);
-      const hour = est.getHours();
-      const day = est.getDay();
-
-      if (day >= 1 && day <= 5 && hour >= 9 && hour < 20) {
-        hours++;
-      }
-    } catch (_e) {
-      hours++; // Fallback: count all hours
-    }
-    current.setTime(current.getTime() + 60 * 60 * 1000);
-    if (hours > 1000) break; // Safety limit
-  }
-  return hours;
-}
+// Business hours calculation now uses shared utility from @/lib/business-hours

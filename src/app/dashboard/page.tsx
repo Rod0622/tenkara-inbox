@@ -10,6 +10,12 @@ import {
   ExternalLink, Inbox, Eye, Download, FileSpreadsheet, FileJson, FileText
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
+import {
+  getBusinessHoursRemaining as sharedGetBusinessHoursRemaining,
+  getBusinessHoursElapsed as sharedGetBusinessHoursElapsed,
+  formatBusinessTime as sharedFormatBusinessTime,
+  type SupplierHours,
+} from "@/lib/business-hours";
 
 const supabase = createBrowserClient();
 
@@ -71,59 +77,18 @@ type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | 
 
 // ── Helpers ───────────────────────────────────────────
 
-// Calculate business hours remaining (EST 9am-8pm = 11 hours/day)
+// Business hours now use shared utility from @/lib/business-hours
+// These wrappers maintain the same call signatures used throughout the dashboard
 function getBusinessHoursRemaining(dueDate: string): number {
-  const due = new Date(dueDate);
-  const now = new Date();
-  if (due <= now) return -getBusinessHoursElapsed(dueDate);
-  
-  let hours = 0;
-  const current = new Date(now);
-  
-  while (current < due) {
-    // Convert to EST
-    const estHour = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
-    const dayOfWeek = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getDay();
-    
-    // Count only Mon-Fri 9am-8pm EST
-    if (dayOfWeek >= 1 && dayOfWeek <= 5 && estHour >= 9 && estHour < 20) {
-      hours++;
-    }
-    current.setTime(current.getTime() + 60 * 60 * 1000); // advance 1 hour
-    if (hours > 500) break; // safety limit
-  }
-  return hours;
+  return sharedGetBusinessHoursRemaining(dueDate);
 }
 
 function getBusinessHoursElapsed(dueDate: string): number {
-  const due = new Date(dueDate);
-  const now = new Date();
-  if (due >= now) return 0;
-  
-  let hours = 0;
-  const current = new Date(due);
-  
-  while (current < now) {
-    const estHour = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getHours();
-    const dayOfWeek = new Date(current.toLocaleString("en-US", { timeZone: "America/New_York" })).getDay();
-    
-    if (dayOfWeek >= 1 && dayOfWeek <= 5 && estHour >= 9 && estHour < 20) {
-      hours++;
-    }
-    current.setTime(current.getTime() + 60 * 60 * 1000);
-    if (hours > 500) break;
-  }
-  return hours;
+  return sharedGetBusinessHoursElapsed(dueDate);
 }
 
 function formatBusinessTime(hours: number): string {
-  if (hours === 0) return "0h";
-  if (hours < 1) return "<1h";
-  if (hours < 11) return Math.round(hours) + "h";
-  const days = Math.floor(hours / 11);
-  const remHours = Math.round(hours % 11);
-  if (remHours === 0) return days + "d";
-  return days + "d " + remHours + "h";
+  return sharedFormatBusinessTime(hours);
 }
 
 function formatDueDate(date: string | null): string {

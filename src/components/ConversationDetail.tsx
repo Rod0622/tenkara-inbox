@@ -33,6 +33,7 @@ import {
   Tag,
   Trash2,
   User,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -44,6 +45,7 @@ import {
 } from "@/lib/hooks";
 import type { ConversationDetailProps, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
+import { addBusinessHours, type SupplierHours } from "@/lib/business-hours";
 import RichTextEditor from "@/components/RichTextEditor";
 
 type SuggestedTaskItem = {
@@ -2001,15 +2003,28 @@ export default function ConversationDetail({
   const handleAddTaskInternal = async () => {
     if (!convo || !newTaskText.trim()) return;
 
-    // Calculate due_time from hours
+    // Calculate due_time from hours using supplier business hours
     let computedDueDate = newTaskDueDate || undefined;
     let computedDueTime: string | undefined = undefined;
     if (newTaskDueTime) {
       const hours = parseInt(newTaskDueTime);
       if (hours > 0) {
-        const deadline = new Date(Date.now() + hours * 60 * 60 * 1000);
-        computedDueDate = computedDueDate || deadline.toISOString().split("T")[0];
-        computedDueTime = deadline.toTimeString().slice(0, 5); // "HH:MM"
+        // Fetch supplier hours if available
+        let supplierHrs: SupplierHours | null = null;
+        try {
+          if ((convo as any)?.supplier_contact_id) {
+            const sb = (await import("@/lib/supabase")).createBrowserClient();
+            const { data: sc } = await sb.from("supplier_contacts")
+              .select("timezone, work_start, work_end, work_days")
+              .eq("id", (convo as any).supplier_contact_id)
+              .single();
+            if (sc) supplierHrs = sc;
+          }
+        } catch (_e) { /* use defaults */ }
+
+        const result = addBusinessHours(new Date(), hours, supplierHrs);
+        computedDueDate = computedDueDate || result.dueDate;
+        computedDueTime = result.dueTime;
       }
     }
 
@@ -2074,16 +2089,28 @@ export default function ConversationDetail({
   const saveEditTask = async () => {
     if (!editingTaskId || !editTaskText.trim()) return;
     try {
-      // Calculate due_time from hours
+      // Calculate due_time from hours using supplier business hours
       let computedDueDate = editTaskDueDate || null;
       let computedDueTime: string | null = editTaskDueTime || null;
       if (editTaskDueTime && !editTaskDueTime.includes(":")) {
         // It's hours, not a time string
         const hours = parseInt(editTaskDueTime);
         if (hours > 0) {
-          const deadline = new Date(Date.now() + hours * 60 * 60 * 1000);
-          computedDueDate = computedDueDate || deadline.toISOString().split("T")[0];
-          computedDueTime = deadline.toTimeString().slice(0, 5);
+          let supplierHrs: SupplierHours | null = null;
+          try {
+            if ((convo as any)?.supplier_contact_id) {
+              const sb = (await import("@/lib/supabase")).createBrowserClient();
+              const { data: sc } = await sb.from("supplier_contacts")
+                .select("timezone, work_start, work_end, work_days")
+                .eq("id", (convo as any).supplier_contact_id)
+                .single();
+              if (sc) supplierHrs = sc;
+            }
+          } catch (_e) { /* use defaults */ }
+
+          const result = addBusinessHours(new Date(), hours, supplierHrs);
+          computedDueDate = computedDueDate || result.dueDate;
+          computedDueTime = result.dueTime;
         }
       }
 
@@ -2622,6 +2649,59 @@ export default function ConversationDetail({
             <span className="text-[#7D8590]">{convo.from_name}</span>
             <span className="text-[#484F58]">&lt;{convo.from_email}&gt;</span>
           </div>
+
+          {/* ── Participants row ── */}
+          {convo.from_email !== "internal" && (() => {
+            const seen = new Set<string>();
+            const participants: { name: string; email: string }[] = [];
+            for (const msg of (messages || [])) {
+              const addAddr = (raw: string | null | undefined, fallbackName?: string) => {
+                if (!raw) return;
+                for (const part of raw.split(",")) {
+                  const trimmed = part.trim().toLowerCase();
+                  if (!trimmed || seen.has(trimmed)) continue;
+                  seen.add(trimmed);
+                  // Try to extract "Name <email>" format
+                  const match = part.match(/^(.+?)\s*<(.+?)>$/);
+                  if (match) {
+                    participants.push({ name: match[1].trim(), email: match[2].trim().toLowerCase() });
+                  } else {
+                    participants.push({ name: fallbackName || trimmed.split("@")[0], email: trimmed });
+                  }
+                }
+              };
+              // From
+              if (msg.from_email && !seen.has(msg.from_email.toLowerCase())) {
+                seen.add(msg.from_email.toLowerCase());
+                participants.push({ name: msg.from_name || msg.from_email.split("@")[0], email: msg.from_email.toLowerCase() });
+              }
+              // To + CC
+              addAddr(msg.to_addresses);
+              addAddr(msg.cc_addresses);
+            }
+            if (participants.length <= 1) return null;
+            const MAX_SHOW = 5;
+            const shown = participants.slice(0, MAX_SHOW);
+            const extra = participants.length - MAX_SHOW;
+            return (
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <Users size={11} className="text-[#484F58] shrink-0" />
+                {shown.map((p, i) => (
+                  <span key={p.email} title={`${p.name} <${p.email}>`}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#12161B] border border-[#1E242C] text-[10px] text-[#7D8590] max-w-[160px] truncate">
+                    <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
+                      style={{ background: i === 0 ? "#58A6FF" : i === 1 ? "#4ADE80" : i === 2 ? "#BC8CFF" : i === 3 ? "#F0883E" : "#F5D547" }}>
+                      {(p.name || "?").slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="truncate">{p.name || p.email}</span>
+                  </span>
+                ))}
+                {extra > 0 && (
+                  <span className="text-[10px] text-[#484F58]">+{extra} more</span>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {(convo.labels || []).map(
@@ -3629,16 +3709,29 @@ export default function ConversationDetail({
                                 // Add note with reason
                                 await onAddNote(convo!.id, `⏱️ SLA Reset — Task: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}\nPrevious deadline: ${task.due_date}${task.due_time ? " " + task.due_time : ""}`);
 
-                                // Reset the deadline to same number of hours from now
+                                // Calculate same number of hours as original deadline
                                 const hours = task.due_time ? Math.max(1, Math.round((new Date(task.due_date + "T" + task.due_time).getTime() - new Date(task.created_at).getTime()) / (1000 * 60 * 60))) : 24;
-                                const newDeadline = new Date(Date.now() + hours * 60 * 60 * 1000);
-                                const newDueDate = newDeadline.toISOString().split("T")[0];
-                                const newDueTime = newDeadline.toTimeString().slice(0, 5);
 
-                                await onUpdateTask(task.id, { dueDate: newDueDate });
+                                // Fetch supplier hours for timezone-aware business hours
+                                let supplierHrs: SupplierHours | null = null;
+                                try {
+                                  const sb = (await import("@/lib/supabase")).createBrowserClient();
+                                  if ((convo as any)?.supplier_contact_id) {
+                                    const { data: sc } = await sb.from("supplier_contacts")
+                                      .select("timezone, work_start, work_end, work_days")
+                                      .eq("id", (convo as any).supplier_contact_id)
+                                      .single();
+                                    if (sc) supplierHrs = sc;
+                                  }
+                                } catch (_e) { /* use defaults */ }
+
+                                // Reset using business hours calculation
+                                const result = addBusinessHours(new Date(), hours, supplierHrs);
+
+                                await onUpdateTask(task.id, { dueDate: result.dueDate });
                                 // Update due_time directly
                                 const sb = (await import("@/lib/supabase")).createBrowserClient();
-                                await sb.from("tasks").update({ due_time: newDueTime }).eq("id", task.id);
+                                await sb.from("tasks").update({ due_time: result.dueTime }).eq("id", task.id);
 
                                 await refetchDetail();
                               } catch (e) { console.error("Reset SLA failed:", e); }

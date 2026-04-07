@@ -204,6 +204,7 @@ export function useConversations(accountId: string | null) {
         last_message_at,
         created_at,
         updated_at,
+        supplier_contact_id,
         assignee:team_members!conversations_assignee_id_fkey(*),
         labels:conversation_labels(
           label_id,
