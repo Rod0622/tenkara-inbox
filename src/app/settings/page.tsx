@@ -8,7 +8,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check
+  FileSignature, Check, ClipboardList
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -47,6 +47,7 @@ const TABS = [
   { id: "labels", label: "Labels", icon: Tag },
   { id: "rules", label: "Rules", icon: Zap },
   { id: "categories", label: "Task Categories", icon: Tag },
+  { id: "task_templates", label: "Task Templates", icon: ClipboardList },
   { id: "templates", label: "Email Templates", icon: FileSignature },
 ];
 
@@ -109,6 +110,7 @@ export default function SettingsPage() {
         {activeTab === "labels" && <LabelsTab />}
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "categories" && <TaskCategoriesTab />}
+        {activeTab === "task_templates" && <TaskTemplatesTab />}
         {activeTab === "templates" && <EmailTemplatesTab />}
       </div>
 
@@ -2458,6 +2460,254 @@ function TaskCategoriesTab() {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Task Templates Tab ──────────────────────────────
+
+function TaskTemplatesTab() {
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Form state
+  const [formName, setFormName] = useState("");
+  const [formText, setFormText] = useState("");
+  const [formCategoryId, setFormCategoryId] = useState("");
+  const [formDeadlineHours, setFormDeadlineHours] = useState("");
+  const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
+
+  const fetchData = () => {
+    Promise.all([
+      supabase.from("task_templates").select("*").order("sort_order"),
+      supabase.from("task_categories").select("*").eq("is_active", true).order("sort_order"),
+      supabase.from("team_members").select("id, name, email, initials, color, is_active").eq("is_active", true).order("name"),
+    ]).then(([tplRes, catRes, memberRes]) => {
+      setTemplates(tplRes.data || []);
+      setCategories(catRes.data || []);
+      setTeamMembers(memberRes.data || []);
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const resetForm = () => {
+    setFormName(""); setFormText(""); setFormCategoryId("");
+    setFormDeadlineHours(""); setFormAssigneeIds([]);
+  };
+
+  const handleSave = async (id?: string) => {
+    if (!formName.trim()) return;
+    const payload = {
+      name: formName.trim(),
+      text: formText.trim(),
+      category_id: formCategoryId || null,
+      deadline_hours: formDeadlineHours ? parseInt(formDeadlineHours) : null,
+      assignee_ids: formAssigneeIds,
+      sort_order: id ? undefined : templates.length,
+    };
+    if (id) {
+      await supabase.from("task_templates").update(payload).eq("id", id);
+    } else {
+      await supabase.from("task_templates").insert(payload);
+    }
+    resetForm(); setShowAdd(false); setEditingId(null); fetchData();
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete template "${name}"?`)) return;
+    await supabase.from("task_templates").delete().eq("id", id);
+    fetchData();
+  };
+
+  const handleToggle = async (id: string, isActive: boolean) => {
+    await supabase.from("task_templates").update({ is_active: !isActive }).eq("id", id);
+    fetchData();
+  };
+
+  const startEdit = (tpl: any) => {
+    setEditingId(tpl.id);
+    setFormName(tpl.name || "");
+    setFormText(tpl.text || "");
+    setFormCategoryId(tpl.category_id || "");
+    setFormDeadlineHours(tpl.deadline_hours ? String(tpl.deadline_hours) : "");
+    setFormAssigneeIds(tpl.assignee_ids || []);
+  };
+
+  const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name || "";
+  const getCategoryColor = (id: string) => categories.find((c) => c.id === id)?.color || "#484F58";
+  const getCategoryIcon = (id: string) => categories.find((c) => c.id === id)?.icon || "";
+  const getMemberName = (id: string) => teamMembers.find((m) => m.id === id)?.name || "Unknown";
+
+  const renderForm = (isEdit: boolean, tplId?: string) => (
+    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+      <div>
+        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Template Name</div>
+        <input value={formName} onChange={(e) => setFormName(e.target.value)}
+          placeholder="e.g., Call Supplier, Follow Up Quote"
+          className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      </div>
+      <div>
+        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Task Text (pre-filled when used)</div>
+        <textarea value={formText} onChange={(e) => setFormText(e.target.value)}
+          placeholder="What needs to be done?"
+          rows={2}
+          className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      </div>
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Category</div>
+          <select value={formCategoryId} onChange={(e) => setFormCategoryId(e.target.value)}
+            className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            <option value="">None</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="w-40">
+          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Start Within (hours)</div>
+          <select value={formDeadlineHours} onChange={(e) => setFormDeadlineHours(e.target.value)}
+            className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            <option value="">No limit</option>
+            <option value="1">1 hour</option>
+            <option value="2">2 hours</option>
+            <option value="3">3 hours</option>
+            <option value="4">4 hours</option>
+            <option value="6">6 hours</option>
+            <option value="8">8 hours</option>
+            <option value="12">12 hours</option>
+            <option value="24">24 hours</option>
+            <option value="48">48 hours</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Default Assignees</div>
+        <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1 max-h-32 overflow-y-auto">
+          {teamMembers.map((member) => {
+            const checked = formAssigneeIds.includes(member.id);
+            return (
+              <label key={member.id} className="flex items-center gap-2 text-[12px] text-[#E6EDF3] px-1 py-0.5 rounded hover:bg-[#1E242C] cursor-pointer">
+                <input type="checkbox" checked={checked}
+                  onChange={(e) => {
+                    setFormAssigneeIds((prev) =>
+                      e.target.checked ? [...prev, member.id] : prev.filter((id) => id !== member.id)
+                    );
+                  }}
+                  className="accent-[#4ADE80]" />
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]"
+                  style={{ background: member.color }}>{member.initials}</div>
+                {member.name}
+              </label>
+            );
+          })}
+        </div>
+        <div className="text-[9px] text-[#484F58] mt-1">Assignees will be filtered by account access when the template is used.</div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => handleSave(isEdit ? tplId : undefined)}
+          disabled={!formName.trim()}
+          className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm disabled:opacity-50">
+          {isEdit ? "Save Changes" : "Create Template"}
+        </button>
+        <button onClick={() => { resetForm(); setShowAdd(false); setEditingId(null); }}
+          className="px-4 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:text-[#E6EDF3]">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="p-6 max-w-4xl">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold">Task Templates</h2>
+          <p className="text-sm text-[#484F58]">Create reusable task templates with pre-filled text, category, deadline, and assignees</p>
+        </div>
+        {!showAdd && (
+          <button onClick={() => { resetForm(); setShowAdd(true); }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+            <Plus size={16} /> New Template
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+      ) : (
+        <>
+          {showAdd && renderForm(false)}
+
+          {templates.length > 0 ? (
+            <div className="space-y-2 mt-4">
+              {templates.map((tpl) => (
+                editingId === tpl.id ? (
+                  <div key={tpl.id}>{renderForm(true, tpl.id)}</div>
+                ) : (
+                  <div key={tpl.id} className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${
+                    tpl.is_active !== false ? "border-[#1E242C] bg-[#0F1318]" : "border-[#1E242C]/50 bg-[#0B0E11] opacity-60"
+                  }`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-semibold text-[#E6EDF3]">{tpl.name}</div>
+                      {tpl.text && <div className="text-[12px] text-[#7D8590] mt-0.5 truncate">{tpl.text}</div>}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {tpl.category_id && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
+                            style={{ background: getCategoryColor(tpl.category_id) + "20", color: getCategoryColor(tpl.category_id) }}>
+                            {getCategoryIcon(tpl.category_id)} {getCategoryName(tpl.category_id)}
+                          </span>
+                        )}
+                        {tpl.deadline_hours && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                            Start within {tpl.deadline_hours}h
+                          </span>
+                        )}
+                        {(tpl.assignee_ids || []).length > 0 && (
+                          <span className="text-[10px] text-[#484F58]">
+                            Assignees: {(tpl.assignee_ids || []).map((id: string) => getMemberName(id)).join(", ")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button onClick={() => handleToggle(tpl.id, tpl.is_active !== false)}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                          tpl.is_active !== false ? "text-[#4ADE80] hover:bg-[#4ADE80]/10" : "text-[#484F58] hover:bg-[#1E242C]"
+                        }`} title={tpl.is_active !== false ? "Disable" : "Enable"}>
+                        {tpl.is_active !== false ? <Eye size={14} /> : <EyeOff size={14} />}
+                      </button>
+                      <button onClick={() => startEdit(tpl)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#484F58] hover:text-[#58A6FF] hover:bg-[#58A6FF]/10">
+                        <Edit2 size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(tpl.id, tpl.name)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#484F58] hover:text-[#F85149] hover:bg-[#F85149]/10">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              ))}
+            </div>
+          ) : !showAdd && (
+            <div className="text-center py-16 border border-dashed border-[#1E242C] rounded-xl">
+              <ClipboardList size={40} className="mx-auto text-[#484F58] mb-3" />
+              <p className="text-[#484F58] text-sm mb-4">No task templates yet</p>
+              <button onClick={() => { resetForm(); setShowAdd(true); }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                <Plus size={16} /> Create First Template
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
