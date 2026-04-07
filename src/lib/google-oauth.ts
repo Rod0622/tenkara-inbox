@@ -6,7 +6,7 @@ export async function refreshGoogleToken(accountId: string): Promise<string> {
 
   const { data: account } = await supabase
     .from("email_accounts")
-    .select("oauth_refresh_token, oauth_access_token, oauth_token_expires_at")
+    .select("oauth_refresh_token, oauth_access_token, oauth_expires_at")
     .eq("id", accountId)
     .single();
 
@@ -15,8 +15,8 @@ export async function refreshGoogleToken(accountId: string): Promise<string> {
   }
 
   // Check if current token is still valid (with 5 min buffer)
-  if (account.oauth_access_token && account.oauth_token_expires_at) {
-    const expiresAt = new Date(account.oauth_token_expires_at).getTime();
+  if (account.oauth_access_token && account.oauth_expires_at) {
+    const expiresAt = new Date(account.oauth_expires_at).getTime();
     if (Date.now() < expiresAt - 5 * 60 * 1000) {
       return account.oauth_access_token;
     }
@@ -44,7 +44,7 @@ export async function refreshGoogleToken(accountId: string): Promise<string> {
   // Update stored token
   await supabase.from("email_accounts").update({
     oauth_access_token: tokens.access_token,
-    oauth_token_expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
+    oauth_expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
   }).eq("id", accountId);
 
   return tokens.access_token;

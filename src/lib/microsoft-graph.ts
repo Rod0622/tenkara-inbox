@@ -215,7 +215,7 @@ export async function sendGraphEmail(
 }
 
 
-// ── Sync a Microsoft account (batch-friendly for 10s timeout) ──
+// ── Sync a Microsoft account (multi-batch for Pro 60s timeout) ──
 export async function syncMicrosoftAccount(accountId: string): Promise<{
   success: boolean;
   newMessages: number;
@@ -232,147 +232,174 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
 
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 50;
+    const MAX_BATCHES = 10; // Up to 500 emails per sync call
+    const TIME_LIMIT_MS = 50000; // Stop after 50s to leave margin for the 60s timeout
+    const syncStart = Date.now();
     const token = await getGraphTokenForAccount(accountId);
-    let emails: GraphMessage[];
-
-    if (account.last_sync_at) {
-      // Incremental sync
-      emails = await fetchGraphEmails(account.email, account.last_sync_at, BATCH_SIZE);
-    } else {
-      // Initial bulk sync with skip offset — fetch minimal fields to save time
-      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
-      const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${skipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId`;
-
-      const res: Response = await fetch(pageUrl, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(`Graph API error: ${err.error?.message || res.statusText}`);
-      }
-      const data = await res.json();
-      emails = data.value || [];
-      result.hasMore = emails.length >= BATCH_SIZE;
-    }
-
-    if (emails.length === 0) {
-      await supabase.from("email_accounts")
-        .update({ last_sync_at: new Date().toISOString(), sync_error: null })
-        .eq("id", accountId);
-      result.success = true;
-      return result;
-    }
+    const isInitialSync = !account.last_sync_at;
 
     // Skip rules during bulk initial sync to save time
-    const isInitialSync = !account.last_sync_at;
     let runRulesFn: any = null;
     if (!isInitialSync) {
       const mod = await import("@/lib/rule-engine");
       runRulesFn = mod.runRulesForMessage;
     }
 
-    for (const email of emails) {
-      try {
-        const msgId = email.internetMessageId || email.id;
-        const { data: existing } = await supabase.from("messages")
-          .select("id").eq("provider_message_id", `ms:${msgId}`).maybeSingle();
-        if (existing) continue;
+    let batchCount = 0;
+    let currentSkipOffset = parseInt(account.last_sync_uid || "0") || 0;
 
-        const isOutbound = email.from?.emailAddress?.address?.toLowerCase() === account.email.toLowerCase();
-        let conversationId: string | null = null;
+    while (batchCount < MAX_BATCHES) {
+      // Time check — stop if we're running out of time
+      if (Date.now() - syncStart > TIME_LIMIT_MS) {
+        console.log(`[graph-sync] ${account.email}: time limit reached after ${batchCount} batches`);
+        result.hasMore = true;
+        break;
+      }
 
-        // Thread by Graph conversationId
-        if (email.conversationId) {
-          const { data: c } = await supabase.from("conversations").select("id")
-            .eq("thread_id", `ms:${email.conversationId}`).eq("email_account_id", accountId).maybeSingle();
-          if (c) conversationId = c.id;
+      let emails: GraphMessage[];
+
+      if (isInitialSync) {
+        // Initial bulk sync with skip offset
+        const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${currentSkipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId`;
+
+        const res: Response = await fetch(pageUrl, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(`Graph API error: ${err.error?.message || res.statusText}`);
         }
+        const data = await res.json();
+        emails = data.value || [];
+        result.hasMore = emails.length >= BATCH_SIZE;
+      } else {
+        // Incremental sync — fetch all new emails since last sync, one batch only
+        emails = await fetchGraphEmails(account.email, account.last_sync_at, BATCH_SIZE);
+        // Incremental doesn't loop
+        batchCount = MAX_BATCHES; // Will exit loop after processing
+      }
 
-        // Thread by subject
-        if (!conversationId) {
-          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
-          if (subj) {
-            const { data: m } = await supabase.from("conversations").select("id")
-              .eq("email_account_id", accountId).eq("subject", subj)
-              .gte("last_message_at", new Date(Date.now() - 30*24*60*60*1000).toISOString())
-              .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
-            if (m) conversationId = m.id;
+      if (emails.length === 0) {
+        result.hasMore = false;
+        break;
+      }
+
+      // Process emails in this batch
+      for (const email of emails) {
+        try {
+          const msgId = email.internetMessageId || email.id;
+          const { data: existing } = await supabase.from("messages")
+            .select("id").eq("provider_message_id", `ms:${msgId}`).maybeSingle();
+          if (existing) continue;
+
+          const isOutbound = email.from?.emailAddress?.address?.toLowerCase() === account.email.toLowerCase();
+          let conversationId: string | null = null;
+
+          // Thread by Graph conversationId
+          if (email.conversationId) {
+            const { data: c } = await supabase.from("conversations").select("id")
+              .eq("thread_id", `ms:${email.conversationId}`).eq("email_account_id", accountId).maybeSingle();
+            if (c) conversationId = c.id;
           }
-        }
 
-        // Create conversation
-        if (!conversationId) {
-          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
-          const { data: nc, error: ce } = await supabase.from("conversations").insert({
-            email_account_id: accountId,
-            thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
-            subject: subj,
-            from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
-            from_email: email.from?.emailAddress?.address || "",
-            preview: (email.bodyPreview || "").slice(0, 200),
-            is_unread: !isOutbound, status: "open",
-            last_message_at: email.receivedDateTime || new Date().toISOString(),
-          }).select("id").single();
-          if (ce) { result.errors.push(ce.message); continue; }
-          conversationId = nc.id;
-          result.newConversations++;
-        }
+          // Thread by subject
+          if (!conversationId) {
+            const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+            if (subj) {
+              const { data: m } = await supabase.from("conversations").select("id")
+                .eq("email_account_id", accountId).eq("subject", subj)
+                .gte("last_message_at", new Date(Date.now() - 30*24*60*60*1000).toISOString())
+                .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+              if (m) conversationId = m.id;
+            }
+          }
 
-        const bodyText = email.bodyPreview || (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-        const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
-        const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
-
-        const { error: me } = await supabase.from("messages").insert({
-          conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
-          from_name: email.from?.emailAddress?.name || "Unknown",
-          from_email: email.from?.emailAddress?.address || "",
-          to_addresses: toAddr, cc_addresses: ccAddr,
-          subject: email.subject || "(No Subject)",
-          body_text: bodyText.slice(0, 5000),
-          body_html: null,
-          snippet: bodyText.slice(0, 200),
-          is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
-          sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
-        });
-        if (me) { result.errors.push(me.message); continue; }
-
-        const convoUpdate: any = {
-          preview: (email.bodyPreview || bodyText).slice(0, 200),
-          last_message_at: email.receivedDateTime || new Date().toISOString(),
-          is_unread: !isOutbound,
-        };
-        if (email.hasAttachments) convoUpdate.has_attachments = true;
-
-        await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
-
-        if (runRulesFn && conversationId) {
-          try {
-            await runRulesFn(conversationId, {
-              conversation_id: conversationId, subject: email.subject || "",
+          // Create conversation
+          if (!conversationId) {
+            const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+            const { data: nc, error: ce } = await supabase.from("conversations").insert({
+              email_account_id: accountId,
+              thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
+              subject: subj,
+              from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
               from_email: email.from?.emailAddress?.address || "",
-              from_name: email.from?.emailAddress?.name || "",
-              to_addresses: toAddr, body_text: bodyText,
-            }, isOutbound ? "outgoing" : "incoming");
-          } catch (re: any) { console.error("Rule error:", re.message); }
-        }
+              preview: (email.bodyPreview || "").slice(0, 200),
+              is_unread: !isOutbound, status: "open",
+              last_message_at: email.receivedDateTime || new Date().toISOString(),
+            }).select("id").single();
+            if (ce) { result.errors.push(ce.message); continue; }
+            conversationId = nc.id;
+            result.newConversations++;
+          }
 
-        result.newMessages++;
-      } catch (ee: any) { result.errors.push(ee.message); }
-    }
+          const bodyText = email.bodyPreview || (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
+          const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
-    // Update sync state
-    if (isInitialSync) {
-      const skip = (parseInt(account.last_sync_uid || "0") || 0) + emails.length;
-      if (result.hasMore) {
+          const { error: me } = await supabase.from("messages").insert({
+            conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
+            from_name: email.from?.emailAddress?.name || "Unknown",
+            from_email: email.from?.emailAddress?.address || "",
+            to_addresses: toAddr, cc_addresses: ccAddr,
+            subject: email.subject || "(No Subject)",
+            body_text: bodyText.slice(0, 5000),
+            body_html: null,
+            snippet: bodyText.slice(0, 200),
+            is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
+            sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
+          });
+          if (me) { result.errors.push(me.message); continue; }
+
+          const convoUpdate: any = {
+            preview: (email.bodyPreview || bodyText).slice(0, 200),
+            last_message_at: email.receivedDateTime || new Date().toISOString(),
+            is_unread: !isOutbound,
+          };
+          if (email.hasAttachments) convoUpdate.has_attachments = true;
+
+          await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
+
+          if (runRulesFn && conversationId) {
+            try {
+              await runRulesFn(conversationId, {
+                conversation_id: conversationId, subject: email.subject || "",
+                from_email: email.from?.emailAddress?.address || "",
+                from_name: email.from?.emailAddress?.name || "",
+                to_addresses: toAddr, body_text: bodyText,
+              }, isOutbound ? "outgoing" : "incoming");
+            } catch (re: any) { console.error("Rule error:", re.message); }
+          }
+
+          result.newMessages++;
+        } catch (ee: any) { result.errors.push(ee.message); }
+      }
+
+      // Advance offset for initial sync
+      if (isInitialSync) {
+        currentSkipOffset += emails.length;
+        // Save progress after each batch so we don't lose work if we time out
         await supabase.from("email_accounts").update({
-          last_sync_uid: skip.toString(),
+          last_sync_uid: currentSkipOffset.toString(),
           sync_error: result.errors.length > 0 ? result.errors[0] : null,
         }).eq("id", accountId);
-      } else {
-        await supabase.from("email_accounts").update({
-          last_sync_at: new Date().toISOString(), last_sync_uid: skip.toString(), sync_error: null,
-        }).eq("id", accountId);
       }
-    } else {
+
+      batchCount++;
+      console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, +${result.newMessages} msgs, ${Date.now() - syncStart}ms`);
+
+      // If this batch was less than full, we've reached the end
+      if (!result.hasMore) break;
+    }
+
+    // Final sync state update
+    if (isInitialSync && !result.hasMore) {
+      // Initial sync complete — set last_sync_at so future syncs are incremental
+      await supabase.from("email_accounts").update({
+        last_sync_at: new Date().toISOString(),
+        last_sync_uid: currentSkipOffset.toString(),
+        sync_error: null,
+      }).eq("id", accountId);
+      console.log(`[graph-sync] ${account.email}: initial sync COMPLETE at offset ${currentSkipOffset}`);
+    } else if (!isInitialSync) {
       await supabase.from("email_accounts").update({
         last_sync_at: new Date().toISOString(),
         sync_error: result.errors.length > 0 ? result.errors[0] : null,

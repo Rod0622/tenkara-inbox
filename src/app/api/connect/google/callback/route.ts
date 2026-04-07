@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
       sync_error: null,
       oauth_access_token: tokens.access_token,
       oauth_refresh_token: tokens.refresh_token,
-      oauth_token_expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
+      oauth_expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
     };
 
     // Check for existing
