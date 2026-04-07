@@ -46,6 +46,7 @@ import {
 import type { ConversationDetailProps, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 import { addBusinessHours, type SupplierHours } from "@/lib/business-hours";
+import TaskCountdown from "@/components/TaskCountdown";
 import RichTextEditor from "@/components/RichTextEditor";
 
 type SuggestedTaskItem = {
@@ -3694,9 +3695,16 @@ export default function ConversationDetail({
                         )}
 
                         {task.due_date && (
-                          <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-                            Start by: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
-                          </span>
+                          <>
+                            <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                              Start by: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
+                            </span>
+                            <TaskCountdown
+                              dueDate={task.due_date}
+                              dueTime={task.due_time}
+                              isCompleted={task.status === "completed" || task.is_done}
+                            />
+                          </>
                         )}
 
                         {/* Reset SLA Timer */}

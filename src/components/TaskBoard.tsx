@@ -15,6 +15,7 @@ import {
   Search,
 } from "lucide-react";
 import { useTasks } from "@/lib/hooks";
+import TaskCountdown from "@/components/TaskCountdown";
 import type { Task, TaskStatus, TeamMember } from "@/types";
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -729,10 +730,17 @@ function TaskCard({
         ))}
 
         {task.due_date && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,213,71,0.12)] px-2 py-1 text-[11px] text-[#F5D547]">
-            <CalendarDays size={12} />
-            {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,213,71,0.12)] px-2 py-1 text-[11px] text-[#F5D547]">
+              <CalendarDays size={12} />
+              {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
+            </span>
+            <TaskCountdown
+              dueDate={task.due_date}
+              dueTime={task.due_time}
+              isCompleted={task.status === "completed" || task.is_done}
+            />
+          </>
         )}
 
         {!task.conversation_id && (
