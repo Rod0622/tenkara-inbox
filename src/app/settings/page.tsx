@@ -12,7 +12,12 @@ import {
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
-const supabase = createBrowserClient();
+// Lazy-init supabase client (avoid module-level call that breaks static generation)
+let _supabase: ReturnType<typeof createBrowserClient> | null = null;
+function getSupabase() {
+  if (!_supabase) _supabase = createBrowserClient();
+  return _supabase;
+}
 
 // ── Provider definitions matching the DB presets ─────
 const PROVIDERS = [
@@ -364,25 +369,25 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
           const batch = convoIds.slice(i, i + 100);
           
           // Delete conversation labels
-          await supabase.from("conversation_labels").delete().in("conversation_id", batch);
+          await getSupabase().from("conversation_labels").delete().in("conversation_id", batch);
           
           // Delete task assignees via tasks
-          const { data: batchTasks } = await supabase.from("tasks").select("id").in("conversation_id", batch);
+          const { data: batchTasks } = await getSupabase().from("tasks").select("id").in("conversation_id", batch);
           const taskIds = (batchTasks || []).map((t: any) => t.id);
           if (taskIds.length > 0) {
-            await supabase.from("task_assignees").delete().in("task_id", taskIds);
+            await getSupabase().from("task_assignees").delete().in("task_id", taskIds);
           }
           
           // Delete tasks, notes, messages, activity, summaries
-          await supabase.from("tasks").delete().in("conversation_id", batch);
-          await supabase.from("notes").delete().in("conversation_id", batch);
-          await supabase.from("messages").delete().in("conversation_id", batch);
-          await supabase.from("activity_log").delete().in("conversation_id", batch);
-          await supabase.from("thread_summaries").delete().in("conversation_id", batch);
+          await getSupabase().from("tasks").delete().in("conversation_id", batch);
+          await getSupabase().from("notes").delete().in("conversation_id", batch);
+          await getSupabase().from("messages").delete().in("conversation_id", batch);
+          await getSupabase().from("activity_log").delete().in("conversation_id", batch);
+          await getSupabase().from("thread_summaries").delete().in("conversation_id", batch);
         }
         
         // Delete all conversations for this account
-        const { error: convoErr } = await supabase.from("conversations").delete().eq("email_account_id", id);
+        const { error: convoErr } = await getSupabase().from("conversations").delete().eq("email_account_id", id);
         if (convoErr) {
           alert("Failed to delete conversations: " + convoErr.message);
           return;
@@ -390,10 +395,10 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
       }
 
       // Delete account access entries
-      await supabase.from("account_access").delete().eq("email_account_id", id);
+      await getSupabase().from("account_access").delete().eq("email_account_id", id);
 
       // Finally delete the account
-      const { error } = await supabase.from("email_accounts").delete().eq("id", id);
+      const { error } = await getSupabase().from("email_accounts").delete().eq("id", id);
       if (error) {
         alert("Failed to delete account: " + error.message);
         return;
@@ -633,7 +638,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
       }
 
       // Standard IMAP/SMTP connection
-      const { data, error: dbError } = await supabase.from("email_accounts").insert({
+      const { data, error: dbError } = await getSupabase().from("email_accounts").insert({
         name: formData.name || formData.email.split("@")[0],
         email: formData.email,
         provider: selectedProvider?.id || "imap",
@@ -974,9 +979,9 @@ function TeamTab() {
 
   const fetchMembers = async () => {
     const [membersRes, accountsRes, accessRes] = await Promise.all([
-      supabase.from("team_members").select("*").order("created_at"),
-      supabase.from("email_accounts").select("id, name, email, icon, color").eq("is_active", true).order("created_at"),
-      supabase.from("account_access").select("*"),
+      getSupabase().from("team_members").select("*").order("created_at"),
+      getSupabase().from("email_accounts").select("id, name, email, icon, color").eq("is_active", true).order("created_at"),
+      getSupabase().from("account_access").select("*"),
     ]);
     setMembers(membersRes.data || []);
     setEmailAccounts(accountsRes.data || []);
@@ -993,10 +998,10 @@ function TeamTab() {
   const toggleAccountAccess = async (memberId: string, accountId: string) => {
     const current = accessMap[memberId] || [];
     if (current.includes(accountId)) {
-      await supabase.from("account_access").delete()
+      await getSupabase().from("account_access").delete()
         .eq("team_member_id", memberId).eq("email_account_id", accountId);
     } else {
-      await supabase.from("account_access").insert({
+      await getSupabase().from("account_access").insert({
         team_member_id: memberId, email_account_id: accountId,
       });
     }
@@ -1007,7 +1012,7 @@ function TeamTab() {
     const current = accessMap[memberId] || [];
     const toAdd = emailAccounts.filter((a) => !current.includes(a.id));
     if (toAdd.length > 0) {
-      await supabase.from("account_access").insert(
+      await getSupabase().from("account_access").insert(
         toAdd.map((a) => ({ team_member_id: memberId, email_account_id: a.id }))
       );
     }
@@ -1015,7 +1020,7 @@ function TeamTab() {
   };
 
   const revokeAllAccounts = async (memberId: string) => {
-    await supabase.from("account_access").delete().eq("team_member_id", memberId);
+    await getSupabase().from("account_access").delete().eq("team_member_id", memberId);
     fetchMembers();
   };
 
@@ -1393,7 +1398,7 @@ function LabelsTab() {
   useEffect(() => { fetchLabels(); }, []);
 
   const fetchLabels = async () => {
-    const { data } = await supabase.from("labels").select("*").order("sort_order");
+    const { data } = await getSupabase().from("labels").select("*").order("sort_order");
     setLabels(data || []);
     setLoading(false);
   };
@@ -1657,9 +1662,9 @@ function RulesTab() {
   useEffect(() => {
     Promise.all([
       fetch("/api/rules").then((r) => r.json()),
-      supabase.from("labels").select("*").order("sort_order"),
-      supabase.from("team_members").select("*").eq("is_active", true),
-      supabase.from("folders").select("*").order("sort_order"),
+      getSupabase().from("labels").select("*").order("sort_order"),
+      getSupabase().from("team_members").select("*").eq("is_active", true),
+      getSupabase().from("folders").select("*").order("sort_order"),
     ]).then(([rulesData, labelsRes, membersRes, foldersRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
@@ -2094,8 +2099,8 @@ function UserGroupsTab() {
 
   const fetchGroups = async () => {
     const [groupsRes, membersRes] = await Promise.all([
-      supabase.from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(*))").order("created_at"),
-      supabase.from("team_members").select("*").eq("is_active", true).order("name"),
+      getSupabase().from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(*))").order("created_at"),
+      getSupabase().from("team_members").select("*").eq("is_active", true).order("name"),
     ]);
     setGroups(groupsRes.data || []);
     setTeamMembers(membersRes.data || []);
@@ -2108,18 +2113,18 @@ function UserGroupsTab() {
 
   const handleAdd = async () => {
     if (!formName.trim()) return;
-    await supabase.from("user_groups").insert({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon });
+    await getSupabase().from("user_groups").insert({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon });
     resetForm(); setShowAdd(false); fetchGroups();
   };
 
   const handleUpdate = async (id: string) => {
-    await supabase.from("user_groups").update({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon }).eq("id", id);
+    await getSupabase().from("user_groups").update({ name: formName.trim(), description: formDesc.trim(), color: formColor, icon: formIcon }).eq("id", id);
     setEditingId(null); resetForm(); fetchGroups();
   };
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete group "${name}"? Members won't be deleted.`)) return;
-    await supabase.from("user_groups").delete().eq("id", id);
+    await getSupabase().from("user_groups").delete().eq("id", id);
     fetchGroups();
   };
 
@@ -2129,9 +2134,9 @@ function UserGroupsTab() {
 
   const toggleMember = async (groupId: string, memberId: string, isMember: boolean) => {
     if (isMember) {
-      await supabase.from("user_group_members").delete().eq("group_id", groupId).eq("team_member_id", memberId);
+      await getSupabase().from("user_group_members").delete().eq("group_id", groupId).eq("team_member_id", memberId);
     } else {
-      await supabase.from("user_group_members").insert({ group_id: groupId, team_member_id: memberId });
+      await getSupabase().from("user_group_members").insert({ group_id: groupId, team_member_id: memberId });
     }
     fetchGroups();
   };
@@ -2253,12 +2258,12 @@ function UserGroupsTab() {
                         const allActive = teamMembers.filter((m: any) => m.is_active);
                         if (currentIds.size === allActive.length) {
                           // Remove all
-                          await supabase.from("user_group_members").delete().eq("group_id", group.id);
+                          await getSupabase().from("user_group_members").delete().eq("group_id", group.id);
                         } else {
                           // Add missing
                           const toAdd = allActive.filter((m: any) => !currentIds.has(m.id));
                           if (toAdd.length > 0) {
-                            await supabase.from("user_group_members").insert(toAdd.map((m: any) => ({ group_id: group.id, team_member_id: m.id })));
+                            await getSupabase().from("user_group_members").insert(toAdd.map((m: any) => ({ group_id: group.id, team_member_id: m.id })));
                           }
                         }
                         fetchGroups();
@@ -2319,7 +2324,7 @@ function TaskCategoriesTab() {
   const [formIcon, setFormIcon] = useState("📋");
 
   const fetchCategories = () => {
-    supabase.from("task_categories").select("*").order("sort_order")
+    getSupabase().from("task_categories").select("*").order("sort_order")
       .then(({ data }) => { setCategories(data || []); setLoading(false); });
   };
 
@@ -2329,7 +2334,7 @@ function TaskCategoriesTab() {
 
   const handleAdd = async () => {
     if (!formName.trim()) return;
-    await supabase.from("task_categories").insert({
+    await getSupabase().from("task_categories").insert({
       name: formName.trim(), color: formColor, icon: formIcon,
       sort_order: categories.length,
     });
@@ -2337,7 +2342,7 @@ function TaskCategoriesTab() {
   };
 
   const handleUpdate = async (id: string) => {
-    await supabase.from("task_categories").update({
+    await getSupabase().from("task_categories").update({
       name: formName.trim(), color: formColor, icon: formIcon,
     }).eq("id", id);
     setEditingId(null); resetForm(); fetchCategories();
@@ -2345,12 +2350,12 @@ function TaskCategoriesTab() {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete category "${name}"?`)) return;
-    await supabase.from("task_categories").delete().eq("id", id);
+    await getSupabase().from("task_categories").delete().eq("id", id);
     fetchCategories();
   };
 
   const handleToggle = async (id: string, isActive: boolean) => {
-    await supabase.from("task_categories").update({ is_active: !isActive }).eq("id", id);
+    await getSupabase().from("task_categories").update({ is_active: !isActive }).eq("id", id);
     fetchCategories();
   };
 
@@ -2484,9 +2489,9 @@ function TaskTemplatesTab() {
 
   const fetchData = () => {
     Promise.all([
-      supabase.from("task_templates").select("*").order("sort_order"),
-      supabase.from("task_categories").select("*").eq("is_active", true).order("sort_order"),
-      supabase.from("team_members").select("id, name, email, initials, color, is_active").eq("is_active", true).order("name"),
+      getSupabase().from("task_templates").select("*").order("sort_order"),
+      getSupabase().from("task_categories").select("*").eq("is_active", true).order("sort_order"),
+      getSupabase().from("team_members").select("id, name, email, initials, color, is_active").eq("is_active", true).order("name"),
     ]).then(([tplRes, catRes, memberRes]) => {
       setTemplates(tplRes.data || []);
       setCategories(catRes.data || []);
@@ -2513,21 +2518,21 @@ function TaskTemplatesTab() {
       sort_order: id ? undefined : templates.length,
     };
     if (id) {
-      await supabase.from("task_templates").update(payload).eq("id", id);
+      await getSupabase().from("task_templates").update(payload).eq("id", id);
     } else {
-      await supabase.from("task_templates").insert(payload);
+      await getSupabase().from("task_templates").insert(payload);
     }
     resetForm(); setShowAdd(false); setEditingId(null); fetchData();
   };
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete template "${name}"?`)) return;
-    await supabase.from("task_templates").delete().eq("id", id);
+    await getSupabase().from("task_templates").delete().eq("id", id);
     fetchData();
   };
 
   const handleToggle = async (id: string, isActive: boolean) => {
-    await supabase.from("task_templates").update({ is_active: !isActive }).eq("id", id);
+    await getSupabase().from("task_templates").update({ is_active: !isActive }).eq("id", id);
     fetchData();
   };
 
@@ -2730,7 +2735,7 @@ function EmailTemplatesTab() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const fetchTemplates = async () => {
-    const { data } = await supabase.from("email_templates").select("*, owner:team_members(name)").order("scope").order("sort_order");
+    const { data } = await getSupabase().from("email_templates").select("*, owner:team_members(name)").order("scope").order("sort_order");
     setTemplates(data || []);
     setLoading(false);
   };
@@ -2738,7 +2743,7 @@ function EmailTemplatesTab() {
   useEffect(() => {
     fetchTemplates();
     // Get current user ID
-    supabase.from("team_members").select("id, email").then(({ data }) => {
+    getSupabase().from("team_members").select("id, email").then(({ data }) => {
       // Will be set properly when we know the session email
       if (data && data.length > 0) setCurrentUserId(data[0].id);
     });
@@ -2748,7 +2753,7 @@ function EmailTemplatesTab() {
 
   const handleAdd = async () => {
     if (!formName.trim() || !formBody.trim()) return;
-    await supabase.from("email_templates").insert({
+    await getSupabase().from("email_templates").insert({
       name: formName.trim(), subject: formSubject.trim(), body: formBody.trim(),
       scope: formScope, category: formCategory, owner_id: currentUserId,
       sort_order: templates.length,
@@ -2757,7 +2762,7 @@ function EmailTemplatesTab() {
   };
 
   const handleUpdate = async (id: string) => {
-    await supabase.from("email_templates").update({
+    await getSupabase().from("email_templates").update({
       name: formName.trim(), subject: formSubject.trim(), body: formBody.trim(),
       scope: formScope, category: formCategory,
     }).eq("id", id);
@@ -2766,7 +2771,7 @@ function EmailTemplatesTab() {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete template "${name}"?`)) return;
-    await supabase.from("email_templates").delete().eq("id", id);
+    await getSupabase().from("email_templates").delete().eq("id", id);
     fetchTemplates();
   };
 

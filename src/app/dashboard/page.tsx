@@ -17,7 +17,12 @@ import {
   type SupplierHours,
 } from "@/lib/business-hours";
 
-const supabase = createBrowserClient();
+// Lazy-init supabase client (avoid module-level call that breaks static generation)
+let _supabase: ReturnType<typeof createBrowserClient> | null = null;
+function getSupabase() {
+  if (!_supabase) _supabase = createBrowserClient();
+  return _supabase;
+}
 
 // ── Types ─────────────────────────────────────────────
 
@@ -241,7 +246,7 @@ export default function DashboardPage() {
     const { data: tasks } = await tasksQuery;
 
     // Conversations
-    let convosQuery = supabase.from("conversations").select("id, assignee_id, is_unread, status, email_account_id").neq("status", "trash");
+    let convosQuery = getSupabase().from("conversations").select("id, assignee_id, is_unread, status, email_account_id").neq("status", "trash");
     if (effectiveDateFrom) convosQuery = convosQuery.gte("last_message_at", effectiveDateFrom);
     if (effectiveDateTo) convosQuery = convosQuery.lte("last_message_at", effectiveDateTo);
     const { data: conversations } = await convosQuery;
@@ -262,7 +267,7 @@ export default function DashboardPage() {
     }
 
     // Get account_access for fallback
-    const { data: accessData } = await supabase.from("account_access").select("team_member_id, email_account_id");
+    const { data: accessData } = await getSupabase().from("account_access").select("team_member_id, email_account_id");
     const accountToUsers: Record<string, string[]> = {};
     for (const row of (accessData || [])) {
       if (!accountToUsers[row.email_account_id]) accountToUsers[row.email_account_id] = [];
