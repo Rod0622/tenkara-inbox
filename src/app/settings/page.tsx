@@ -150,7 +150,7 @@ function SignatureEditor({
   const handleSave = async () => {
     setSaving(true);
     const html = editorRef.current?.innerHTML || "";
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from("email_accounts")
       .update({ signature: html, signature_enabled: enabled })
       .eq("id", accountId);
@@ -339,7 +339,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [editingSignatureId, setEditingSignatureId] = useState<string | null>(null);
 
   const fetchAccounts = () => {
-    supabase
+    getSupabase()
       .from("email_accounts")
       .select("*")
       .order("created_at", { ascending: true })
@@ -356,7 +356,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
 
     try {
       // Get all conversation IDs for this account
-      const { data: convos } = await supabase
+      const { data: convos } = await getSupabase()
         .from("conversations")
         .select("id")
         .eq("email_account_id", id);

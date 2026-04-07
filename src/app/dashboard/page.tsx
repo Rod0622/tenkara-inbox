@@ -228,14 +228,14 @@ export default function DashboardPage() {
   async function loadDashboardData() {
     setLoading(true);
 
-    const { data: members } = await supabase
+    const { data: members } = await getSupabase()
       .from("team_members")
       .select("id, name, email, initials, color, role, department")
       .eq("is_active", true)
       .order("name");
 
     // Tasks query with optional date filter
-    let tasksQuery = supabase
+    let tasksQuery = getSupabase()
       .from("tasks")
       .select("id, text, due_date, due_time, status, is_done, created_at, conversation_id, category_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color)")
       .order("due_date", { ascending: true });
@@ -252,7 +252,7 @@ export default function DashboardPage() {
     const { data: conversations } = await convosQuery;
 
     // Sent emails — count by sent_by_user_id (most accurate), fallback to account_access
-    let outboundQuery = supabase
+    let outboundQuery = getSupabase()
       .from("messages")
       .select("id, conversation_id, sent_at, sent_by_user_id")
       .eq("is_outbound", true);
@@ -363,7 +363,7 @@ export default function DashboardPage() {
     const user = userStats.find((u) => u.id === userId);
 
     // Fetch user's tasks WITH date filter
-    let tasksQuery = supabase
+    let tasksQuery = getSupabase()
       .from("task_assignees")
       .select("task_id, is_done, status, task:tasks(id, text, due_date, due_time, status, is_done, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))")
       .eq("team_member_id", userId);
@@ -398,7 +398,7 @@ export default function DashboardPage() {
     }
 
     // Fetch user's assigned conversations WITH date filter
-    let convosQuery = supabase
+    let convosQuery = getSupabase()
       .from("conversations")
       .select("id, subject, from_name, from_email, preview, status, is_unread, last_message_at, assignee_id, email_account_id, folder_id, email_account:email_accounts(name), folder:folders(name)")
       .eq("assignee_id", userId)
@@ -417,7 +417,7 @@ export default function DashboardPage() {
     if (convoIds.length > 0) {
       for (let i = 0; i < convoIds.length; i += 50) {
         const batch = convoIds.slice(i, i + 50);
-        const { data: msgs } = await supabase
+        const { data: msgs } = await getSupabase()
           .from("messages")
           .select("conversation_id, is_outbound, sent_at")
           .in("conversation_id", batch)
@@ -455,7 +455,7 @@ export default function DashboardPage() {
     });
 
     // Fetch sent emails — filter by sent_by_user_id for accurate per-user tracking
-    let sentQuery = supabase
+    let sentQuery = getSupabase()
       .from("messages")
       .select("id, subject, to_addresses, sent_at, conversation_id, from_email, sent_by_user_id")
       .eq("is_outbound", true)
