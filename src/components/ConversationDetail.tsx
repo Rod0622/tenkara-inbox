@@ -2899,12 +2899,10 @@ export default function ConversationDetail({
                           <span className="text-[10px] text-[#4ADE80] ml-2">Sent</span>
                         )}
                       </span>
-                      <span className="text-[11px] text-[#484F58]">&lt;{msg.from_email}&gt;</span>
                     </div>
                     <div className="text-[10px] text-[#484F58] mt-0.5 space-y-0.5">
-                      {msg.to_addresses && (
-                        <div><span className="text-[#7D8590] font-semibold">To:</span> {msg.to_addresses}</div>
-                      )}
+                      <div><span className="text-[#7D8590] font-semibold">From:</span> {msg.from_name} &lt;{msg.from_email}&gt;</div>
+                      <div><span className="text-[#7D8590] font-semibold">To:</span> {msg.to_addresses || (msg.is_outbound ? (convo.from_name ? convo.from_name + " <" + convo.from_email + ">" : convo.from_email) : msg.from_email !== convo.from_email ? convo.from_email : "—")}</div>
                       {msg.cc_addresses && (
                         <div><span className="text-[#7D8590] font-semibold">Cc:</span> {msg.cc_addresses}</div>
                       )}
