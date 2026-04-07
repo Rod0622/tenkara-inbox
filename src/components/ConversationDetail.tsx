@@ -1801,8 +1801,7 @@ export default function ConversationDetail({
 
       // Load task templates
       sb.from("task_templates").select("*").eq("is_active", true).order("sort_order")
-        .then(({ data }) => setTaskTemplates(data || []))
-        .catch(() => setTaskTemplates([])); // table might not exist yet
+        .then(({ data }) => setTaskTemplates(data || []), () => setTaskTemplates([]));
 
       // Load manual user groups
       sb.from("user_groups").select("*, user_group_members(team_member_id)").eq("is_active", true).order("created_at")
