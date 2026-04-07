@@ -730,6 +730,7 @@ export function useActions() {
     account_id: string;
     to: string;
     cc?: string;
+    bcc?: string;
     subject: string;
     body: string;
     attachments?: { name: string; type: string; data: string }[];
