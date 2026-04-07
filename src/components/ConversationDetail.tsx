@@ -1719,7 +1719,10 @@ export default function ConversationDetail({
   const [newTaskDueTime, setNewTaskDueTime] = useState("");
   const [newTaskCategoryId, setNewTaskCategoryId] = useState("");
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
+  const [taskTemplates, setTaskTemplates] = useState<any[]>([]);
+  const [showTaskTemplates, setShowTaskTemplates] = useState(false);
   const [userGroups, setUserGroups] = useState<any[]>([]);
+  const [accountAccessMap, setAccountAccessMap] = useState<Record<string, string[]>>({});
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1796,6 +1799,11 @@ export default function ConversationDetail({
       sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
         .then(({ data }) => setTaskCategories(data || []));
 
+      // Load task templates
+      sb.from("task_templates").select("*").eq("is_active", true).order("sort_order")
+        .then(({ data }) => setTaskTemplates(data || []))
+        .catch(() => setTaskTemplates([])); // table might not exist yet
+
       // Load manual user groups
       sb.from("user_groups").select("*, user_group_members(team_member_id)").eq("is_active", true).order("created_at")
         .then(async ({ data: manualGroups }) => {
@@ -1816,6 +1824,7 @@ export default function ConversationDetail({
             if (!accountMembers[row.email_account_id]) accountMembers[row.email_account_id] = [];
             accountMembers[row.email_account_id].push(row.team_member_id);
           }
+          setAccountAccessMap(accountMembers);
 
           // Create virtual groups for accounts that have access restrictions
           for (const acc of accounts) {
@@ -1893,6 +1902,15 @@ export default function ConversationDetail({
   ];
 
   const isReviewTab = activeTab !== "messages";
+
+  // Members who have access to this conversation's email account
+  const assignableMembers = useMemo(() => {
+    const active = teamMembers.filter((m) => m.is_active !== false);
+    if (!convo?.email_account_id) return active;
+    const allowedIds = accountAccessMap[convo.email_account_id];
+    if (!allowedIds || allowedIds.length === 0) return active; // no restrictions = all users
+    return active.filter((m) => allowedIds.includes(m.id));
+  }, [teamMembers, convo?.email_account_id, accountAccessMap]);
 
   const getTaskAssignees = (task: any) =>
     task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : [];
@@ -3095,6 +3113,35 @@ export default function ConversationDetail({
 
             {showTaskInput && (
               <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 space-y-3">
+                {/* Task template picker */}
+                {taskTemplates.length > 0 && (
+                  <div>
+                    <button onClick={() => setShowTaskTemplates(!showTaskTemplates)}
+                      className="flex items-center gap-1.5 text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold mb-1">
+                      <FileText size={11} /> {showTaskTemplates ? "Hide templates" : "Use template"}
+                    </button>
+                    {showTaskTemplates && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {taskTemplates.map((tpl: any) => (
+                          <button key={tpl.id} onClick={() => {
+                            setNewTaskText(tpl.text || "");
+                            if (tpl.category_id) setNewTaskCategoryId(tpl.category_id);
+                            if (tpl.deadline_hours) setNewTaskDueTime(String(tpl.deadline_hours));
+                            if (tpl.assignee_ids && Array.isArray(tpl.assignee_ids)) {
+                              setNewTaskAssigneeIds(tpl.assignee_ids.filter((id: string) => assignableMembers.some((m) => m.id === id)));
+                            }
+                            setShowTaskTemplates(false);
+                          }}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-[#0B0E11] border border-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3] hover:border-[#4ADE80]/30 transition-colors"
+                          >
+                            {tpl.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <textarea
                   value={newTaskText}
                   onChange={(e) => setNewTaskText(e.target.value)}
@@ -3143,8 +3190,8 @@ export default function ConversationDetail({
                       className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-3 text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
                     />
                   </div>
-                  <div className="w-32">
-                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Hours</div>
+                  <div className="w-36">
+                    <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Start Within</div>
                     <select
                       value={newTaskDueTime}
                       onChange={(e) => setNewTaskDueTime(e.target.value)}
@@ -3170,16 +3217,15 @@ export default function ConversationDetail({
                     <div className="text-[10px] text-[#484F58] font-semibold">Assign to</div>
                     <button
                       onClick={() => {
-                        const activeMembers = teamMembers.filter((m) => m.is_active !== false);
-                        if (newTaskAssigneeIds.length === activeMembers.length) {
+                        if (newTaskAssigneeIds.length === assignableMembers.length) {
                           setNewTaskAssigneeIds([]);
                         } else {
-                          setNewTaskAssigneeIds(activeMembers.map((m) => m.id));
+                          setNewTaskAssigneeIds(assignableMembers.map((m) => m.id));
                         }
                       }}
                       className="text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold"
                     >
-                      {newTaskAssigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
+                      {newTaskAssigneeIds.length === assignableMembers.length ? "Deselect all" : "Select all"}
                     </button>
                   </div>
                   {/* Group quick-select */}
@@ -3207,8 +3253,7 @@ export default function ConversationDetail({
                     </div>
                   )}
                   <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1 max-h-32 overflow-y-auto">
-                    {teamMembers
-                      .filter((member) => member.is_active !== false)
+                    {assignableMembers
                       .map((member) => {
                         const checked = newTaskAssigneeIds.includes(member.id);
                         return (
@@ -3490,8 +3535,39 @@ export default function ConversationDetail({
 
                         {task.due_date && (
                           <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
-                            Due: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
+                            Start by: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
                           </span>
+                        )}
+
+                        {/* Reset SLA Timer */}
+                        {task.due_date && task.status !== "completed" && !task.is_done && (
+                          <button
+                            onClick={async () => {
+                              const reason = prompt("Reason for resetting the timer:\n(e.g., contact was busy, no answer, rescheduled)");
+                              if (!reason || !reason.trim()) return;
+                              try {
+                                // Add note with reason
+                                await onAddNote(convo!.id, `⏱️ SLA Reset — Task: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}\nPrevious deadline: ${task.due_date}${task.due_time ? " " + task.due_time : ""}`);
+
+                                // Reset the deadline to same number of hours from now
+                                const hours = task.due_time ? Math.max(1, Math.round((new Date(task.due_date + "T" + task.due_time).getTime() - new Date(task.created_at).getTime()) / (1000 * 60 * 60))) : 24;
+                                const newDeadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+                                const newDueDate = newDeadline.toISOString().split("T")[0];
+                                const newDueTime = newDeadline.toTimeString().slice(0, 5);
+
+                                await onUpdateTask(task.id, { dueDate: newDueDate });
+                                // Update due_time directly
+                                const sb = (await import("@/lib/supabase")).createBrowserClient();
+                                await sb.from("tasks").update({ due_time: newDueTime }).eq("id", task.id);
+
+                                await refetchDetail();
+                              } catch (e) { console.error("Reset SLA failed:", e); }
+                            }}
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-[#F0883E] bg-[rgba(240,136,62,0.1)] hover:bg-[rgba(240,136,62,0.2)] transition-colors"
+                            title="Reset the SLA timer and log a reason"
+                          >
+                            <AlarmClock size={11} /> Reset timer
+                          </button>
                         )}
 
                         {assignees.map((member: any) => (
