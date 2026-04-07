@@ -229,9 +229,9 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         <div className="flex items-center gap-2">
           <button
             onClick={handleSend}
-            disabled={sending || !to.trim() || !subject.trim()}
+            disabled={sending || (to.length === 0 && !toInput.trim()) || !subject.trim()}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-bold transition-all ${
-              !sending && to.trim() && subject.trim()
+              !sending && (to.length > 0 || toInput.trim()) && subject.trim()
                 ? "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73] active:scale-[0.98]"
                 : "bg-[#1E242C] text-[#484F58] cursor-not-allowed"
             }`}
