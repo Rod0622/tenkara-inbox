@@ -1607,6 +1607,10 @@ export default function ConversationDetail({
   const [inlineComposeTo, setInlineComposeTo] = useState("");
   const [inlineComposeSubject, setInlineComposeSubject] = useState("");
   const [inlineComposeBody, setInlineComposeBody] = useState("");
+  const [inlineComposeCc, setInlineComposeCc] = useState("");
+  const [inlineComposeBcc, setInlineComposeBcc] = useState("");
+  const [showInlineComposeCc, setShowInlineComposeCc] = useState(false);
+  const [showInlineComposeBcc, setShowInlineComposeBcc] = useState(false);
   const [sendingInlineCompose, setSendingInlineCompose] = useState(false);
   const [activeReminder, setActiveReminder] = useState<any>(null);
 
@@ -2326,6 +2330,8 @@ export default function ConversationDetail({
           conversation_id: convo.id,
           account_id: convo.email_account_id,
           to: inlineComposeTo.trim(),
+          cc: inlineComposeCc.trim() || undefined,
+          bcc: inlineComposeBcc.trim() || undefined,
           subject,
           body: inlineComposeBody,
           actor_id: currentUser?.id,
@@ -2333,9 +2339,9 @@ export default function ConversationDetail({
       });
       if (res.ok) {
         setShowInlineCompose(false);
-        setInlineComposeTo("");
-        setInlineComposeSubject("");
-        setInlineComposeBody("");
+        setInlineComposeTo(""); setInlineComposeSubject(""); setInlineComposeBody("");
+        setInlineComposeCc(""); setInlineComposeBcc("");
+        setShowInlineComposeCc(false); setShowInlineComposeBcc(false);
         refetchDetail();
       } else {
         const err = await res.json();
@@ -2880,21 +2886,34 @@ export default function ConversationDetail({
                         : "bg-[#12161B] border-[#161B22]"
                     } ${searchQ && matchCountInMsg > 0 ? "ring-1 ring-[#F5D547]/20" : ""}`}
                   >
-                <div className="flex items-center gap-2 mb-2.5">
+                <div className="flex items-start gap-2 mb-2.5">
                   <Avatar
                     initials={(msg.from_name || "?").slice(0, 2).toUpperCase()}
                     color={msg.is_outbound ? "#4ADE80" : "#58A6FF"}
                   />
-                  <div className="flex-1">
-                    <span className="text-[13px] font-semibold text-[#E6EDF3]">
-                      {msg.from_name}
-                      {msg.is_outbound && (
-                        <span className="text-[10px] text-[#4ADE80] ml-2">Sent</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-[#E6EDF3]">
+                        {msg.from_name}
+                        {msg.is_outbound && (
+                          <span className="text-[10px] text-[#4ADE80] ml-2">Sent</span>
+                        )}
+                      </span>
+                      <span className="text-[11px] text-[#484F58]">&lt;{msg.from_email}&gt;</span>
+                    </div>
+                    <div className="text-[10px] text-[#484F58] mt-0.5 space-y-0.5">
+                      {msg.to_addresses && (
+                        <div><span className="text-[#7D8590] font-semibold">To:</span> {msg.to_addresses}</div>
                       )}
-                    </span>
-                    <span className="text-[11px] text-[#484F58] ml-2">{msg.from_email}</span>
+                      {msg.cc_addresses && (
+                        <div><span className="text-[#7D8590] font-semibold">Cc:</span> {msg.cc_addresses}</div>
+                      )}
+                      {msg.bcc_addresses && (
+                        <div><span className="text-[#7D8590] font-semibold">Bcc:</span> {msg.bcc_addresses}</div>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-[11px] text-[#484F58]">
+                  <span className="text-[11px] text-[#484F58] flex-shrink-0">
                     {msg.sent_at ? new Date(msg.sent_at).toLocaleString() : ""}
                   </span>
                 </div>
@@ -2950,14 +2969,36 @@ export default function ConversationDetail({
                   <button onClick={() => setShowInlineCompose(false)} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={14} /></button>
                 </div>
                 <div>
-                  <label className="block text-[10px] text-[#484F58] font-semibold mb-1">To *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] text-[#484F58] font-semibold">To *</label>
+                    <div className="flex gap-2">
+                      {!showInlineComposeCc && <button onClick={() => setShowInlineComposeCc(true)} className="text-[9px] text-[#484F58] hover:text-[#7D8590]">Cc</button>}
+                      {!showInlineComposeBcc && <button onClick={() => setShowInlineComposeBcc(true)} className="text-[9px] text-[#484F58] hover:text-[#7D8590]">Bcc</button>}
+                    </div>
+                  </div>
                   <input
                     value={inlineComposeTo}
                     onChange={(e) => setInlineComposeTo(e.target.value)}
-                    placeholder="supplier@example.com"
+                    placeholder="supplier@example.com (comma-separated for multiple)"
                     className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
                   />
                 </div>
+                {showInlineComposeCc && (
+                  <div>
+                    <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Cc</label>
+                    <input value={inlineComposeCc} onChange={(e) => setInlineComposeCc(e.target.value)}
+                      placeholder="cc@example.com"
+                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                  </div>
+                )}
+                {showInlineComposeBcc && (
+                  <div>
+                    <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Bcc</label>
+                    <input value={inlineComposeBcc} onChange={(e) => setInlineComposeBcc(e.target.value)}
+                      placeholder="bcc@example.com"
+                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                  </div>
+                )}
                 <div>
                   <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Subject</label>
                   <input
