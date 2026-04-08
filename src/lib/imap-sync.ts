@@ -295,7 +295,10 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
         if (lastUid > 0) {
           searchCriteria = [["UID", `${lastUid + 1}:*`]];
         } else {
-          searchCriteria = ["ALL"];
+          // Initial sync: fetch last 30 days instead of ALL to avoid Gmail IMAP hanging
+          const since = new Date();
+          since.setDate(since.getDate() - 30);
+          searchCriteria = [["SINCE", since]];
         }
 
         imap.search(searchCriteria, (searchErr, uids) => {
