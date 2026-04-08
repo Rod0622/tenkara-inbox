@@ -284,6 +284,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
       }
 
       // Process emails in this batch
+      let batchNewCount = 0;
       for (const email of emails) {
         try {
           const msgId = email.internetMessageId || email.id;
@@ -370,6 +371,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           }
 
           result.newMessages++;
+          batchNewCount++;
         } catch (ee: any) { result.errors.push(ee.message); }
       }
 
@@ -384,7 +386,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
       }
 
       batchCount++;
-      console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, +${result.newMessages} msgs, ${Date.now() - syncStart}ms`);
+      console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, +${batchNewCount} new (${result.newMessages} total), ${Date.now() - syncStart}ms`);
 
       // If this batch was less than full, we've reached the end
       if (!result.hasMore) break;
