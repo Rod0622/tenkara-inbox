@@ -31,10 +31,13 @@ export async function GET(req: NextRequest) {
   const TOTAL_TIME_LIMIT = 55000; // 55s total, leaving 5s margin for the 60s function timeout
 
   try {
-    const { data: accounts } = await supabase
+    const { data: accounts, error: accountsError } = await supabase
       .from("email_accounts")
       .select("id, name, email, provider, imap_host, imap_password, microsoft_client_id, oauth_refresh_token")
       .eq("is_active", true);
+
+    console.log(`[cron-sync] Fetched ${accounts?.length || 0} accounts:`, (accounts || []).map((a: any) => `${a.email}=${a.id.slice(0,8)}`).join(", "));
+    if (accountsError) console.error(`[cron-sync] accounts query error:`, accountsError.message);
 
     if (!accounts || accounts.length === 0) {
       return NextResponse.json({ message: "No active accounts", duration_ms: Date.now() - startTime });
