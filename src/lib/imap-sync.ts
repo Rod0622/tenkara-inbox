@@ -396,6 +396,12 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
 
     imap.once("end", () => {});
 
+    imap.once("error", (err: any) => {
+      clearTimeout(timeout);
+      console.error(`IMAP sync error for ${account.email}:`, err.message);
+      reject(new Error(`IMAP connection error: ${err.message}`));
+    });
+
     const timeout = setTimeout(() => {
       try { imap.end(); } catch {}
       reject(new Error("IMAP sync timed out (10s)"));
