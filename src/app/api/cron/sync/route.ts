@@ -56,16 +56,37 @@ export async function GET(req: NextRequest) {
       const remainingMs = TOTAL_TIME_LIMIT - elapsed;
       const accountStart = Date.now();
       try {
+        // Verify the account still exists (handle stale IDs from cached queries)
+        const { data: verified } = await supabase.from("email_accounts")
+          .select("id").eq("id", account.id).maybeSingle();
+        
+        let syncId = account.id;
+        if (!verified) {
+          // ID doesn't exist — try to find current account by email
+          const { data: byEmail } = await supabase.from("email_accounts")
+            .select("id, provider, imap_host, microsoft_client_id, oauth_refresh_token")
+            .eq("email", account.email).eq("is_active", true).maybeSingle();
+          if (!byEmail) {
+            console.log(`[cron-sync] ${account.email}: account deleted, skipping`);
+            results.push({ account: account.email, success: false, error: "Account deleted", duration_ms: 0 });
+            continue;
+          }
+          console.log(`[cron-sync] ${account.email}: stale ID ${account.id.slice(0,8)}, using ${byEmail.id.slice(0,8)}`);
+          syncId = byEmail.id;
+          // Update method based on fresh data
+          account = { ...account, ...byEmail };
+        }
+
         const method = getSyncMethod(account);
-        console.log(`[cron-sync] ${account.email}: ${method} (id: ${account.id})`);
+        console.log(`[cron-sync] ${account.email}: ${method} (id: ${syncId.slice(0,8)})`);
 
         let result;
         if (method === "microsoft_oauth") {
-          result = await syncMicrosoftOAuthAccount(account.id);
+          result = await syncMicrosoftOAuthAccount(syncId);
         } else if (method === "graph") {
-          result = await syncMicrosoftAccount(account.id, remainingMs);
+          result = await syncMicrosoftAccount(syncId, remainingMs);
         } else {
-          result = await syncEmailAccount(account.id);
+          result = await syncEmailAccount(syncId);
         }
 
         results.push({

@@ -87,11 +87,10 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       .from("email_accounts")
       .select("*")
       .eq("id", accountId)
-      .single();
+      .maybeSingle();
 
-    // If account not found by ID (stale reference), try to find by looking at all active accounts
     if (accError || !account) {
-      console.error(`IMAP sync ${accountId}: account not found or error:`, accError?.message);
+      console.error(`IMAP sync ${accountId}: ID lookup failed (${accError?.message || "not found"}), skipping`);
       result.errors.push("Account not found: " + (accError?.message || "unknown"));
       return result;
     }
