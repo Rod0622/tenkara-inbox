@@ -233,8 +233,8 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
     const BATCH_SIZE = 50;
-    const MAX_BATCHES = 10; // Up to 500 emails per sync call
-    const TIME_LIMIT_MS = timeBudgetMs ? Math.min(timeBudgetMs - 2000, 55000) : 50000; // Leave 2s margin
+    const MAX_BATCHES = 8; // Limit batches to stay within timeout
+    const TIME_LIMIT_MS = timeBudgetMs ? Math.min(timeBudgetMs - 5000, 40000) : 35000; // Conservative: stop at 35s
     const syncStart = Date.now();
     const token = await getGraphTokenForAccount(accountId);
     const isInitialSync = !account.last_sync_at;
@@ -290,9 +290,11 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
       // This ensures progress is saved even if we time out during email processing
       if (isInitialSync) {
         currentSkipOffset += emails.length;
-        await supabase.from("email_accounts").update({
+        const { error: saveErr } = await supabase.from("email_accounts").update({
           last_sync_uid: currentSkipOffset.toString(),
         }).eq("id", accountId);
+        if (saveErr) console.error(`[graph-sync] ${account.email}: FAILED to save offset ${currentSkipOffset}:`, saveErr.message);
+        else console.log(`[graph-sync] ${account.email}: saved offset ${currentSkipOffset}`);
       }
 
       // Bulk duplicate check — get all existing message IDs in one query
