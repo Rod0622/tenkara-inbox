@@ -295,13 +295,25 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
         }).eq("id", accountId);
       }
 
-      for (const email of emails) {
+      // Bulk duplicate check — get all existing message IDs in one query
+      const msgIds = emails.map((e) => `ms:${e.internetMessageId || e.id}`);
+      const { data: existingMsgs } = await supabase.from("messages")
+        .select("provider_message_id")
+        .in("provider_message_id", msgIds);
+      const existingSet = new Set((existingMsgs || []).map((m: any) => m.provider_message_id));
+
+      // If entire batch is duplicates, skip processing entirely
+      const newEmails = emails.filter((e) => !existingSet.has(`ms:${e.internetMessageId || e.id}`));
+      if (newEmails.length === 0) {
+        batchCount++;
+        console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, SKIP (all dupes), ${Date.now() - syncStart}ms`);
+        if (!result.hasMore) break;
+        continue;
+      }
+
+      for (const email of newEmails) {
         try {
           const msgId = email.internetMessageId || email.id;
-          const { data: existing } = await supabase.from("messages")
-            .select("id").eq("provider_message_id", `ms:${msgId}`).maybeSingle();
-          if (existing) continue;
-
           const isOutbound = email.from?.emailAddress?.address?.toLowerCase() === account.email.toLowerCase();
           let conversationId: string | null = null;
 
