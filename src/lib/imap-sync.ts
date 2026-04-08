@@ -99,18 +99,134 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
     console.log(`IMAP sync ${accountId}: connecting to ${account.imap_host}:${account.imap_port} as ${account.imap_user}`);
 
-    // For OAuth accounts, get a fresh access token
+    // For OAuth accounts, use Gmail API directly instead of IMAP (more reliable)
     const acct = account as EmailAccount;
     if (account.provider === "google_oauth" && account.oauth_refresh_token) {
       try {
-        // Always force refresh for IMAP — cached tokens often fail with Gmail IMAP
         const accessToken = await refreshGoogleToken(accountId, true);
-        acct._xoauth2Token = buildXOAuth2Token(account.email, accessToken);
-        console.log(`IMAP sync ${accountId}: using XOAUTH2 authentication`);
-      } catch (oauthErr: any) {
-        console.error(`IMAP sync ${accountId}: OAuth token refresh failed:`, oauthErr.message);
-        await supabase.from("email_accounts").update({ sync_error: "OAuth refresh failed: " + oauthErr.message }).eq("id", accountId);
-        result.errors.push("OAuth refresh failed: " + oauthErr.message);
+        console.log(`IMAP sync ${accountId}: using Gmail API for OAuth account`);
+
+        // Fetch recent messages via Gmail API
+        const sinceDate = account.last_sync_at
+          ? new Date(account.last_sync_at)
+          : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })();
+        const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
+        const query = `after:${afterEpoch}`;
+
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`;
+        const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!listRes.ok) {
+          const err = await listRes.json().catch(() => ({}));
+          throw new Error(`Gmail API list error: ${err.error?.message || listRes.statusText}`);
+        }
+        const listData = await listRes.json();
+        const messageIds: string[] = (listData.messages || []).map((m: any) => m.id);
+        console.log(`IMAP sync ${accountId}: Gmail API found ${messageIds.length} messages`);
+
+        if (messageIds.length === 0) {
+          result.success = true;
+          await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+          return result;
+        }
+
+        // Fetch each message detail
+        for (const msgId of messageIds) {
+          try {
+            // Check if already synced
+            const { data: existing } = await supabase.from("messages")
+              .select("id").eq("provider_message_id", `gmail:${msgId}`).maybeSingle();
+            if (existing) continue;
+
+            const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`;
+            const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+            if (!msgRes.ok) continue;
+            const msgData = await msgRes.json();
+
+            const headers: Record<string, string> = {};
+            for (const h of (msgData.payload?.headers || [])) {
+              headers[h.name.toLowerCase()] = h.value;
+            }
+
+            const fromMatch = (headers.from || "").match(/^(.+?)\s*<(.+?)>$/);
+            const fromName = fromMatch ? fromMatch[1].trim() : (headers.from || "Unknown");
+            const fromEmail = fromMatch ? fromMatch[2].trim().toLowerCase() : (headers.from || "").toLowerCase();
+            const isOutbound = fromEmail === account.email.toLowerCase();
+
+            const toAddresses = headers.to || "";
+            const ccAddresses = headers.cc || "";
+            const subject = headers.subject || "(No Subject)";
+            const snippet = msgData.snippet || "";
+            const sentAt = headers.date ? new Date(headers.date).toISOString() : new Date(parseInt(msgData.internalDate)).toISOString();
+            const hasAttachments = (msgData.payload?.parts || []).some((p: any) => p.filename && p.filename.length > 0);
+
+            // Check Gmail labels for category filtering
+            const labels: string[] = msgData.labelIds || [];
+            const isPromotions = labels.some((l: string) => l.toLowerCase().includes("promotions") || l === "CATEGORY_PROMOTIONS");
+            const isSocial = labels.some((l: string) => l.toLowerCase().includes("social") || l === "CATEGORY_SOCIAL");
+            const isUpdates = labels.some((l: string) => l.toLowerCase().includes("updates") || l === "CATEGORY_UPDATES");
+            const isForums = labels.some((l: string) => l.toLowerCase().includes("forums") || l === "CATEGORY_FORUMS");
+            if (isPromotions || isSocial || isUpdates || isForums) continue;
+
+            // Thread into conversation
+            const cleanSubject = subject.replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+            let conversationId: string | null = null;
+
+            if (cleanSubject) {
+              const { data: c } = await supabase.from("conversations").select("id")
+                .eq("email_account_id", accountId).eq("subject", cleanSubject)
+                .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+              if (c) conversationId = c.id;
+            }
+
+            if (!conversationId) {
+              const { data: nc, error: ce } = await supabase.from("conversations").insert({
+                email_account_id: accountId,
+                thread_id: `gmail:${msgData.threadId || msgId}`,
+                subject: cleanSubject || "(No Subject)",
+                from_name: fromName, from_email: fromEmail,
+                preview: snippet.slice(0, 200),
+                is_unread: !isOutbound, status: "open",
+                last_message_at: sentAt,
+              }).select("id").single();
+              if (ce) continue;
+              conversationId = nc.id;
+              result.newConversations++;
+            }
+
+            await supabase.from("messages").insert({
+              conversation_id: conversationId,
+              provider_message_id: `gmail:${msgId}`,
+              from_name: fromName, from_email: fromEmail,
+              to_addresses: toAddresses, cc_addresses: ccAddresses,
+              subject, body_text: snippet, body_html: null,
+              snippet: snippet.slice(0, 200),
+              is_outbound: isOutbound, has_attachments: hasAttachments,
+              sent_at: sentAt,
+            });
+
+            await supabase.from("conversations").update({
+              preview: snippet.slice(0, 200),
+              last_message_at: sentAt,
+              is_unread: !isOutbound,
+            }).eq("id", conversationId);
+
+            result.newMessages++;
+          } catch (msgErr: any) {
+            result.errors.push(msgErr.message);
+          }
+        }
+
+        result.success = true;
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(),
+          sync_error: result.errors.length > 0 ? result.errors[0] : null,
+        }).eq("id", accountId);
+        return result;
+
+      } catch (apiErr: any) {
+        console.error(`IMAP sync ${accountId}: Gmail API failed:`, apiErr.message);
+        await supabase.from("email_accounts").update({ sync_error: "Gmail API: " + apiErr.message }).eq("id", accountId);
+        result.errors.push("Gmail API: " + apiErr.message);
         return result;
       }
     }
@@ -279,7 +395,11 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
 
     // Use XOAUTH2 for OAuth accounts, password for others
     if (account._xoauth2Token) {
+      // node-imap handles the XOAUTH2 SASL encoding internally when xoauth2 is set
+      // Pass the raw access token — the library builds the SASL string itself
       imapConfig.xoauth2 = account._xoauth2Token;
+      // Also try setting xoauth as alternative for some library versions
+      imapConfig.xoauth = account._xoauth2Token;
     } else {
       imapConfig.password = account.imap_password;
     }
