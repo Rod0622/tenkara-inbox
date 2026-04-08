@@ -27,11 +27,16 @@ export async function refreshGoogleToken(accountId: string, forceRefresh: boolea
     }
   }
 
-  // Refresh the token
+  // Refresh the token — use cache: no-store and unique URL to prevent any HTTP caching
   console.log(`[google-oauth] ${account.email}: refreshing access token...`);
-  const res = await fetch("https://oauth2.googleapis.com/token", {
+  const refreshStart = Date.now();
+  const res = await fetch(`https://oauth2.googleapis.com/token?_t=${Date.now()}`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { 
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Cache-Control": "no-cache, no-store",
+    },
+    cache: "no-store" as any,
     body: new URLSearchParams({
       client_id: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
       client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
@@ -47,7 +52,8 @@ export async function refreshGoogleToken(accountId: string, forceRefresh: boolea
   }
 
   const tokens = await res.json();
-  console.log(`[google-oauth] ${account.email}: got new token, expires_in=${tokens.expires_in}s, scope=${tokens.scope || "not returned"}`);
+  const refreshDuration = Date.now() - refreshStart;
+  console.log(`[google-oauth] ${account.email}: got new token in ${refreshDuration}ms, expires_in=${tokens.expires_in}s, scope=${tokens.scope || "not returned"}, token_start=${(tokens.access_token || "").slice(0, 20)}`);
 
   // Update stored token
   await supabase.from("email_accounts").update({
