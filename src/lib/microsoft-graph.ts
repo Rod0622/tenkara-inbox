@@ -233,7 +233,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
     const BATCH_SIZE = 50;
-    const MAX_BATCHES = 8; // Limit batches to stay within timeout
+    const MAX_BATCHES = 20; // Can be high since dupe batches are <1s each
     const TIME_LIMIT_MS = timeBudgetMs ? Math.min(timeBudgetMs - 5000, 40000) : 35000; // Conservative: stop at 35s
     const syncStart = Date.now();
     const token = await getGraphTokenForAccount(accountId);
@@ -247,6 +247,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
     }
 
     let batchCount = 0;
+    let consecutiveDupeBatches = 0;
     let currentSkipOffset = parseInt(account.last_sync_uid || "0") || 0;
 
     while (batchCount < MAX_BATCHES) {
@@ -307,11 +308,13 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
       // If entire batch is duplicates, skip processing entirely
       const newEmails = emails.filter((e) => !existingSet.has(`ms:${e.internetMessageId || e.id}`));
       if (newEmails.length === 0) {
+        consecutiveDupeBatches++;
         batchCount++;
-        console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, SKIP (all dupes), ${Date.now() - syncStart}ms`);
+        console.log(`[graph-sync] ${account.email}: batch ${batchCount}, offset ${currentSkipOffset}, SKIP (all dupes x${consecutiveDupeBatches}), ${Date.now() - syncStart}ms`);
         if (!result.hasMore) break;
         continue;
       }
+      consecutiveDupeBatches = 0;
 
       for (const email of newEmails) {
         try {
