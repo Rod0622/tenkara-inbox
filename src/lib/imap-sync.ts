@@ -130,8 +130,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         } else {
           var gmailToken = accessToken;
         }
-        const profileData = await (testRes.ok ? testRes : Promise.resolve({ json: () => ({}) } as any)).json().catch(() => ({}));
-        console.log(`IMAP sync ${accountId}: Gmail profile: ${profileData.emailAddress || "unknown"}`);
+        let profileEmail = "unknown";
+        if (testRes.ok) {
+          const profileData = await testRes.json().catch(() => ({}));
+          profileEmail = profileData.emailAddress || "unknown";
+        }
+        console.log(`IMAP sync ${accountId}: Gmail profile: ${profileEmail}`);
 
         // Fetch recent messages via Gmail API
         const sinceDate = account.last_sync_at
