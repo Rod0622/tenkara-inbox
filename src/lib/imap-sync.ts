@@ -82,6 +82,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
   try {
     // 1. Get account credentials
+    console.log(`IMAP sync ${accountId}: starting sync...`);
     const { data: account, error: accError } = await supabase
       .from("email_accounts")
       .select("*")
@@ -89,6 +90,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       .single();
 
     if (accError || !account) {
+      console.error(`IMAP sync ${accountId}: account not found or error:`, accError?.message);
       result.errors.push("Account not found");
       return result;
     }

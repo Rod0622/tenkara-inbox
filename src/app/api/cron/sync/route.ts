@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
       const accountStart = Date.now();
       try {
         const method = getSyncMethod(account);
-        console.log(`[cron-sync] ${account.email}: ${method}`);
+        console.log(`[cron-sync] ${account.email}: ${method} (id: ${account.id})`);
 
         let result;
         if (method === "microsoft_oauth") {
