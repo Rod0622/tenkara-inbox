@@ -216,7 +216,7 @@ export async function sendGraphEmail(
 
 
 // ── Sync a Microsoft account (multi-batch for Pro 60s timeout) ──
-export async function syncMicrosoftAccount(accountId: string): Promise<{
+export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: number): Promise<{
   success: boolean;
   newMessages: number;
   newConversations: number;
@@ -234,7 +234,7 @@ export async function syncMicrosoftAccount(accountId: string): Promise<{
 
     const BATCH_SIZE = 50;
     const MAX_BATCHES = 10; // Up to 500 emails per sync call
-    const TIME_LIMIT_MS = 50000; // Stop after 50s to leave margin for the 60s timeout
+    const TIME_LIMIT_MS = timeBudgetMs ? Math.min(timeBudgetMs - 2000, 55000) : 50000; // Leave 2s margin
     const syncStart = Date.now();
     const token = await getGraphTokenForAccount(accountId);
     const isInitialSync = !account.last_sync_at;

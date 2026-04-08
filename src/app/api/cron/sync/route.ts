@@ -28,6 +28,8 @@ export async function GET(req: NextRequest) {
   const startTime = Date.now();
   const supabase = createServerClient();
 
+  const TOTAL_TIME_LIMIT = 55000; // 55s total, leaving 5s margin for the 60s function timeout
+
   try {
     const { data: accounts } = await supabase
       .from("email_accounts")
@@ -40,6 +42,15 @@ export async function GET(req: NextRequest) {
 
     const results = [];
     for (const account of accounts) {
+      // Check if we have enough time left for another account
+      const elapsed = Date.now() - startTime;
+      if (elapsed > TOTAL_TIME_LIMIT) {
+        console.log(`[cron-sync] Skipping ${account.email}: time limit reached (${elapsed}ms elapsed)`);
+        results.push({ account: account.email, success: false, error: "Skipped: time limit", duration_ms: 0 });
+        continue;
+      }
+
+      const remainingMs = TOTAL_TIME_LIMIT - elapsed;
       const accountStart = Date.now();
       try {
         const method = getSyncMethod(account);
@@ -49,7 +60,7 @@ export async function GET(req: NextRequest) {
         if (method === "microsoft_oauth") {
           result = await syncMicrosoftOAuthAccount(account.id);
         } else if (method === "graph") {
-          result = await syncMicrosoftAccount(account.id);
+          result = await syncMicrosoftAccount(account.id, remainingMs);
         } else {
           result = await syncEmailAccount(account.id);
         }
