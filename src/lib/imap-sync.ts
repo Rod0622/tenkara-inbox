@@ -103,7 +103,8 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
     const acct = account as EmailAccount;
     if (account.provider === "google_oauth" && account.oauth_refresh_token) {
       try {
-        const accessToken = await refreshGoogleToken(accountId);
+        // Always force refresh for IMAP — cached tokens often fail with Gmail IMAP
+        const accessToken = await refreshGoogleToken(accountId, true);
         acct._xoauth2Token = buildXOAuth2Token(account.email, accessToken);
         console.log(`IMAP sync ${accountId}: using XOAUTH2 authentication`);
       } catch (oauthErr: any) {
