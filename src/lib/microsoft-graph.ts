@@ -285,6 +285,16 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
 
       // Process emails in this batch
       let batchNewCount = 0;
+
+      // For initial sync: advance offset and save BEFORE processing
+      // This ensures progress is saved even if we time out during email processing
+      if (isInitialSync) {
+        currentSkipOffset += emails.length;
+        await supabase.from("email_accounts").update({
+          last_sync_uid: currentSkipOffset.toString(),
+        }).eq("id", accountId);
+      }
+
       for (const email of emails) {
         try {
           const msgId = email.internetMessageId || email.id;
@@ -373,16 +383,6 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           result.newMessages++;
           batchNewCount++;
         } catch (ee: any) { result.errors.push(ee.message); }
-      }
-
-      // Advance offset for initial sync
-      if (isInitialSync) {
-        currentSkipOffset += emails.length;
-        // Save progress after each batch so we don't lose work if we time out
-        await supabase.from("email_accounts").update({
-          last_sync_uid: currentSkipOffset.toString(),
-          sync_error: result.errors.length > 0 ? result.errors[0] : null,
-        }).eq("id", accountId);
       }
 
       batchCount++;
