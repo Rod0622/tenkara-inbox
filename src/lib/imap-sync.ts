@@ -104,7 +104,34 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
     if (account.provider === "google_oauth" && account.oauth_refresh_token) {
       try {
         const accessToken = await refreshGoogleToken(accountId, true);
-        console.log(`IMAP sync ${accountId}: using Gmail API for OAuth account`);
+        console.log(`IMAP sync ${accountId}: using Gmail API for OAuth account, token starts with: ${accessToken.slice(0, 20)}...`);
+
+        // Quick test: verify token works with Gmail API
+        const testRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!testRes.ok) {
+          const testErr = await testRes.json().catch(() => ({}));
+          console.error(`IMAP sync ${accountId}: Gmail API token test failed (${testRes.status}):`, JSON.stringify(testErr));
+          // Try fetching a completely fresh token by clearing the stored one first
+          const sb2 = createServerClient();
+          await sb2.from("email_accounts").update({ oauth_access_token: null, oauth_expires_at: null }).eq("id", accountId);
+          const freshToken = await refreshGoogleToken(accountId, true);
+          console.log(`IMAP sync ${accountId}: retrying with cleared token, starts with: ${freshToken.slice(0, 20)}...`);
+          const retryRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+            headers: { Authorization: `Bearer ${freshToken}` },
+          });
+          if (!retryRes.ok) {
+            const retryErr = await retryRes.json().catch(() => ({}));
+            throw new Error(`Gmail API auth failed after retry: ${retryErr.error?.message || retryRes.statusText}`);
+          }
+          // Use the fresh token for the rest
+          var gmailToken = freshToken;
+        } else {
+          var gmailToken = accessToken;
+        }
+        const profileData = await (testRes.ok ? testRes : Promise.resolve({ json: () => ({}) } as any)).json().catch(() => ({}));
+        console.log(`IMAP sync ${accountId}: Gmail profile: ${profileData.emailAddress || "unknown"}`);
 
         // Fetch recent messages via Gmail API
         const sinceDate = account.last_sync_at
@@ -114,7 +141,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         const query = `after:${afterEpoch}`;
 
         const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`;
-        const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+        const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
         if (!listRes.ok) {
           const err = await listRes.json().catch(() => ({}));
           throw new Error(`Gmail API list error: ${err.error?.message || listRes.statusText}`);
@@ -138,7 +165,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             if (existing) continue;
 
             const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`;
-            const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+            const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
             if (!msgRes.ok) continue;
             const msgData = await msgRes.json();
 
