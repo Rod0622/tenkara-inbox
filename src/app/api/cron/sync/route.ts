@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     }
 
     const results = [];
-    for (const account of accounts) {
+    for (let account of accounts) {
       // Check if we have enough time left for another account
       const elapsed = Date.now() - startTime;
       if (elapsed > TOTAL_TIME_LIMIT) {
