@@ -667,4 +667,6 @@ function normalizeSubject(subject: string): string {
     .trim();
 }
 
+function isOutbound(fromEmail: string, accountEmail: string): boolean {
+  return fromEmail.toLowerCase() === accountEmail.toLowerCase();
 }
