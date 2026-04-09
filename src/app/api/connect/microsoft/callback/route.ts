@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
   const state = req.nextUrl.searchParams.get("state");
   const error = req.nextUrl.searchParams.get("error");
   const errorDesc = req.nextUrl.searchParams.get("error_description");
-  const baseUrl = process.env.NEXTAUTH_URL || "https://tenkara-inbox-5fdl.vercel.app";
+  const baseUrl = process.env.NEXTAUTH_URL || "https://tenkara-inbox-nine.vercel.app";
   const redirectUri = baseUrl + "/api/connect/microsoft/callback";
 
   if (error) {

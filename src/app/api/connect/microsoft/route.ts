@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 // GET /api/connect/microsoft — Redirect to Microsoft OAuth consent
 export async function GET(req: NextRequest) {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const baseUrl = process.env.NEXTAUTH_URL || "https://tenkara-inbox-5fdl.vercel.app";
+  const baseUrl = process.env.NEXTAUTH_URL || "https://tenkara-inbox-nine.vercel.app";
   const redirectUri = baseUrl + "/api/connect/microsoft/callback";
 
   if (!clientId) {
