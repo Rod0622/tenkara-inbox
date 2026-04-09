@@ -39,6 +39,11 @@ export async function GET(req: NextRequest) {
       .eq("is_active", true);
 
     console.log(`[cron-sync] Fetched ${accounts?.length || 0} accounts:`, (accounts || []).map((a: any) => `${a.email}=${a.id.slice(0,8)}`).join(", "));
+    // Debug: log what each account looks like for sync method detection
+    for (const a of (accounts || [])) {
+      const method = getSyncMethod(a);
+      console.log(`[cron-sync] ${a.email}: ${method} (id: ${a.id.slice(0,8)}, provider=${a.provider}, imap_host=${a.imap_host || "null"}, has_imap_pw=${!!a.imap_password}, ms_client=${!!a.microsoft_client_id}, has_oauth_rt=${!!a.oauth_refresh_token})`);
+    }
     if (accountsError) console.error(`[cron-sync] accounts query error:`, accountsError.message);
 
     if (!accounts || accounts.length === 0) {
