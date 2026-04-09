@@ -7,9 +7,32 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const accountId = req.nextUrl.searchParams.get("account_id") || null;
   const folderId = req.nextUrl.searchParams.get("folder_id") || null;
+  const userEmail = req.nextUrl.searchParams.get("user_email") || null;
 
   if (!q || q.length < 2) {
     return NextResponse.json({ conversations: [], match_snippets: {} });
+  }
+
+  // Determine accessible account IDs for this user
+  let accessibleAccountIds: string[] | null = null; // null = no restriction (admin or no access table)
+  if (userEmail) {
+    const { data: member } = await supabase.from("team_members").select("id, role").eq("email", userEmail).single();
+    if (member && member.role !== "admin") {
+      const { data: allAccounts } = await supabase.from("email_accounts").select("id").eq("is_active", true);
+      const { data: accessData } = await supabase.from("account_access").select("email_account_id, team_member_id");
+      const accessByAccount: Record<string, string[]> = {};
+      for (const row of (accessData || [])) {
+        if (!accessByAccount[row.email_account_id]) accessByAccount[row.email_account_id] = [];
+        accessByAccount[row.email_account_id].push(row.team_member_id);
+      }
+      accessibleAccountIds = (allAccounts || [])
+        .filter((a: any) => {
+          const restrictedTo = accessByAccount[a.id];
+          if (!restrictedTo || restrictedTo.length === 0) return true;
+          return restrictedTo.includes(member.id);
+        })
+        .map((a: any) => a.id);
+    }
   }
 
   const searchTerm = "%" + q + "%";
@@ -87,6 +110,7 @@ export async function GET(req: NextRequest) {
       .neq("status", "trash");
     if (accountId) fetchQuery = fetchQuery.eq("email_account_id", accountId);
     if (folderId) fetchQuery = fetchQuery.eq("folder_id", folderId);
+    if (accessibleAccountIds) fetchQuery = fetchQuery.in("email_account_id", accessibleAccountIds);
     const { data } = await fetchQuery.order("last_message_at", { ascending: false });
     if (data) allConvos.push(...data);
   }

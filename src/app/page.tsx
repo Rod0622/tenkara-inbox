@@ -78,6 +78,7 @@ export default function InboxPage() {
         if (searchScope === "account" && activeMailbox) url += "&account_id=" + activeMailbox;
         if (searchScope === "folder" && activeFolder) url += "&folder_id=" + activeFolder;
         if (searchScope === "folder" && activeMailbox) url += "&account_id=" + activeMailbox;
+        if (session?.user?.email) url += "&user_email=" + encodeURIComponent(session.user.email);
         const res = await fetch(url);
         const data = await res.json();
         setSearchResults((data.conversations || []) as Conversation[]);
