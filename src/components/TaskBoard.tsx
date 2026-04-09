@@ -31,6 +31,7 @@ const SECTION_META = {
   todo: { label: "To do", icon: ListTodo, color: "#58A6FF" },
   in_progress: { label: "In progress", icon: Clock3, color: "#F5D547" },
   completed: { label: "Completed", icon: CheckCircle2, color: "#4ADE80" },
+  dismissed: { label: "Dismissed", icon: Ban, color: "#F0883E" },
 } as const;
 
 function Avatar({ initials, color, size = 18 }: { initials: string; color: string; size?: number }) {
