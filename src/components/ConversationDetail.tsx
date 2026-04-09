@@ -3862,7 +3862,6 @@ export default function ConversationDetail({
                     >
                       <Trash2 size={14} />
                     </button>
-                    </button>
                   </div>
                 </div>
               );
