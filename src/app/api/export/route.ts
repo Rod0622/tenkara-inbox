@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
   if (dataset === "all" || dataset === "tasks") {
     let q = supabase
       .from("tasks")
-      .select("id, text, status, is_done, due_date, due_time, created_at, conversation_id, conversation:conversations(subject), assignee:team_members!tasks_assignee_id_fkey(name, email), task_assignees(team_member_id, is_done, status, team_member:team_members!task_assignees_team_member_id_fkey(name, email)), category:task_categories(name)")
+      .select("id, text, status, is_done, due_date, due_time, dismiss_reason, created_at, conversation_id, conversation:conversations(subject), assignee:team_members!tasks_assignee_id_fkey(name, email), task_assignees(team_member_id, is_done, status, team_member:team_members!task_assignees_team_member_id_fkey(name, email)), category:task_categories(name)")
       .order("created_at", { ascending: false });
 
     if (dateFrom) q = q.gte("created_at", dateFrom);
@@ -114,6 +114,7 @@ export async function GET(req: NextRequest) {
           task_id: t.id,
           task_text: t.text,
           task_status: t.status || "todo",
+          dismiss_reason: t.dismiss_reason || "",
           category: t.category?.name || "",
           due_date: t.due_date || "",
           due_time: t.due_time || "",

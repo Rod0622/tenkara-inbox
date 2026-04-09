@@ -34,7 +34,7 @@ interface UserStats {
   color: string;
   role: string;
   department: string;
-  tasks: { total: number; todo: number; in_progress: number; completed: number; overdue: number; dueSoon: number };
+  tasks: { total: number; todo: number; in_progress: number; completed: number; dismissed: number; overdue: number; dueSoon: number };
   conversations: { assigned: number; unread: number };
   sentEmails: number;
 }
@@ -303,9 +303,11 @@ export default function DashboardPage() {
       const todo = memberTasks.filter((t: any) => getStatus(t) === "todo").length;
       const inProgress = memberTasks.filter((t: any) => getStatus(t) === "in_progress").length;
       const completed = memberTasks.filter((t: any) => getStatus(t) === "completed").length;
-      const overdue = memberTasks.filter((t: any) => getStatus(t) !== "completed" && t.due_date && new Date(t.due_date) < now).length;
+      const dismissed = memberTasks.filter((t: any) => getStatus(t) === "dismissed").length;
+      const overdue = memberTasks.filter((t: any) => getStatus(t) !== "completed" && getStatus(t) !== "dismissed" && t.due_date && new Date(t.due_date) < now).length;
       const dueSoon = memberTasks.filter((t: any) => {
-        if (getStatus(t) === "completed" || !t.due_date) return false;
+        const s = getStatus(t);
+        if (s === "completed" || s === "dismissed" || !t.due_date) return false;
         const d = new Date(t.due_date);
         return d >= now && d <= in48Hours;
       }).length;
@@ -321,7 +323,7 @@ export default function DashboardPage() {
         initials: member.initials || member.name?.slice(0, 2).toUpperCase(),
         color: member.color || "#4ADE80", role: member.role,
         department: member.department || "Uncategorized",
-        tasks: { total: memberTasks.length, todo, in_progress: inProgress, completed, overdue, dueSoon },
+        tasks: { total: memberTasks.length, todo, in_progress: inProgress, completed, dismissed, overdue, dueSoon },
         conversations: { assigned: assignedConvos.length, unread: assignedConvos.filter((c: any) => c.is_unread).length },
         sentEmails: sentCount,
       };
@@ -341,11 +343,11 @@ export default function DashboardPage() {
     });
 
     const critical = (tasks || [])
-      .filter((t: any) => !t.is_done && t.status !== "completed" && !(t.task_assignees || []).every((a: any) => a.is_done) && t.due_date && new Date(t.due_date) <= in48Hours)
+      .filter((t: any) => !t.is_done && t.status !== "completed" && t.status !== "dismissed" && !(t.task_assignees || []).every((a: any) => a.is_done) && t.due_date && new Date(t.due_date) <= in48Hours)
       .map(mapTask).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));
 
     const all = (tasks || [])
-      .filter((t: any) => !(t.task_assignees || []).every((a: any) => a.is_done) && t.status !== "completed" && !t.is_done)
+      .filter((t: any) => !(t.task_assignees || []).every((a: any) => a.is_done) && t.status !== "completed" && t.status !== "dismissed" && !t.is_done)
       .map(mapTask).sort((a, b) => (a.due_date || "z").localeCompare(b.due_date || "z"));
 
     setUserStats(stats);

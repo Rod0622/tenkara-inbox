@@ -3721,13 +3721,13 @@ export default function ConversationDetail({
                             <TaskCountdown
                               dueDate={task.due_date}
                               dueTime={task.due_time}
-                              isCompleted={task.status === "completed" || task.is_done}
+                              isCompleted={task.status === "completed" || task.status === "dismissed" || task.is_done}
                             />
                           </>
                         )}
 
                         {/* Reset SLA Timer */}
-                        {task.due_date && task.status !== "completed" && !task.is_done && (
+                        {task.due_date && task.status !== "completed" && task.status !== "dismissed" && !task.is_done && (
                           <button
                             onClick={async () => {
                               const reason = prompt("Reason for resetting the timer:\n(e.g., contact was busy, no answer, rescheduled)");

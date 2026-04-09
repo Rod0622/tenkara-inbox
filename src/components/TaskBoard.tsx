@@ -806,7 +806,7 @@ function TaskCard({
             <TaskCountdown
               dueDate={task.due_date}
               dueTime={task.due_time}
-              isCompleted={task.status === "completed" || task.is_done}
+              isCompleted={task.status === "completed" || task.status === "dismissed" || task.is_done}
             />
           </>
         )}
