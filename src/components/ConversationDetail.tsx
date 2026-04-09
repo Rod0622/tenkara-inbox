@@ -3254,7 +3254,7 @@ export default function ConversationDetail({
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-[#E6EDF3]">Thread Tasks</div>
               <div className="flex items-center gap-2">
-                {selectedTaskIds.length > 0 && (
+                {selectedTaskIds.length > 0 && currentUser?.role === "admin" && (
                   <button
                     onClick={() => handleDeleteTasks(selectedTaskIds)}
                     disabled={deletingTasks}
@@ -3855,13 +3855,15 @@ export default function ConversationDetail({
                         </button>
                       )
                     )}
-                    <button
-                      onClick={() => handleDeleteTasks([task.id])}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
-                      title="Delete task"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {currentUser?.role === "admin" && (
+                      <button
+                        onClick={() => handleDeleteTasks([task.id])}
+                        className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                        title="Delete task"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

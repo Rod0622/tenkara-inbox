@@ -332,7 +332,7 @@ export default function TaskBoard({
                 className="w-56 pl-9 pr-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
               />
             </div>
-            {selectedTaskIds.length > 0 && (
+            {selectedTaskIds.length > 0 && currentUser?.role === "admin" && (
               <button
                 onClick={() => deleteTasks(selectedTaskIds)}
                 disabled={deleting}
@@ -761,15 +761,17 @@ function TaskCard({
               </button>
             )
           )}
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={deleting}
-            className="text-[#7D8590] hover:text-[#F85149] transition-colors disabled:opacity-50"
-            title="Delete task"
-          >
-            <Trash2 size={15} />
-          </button>
+          {currentUser?.role === "admin" && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              className="text-[#7D8590] hover:text-[#F85149] transition-colors disabled:opacity-50"
+              title="Delete task"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
         </div>
       </div>
 
