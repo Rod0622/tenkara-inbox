@@ -91,7 +91,11 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
           <Link href="/" className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-[#58A6FF] hover:text-[#79B8FF]"><ArrowLeft size={16} /> Back to inbox</Link>
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#12161B] border border-[#1E242C]"><Mail size={20} className="text-[#58A6FF]" /></div>
-            <div><h1 className="text-2xl font-bold tracking-tight">{contact.name || contact.email}</h1><div className="text-sm text-[#7D8590]">{contact.email}</div></div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">{contact.name || contact.email}</h1>
+              {contact.company && contact.company !== contact.name && <div className="text-sm text-[#58A6FF]">{contact.company}</div>}
+              <div className="text-sm text-[#7D8590]">{contact.email}</div>
+            </div>
           </div>
         </div>
 

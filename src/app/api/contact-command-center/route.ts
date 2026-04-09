@@ -193,7 +193,7 @@ export async function GET(req: NextRequest) {
 
     if (allRelatedIds.length === 0) {
       return NextResponse.json({
-        contact: { email, name: null },
+        contact: { email, name: supplierContact?.name || supplierContact?.company || email.split("@")[1]?.split(".")[0] || email, company: supplierContact?.company || null },
         supplier_hours: supplierContact ? {
           id: supplierContact.id,
           timezone: supplierContact.timezone,
@@ -360,10 +360,10 @@ export async function GET(req: NextRequest) {
       summaries: threadSummaries,
     });
 
-    const contactName =
-      relatedThreads.find((t: any) => t.from_name)?.from_name ||
-      relatedThreads.find((t: any) => t.from_email)?.from_email ||
-      email;
+    // Determine display name: supplier_contacts name > company > domain name
+    const domainName = email.split("@")[1]?.split(".")[0] || email;
+    const contactName = supplierContact?.name || supplierContact?.company || domainName.charAt(0).toUpperCase() + domainName.slice(1);
+    const contactCompany = supplierContact?.company || null;
 
     const rollup = buildRollupSummary({
       contactEmail: email,
@@ -377,6 +377,7 @@ export async function GET(req: NextRequest) {
       contact: {
         email,
         name: contactName,
+        company: contactCompany,
       },
       supplier_hours: supplierContact ? {
         id: supplierContact.id,
