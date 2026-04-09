@@ -8,9 +8,11 @@ import { createServerClient } from "@/lib/supabase";
 
 // Determine sync method for an account
 function getSyncMethod(account: any): "microsoft_oauth" | "graph" | "imap" {
+  // If IMAP credentials are configured, always use IMAP (even if Graph was previously set up)
+  if (account.imap_host && account.imap_password) return "imap";
   if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) return "microsoft_oauth";
   if (account.provider === "microsoft") return "graph";
-  if (account.microsoft_client_id && !account.imap_host) return "graph";
+  if (account.microsoft_client_id) return "graph";
   return "imap";
 }
 
