@@ -297,6 +297,8 @@ export default function DashboardPage() {
         (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
       );
       const getStatus = (task: any) => {
+        // Dismissed is a task-level status that overrides per-assignee status
+        if (task.status === "dismissed") return "dismissed";
         const a = (task.task_assignees || []).find((a: any) => a.team_member_id === member.id);
         return a?.status || (a?.is_done ? "completed" : "todo");
       };
