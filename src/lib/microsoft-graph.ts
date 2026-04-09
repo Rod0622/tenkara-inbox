@@ -158,7 +158,8 @@ export async function sendGraphEmail(
   subject: string,
   body: string,
   cc?: string,
-  attachments?: { name: string; type: string; data: string }[]
+  attachments?: { name: string; type: string; data: string }[],
+  inlineAttachments?: { cid: string; content: Buffer; contentType: string; filename: string }[]
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const token = await getGraphTokenForEmail(fromEmail);
 
@@ -192,6 +193,21 @@ export async function sendGraphEmail(
       contentType: att.type || "application/octet-stream",
       contentBytes: att.data,
     }));
+  }
+
+  // Add inline CID attachments (for signature images)
+  if (inlineAttachments && inlineAttachments.length > 0) {
+    if (!message.attachments) message.attachments = [];
+    for (const cid of inlineAttachments) {
+      message.attachments.push({
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: cid.filename,
+        contentType: cid.contentType,
+        contentBytes: cid.content.toString("base64"),
+        isInline: true,
+        contentId: cid.cid,
+      });
+    }
   }
 
   const res = await fetch(`${GRAPH_BASE}/users/${fromEmail}/sendMail`, {

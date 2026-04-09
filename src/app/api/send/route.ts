@@ -113,6 +113,33 @@ export async function POST(req: NextRequest) {
       .replace(/<span>\s*<\/span>/g, "")
       .replace(/class="[^"]*"/g, "");
 
+    // ── Step 5: Convert base64 images to CID inline attachments ──
+    // Gmail clips emails > 102KB. Base64 images in signatures can be 50-200KB each.
+    // Converting them to CID-attached inline images keeps HTML small.
+    const cidAttachments: { cid: string; content: Buffer; contentType: string; filename: string }[] = [];
+    const base64ImgRegex = /<img([^>]*)\ssrc="data:(image\/[^;]+);base64,([^"]+)"([^>]*)>/gi;
+    let cidCounter = 0;
+    finalBody = finalBody.replace(base64ImgRegex, (_match: string, before: string, mimeType: string, base64Data: string, after: string) => {
+      cidCounter++;
+      const ext = mimeType.split("/")[1] || "png";
+      const cid = `img${cidCounter}_${Date.now()}@tenkara`;
+      const filename = `image${cidCounter}.${ext}`;
+      try {
+        cidAttachments.push({
+          cid,
+          content: Buffer.from(base64Data, "base64"),
+          contentType: mimeType,
+          filename,
+        });
+        return `<img${before} src="cid:${cid}"${after}>`;
+      } catch (e) {
+        // If base64 decode fails, keep original (shouldn't happen)
+        return _match;
+      }
+    });
+
+    console.log(`[send] HTML size: ${finalBody.length} chars, ${cidAttachments.length} inline images extracted`);
+
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
       const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
@@ -133,13 +160,23 @@ export async function POST(req: NextRequest) {
         saveToSentItems: true,
       };
 
-      if (body.attachments?.length) {
-        graphBody.message.attachments = body.attachments.map((att: any) => ({
-          "@odata.type": "#microsoft.graph.fileAttachment",
-          name: att.name,
-          contentType: att.type,
-          contentBytes: att.data,
-        }));
+      if (body.attachments?.length || cidAttachments.length > 0) {
+        graphBody.message.attachments = [
+          ...(body.attachments || []).map((att: any) => ({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name: att.name,
+            contentType: att.type,
+            contentBytes: att.data,
+          })),
+          ...cidAttachments.map((cid) => ({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name: cid.filename,
+            contentType: cid.contentType,
+            contentBytes: cid.content.toString("base64"),
+            isInline: true,
+            contentId: cid.cid,
+          })),
+        ];
       }
 
       const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
@@ -162,7 +199,8 @@ export async function POST(req: NextRequest) {
         subject,
         finalBody,
         cc || undefined,
-        body.attachments || undefined
+        body.attachments || undefined,
+        cidAttachments.length > 0 ? cidAttachments : undefined
       );
 
       if (!graphResult.success) {
@@ -210,11 +248,20 @@ export async function POST(req: NextRequest) {
         subject,
         text: plainContent,
         html: htmlContent,
-        attachments: (body.attachments || []).map((att: any) => ({
-          filename: att.name,
-          content: Buffer.from(att.data, "base64"),
-          contentType: att.type || "application/octet-stream",
-        })),
+        attachments: [
+          ...(body.attachments || []).map((att: any) => ({
+            filename: att.name,
+            content: Buffer.from(att.data, "base64"),
+            contentType: att.type || "application/octet-stream",
+          })),
+          ...cidAttachments.map((cid) => ({
+            filename: cid.filename,
+            content: cid.content,
+            contentType: cid.contentType,
+            cid: cid.cid,
+            contentDisposition: "inline" as const,
+          })),
+        ],
       });
 
       messageId = info.messageId;
