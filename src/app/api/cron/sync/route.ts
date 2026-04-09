@@ -33,7 +33,15 @@ export async function GET(req: NextRequest) {
   const TOTAL_TIME_LIMIT = 55000; // 55s total, leaving 5s margin for the 60s function timeout
 
   try {
-    const { data: accounts, error: accountsError } = await supabase
+    // Create a fresh Supabase client to avoid any connection pool caching
+    const { createClient } = await import("@supabase/supabase-js");
+    const freshSupabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false }, db: { schema: "inbox" }, global: { headers: { "Cache-Control": "no-cache", "x-cache-bust": Date.now().toString() } } }
+    );
+
+    const { data: accounts, error: accountsError } = await freshSupabase
       .from("email_accounts")
       .select("id, name, email, provider, imap_host, imap_password, microsoft_client_id, oauth_refresh_token")
       .eq("is_active", true);
