@@ -328,6 +328,7 @@ export async function GET(req: NextRequest) {
           conversation_subject: task.conversation?.subject || "",
           conversation_id: task.conversation_id || "",
           created_at: task.created_at,
+          link: task.conversation_id ? "https://tenkara-inbox-nine.vercel.app/#conversation=" + task.conversation_id : "",
         });
       }
     }
@@ -393,6 +394,7 @@ export async function GET(req: NextRequest) {
           avg_response_hours: avgResponseHours,
           last_message_at: lastMsg?.sent_at || "",
           conversation_created_at: convo.created_at,
+          link: "https://tenkara-inbox-nine.vercel.app/#conversation=" + convo.id,
         });
       }
     }

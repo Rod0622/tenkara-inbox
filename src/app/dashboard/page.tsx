@@ -1159,6 +1159,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             conversation_subject: r.conversation_subject,
             conversation_id: r.conversation_id,
             created_at: r.created_at,
+            link: r.conversation_id ? "https://tenkara-inbox-nine.vercel.app/#conversation=" + r.conversation_id : "",
           }));
           const convoRows = (perfData.conversation_performance || []).map((r: any) => ({
             user_name: r.user_name,
@@ -1181,6 +1182,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             conversation_subject: r.conversation_subject,
             conversation_id: r.conversation_id,
             created_at: r.conversation_created_at,
+            link: r.conversation_id ? "https://tenkara-inbox-nine.vercel.app/#conversation=" + r.conversation_id : "",
           }));
           rows = [...taskRows, ...convoRows].sort((a, b) => (a.user_name || "").localeCompare(b.user_name || ""));
         } else {
@@ -1473,7 +1475,11 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
                     {previewSource.slice(0, 5).map((row: any, i: number) => (
                       <tr key={i} className="border-b border-[#1E242C]/50">
                         {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
-                          <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">{String(row[col] ?? "")}</td>
+                          <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">
+                            {col === "link" && row[col] ? (
+                              <a href={String(row[col])} target="_blank" rel="noopener noreferrer" className="text-[#58A6FF] hover:underline">Open →</a>
+                            ) : String(row[col] ?? "")}
+                          </td>
                         ))}
                       </tr>
                     ))}
