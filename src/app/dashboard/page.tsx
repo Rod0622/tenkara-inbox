@@ -1116,7 +1116,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [allColumns, setAllColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
-  const [perfSubSheet, setPerfSubSheet] = useState<"task_summary" | "task_details" | "conversation_performance">("task_summary");
+  const [perfSubSheet, setPerfSubSheet] = useState<"task_summary" | "task_details" | "conversation_performance" | "all_details">("all_details");
 
   // Fetch data when mode or dataset changes
   useEffect(() => {
@@ -1135,9 +1135,57 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
 
       let rows: any[];
       if (selectedDataset === "user_performance") {
-        // User performance has 3 sub-sheets — show the selected one
         const perfData = data.user_performance || {};
-        rows = perfData[perfSubSheet] || [];
+        if (perfSubSheet === "all_details") {
+          // Combine task details + conversation performance into one flat table per user
+          const taskRows = (perfData.task_details || []).map((r: any) => ({
+            user_name: r.user_name,
+            user_email: r.user_email,
+            record_type: "Task",
+            title: r.task_text,
+            status: r.task_status,
+            category: r.category,
+            due_date: r.due_date,
+            is_overdue: r.is_overdue,
+            dismiss_reason: r.dismiss_reason,
+            dismissed_at: r.dismissed_at,
+            reply_status: "",
+            waiting_hours: "",
+            inbound_count: "",
+            outbound_count: "",
+            user_replies: "",
+            first_response_hours: "",
+            avg_response_hours: "",
+            conversation_subject: r.conversation_subject,
+            conversation_id: r.conversation_id,
+            created_at: r.created_at,
+          }));
+          const convoRows = (perfData.conversation_performance || []).map((r: any) => ({
+            user_name: r.user_name,
+            user_email: r.user_email,
+            record_type: "Conversation",
+            title: r.conversation_subject,
+            status: r.conversation_status,
+            category: "",
+            due_date: "",
+            is_overdue: "",
+            dismiss_reason: "",
+            dismissed_at: "",
+            reply_status: r.reply_status,
+            waiting_hours: r.waiting_hours,
+            inbound_count: r.inbound_count,
+            outbound_count: r.outbound_count,
+            user_replies: r.user_replies,
+            first_response_hours: r.first_response_hours,
+            avg_response_hours: r.avg_response_hours,
+            conversation_subject: r.conversation_subject,
+            conversation_id: r.conversation_id,
+            created_at: r.conversation_created_at,
+          }));
+          rows = [...taskRows, ...convoRows].sort((a, b) => (a.user_name || "").localeCompare(b.user_name || ""));
+        } else {
+          rows = perfData[perfSubSheet] || [];
+        }
       } else {
         rows = data[selectedDataset] || [];
       }
@@ -1329,6 +1377,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
           <div className="flex items-center gap-2 mt-2">
             <span className="text-[10px] text-[#484F58]">View:</span>
             {([
+              { id: "all_details" as const, label: "All Details (Combined)" },
               { id: "task_summary" as const, label: "Task Summary" },
               { id: "task_details" as const, label: "Task Details" },
               { id: "conversation_performance" as const, label: "Conversation Performance" },
