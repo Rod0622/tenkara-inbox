@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
     let convoQuery = supabase
       .from("conversations")
       .select(`
-        id, subject, status, from_name, from_email, to_addresses, preview, is_unread, is_starred,
+        id, subject, status, from_name, from_email, preview, is_unread, is_starred,
         last_message_at, email_account_id, folder_id, supplier_contact_id,
         folders ( id, name ),
         email_accounts:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
@@ -150,12 +150,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: convoError.message }, { status: 500 });
     }
 
+    // Find conversation IDs where this email appears in messages (from, to, or cc)
+    const searchTerm = "%" + email + "%";
+    const { data: msgMatches } = await supabase
+      .from("messages")
+      .select("conversation_id")
+      .or(`from_email.ilike.${searchTerm},to_addresses.ilike.${searchTerm},cc_addresses.ilike.${searchTerm}`)
+      .limit(1000);
+    const msgConvoIds = new Set((msgMatches || []).map((m: any) => m.conversation_id).filter(Boolean));
+
     const relatedThreads = (allConversations || []).filter((convo: any) => {
-      const fromEmail = safeLower(convo.from_email);
-      if (fromEmail === email) return true;
-      // Also check to_addresses (supplier might be the recipient)
-      const toAddrs = safeLower(convo.to_addresses || "");
-      return toAddrs.includes(email);
+      if (safeLower(convo.from_email) === email) return true;
+      return msgConvoIds.has(convo.id);
     });
 
     // ── Fetch cross-account threads (ALL accounts for this supplier) ──
@@ -164,7 +170,7 @@ export async function GET(req: NextRequest) {
       const { data: crossConvos } = await supabase
         .from("conversations")
         .select(`
-          id, subject, status, from_name, from_email, to_addresses, preview, is_unread, is_starred,
+          id, subject, status, from_name, from_email, preview, is_unread, is_starred,
           last_message_at, email_account_id, folder_id,
           folders ( id, name ),
           email_accounts:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
@@ -174,10 +180,8 @@ export async function GET(req: NextRequest) {
         .order("last_message_at", { ascending: false });
 
       crossAccountThreads = (crossConvos || []).filter((convo: any) => {
-        const fromEmail = safeLower(convo.from_email);
-        if (fromEmail === email) return true;
-        const toAddrs = safeLower(convo.to_addresses || "");
-        return toAddrs.includes(email);
+        if (safeLower(convo.from_email) === email) return true;
+        return msgConvoIds.has(convo.id);
       });
     }
 
