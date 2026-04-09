@@ -45,6 +45,7 @@ interface TaskDetail {
   due_date: string | null;
   due_time: string | null;
   status: string;
+  dismiss_reason?: string | null;
   created_at: string;
   conversation_subject: string;
   conversation_id: string;
@@ -237,7 +238,7 @@ export default function DashboardPage() {
     // Tasks query with optional date filter
     let tasksQuery = getSupabase()
       .from("tasks")
-      .select("id, text, due_date, due_time, status, is_done, created_at, conversation_id, category_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color)")
+      .select("id, text, due_date, due_time, status, is_done, dismiss_reason, created_at, conversation_id, category_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color)")
       .order("due_date", { ascending: true });
 
     if (effectiveDateFrom) tasksQuery = tasksQuery.gte("created_at", effectiveDateFrom);
@@ -333,7 +334,7 @@ export default function DashboardPage() {
 
     const mapTask = (t: any): TaskDetail => ({
       id: t.id, text: t.text, due_date: t.due_date, due_time: t.due_time,
-      status: t.status || "todo", created_at: t.created_at,
+      status: t.status || "todo", dismiss_reason: t.dismiss_reason || null, created_at: t.created_at,
       conversation_subject: t.conversation?.subject || "Unknown",
       conversation_id: t.conversation?.id || t.conversation_id,
       assignees: (t.task_assignees || []).map((a: any) => ({
@@ -369,7 +370,7 @@ export default function DashboardPage() {
     // Fetch user's tasks WITH date filter
     let tasksQuery = getSupabase()
       .from("task_assignees")
-      .select("task_id, is_done, status, task:tasks(id, text, due_date, due_time, status, is_done, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))")
+      .select("task_id, is_done, status, task:tasks(id, text, due_date, due_time, status, is_done, dismiss_reason, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))")
       .eq("team_member_id", userId);
 
     const { data: assigneeRows } = await tasksQuery;
@@ -378,9 +379,11 @@ export default function DashboardPage() {
       .filter((r: any) => r.task)
       .map((r: any) => {
         const t = r.task;
+        // Dismissed is task-level, overrides per-assignee status
+        const taskStatus = t.status === "dismissed" ? "dismissed" : (r.status || (r.is_done ? "completed" : "todo"));
         return {
           id: t.id, text: t.text, due_date: t.due_date, due_time: t.due_time,
-          status: r.status || (r.is_done ? "completed" : "todo"), created_at: t.created_at,
+          status: taskStatus, dismiss_reason: t.dismiss_reason || null, created_at: t.created_at,
           conversation_subject: t.conversation?.subject || "Unknown",
           conversation_id: t.conversation?.id || t.conversation_id,
           assignees: (t.task_assignees || []).map((a: any) => ({
@@ -1033,7 +1036,8 @@ function TaskRow({ task }: { task: TaskDetail }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             {isDismissed && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(240,136,62,0.12)] text-[#F0883E]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(240,136,62,0.12)] text-[#F0883E]"
+                title={task.dismiss_reason ? "Reason: " + task.dismiss_reason : "No reason provided"}>
                 Dismissed
               </span>
             )}
@@ -1050,6 +1054,11 @@ function TaskRow({ task }: { task: TaskDetail }) {
               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: (task.category_color || "#1E242C") + "20", color: task.category_color || "#7D8590" }}>{task.category_name}</span>
             )}
           </div>
+          {isDismissed && task.dismiss_reason && (
+            <div className="mt-1 text-[11px] text-[#F0883E] italic">
+              Reason: {task.dismiss_reason}
+            </div>
+          )}
         </div>
         {task.due_date && !isDismissed && (
           <div className="flex items-center gap-1 text-[11px] font-medium flex-shrink-0" style={{ color: isCompleted ? "#4ADE80" : getDueColor(task.due_date) }}>
