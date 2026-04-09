@@ -194,6 +194,7 @@ export default function TaskBoard({
       todo: filteredTasks.filter((task) => getMyStatus(task) === "todo"),
       in_progress: filteredTasks.filter((task) => getMyStatus(task) === "in_progress"),
       completed: filteredTasks.filter((task) => getMyStatus(task) === "completed"),
+      dismissed: filteredTasks.filter((task) => getMyStatus(task) === "dismissed"),
     }),
     [filteredTasks, getMyStatus]
   );
