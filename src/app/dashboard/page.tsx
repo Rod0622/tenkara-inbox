@@ -1019,15 +1019,31 @@ function FilterPill({ active, onClick, label, avatar }: { active: boolean; onCli
 function TaskRow({ task }: { task: TaskDetail }) {
   const completedCount = task.assignees.filter((a) => a.is_done).length;
   const totalCount = task.assignees.length;
-  const isOverdue = task.due_date && new Date(task.due_date) < new Date();
+  const isDismissed = task.status === "dismissed";
+  const isCompleted = task.status === "completed" || (totalCount > 0 && completedCount === totalCount);
+  const isOverdue = !isDismissed && !isCompleted && task.due_date && new Date(task.due_date) < new Date();
 
   return (
     <Link href={"/#conversation=" + task.conversation_id}
-      className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#58A6FF]/30 transition-all cursor-pointer ${isOverdue ? "border-[#F85149]/30" : "border-[#1E242C]"}`}
+      className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#58A6FF]/30 transition-all cursor-pointer ${
+        isDismissed ? "border-[#F0883E]/20 opacity-70" : isCompleted ? "border-[#4ADE80]/20 opacity-80" : isOverdue ? "border-[#F85149]/30" : "border-[#1E242C]"
+      }`}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium mb-1">{task.text}</div>
+          <div className="flex items-center gap-2 mb-1">
+            {isDismissed && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(240,136,62,0.12)] text-[#F0883E]">
+                Dismissed
+              </span>
+            )}
+            {isCompleted && !isDismissed && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
+                Completed
+              </span>
+            )}
+            <div className={`text-[13px] font-medium ${isDismissed ? "italic text-[#7D8590]" : isCompleted ? "line-through text-[#7D8590]" : ""}`}>{task.text}</div>
+          </div>
           <div className="flex items-center gap-3 text-[11px] text-[#484F58]">
             <span className="truncate max-w-[300px]">{task.conversation_subject}</span>
             {task.category_name && (
@@ -1035,9 +1051,9 @@ function TaskRow({ task }: { task: TaskDetail }) {
             )}
           </div>
         </div>
-        {task.due_date && (
-          <div className="flex items-center gap-1 text-[11px] font-medium flex-shrink-0" style={{ color: getDueColor(task.due_date) }}>
-            <CalendarClock size={12} /> {formatDueDate(task.due_date)}
+        {task.due_date && !isDismissed && (
+          <div className="flex items-center gap-1 text-[11px] font-medium flex-shrink-0" style={{ color: isCompleted ? "#4ADE80" : getDueColor(task.due_date) }}>
+            <CalendarClock size={12} /> {isCompleted ? "Done" : formatDueDate(task.due_date)}
           </div>
         )}
       </div>
@@ -1051,10 +1067,14 @@ function TaskRow({ task }: { task: TaskDetail }) {
             </div>
           ))}
         </div>
-        <span className="text-[10px] text-[#484F58]">{completedCount}/{totalCount} done</span>
-        <div className="w-16 h-1.5 rounded-full bg-[#1E242C] overflow-hidden">
-          <div className="h-full rounded-full bg-[#4ADE80] transition-all" style={{ width: totalCount > 0 ? (completedCount / totalCount * 100) + "%" : "0%" }} />
-        </div>
+        {!isDismissed && (
+          <>
+            <span className="text-[10px] text-[#484F58]">{completedCount}/{totalCount} done</span>
+            <div className="w-16 h-1.5 rounded-full bg-[#1E242C] overflow-hidden">
+              <div className="h-full rounded-full bg-[#4ADE80] transition-all" style={{ width: totalCount > 0 ? (completedCount / totalCount * 100) + "%" : "0%" }} />
+            </div>
+          </>
+        )}
       </div>
     </Link>
   );
