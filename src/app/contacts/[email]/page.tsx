@@ -43,6 +43,12 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   const [hoursForm, setHoursForm] = useState({ timezone: "", work_start: "09:00", work_end: "17:00", work_days: [1,2,3,4,5] as number[] });
   const account = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("account") || "" : "";
 
+  // Override body overflow:hidden from globals.css so this page can scroll
+  useEffect(() => {
+    document.body.style.overflow = "auto";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
   useEffect(() => {
     let c = false;
     (async () => {
