@@ -1116,14 +1116,13 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [allColumns, setAllColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
+  const [perfSubSheet, setPerfSubSheet] = useState<"task_summary" | "task_details" | "conversation_performance">("task_summary");
 
   // Fetch data when mode or dataset changes
   useEffect(() => {
     if (exportMode === "single") loadSingleData();
     else loadUnifiedData();
   }, [selectedDataset, exportMode, perfSubSheet]);
-
-  const [perfSubSheet, setPerfSubSheet] = useState<"task_summary" | "task_details" | "conversation_performance">("task_summary");
 
   async function loadSingleData() {
     setPreviewLoading(true);
