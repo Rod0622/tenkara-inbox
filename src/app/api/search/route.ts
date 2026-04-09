@@ -5,6 +5,8 @@ import { createServerClient } from "@/lib/supabase";
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const q = req.nextUrl.searchParams.get("q")?.trim();
+  const accountId = req.nextUrl.searchParams.get("account_id") || null;
+  const folderId = req.nextUrl.searchParams.get("folder_id") || null;
 
   if (!q || q.length < 2) {
     return NextResponse.json({ conversations: [], match_snippets: {} });
@@ -20,12 +22,14 @@ export async function GET(req: NextRequest) {
     .limit(500);
 
   // Search in conversations
-  const { data: convoMatches } = await supabase
+  let convoQuery = supabase
     .from("conversations")
-    .select("id, subject, preview")
+    .select("id, subject, preview, email_account_id, folder_id")
     .or(`subject.ilike.${searchTerm},from_name.ilike.${searchTerm},from_email.ilike.${searchTerm},preview.ilike.${searchTerm}`)
-    .neq("status", "trash")
-    .limit(500);
+    .neq("status", "trash");
+  if (accountId) convoQuery = convoQuery.eq("email_account_id", accountId);
+  if (folderId) convoQuery = convoQuery.eq("folder_id", folderId);
+  const { data: convoMatches } = await convoQuery.limit(500);
 
   // Search in notes
   const { data: noteMatches } = await supabase
@@ -76,12 +80,14 @@ export async function GET(req: NextRequest) {
   const allConvos: any[] = [];
   for (let i = 0; i < idArray.length; i += 50) {
     const batch = idArray.slice(i, i + 50);
-    const { data } = await supabase
+    let fetchQuery = supabase
       .from("conversations")
       .select(`id, email_account_id, folder_id, thread_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, has_attachments, last_message_at, created_at, updated_at, assignee:team_members!conversations_assignee_id_fkey(*), labels:conversation_labels(label_id, label:labels(*))`)
       .in("id", batch)
-      .neq("status", "trash")
-      .order("last_message_at", { ascending: false });
+      .neq("status", "trash");
+    if (accountId) fetchQuery = fetchQuery.eq("email_account_id", accountId);
+    if (folderId) fetchQuery = fetchQuery.eq("folder_id", folderId);
+    const { data } = await fetchQuery.order("last_message_at", { ascending: false });
     if (data) allConvos.push(...data);
   }
 

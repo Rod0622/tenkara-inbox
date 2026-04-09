@@ -197,6 +197,12 @@ export interface ConversationListProps {
   setActiveConvo: (convo: Conversation) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  searchScope?: "all" | "account" | "folder";
+  setSearchScope?: (scope: "all" | "account" | "folder") => void;
+  activeMailbox?: string | null;
+  activeFolder?: string | null;
+  emailAccounts?: any[];
+  folders?: any[];
   teamMembers: TeamMember[];
   onBulkAction?: (ids: string[], action: string, payload?: any) => Promise<void>;
   searchSnippets?: Record<string, string>;

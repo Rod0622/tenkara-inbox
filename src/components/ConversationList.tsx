@@ -336,7 +336,9 @@ function FilterPanel({
 
 // ── Main ConversationList ────────────────────────────
 export default function ConversationList({
-  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery, teamMembers, onBulkAction, searchSnippets,
+  conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery,
+  searchScope = "all", setSearchScope, activeMailbox, activeFolder, emailAccounts = [], folders = [],
+  teamMembers, onBulkAction, searchSnippets,
 }: ConversationListProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -533,6 +535,29 @@ export default function ConversationList({
             {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]" />}
           </button>
         </div>
+
+        {/* Search scope selector — visible when searching */}
+        {searchQuery.trim().length >= 1 && setSearchScope && (
+          <div className="flex items-center gap-1 mt-1.5 px-1">
+            {([
+              { id: "all" as const, label: "All Accounts" },
+              ...(activeMailbox ? [{ id: "account" as const, label: emailAccounts.find((a: any) => a.id === activeMailbox)?.name || "This Account" }] : []),
+              ...(activeFolder ? [{ id: "folder" as const, label: folders.find((f: any) => f.id === activeFolder)?.name || "This Folder" }] : []),
+            ]).map((scope) => (
+              <button
+                key={scope.id}
+                onClick={() => setSearchScope(scope.id)}
+                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
+                  searchScope === scope.id
+                    ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30"
+                    : "text-[#484F58] hover:text-[#7D8590] border border-[#1E242C]"
+                }`}
+              >
+                {scope.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Bulk action bar */}

@@ -52,6 +52,7 @@ export default function InboxPage() {
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchScope, setSearchScope] = useState<"all" | "account" | "folder">("all");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
   const [searchSnippets, setSearchSnippets] = useState<Record<string, string>>({});
   const searchTimerRef = useRef<any>(null);
@@ -73,7 +74,11 @@ export default function InboxPage() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch("/api/search?q=" + encodeURIComponent(searchQuery.trim()));
+        let url = "/api/search?q=" + encodeURIComponent(searchQuery.trim());
+        if (searchScope === "account" && activeMailbox) url += "&account_id=" + activeMailbox;
+        if (searchScope === "folder" && activeFolder) url += "&folder_id=" + activeFolder;
+        if (searchScope === "folder" && activeMailbox) url += "&account_id=" + activeMailbox;
+        const res = await fetch(url);
         const data = await res.json();
         setSearchResults((data.conversations || []) as Conversation[]);
         setSearchSnippets(data.match_snippets || {});
@@ -83,7 +88,7 @@ export default function InboxPage() {
       }
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery]);
+  }, [searchQuery, searchScope, activeMailbox, activeFolder]);
 
   const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
 
@@ -434,6 +439,12 @@ export default function InboxPage() {
             setActiveConvo={setActiveConvo}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            searchScope={searchScope}
+            setSearchScope={setSearchScope}
+            activeMailbox={activeMailbox}
+            activeFolder={activeFolder}
+            emailAccounts={emailAccounts}
+            folders={folders}
             teamMembers={teamMembers}
             onBulkAction={handleBulkAction}
             searchSnippets={searchSnippets}
