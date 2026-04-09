@@ -161,6 +161,8 @@ export default function TaskBoard({
   // For multi-assignee tasks, use the current user's personal completion status
   // For single-assignee tasks, use the task-level status
   const getMyStatus = useCallback((task: Task): TaskStatus => {
+    // Dismissed overrides everything — it's a task-level status
+    if (task.status === "dismissed") return "dismissed";
     const assignees = task.assignees || [];
     if (assignees.length > 1 && currentUser) {
       const myEntry = assignees.find((a: any) => a.id === currentUser.id);

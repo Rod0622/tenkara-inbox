@@ -613,14 +613,14 @@ export default function DashboardPage() {
         {/* ── TEAM OVERVIEW ─── */}
         {viewMode === "overview" && (
           <div className="space-y-1">
-            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
               <span>Team Member</span><span className="text-center">To Do</span><span className="text-center">In Progress</span>
-              <span className="text-center">Completed</span><span className="text-center">Overdue</span>
+              <span className="text-center">Completed</span><span className="text-center">Dismissed</span><span className="text-center">Overdue</span>
               <span className="text-center">Due Soon</span><span className="text-center">Emails</span><span className="text-center">Sent</span>
             </div>
             {userStats.map((user) => (
               <button key={user.id} onClick={() => loadUserDetail(user.id)}
-                className="w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all items-center text-left"
+                className="w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all items-center text-left"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11] flex-shrink-0" style={{ background: user.color }}>{user.initials}</div>
@@ -629,6 +629,7 @@ export default function DashboardPage() {
                 <div className="text-center text-sm font-semibold text-[#58A6FF]">{user.tasks.todo}</div>
                 <div className="text-center text-sm font-semibold text-[#F5D547]">{user.tasks.in_progress}</div>
                 <div className="text-center text-sm font-semibold text-[#4ADE80]">{user.tasks.completed}</div>
+                <div className="text-center text-sm font-semibold text-[#F0883E]">{user.tasks.dismissed}</div>
                 <div className="text-center text-sm font-semibold" style={{ color: user.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{user.tasks.overdue}</div>
                 <div className="text-center text-sm font-semibold" style={{ color: user.tasks.dueSoon > 0 ? "#F0883E" : "#484F58" }}>{user.tasks.dueSoon}</div>
                 <div className="text-center"><span className="text-sm font-semibold">{user.conversations.assigned}</span>{user.conversations.unread > 0 && <span className="ml-1 text-[10px] text-[#F0883E]">({user.conversations.unread})</span>}</div>
@@ -679,15 +680,52 @@ export default function DashboardPage() {
                 <div className="text-lg font-bold">{selectedUser.name}</div>
                 <div className="text-xs text-[#484F58]">{selectedUser.email} · {selectedUser.department} · {selectedUser.role}</div>
               </div>
-              <div className="grid grid-cols-6 gap-4 text-center">
+              <div className="grid grid-cols-7 gap-4 text-center">
                 <div><div className="text-xl font-bold text-[#58A6FF]">{selectedUser.tasks.todo + selectedUser.tasks.in_progress}</div><div className="text-[10px] text-[#484F58]">Open Tasks</div></div>
                 <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.tasks.completed}</div><div className="text-[10px] text-[#484F58]">Completed</div></div>
+                <div><div className="text-xl font-bold text-[#F0883E]">{selectedUser.tasks.dismissed}</div><div className="text-[10px] text-[#484F58]">Dismissed</div></div>
                 <div><div className="text-xl font-bold" style={{ color: selectedUser.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{selectedUser.tasks.overdue}</div><div className="text-[10px] text-[#484F58]">Overdue</div></div>
                 <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[#484F58]">Sent</div></div>
                 <div><div className="text-xl font-bold text-[#F85149]">{userConversations.filter((c) => c.reply_status === "awaiting_our_reply").length}</div><div className="text-[10px] text-[#484F58]">Need Reply</div></div>
                 <div><div className="text-xl font-bold text-[#F0883E]">{userConversations.filter((c) => c.reply_status === "awaiting_supplier_reply").length}</div><div className="text-[10px] text-[#484F58]">Waiting Supplier</div></div>
               </div>
             </div>
+
+            {/* Completed tasks by category breakdown */}
+            {(() => {
+              const completedTasks = userTasks.filter((t) => t.status === "completed");
+              if (completedTasks.length === 0) return null;
+              const byCategory: Record<string, { count: number; color: string }> = {};
+              for (const t of completedTasks) {
+                const cat = t.category_name || "Uncategorized";
+                if (!byCategory[cat]) byCategory[cat] = { count: 0, color: t.category_color || "#7D8590" };
+                byCategory[cat].count++;
+              }
+              const sorted = Object.entries(byCategory).sort((a, b) => b[1].count - a[1].count);
+              return (
+                <div className="mb-4 p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
+                  <div className="text-xs font-semibold text-[#7D8590] mb-3 flex items-center gap-2">
+                    <CheckCircle2 size={13} className="text-[#4ADE80]" />
+                    Completed Tasks by Category ({completedTasks.length} total)
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {sorted.map(([cat, data]) => (
+                      <div key={cat} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: data.color }} />
+                        <span className="text-xs text-[#E6EDF3] font-medium">{cat}</span>
+                        <span className="text-sm font-bold" style={{ color: data.color }}>{data.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Progress bar */}
+                  <div className="mt-3 flex h-2 rounded-full overflow-hidden bg-[#1E242C]">
+                    {sorted.map(([cat, data]) => (
+                      <div key={cat} title={`${cat}: ${data.count}`} style={{ width: `${(data.count / completedTasks.length) * 100}%`, background: data.color }} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Sub-tabs */}
             <div className="flex items-center gap-1 mb-3">
