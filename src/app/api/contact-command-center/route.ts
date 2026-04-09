@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
     let convoQuery = supabase
       .from("conversations")
       .select(`
-        id, subject, status, from_name, from_email, preview, is_unread, is_starred,
+        id, subject, status, from_name, from_email, to_addresses, preview, is_unread, is_starred,
         last_message_at, email_account_id, folder_id, supplier_contact_id,
         folders ( id, name ),
         email_accounts:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
@@ -152,7 +152,10 @@ export async function GET(req: NextRequest) {
 
     const relatedThreads = (allConversations || []).filter((convo: any) => {
       const fromEmail = safeLower(convo.from_email);
-      return fromEmail === email;
+      if (fromEmail === email) return true;
+      // Also check to_addresses (supplier might be the recipient)
+      const toAddrs = safeLower(convo.to_addresses || "");
+      return toAddrs.includes(email);
     });
 
     // ── Fetch cross-account threads (ALL accounts for this supplier) ──
@@ -161,7 +164,7 @@ export async function GET(req: NextRequest) {
       const { data: crossConvos } = await supabase
         .from("conversations")
         .select(`
-          id, subject, status, from_name, from_email, preview, is_unread, is_starred,
+          id, subject, status, from_name, from_email, to_addresses, preview, is_unread, is_starred,
           last_message_at, email_account_id, folder_id,
           folders ( id, name ),
           email_accounts:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
@@ -171,7 +174,10 @@ export async function GET(req: NextRequest) {
         .order("last_message_at", { ascending: false });
 
       crossAccountThreads = (crossConvos || []).filter((convo: any) => {
-        return safeLower(convo.from_email) === email;
+        const fromEmail = safeLower(convo.from_email);
+        if (fromEmail === email) return true;
+        const toAddrs = safeLower(convo.to_addresses || "");
+        return toAddrs.includes(email);
       });
     }
 
@@ -202,14 +208,38 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Tasks across ALL related conversations (both accounts) ──
-    const { data: tasksRaw, error: tasksError } = await supabase
-      .from("tasks")
-      .select("*, category:task_categories(name, color)")
-      .in("conversation_id", allRelatedIds)
-      .order("created_at", { ascending: false });
+    // Also find tasks linked via supplier_contact_id
+    let tasksRaw: any[] = [];
+    if (allRelatedIds.length > 0) {
+      const { data, error: tasksError } = await supabase
+        .from("tasks")
+        .select("*, category:task_categories(name, color)")
+        .in("conversation_id", allRelatedIds)
+        .order("created_at", { ascending: false });
+      if (tasksError) return NextResponse.json({ error: tasksError.message }, { status: 500 });
+      tasksRaw = data || [];
+    }
 
-    if (tasksError) {
-      return NextResponse.json({ error: tasksError.message }, { status: 500 });
+    // Also find tasks from conversations linked to this supplier_contact
+    if (supplierContact?.id) {
+      const { data: scConvos } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("supplier_contact_id", supplierContact.id);
+      const scIds = (scConvos || []).map((c: any) => c.id).filter((id: string) => !allRelatedIds.includes(id));
+      if (scIds.length > 0) {
+        const { data: extraTasks } = await supabase
+          .from("tasks")
+          .select("*, category:task_categories(name, color)")
+          .in("conversation_id", scIds)
+          .order("created_at", { ascending: false });
+        if (extraTasks) {
+          const existingIds = new Set(tasksRaw.map((t: any) => t.id));
+          for (const t of extraTasks) {
+            if (!existingIds.has(t.id)) tasksRaw.push(t);
+          }
+        }
+      }
     }
 
     const tasks = tasksRaw || [];
