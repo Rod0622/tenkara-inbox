@@ -1101,6 +1101,7 @@ const DATASETS = [
   { id: "tasks", label: "Tasks", desc: "All tasks with assignees, categories, due dates, completion" },
   { id: "team_members", label: "Team Members", desc: "User profiles, roles, departments" },
   { id: "sla", label: "SLA Metrics", desc: "Response times, waiting times, reply status per conversation" },
+  { id: "user_performance", label: "User Performance", desc: "Per-user task breakdown, completion rates, categories, conversation SLA & response times" },
   { id: "activity", label: "Activity Log", desc: "All actions: assignments, replies, status changes" },
 ] as const;
 
@@ -1120,7 +1121,9 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
   useEffect(() => {
     if (exportMode === "single") loadSingleData();
     else loadUnifiedData();
-  }, [selectedDataset, exportMode]);
+  }, [selectedDataset, exportMode, perfSubSheet]);
+
+  const [perfSubSheet, setPerfSubSheet] = useState<"task_summary" | "task_details" | "conversation_performance">("task_summary");
 
   async function loadSingleData() {
     setPreviewLoading(true);
@@ -1130,7 +1133,16 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       if (dateTo) url += "&date_to=" + dateTo;
       const res = await fetch(url);
       const data = await res.json();
-      const rows = data[selectedDataset] || [];
+
+      let rows: any[];
+      if (selectedDataset === "user_performance") {
+        // User performance has 3 sub-sheets — show the selected one
+        const perfData = data.user_performance || {};
+        rows = perfData[perfSubSheet] || [];
+      } else {
+        rows = data[selectedDataset] || [];
+      }
+
       setPreviewData(rows);
       if (rows.length > 0) {
         const cols = Object.keys(rows[0]);
@@ -1311,6 +1323,24 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             </button>
           ))}
         </div>
+
+        {/* Sub-sheet selector for User Performance */}
+        {selectedDataset === "user_performance" && exportMode === "single" && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[10px] text-[#484F58]">View:</span>
+            {([
+              { id: "task_summary" as const, label: "Task Summary" },
+              { id: "task_details" as const, label: "Task Details" },
+              { id: "conversation_performance" as const, label: "Conversation Performance" },
+            ]).map((sheet) => (
+              <button key={sheet.id} onClick={() => { setPerfSubSheet(sheet.id); }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+                  perfSubSheet === sheet.id ? "bg-[#4ADE80]/10 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                }`}
+              >{sheet.label}</button>
+            ))}
+          </div>
+        )}
       )}
 
       {/* Unified mode description */}

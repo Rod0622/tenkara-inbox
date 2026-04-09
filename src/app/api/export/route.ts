@@ -237,6 +237,173 @@ export async function GET(req: NextRequest) {
     result.sla = slaRows;
   }
 
+  // ── USER PERFORMANCE ──
+  if (dataset === "all" || dataset === "user_performance") {
+    const { data: members } = await supabase.from("team_members").select("id, name, email, role, department").eq("is_active", true).order("name");
+    const { data: allTasks } = await supabase
+      .from("tasks")
+      .select("id, text, status, is_done, due_date, due_time, dismiss_reason, dismissed_at, created_at, conversation_id, conversation:conversations(subject), task_assignees(team_member_id, is_done, status, team_member:team_members!task_assignees_team_member_id_fkey(name)), category:task_categories(name)");
+    const { data: allConvos } = await supabase
+      .from("conversations")
+      .select("id, subject, from_name, from_email, status, is_unread, assignee_id, last_message_at, created_at, supplier_contact_id, supplier_contact:supplier_contacts(timezone, work_start, work_end)")
+      .neq("status", "trash");
+    const { data: allMsgs } = await supabase
+      .from("messages")
+      .select("id, conversation_id, is_outbound, sent_at, sent_by_user_id")
+      .order("sent_at", { ascending: true });
+
+    // Group messages by conversation
+    const msgsByConvo: Record<string, any[]> = {};
+    for (const m of (allMsgs || [])) {
+      if (!msgsByConvo[m.conversation_id]) msgsByConvo[m.conversation_id] = [];
+      msgsByConvo[m.conversation_id].push(m);
+    }
+
+    const now = new Date();
+
+    // ─ Sheet 1: User Task Summary ─
+    const userTaskRows: any[] = [];
+    for (const member of (members || [])) {
+      const myTasks = (allTasks || []).filter((t: any) =>
+        (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
+      );
+      const byStatus = { todo: 0, in_progress: 0, completed: 0, dismissed: 0 };
+      const byCategory: Record<string, { total: number; completed: number; dismissed: number }> = {};
+      let overdueCount = 0;
+
+      for (const t of myTasks) {
+        const s = (t as any).status === "dismissed" ? "dismissed" : (() => {
+          const a = ((t as any).task_assignees || []).find((a: any) => a.team_member_id === member.id);
+          return a?.status || (a?.is_done ? "completed" : "todo");
+        })();
+        if (s in byStatus) (byStatus as any)[s]++;
+        if (s !== "completed" && s !== "dismissed" && (t as any).due_date && new Date((t as any).due_date) < now) overdueCount++;
+        const cat = (t as any).category?.name || "Uncategorized";
+        if (!byCategory[cat]) byCategory[cat] = { total: 0, completed: 0, dismissed: 0 };
+        byCategory[cat].total++;
+        if (s === "completed") byCategory[cat].completed++;
+        if (s === "dismissed") byCategory[cat].dismissed++;
+      }
+
+      userTaskRows.push({
+        user_name: member.name,
+        user_email: member.email,
+        department: member.department || "",
+        role: member.role || "",
+        total_tasks: myTasks.length,
+        todo: byStatus.todo,
+        in_progress: byStatus.in_progress,
+        completed: byStatus.completed,
+        dismissed: byStatus.dismissed,
+        overdue: overdueCount,
+        completion_rate: myTasks.length > 0 ? Math.round((byStatus.completed / myTasks.length) * 100) + "%" : "0%",
+        categories_breakdown: Object.entries(byCategory).map(([cat, d]) => `${cat}: ${d.completed}/${d.total}`).join("; "),
+      });
+    }
+
+    // ─ Sheet 2: User Task Details ─
+    const userTaskDetailRows: any[] = [];
+    for (const member of (members || [])) {
+      const myTasks = (allTasks || []).filter((t: any) =>
+        (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
+      );
+      for (const t of myTasks) {
+        const task = t as any;
+        const s = task.status === "dismissed" ? "dismissed" : (() => {
+          const a = (task.task_assignees || []).find((a: any) => a.team_member_id === member.id);
+          return a?.status || (a?.is_done ? "completed" : "todo");
+        })();
+        const isOverdue = s !== "completed" && s !== "dismissed" && task.due_date && new Date(task.due_date) < now;
+        userTaskDetailRows.push({
+          user_name: member.name,
+          user_email: member.email,
+          task_text: task.text,
+          task_status: s,
+          category: task.category?.name || "Uncategorized",
+          due_date: task.due_date || "",
+          due_time: task.due_time || "",
+          is_overdue: isOverdue ? "Yes" : "No",
+          dismiss_reason: task.dismiss_reason || "",
+          dismissed_at: task.dismissed_at || "",
+          conversation_subject: task.conversation?.subject || "",
+          conversation_id: task.conversation_id || "",
+          created_at: task.created_at,
+        });
+      }
+    }
+
+    // ─ Sheet 3: User Conversation Performance ─
+    const userConvoRows: any[] = [];
+    for (const member of (members || [])) {
+      const myConvos = (allConvos || []).filter((c: any) => c.assignee_id === member.id);
+      for (const c of myConvos) {
+        const convo = c as any;
+        const cMsgs = msgsByConvo[convo.id] || [];
+        const lastMsg = cMsgs[cMsgs.length - 1];
+        const replyStatus = lastMsg ? (lastMsg.is_outbound ? "Awaiting supplier reply" : "Awaiting our reply") : "No messages";
+        const waitingHours = lastMsg ? Math.round((now.getTime() - new Date(lastMsg.sent_at).getTime()) / (1000 * 60 * 60) * 10) / 10 : 0;
+        const totalInbound = cMsgs.filter((m: any) => !m.is_outbound).length;
+        const totalOutbound = cMsgs.filter((m: any) => m.is_outbound).length;
+        const userReplies = cMsgs.filter((m: any) => m.is_outbound && m.sent_by_user_id === member.id).length;
+
+        // First response time for this user
+        let firstResponseHours = "";
+        for (let i = 0; i < cMsgs.length; i++) {
+          if (!cMsgs[i].is_outbound) {
+            for (let j = i + 1; j < cMsgs.length; j++) {
+              if (cMsgs[j].is_outbound && cMsgs[j].sent_by_user_id === member.id) {
+                firstResponseHours = (Math.round((new Date(cMsgs[j].sent_at).getTime() - new Date(cMsgs[i].sent_at).getTime()) / (1000 * 60 * 60) * 10) / 10).toString();
+                break;
+              }
+            }
+            if (firstResponseHours) break;
+          }
+        }
+
+        // Average response time for this user across all reply pairs
+        const responseTimes: number[] = [];
+        for (let i = 0; i < cMsgs.length; i++) {
+          if (!cMsgs[i].is_outbound) {
+            for (let j = i + 1; j < cMsgs.length; j++) {
+              if (cMsgs[j].is_outbound && cMsgs[j].sent_by_user_id === member.id) {
+                responseTimes.push((new Date(cMsgs[j].sent_at).getTime() - new Date(cMsgs[i].sent_at).getTime()) / (1000 * 60 * 60));
+                break;
+              }
+            }
+          }
+        }
+        const avgResponseHours = responseTimes.length > 0 ? (Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length * 10) / 10).toString() : "";
+
+        userConvoRows.push({
+          user_name: member.name,
+          user_email: member.email,
+          conversation_subject: convo.subject,
+          conversation_id: convo.id,
+          from_name: convo.from_name || "",
+          from_email: convo.from_email || "",
+          conversation_status: convo.status,
+          is_unread: convo.is_unread ? "Yes" : "No",
+          reply_status: replyStatus,
+          waiting_hours: waitingHours,
+          total_messages: cMsgs.length,
+          inbound_count: totalInbound,
+          outbound_count: totalOutbound,
+          user_replies: userReplies,
+          first_response_hours: firstResponseHours,
+          avg_response_hours: avgResponseHours,
+          last_message_at: lastMsg?.sent_at || "",
+          conversation_created_at: convo.created_at,
+        });
+      }
+    }
+
+    result.user_performance = {
+      task_summary: userTaskRows,
+      task_details: userTaskDetailRows,
+      conversation_performance: userConvoRows,
+    };
+  }
+
   // ── ACTIVITY LOG ──
   if (dataset === "all" || dataset === "activity") {
     let q = supabase
