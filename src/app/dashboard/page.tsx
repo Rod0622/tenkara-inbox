@@ -1313,6 +1313,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
 
       {/* Single dataset picker */}
       {exportMode === "single" && (
+        <>
         <div className="grid grid-cols-3 gap-2">
           {DATASETS.map((ds) => (
             <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
@@ -1325,7 +1326,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
         </div>
 
         {/* Sub-sheet selector for User Performance */}
-        {selectedDataset === "user_performance" && exportMode === "single" && (
+        {selectedDataset === "user_performance" && (
           <div className="flex items-center gap-2 mt-2">
             <span className="text-[10px] text-[#484F58]">View:</span>
             {([
@@ -1341,6 +1342,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             ))}
           </div>
         )}
+        </>
       )}
 
       {/* Unified mode description */}
