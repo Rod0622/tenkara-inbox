@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlarmClock,
   Archive,
+  Ban,
   Check,
   CheckCircle,
   ChevronDown,
@@ -27,6 +28,7 @@ import {
   Pencil,
   Plus,
   Reply,
+  RotateCcw,
   Search,
   Send,
   Star,
@@ -3600,6 +3602,7 @@ export default function ConversationDetail({
                       className="mt-0.5"
                     >
                       {(() => {
+                        if (task.status === "dismissed") return <Ban size={18} className="text-[#F0883E] opacity-60" />;
                         if (assignees.length > 1 && currentUser) {
                           const myEntry = assignees.find((a: any) => a.id === currentUser.id);
                           const allDone = assignees.every((a: any) => a.is_done);
@@ -3616,13 +3619,29 @@ export default function ConversationDetail({
                     <div className="flex-1 min-w-0">
                       <div
                         className={`text-sm font-medium ${
-                          task.status === "completed" || task.is_done
+                          task.status === "dismissed"
+                            ? "text-[#F0883E] italic opacity-70"
+                            : task.status === "completed" || task.is_done
                             ? "text-[#7D8590] line-through"
                             : "text-[#E6EDF3]"
                         }`}
                       >
+                        {task.status === "dismissed" && <Ban size={12} className="inline mr-1 -mt-0.5" />}
                         {task.text}
                       </div>
+
+                      {/* Dismiss reason */}
+                      {task.status === "dismissed" && task.dismiss_reason && (
+                        <div className="mt-1 px-2 py-1 rounded bg-[rgba(240,136,62,0.08)] border border-[rgba(240,136,62,0.15)]">
+                          <span className="text-[10px] text-[#F0883E] font-semibold">Dismissed: </span>
+                          <span className="text-[10px] text-[#7D8590]">{task.dismiss_reason}</span>
+                          {task.dismissed_at && (
+                            <span className="text-[10px] text-[#484F58] ml-2">
+                              {new Date(task.dismissed_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Progress for multi-assignee tasks */}
                       {assignees.length > 1 && (() => {
@@ -3790,12 +3809,59 @@ export default function ConversationDetail({
                     >
                       <Pencil size={13} />
                     </button>
+                    {task.status === "dismissed" ? (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await fetch("/api/tasks", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ task_id: task.id, status: "todo" }),
+                            });
+                            if (convo) await onAddNote(convo.id, `🔄 Task reopened: "${task.text.slice(0, 50)}"`);
+                            await refetchDetail();
+                          } catch (e) { console.error(e); }
+                        }}
+                        className="p-1 rounded text-[#484F58] hover:text-[#4ADE80] hover:bg-[rgba(74,222,128,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                        title="Reopen this task"
+                      >
+                        <RotateCcw size={13} />
+                      </button>
+                    ) : (
+                      task.status !== "completed" && !task.is_done && (
+                        <button
+                          onClick={async () => {
+                            const reason = prompt("Why is this task no longer needed?\n(e.g., supplier responded via email, issue resolved, duplicate task)");
+                            if (!reason || !reason.trim()) return;
+                            try {
+                              await fetch("/api/tasks", {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  task_id: task.id,
+                                  status: "dismissed",
+                                  dismiss_reason: reason.trim(),
+                                  dismissed_by: currentUser?.id || null,
+                                }),
+                              });
+                              if (convo) await onAddNote(convo.id, `🚫 Task dismissed: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}`);
+                              await refetchDetail();
+                            } catch (e) { console.error(e); }
+                          }}
+                          className="p-1 rounded text-[#484F58] hover:text-[#F0883E] hover:bg-[rgba(240,136,62,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                          title="Dismiss — no longer needed"
+                        >
+                          <Ban size={13} />
+                        </button>
+                      )
+                    )}
                     <button
                       onClick={() => handleDeleteTasks([task.id])}
                       className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
                       title="Delete task"
                     >
                       <Trash2 size={14} />
+                    </button>
                     </button>
                   </div>
                 </div>

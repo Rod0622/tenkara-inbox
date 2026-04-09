@@ -195,7 +195,7 @@ export async function POST(req: NextRequest) {
       is_done: status === "completed",
     };
 
-    if (["todo", "in_progress", "completed"].includes(status)) {
+    if (["todo", "in_progress", "completed", "dismissed"].includes(status)) {
       payload.status = status;
     }
 
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
 
     // Notify assigned users
     try {
-      const actorId = body.actor_id || primaryAssigneeId || "";
+      const actorId = body.actor_id || null;
       await notifyTaskAssigned(insert.data.id, assigneeIds, actorId, text, conversationId || undefined);
     } catch (_e) { /* best-effort */ }
 
@@ -351,6 +351,21 @@ export async function PATCH(req: NextRequest) {
     if (status) {
       update.status = status;
       update.is_done = status === "completed";
+      
+      // Handle dismiss
+      if (status === "dismissed") {
+        update.dismiss_reason = body.dismiss_reason || null;
+        update.dismissed_by = body.dismissed_by || null;
+        update.dismissed_at = new Date().toISOString();
+        update.is_done = false; // Dismissed is not "done"
+      }
+      
+      // If un-dismissing (moving back to todo/in_progress), clear dismiss fields
+      if (status !== "dismissed" && (status === "todo" || status === "in_progress")) {
+        update.dismiss_reason = null;
+        update.dismissed_by = null;
+        update.dismissed_at = null;
+      }
     }
 
     if (dueDate !== undefined) {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Ban,
   CalendarDays,
   CheckCircle2,
   Circle,
@@ -10,6 +11,7 @@ import {
   ListTodo,
   Loader2,
   Plus,
+  RotateCcw,
   Trash2,
   User2,
   Search,
@@ -22,6 +24,7 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: "todo", label: "To do" },
   { value: "in_progress", label: "In progress" },
   { value: "completed", label: "Completed" },
+  { value: "dismissed", label: "Dismissed" },
 ];
 
 const SECTION_META = {
@@ -648,6 +651,7 @@ function TaskCard({
           className="mt-0.5"
         >
           {(() => {
+            if (task.status === "dismissed") return <Ban size={16} className="text-[#F0883E] opacity-60" />;
             if (isMulti && currentUser) {
               const myEntry = assignees.find((a: any) => a.id === currentUser.id);
               if (doneCount === assignees.length) return <CheckCircle2 size={16} className="text-[#4ADE80]" />;
@@ -661,9 +665,23 @@ function TaskCard({
         </button>
 
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-medium ${task.status === "completed" ? "text-[#7D8590] line-through" : "text-[#E6EDF3]"}`}>
+          <div className={`text-sm font-medium ${task.status === "dismissed" ? "text-[#F0883E] italic opacity-70" : task.status === "completed" ? "text-[#7D8590] line-through" : "text-[#E6EDF3]"}`}>
+            {task.status === "dismissed" && <Ban size={12} className="inline mr-1 -mt-0.5" />}
             {task.text}
           </div>
+
+          {/* Dismiss reason */}
+          {task.status === "dismissed" && task.dismiss_reason && (
+            <div className="mt-1 px-2 py-1 rounded bg-[rgba(240,136,62,0.08)] border border-[rgba(240,136,62,0.15)]">
+              <span className="text-[10px] text-[#F0883E] font-semibold">Dismissed: </span>
+              <span className="text-[10px] text-[#7D8590]">{task.dismiss_reason}</span>
+              {task.dismissed_at && (
+                <span className="text-[10px] text-[#484F58] ml-2">
+                  {new Date(task.dismissed_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Progress for multi-assignee */}
           {isMulti && (
@@ -692,15 +710,63 @@ function TaskCard({
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleting}
-          className="text-[#7D8590] hover:text-[#F85149] transition-colors disabled:opacity-50"
-          title="Delete task"
-        >
-          <Trash2 size={15} />
-        </button>
+        <div className="flex items-center gap-1">
+          {task.status === "dismissed" ? (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await fetch("/api/tasks", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ task_id: task.id, status: "todo" }),
+                  });
+                  onRefetch?.();
+                } catch (e) { console.error(e); }
+              }}
+              className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
+              title="Reopen this task"
+            >
+              <RotateCcw size={14} />
+            </button>
+          ) : (
+            task.status !== "completed" && !task.is_done && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const reason = prompt("Why is this task no longer needed?\n(e.g., supplier responded via email, issue resolved, duplicate task)");
+                  if (!reason || !reason.trim()) return;
+                  try {
+                    await fetch("/api/tasks", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        task_id: task.id,
+                        status: "dismissed",
+                        dismiss_reason: reason.trim(),
+                        dismissed_by: currentUser?.id || null,
+                      }),
+                    });
+                    onRefetch?.();
+                  } catch (e) { console.error(e); }
+                }}
+                className="text-[#7D8590] hover:text-[#F0883E] transition-colors"
+                title="Dismiss — no longer needed"
+              >
+                <Ban size={14} />
+              </button>
+            )
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="text-[#7D8590] hover:text-[#F85149] transition-colors disabled:opacity-50"
+            title="Delete task"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">

@@ -1,4 +1,4 @@
-export type TaskStatus = "todo" | "in_progress" | "completed";
+export type TaskStatus = "todo" | "in_progress" | "completed" | "dismissed";
 
 export interface TeamMember {
   id: string;
@@ -82,6 +82,9 @@ export interface Task {
   category_id: string | null;
   created_at: string;
   updated_at?: string;
+  dismiss_reason?: string | null;
+  dismissed_by?: string | null;
+  dismissed_at?: string | null;
   assignee?: TeamMember;
   assignees?: TaskAssignee[];
   category?: TaskCategory;
