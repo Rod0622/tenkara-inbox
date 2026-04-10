@@ -20,6 +20,7 @@ interface RuleRow {
   match_mode: "all" | "any" | "none";
   conditions: Condition[];
   actions: Action[];
+  account_ids?: string[] | null;
   // Legacy single fields (fallback)
   condition_field?: string;
   condition_operator?: string;
@@ -35,6 +36,7 @@ interface MessageContext {
   from_name: string;
   to_addresses: string;
   body_text: string;
+  email_account_id?: string;
 }
 
 function getFieldValue(msg: MessageContext, field: string): string {
@@ -174,6 +176,13 @@ export async function runRulesForMessage(
     if (error || !rules || rules.length === 0) return result;
 
     for (const rule of rules as RuleRow[]) {
+      // Skip if rule is restricted to specific accounts and this conversation doesn't belong
+      if (rule.account_ids && Array.isArray(rule.account_ids) && rule.account_ids.length > 0) {
+        if (!msg.email_account_id || !rule.account_ids.includes(msg.email_account_id)) {
+          continue;
+        }
+      }
+
       // Build conditions array — support both new JSONB and legacy single fields
       let conditions: Condition[] = [];
       if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) {

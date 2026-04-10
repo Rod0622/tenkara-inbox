@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       match_mode: match_mode || "all",
       conditions,
       actions: ruleActions,
+      account_ids: body.account_ids || null,
       // Legacy fields for backward compat
       condition_field: firstCondition.field || "subject",
       condition_operator: firstCondition.operator || "contains",
@@ -69,7 +70,7 @@ export async function PATCH(req: NextRequest) {
 
   const allowed = [
     "name", "is_active", "trigger_type", "match_mode",
-    "conditions", "actions",
+    "conditions", "actions", "account_ids",
     "condition_field", "condition_operator", "condition_value",
     "action_type", "action_value", "sort_order",
   ];

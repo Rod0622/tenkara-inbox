@@ -1658,6 +1658,8 @@ function RulesTab() {
   const [formMatchMode, setFormMatchMode] = useState<"all" | "any" | "none">("all");
   const [formConditions, setFormConditions] = useState<RuleCondition[]>([{ field: "subject", operator: "contains", value: "" }]);
   const [formActions, setFormActions] = useState<RuleAction[]>([{ type: "add_label", value: "" }]);
+  const [formAccountIds, setFormAccountIds] = useState<string[]>([]);
+  const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -1665,11 +1667,13 @@ function RulesTab() {
       getSupabase().from("labels").select("*").order("sort_order"),
       getSupabase().from("team_members").select("*").eq("is_active", true),
       getSupabase().from("folders").select("*").order("sort_order"),
-    ]).then(([rulesData, labelsRes, membersRes, foldersRes]) => {
+      getSupabase().from("email_accounts").select("id, name, email").eq("is_active", true),
+    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
       setMembers(membersRes.data || []);
       setAllFolders(foldersRes.data || []);
+      setEmailAccounts(accountsRes.data || []);
       setLoading(false);
     });
   }, []);
@@ -1685,6 +1689,7 @@ function RulesTab() {
     setFormMatchMode("all");
     setFormConditions([{ field: "subject", operator: "contains", value: "" }]);
     setFormActions([{ type: "add_label", value: "" }]);
+    setFormAccountIds([]);
     setError("");
   };
 
@@ -1707,6 +1712,7 @@ function RulesTab() {
     } else {
       setFormActions([{ type: "add_label", value: "" }]);
     }
+    setFormAccountIds(r.account_ids || []);
     setError("");
   };
 
@@ -1725,6 +1731,7 @@ function RulesTab() {
           match_mode: formMatchMode,
           conditions: formConditions,
           actions: formActions,
+          account_ids: formAccountIds.length > 0 ? formAccountIds : null,
         }),
       });
       const data = await res.json();
@@ -1746,6 +1753,7 @@ function RulesTab() {
           match_mode: formMatchMode,
           conditions: formConditions,
           actions: formActions,
+          account_ids: formAccountIds.length > 0 ? formAccountIds : null,
         }),
       });
       if (res.ok) { setEditingId(null); resetForm(); fetchRules(); }
@@ -1850,6 +1858,43 @@ function RulesTab() {
         placeholder="Rule name (e.g. 'Auto-label RFQ emails')"
         className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
       />
+
+      {/* Account scope */}
+      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Applies to</div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setFormAccountIds([])}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+              formAccountIds.length === 0
+                ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30"
+                : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+            }`}
+          >All Accounts</button>
+          {emailAccounts.map((acc) => (
+            <button
+              key={acc.id}
+              onClick={() => {
+                setFormAccountIds((prev) =>
+                  prev.includes(acc.id)
+                    ? prev.filter((id) => id !== acc.id)
+                    : [...prev, acc.id]
+                );
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                formAccountIds.includes(acc.id)
+                  ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30"
+                  : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+              }`}
+            >{acc.name || acc.email}</button>
+          ))}
+        </div>
+        {formAccountIds.length > 0 && (
+          <div className="text-[10px] text-[#484F58] mt-1.5">
+            This rule will only apply to conversations from {formAccountIds.length} selected account{formAccountIds.length > 1 ? "s" : ""}
+          </div>
+        )}
+      </div>
 
       {/* Conditions */}
       <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
@@ -2020,7 +2065,16 @@ function RulesTab() {
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-[#E6EDF3] mb-1">{r.name}</div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="text-sm font-medium text-[#E6EDF3]">{r.name}</div>
+                        {r.account_ids && r.account_ids.length > 0 ? (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
+                            {r.account_ids.map((id: string) => emailAccounts.find((a) => a.id === id)?.name || "?").join(", ")}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#1E242C] text-[#484F58]">All accounts</span>
+                        )}
+                      </div>
 
                       {/* Conditions summary */}
                       <div className="text-[11px] text-[#7D8590] leading-relaxed mb-0.5">
