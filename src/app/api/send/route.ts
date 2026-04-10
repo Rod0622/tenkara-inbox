@@ -344,6 +344,7 @@ export async function POST(req: NextRequest) {
           from_name: account.name,
           to_addresses: to,
           body_text: emailBody,
+          email_account_id: accountId,
         }, "outgoing");
       } catch (ruleErr: any) {
         console.error("Rule engine error on send:", ruleErr.message);

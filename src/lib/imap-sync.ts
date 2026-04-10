@@ -366,6 +366,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             from_name: email.fromName,
             to_addresses: email.toAddresses,
             body_text: email.bodyText,
+            email_account_id: accountId,
           }, triggerType);
         } catch (ruleErr: any) {
           console.error(`Rule engine error for ${email.uid}:`, ruleErr.message);

@@ -183,6 +183,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
               from_name: email.from?.emailAddress?.name || "",
               to_addresses: toAddr,
               body_text: bodyText.slice(0, 200),
+              email_account_id: accountId,
             });
           } catch (_e) { /* best-effort */ }
         }
