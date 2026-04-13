@@ -182,6 +182,92 @@ async function executeAction(
       }
       case "assign_to": {
         if (!action.value) return null;
+
+        // Auto-assignment modes: auto:{strategy}:{pool}:{extra}
+        if (action.value.startsWith("auto:")) {
+          const parts = action.value.split(":");
+          const strategy = parts[1]; // random, round_robin, least_conversations, least_tasks
+          const pool = parts[2] || "all"; // group ID or "all"
+          const extra = parts[3] || "all"; // task category ID or "all" (for least_tasks)
+
+          // Get eligible members
+          let memberIds: string[] = [];
+          if (pool === "all") {
+            const { data: allMembers } = await supabase.from("team_members").select("id").eq("is_active", true);
+            memberIds = (allMembers || []).map((m: any) => m.id);
+          } else {
+            const { data: groupMembers } = await supabase.from("user_group_members").select("team_member_id").eq("user_group_id", pool);
+            memberIds = (groupMembers || []).map((m: any) => m.team_member_id);
+          }
+
+          if (memberIds.length === 0) return null;
+
+          let chosenId: string;
+
+          if (strategy === "random") {
+            chosenId = memberIds[Math.floor(Math.random() * memberIds.length)];
+
+          } else if (strategy === "round_robin") {
+            // Get the last assigned member for this rule from activity_log
+            const { data: lastAssignment } = await supabase
+              .from("activity_log")
+              .select("details")
+              .eq("action", "rule_executed")
+              .order("created_at", { ascending: false })
+              .limit(20);
+            // Find last auto-assigned member in eligible pool
+            let lastIdx = -1;
+            for (const log of (lastAssignment || [])) {
+              const assignedTo = log.details?.auto_assigned_to;
+              if (assignedTo && memberIds.includes(assignedTo)) {
+                lastIdx = memberIds.indexOf(assignedTo);
+                break;
+              }
+            }
+            chosenId = memberIds[(lastIdx + 1) % memberIds.length];
+
+          } else if (strategy === "least_conversations") {
+            // Count open conversations per member
+            const counts: { id: string; count: number }[] = [];
+            for (const mid of memberIds) {
+              const { count } = await supabase.from("conversations").select("id", { count: "exact", head: true })
+                .eq("assignee_id", mid).eq("status", "open");
+              counts.push({ id: mid, count: count || 0 });
+            }
+            counts.sort((a, b) => a.count - b.count);
+            chosenId = counts[0].id;
+
+          } else if (strategy === "least_tasks") {
+            // Count open tasks per member
+            const counts: { id: string; count: number }[] = [];
+            for (const mid of memberIds) {
+              let query = supabase.from("tasks").select("id", { count: "exact", head: true })
+                .eq("assignee_id", mid).eq("status", "todo");
+              if (extra !== "all") query = query.eq("category_id", extra);
+              const { count } = await query;
+              counts.push({ id: mid, count: count || 0 });
+            }
+            counts.sort((a, b) => a.count - b.count);
+            chosenId = counts[0].id;
+
+          } else {
+            chosenId = memberIds[0];
+          }
+
+          await supabase.from("conversations").update({ assignee_id: chosenId }).eq("id", conversationId);
+
+          // Log the auto-assignment for round-robin tracking
+          await supabase.from("activity_log").insert({
+            conversation_id: conversationId, actor_id: null, action: "rule_executed",
+            details: { auto_assigned_to: chosenId, strategy, pool },
+          });
+
+          // Get member name for log
+          const { data: chosenMember } = await supabase.from("team_members").select("name").eq("id", chosenId).maybeSingle();
+          return `Auto-assigned to ${chosenMember?.name || chosenId} (${strategy})`;
+        }
+
+        // Direct assignment (existing behavior)
         await supabase.from("conversations").update({ assignee_id: action.value }).eq("id", conversationId);
         return "Assigned";
       }

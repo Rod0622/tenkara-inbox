@@ -1685,6 +1685,8 @@ function RulesTab() {
   const [formActions, setFormActions] = useState<RuleAction[]>([{ type: "add_label", value: "" }]);
   const [formAccountIds, setFormAccountIds] = useState<string[]>([]);
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
+  const [userGroups, setUserGroups] = useState<any[]>([]);
+  const [taskCategories, setTaskCategories] = useState<any[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -1693,12 +1695,16 @@ function RulesTab() {
       getSupabase().from("team_members").select("*").eq("is_active", true),
       getSupabase().from("folders").select("*").order("sort_order"),
       getSupabase().from("email_accounts").select("id, name, email").eq("is_active", true),
-    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes]) => {
+      getSupabase().from("user_groups").select("id, name").order("created_at"),
+      getSupabase().from("task_categories").select("id, name").order("sort_order"),
+    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes, groupsRes, categoriesRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
       setMembers(membersRes.data || []);
       setAllFolders(foldersRes.data || []);
       setEmailAccounts(accountsRes.data || []);
+      setUserGroups(groupsRes.data || []);
+      setTaskCategories(categoriesRes.data || []);
       setLoading(false);
     });
   }, []);
@@ -1835,12 +1841,62 @@ function RulesTab() {
       );
     }
     if (t === "assign_to") {
+      const isAuto = action.value.startsWith("auto:");
+      const autoParts = isAuto ? action.value.split(":") : [];
+      const autoStrategy = autoParts[1] || "";
+      const autoPool = autoParts[2] || "all";
+      const autoExtra = autoParts[3] || "all";
+
+      const buildAutoValue = (strategy: string, pool: string, extra?: string) => {
+        let v = `auto:${strategy}:${pool}`;
+        if (strategy === "least_tasks" && extra) v += `:${extra}`;
+        return v;
+      };
+
       return (
-        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-          <option value="">Select member...</option>
-          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        <div className="flex-1 flex flex-col gap-1.5">
+          {/* Mode selector */}
+          <div className="flex gap-1">
+            <button onClick={() => updateAction(idx, { value: "" })}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${!isAuto ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              Specific person</button>
+            <button onClick={() => updateAction(idx, { value: "auto:random:all" })}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${isAuto ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              Auto-assign</button>
+          </div>
+          {!isAuto ? (
+            <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              <option value="">Select member...</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {/* Strategy */}
+              <select value={autoStrategy} onChange={(e) => updateAction(idx, { value: buildAutoValue(e.target.value, autoPool, autoExtra) })}
+                className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="random">Random</option>
+                <option value="round_robin">Round Robin</option>
+                <option value="least_conversations">Least Open Conversations</option>
+                <option value="least_tasks">Least Open Tasks</option>
+              </select>
+              {/* Pool: all or group */}
+              <select value={autoPool} onChange={(e) => updateAction(idx, { value: buildAutoValue(autoStrategy, e.target.value, autoExtra) })}
+                className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="all">From: All members</option>
+                {userGroups.map((g) => <option key={g.id} value={g.id}>From: {g.name}</option>)}
+              </select>
+              {/* Extra: task category (only for least_tasks) */}
+              {autoStrategy === "least_tasks" && (
+                <select value={autoExtra} onChange={(e) => updateAction(idx, { value: buildAutoValue(autoStrategy, autoPool, e.target.value) })}
+                  className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                  <option value="all">Count: All task categories</option>
+                  {taskCategories.map((c) => <option key={c.id} value={c.id}>Count: {c.name} tasks only</option>)}
+                </select>
+              )}
+            </div>
+          )}
+        </div>
       );
     }
     if (t === "move_to_folder") {
