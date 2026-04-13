@@ -2139,7 +2139,32 @@ function RulesTab() {
     return { conds, acts, modeLabel };
   };
 
-  const filteredRules = rules.filter((r) => (r.trigger_type || "incoming") === activeTrigger);
+  const [filterAccountId, setFilterAccountId] = useState<string>("");
+
+  const filteredRules = rules.filter((r) => {
+    if ((r.trigger_type || "incoming") !== activeTrigger) return false;
+    if (filterAccountId) {
+      // Show rules that apply to this account (account_ids includes it) OR are global (no account_ids)
+      if (r.account_ids && Array.isArray(r.account_ids) && r.account_ids.length > 0) {
+        return r.account_ids.includes(filterAccountId);
+      }
+      // Global rules always show
+      return true;
+    }
+    return true;
+  });
+
+  // Summary stats for filtered view
+  const accountFilteredCount = filterAccountId
+    ? rules.filter((r) => {
+        if (r.account_ids?.length > 0) return r.account_ids.includes(filterAccountId);
+        return true; // global
+      })
+    : rules;
+  const scopedCount = filterAccountId
+    ? rules.filter((r) => r.account_ids?.length > 0 && r.account_ids.includes(filterAccountId)).length
+    : 0;
+  const globalCount = rules.filter((r) => !r.account_ids || r.account_ids.length === 0).length;
 
   return (
     <div className="max-w-3xl mx-auto p-8">
@@ -2175,6 +2200,41 @@ function RulesTab() {
       <div className="text-[11px] text-[#484F58] mb-4">
         {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.description}
       </div>
+
+      {/* Account filter */}
+      <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-[#12161B] border border-[#1E242C]">
+        <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider shrink-0">Filter by account:</span>
+        <div className="flex flex-wrap gap-1">
+          <button onClick={() => setFilterAccountId("")}
+            className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+              !filterAccountId ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+            }`}>All ({rules.length})</button>
+          {emailAccounts.map((acc) => {
+            const accRuleCount = rules.filter((r) => r.account_ids?.includes(acc.id)).length;
+            return (
+              <button key={acc.id} onClick={() => setFilterAccountId(filterAccountId === acc.id ? "" : acc.id)}
+                className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                  filterAccountId === acc.id ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30" : "text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+                }`}>{acc.name || acc.email} ({accRuleCount})</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Account summary */}
+      {filterAccountId && (
+        <div className="mb-4 p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+          <div className="text-xs font-semibold text-[#E6EDF3] mb-2">
+            Rules for {emailAccounts.find((a) => a.id === filterAccountId)?.name || "this account"}
+          </div>
+          <div className="flex gap-4 text-[11px]">
+            <div><span className="text-[#58A6FF] font-bold">{scopedCount}</span> <span className="text-[#484F58]">scoped to this account</span></div>
+            <div><span className="text-[#7D8590] font-bold">{globalCount}</span> <span className="text-[#484F58]">global (all accounts)</span></div>
+            <div><span className="text-[#4ADE80] font-bold">{filteredRules.filter((r) => r.is_active).length}</span> <span className="text-[#484F58]">active</span></div>
+            <div><span className="text-[#F85149] font-bold">{filteredRules.filter((r) => !r.is_active).length}</span> <span className="text-[#484F58]">disabled</span></div>
+          </div>
+        </div>
+      )}
 
       {/* Add form */}
       {showAdd && (
