@@ -15,9 +15,11 @@ import {
   Trash2,
   User2,
   Search,
+  ClipboardCheck,
 } from "lucide-react";
 import { useTasks } from "@/lib/hooks";
 import TaskCountdown from "@/components/TaskCountdown";
+import FormModal from "@/components/FormModal";
 import type { Task, TaskStatus, TeamMember } from "@/types";
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -62,6 +64,7 @@ export default function TaskBoard({
   const [showComposer, setShowComposer] = useState(false);
   const [taskSearch, setTaskSearch] = useState("");
   const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
+  const [showFormModal, setShowFormModal] = useState<{ taskId: string; conversationId: string; categoryId?: string } | null>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
 
   // Check URL hash for highlight_task param
@@ -563,6 +566,7 @@ export default function TaskBoard({
                         onStatusChange={updateTaskStatus}
                         onDelete={() => deleteTasks([task.id])}
                         onOpenConversation={onOpenConversation}
+                        onOpenForm={(t) => t.conversation_id && setShowFormModal({ taskId: t.id, conversationId: t.conversation_id, categoryId: (t as any).category_id || undefined })}
                         onRefetch={refetch}
                         deleting={deleting}
                         isHighlighted={task.id === highlightedTaskId}
@@ -576,6 +580,18 @@ export default function TaskBoard({
           </div>
         )}
       </div>
+
+      {/* Form Modal */}
+      {showFormModal && (
+        <FormModal
+          conversationId={showFormModal.conversationId}
+          taskId={showFormModal.taskId}
+          taskCategoryId={showFormModal.categoryId}
+          submittedBy={currentUser?.id}
+          onClose={() => setShowFormModal(null)}
+          onSubmitted={() => { refetch(); }}
+        />
+      )}
     </div>
   );
 }
@@ -588,6 +604,7 @@ function TaskCard({
   onStatusChange,
   onDelete,
   onOpenConversation,
+  onOpenForm,
   onRefetch,
   deleting,
   isHighlighted,
@@ -600,6 +617,7 @@ function TaskCard({
   onStatusChange: (taskId: string, status: TaskStatus) => Promise<void>;
   onDelete: () => void;
   onOpenConversation?: (conversationId: string) => void;
+  onOpenForm?: (task: Task) => void;
   onRefetch?: () => Promise<void>;
   deleting: boolean;
   isHighlighted?: boolean;
@@ -715,6 +733,15 @@ function TaskCard({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Fill form button */}
+          <button
+            type="button"
+            onClick={() => onOpenForm?.(task)}
+            className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
+            title="Fill out form"
+          >
+            <ClipboardCheck size={14} />
+          </button>
           {task.status === "dismissed" ? (
             <button
               type="button"

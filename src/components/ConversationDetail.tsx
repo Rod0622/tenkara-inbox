@@ -37,7 +37,9 @@ import {
   User,
   Users,
   X,
+  ClipboardCheck,
 } from "lucide-react";
+import FormModal from "./FormModal";
 import {
   useConversationDetail,
   useFolders,
@@ -1757,6 +1759,7 @@ export default function ConversationDetail({
   const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
+  const [showFormModal, setShowFormModal] = useState<{ taskId?: string; categoryId?: string } | null>(null);
   const [replySignature, setReplySignature] = useState("");
 
   // Fetch account signature for replies
@@ -3809,6 +3812,13 @@ export default function ConversationDetail({
                     >
                       <Pencil size={13} />
                     </button>
+                    <button
+                      onClick={() => setShowFormModal({ taskId: task.id, categoryId: task.category_id || undefined })}
+                      className="p-1 rounded text-[#484F58] hover:text-[#4ADE80] hover:bg-[rgba(74,222,128,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
+                      title="Fill out form"
+                    >
+                      <ClipboardCheck size={13} />
+                    </button>
                     {task.status === "dismissed" ? (
                       <button
                         onClick={async () => {
@@ -4346,12 +4356,21 @@ export default function ConversationDetail({
       {!isReviewTab && (
         <div className="px-4 py-2 border-t border-[#161B22] shrink-0">
           {!showReplyEditor ? (
-            <button
-              onClick={() => setShowReplyEditor(true)}
-              className="w-full px-4 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[#484F58] text-[13px] text-left hover:border-[#4ADE80]/30 hover:text-[#7D8590] transition-all"
-            >
-              Write a reply...
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowReplyEditor(true)}
+                className="flex-1 px-4 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[#484F58] text-[13px] text-left hover:border-[#4ADE80]/30 hover:text-[#7D8590] transition-all"
+              >
+                Write a reply...
+              </button>
+              <button
+                onClick={() => setShowFormModal({})}
+                title="Fill out a form"
+                className="px-3 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[#484F58] hover:border-[#4ADE80]/30 hover:text-[#4ADE80] transition-all"
+              >
+                <ClipboardCheck size={16} />
+              </button>
+            </div>
           ) : (
             <div className="flex flex-col gap-1.5">
               <RichTextEditor
@@ -4625,6 +4644,21 @@ export default function ConversationDetail({
     </div>
   </div>
 )}
+
+      {/* Form Modal */}
+      {showFormModal && (
+        <FormModal
+          conversationId={convo.id}
+          taskId={showFormModal.taskId}
+          taskCategoryId={showFormModal.categoryId}
+          submittedBy={currentUser?.id}
+          onClose={() => setShowFormModal(null)}
+          onSubmitted={() => {
+            // Trigger notes refresh by calling onAddNote with empty to force parent refetch
+            window.location.hash = `#conversation=${convo.id}`;
+          }}
+        />
+      )}
 
     </div>
   );
