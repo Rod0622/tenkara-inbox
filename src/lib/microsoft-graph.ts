@@ -409,7 +409,9 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
                 from_email: email.from?.emailAddress?.address || "",
                 from_name: email.from?.emailAddress?.name || "",
                 to_addresses: toAddr, body_text: bodyText,
+                cc_addresses: (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", "),
                 email_account_id: accountId,
+                has_attachments: !!email.hasAttachments,
               }, isOutbound ? "outgoing" : "incoming");
             } catch (re: any) { console.error("Rule error:", re.message); }
           }

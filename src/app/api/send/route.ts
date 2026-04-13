@@ -343,8 +343,10 @@ export async function POST(req: NextRequest) {
           from_email: account.email,
           from_name: account.name,
           to_addresses: to,
+          cc_addresses: cc || "",
           body_text: emailBody,
           email_account_id: accountId,
+          has_attachments: (body.attachments?.length || 0) > 0,
         }, "outgoing");
       } catch (ruleErr: any) {
         console.error("Rule engine error on send:", ruleErr.message);

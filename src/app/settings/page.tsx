@@ -1607,29 +1607,54 @@ function LabelsTab() {
 
 // ── Rules Tab ───────────────────────────────────────
 const CONDITION_FIELDS = [
-  { value: "subject", label: "Subject" },
-  { value: "from_email", label: "From Email" },
-  { value: "from_name", label: "From Name" },
-  { value: "to_addresses", label: "To / CC" },
-  { value: "body_text", label: "Body" },
+  { value: "from_email", label: "From", group: "Address" },
+  { value: "to_addresses", label: "To", group: "Address" },
+  { value: "to_cc_bcc", label: "To / Cc / Bcc", group: "Address" },
+  { value: "cc_addresses", label: "Cc", group: "Address" },
+  { value: "bcc_addresses", label: "Bcc", group: "Address" },
+  { value: "subject", label: "Subject", group: "Content" },
+  { value: "any_field", label: "Message content (all fields)", group: "Content" },
+  { value: "body_text", label: "Message body", group: "Content" },
+  { value: "has_attachments", label: "Has attachments?", group: "Content" },
+  { value: "email_account", label: "Email account", group: "More" },
+  { value: "conversation_status", label: "Conversation state", group: "More" },
+  { value: "assignee", label: "Assignee", group: "More" },
+  { value: "folder", label: "Team / Folder", group: "More" },
+  { value: "has_label", label: "Label", group: "More" },
+  { value: "message_count", label: "Number of messages", group: "More" },
 ];
 
 const CONDITION_OPERATORS = [
   { value: "contains", label: "Contains" },
   { value: "not_contains", label: "Does not contain" },
   { value: "equals", label: "Equals" },
+  { value: "not_equals", label: "Does not equal" },
   { value: "starts_with", label: "Starts with" },
   { value: "ends_with", label: "Ends with" },
+  { value: "is_true", label: "Is true" },
+  { value: "is_false", label: "Is false" },
+  { value: "greater_than", label: "Greater than" },
+  { value: "less_than", label: "Less than" },
 ];
 
 const ACTION_TYPES = [
-  { value: "add_label", label: "Add label" },
-  { value: "remove_label", label: "Remove label" },
-  { value: "assign_to", label: "Assign to" },
-  { value: "mark_starred", label: "Star conversation" },
-  { value: "mark_read", label: "Mark as read" },
-  { value: "move_to_folder", label: "Move to folder" },
-  { value: "set_status", label: "Set status" },
+  { value: "add_label", label: "Add label", group: "Labels" },
+  { value: "remove_label", label: "Remove label", group: "Labels" },
+  { value: "assign_to", label: "Assign to", group: "Assignment" },
+  { value: "unassign", label: "Unassign", group: "Assignment" },
+  { value: "move_to_folder", label: "Move to folder / team", group: "Organization" },
+  { value: "set_status", label: "Set status", group: "Organization" },
+  { value: "archive", label: "Archive (close)", group: "Organization" },
+  { value: "snooze", label: "Snooze", group: "Organization" },
+  { value: "trash", label: "Trash", group: "Organization" },
+  { value: "mark_starred", label: "Star", group: "Flags" },
+  { value: "unstar", label: "Unstar", group: "Flags" },
+  { value: "mark_read", label: "Mark as read", group: "Flags" },
+  { value: "mark_unread", label: "Mark as unread", group: "Flags" },
+  { value: "add_note", label: "Add note", group: "Tasks & Notes" },
+  { value: "add_task", label: "Add task", group: "Tasks & Notes" },
+  { value: "stop_processing", label: "Stop processing more rules", group: "Flow" },
+  { value: "webhook", label: "Webhook (HTTP POST)", group: "Integration" },
 ];
 
 const TRIGGER_TYPES = [
@@ -1717,8 +1742,8 @@ function RulesTab() {
   };
 
   const handleAdd = async () => {
-    if (!formName.trim() || formConditions.some((c) => !c.value.trim())) return;
-    const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder"].includes(t);
+    if (!formName.trim() || formConditions.some((c) => !["has_attachments"].includes(c.field) && !c.value.trim())) return;
+    const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder", "add_note", "add_task", "webhook"].includes(t);
     if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
     try {
@@ -1837,6 +1862,20 @@ function RulesTab() {
         </select>
       );
     }
+    if (t === "add_note" || t === "add_task") {
+      return (
+        <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          placeholder={t === "add_note" ? "Note text..." : "Task description..."}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      );
+    }
+    if (t === "webhook") {
+      return (
+        <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          placeholder="https://example.com/webhook"
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      );
+    }
     return null;
   };
 
@@ -1920,14 +1959,60 @@ function RulesTab() {
             </select>
             <select value={cond.operator} onChange={(e) => updateCondition(idx, { operator: e.target.value })}
               className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
-              {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {CONDITION_OPERATORS.filter((o) => {
+                // Filter operators based on field type
+                const boolFields = ["has_attachments"];
+                const numFields = ["message_count"];
+                if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
+                if (numFields.includes(cond.field)) return ["greater_than", "less_than", "equals"].includes(o.value);
+                if (["email_account", "assignee", "folder", "has_label", "conversation_status"].includes(cond.field)) return ["equals", "not_equals"].includes(o.value);
+                return !["is_true", "is_false", "greater_than", "less_than"].includes(o.value);
+              }).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <input
-              value={cond.value}
-              onChange={(e) => updateCondition(idx, { value: e.target.value })}
-              placeholder="Value..."
-              className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
-            />
+            {/* Smart value input based on field type */}
+            {cond.field === "has_attachments" ? (
+              <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+            ) : cond.field === "email_account" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select account...</option>
+                {emailAccounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.email}</option>)}
+              </select>
+            ) : cond.field === "assignee" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select member...</option>
+                <option value="__unassigned__">Unassigned</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "folder" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select folder...</option>
+                {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
+              </select>
+            ) : cond.field === "has_label" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select label...</option>
+                {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            ) : cond.field === "conversation_status" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="open">Open</option>
+                <option value="closed">Closed</option>
+                <option value="snoozed">Snoozed</option>
+              </select>
+            ) : (
+              <input
+                value={cond.value}
+                onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                placeholder={cond.field === "message_count" ? "Number..." : "Value..."}
+                type={cond.field === "message_count" ? "number" : "text"}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+              />
+            )}
             <button
               onClick={() => updateCondition(idx, { required: !cond.required })}
               title={cond.required ? "Required — must match" : "Optional — click to make required"}

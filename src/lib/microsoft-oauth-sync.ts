@@ -182,8 +182,10 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
               from_email: email.from?.emailAddress?.address || "",
               from_name: email.from?.emailAddress?.name || "",
               to_addresses: toAddr,
+              cc_addresses: (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", "),
               body_text: bodyText.slice(0, 200),
               email_account_id: accountId,
+              has_attachments: !!email.hasAttachments,
             });
           } catch (_e) { /* best-effort */ }
         }

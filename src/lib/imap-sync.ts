@@ -365,8 +365,10 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             from_email: email.fromEmail,
             from_name: email.fromName,
             to_addresses: email.toAddresses,
+            cc_addresses: email.ccAddresses || "",
             body_text: email.bodyText,
             email_account_id: accountId,
+            has_attachments: !!email.hasAttachments,
           }, triggerType);
         } catch (ruleErr: any) {
           console.error(`Rule engine error for ${email.uid}:`, ruleErr.message);
