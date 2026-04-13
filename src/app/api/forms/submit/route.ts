@@ -65,8 +65,16 @@ export async function POST(req: NextRequest) {
 
   // Optionally complete the task
   if (complete_task && task_id) {
+    const now = new Date().toISOString();
+    
+    // Update all task_assignees to done
+    await supabase.from("task_assignees")
+      .update({ status: "completed", is_done: true, completed_at: now })
+      .eq("task_id", task_id);
+
+    // Update the task itself
     await supabase.from("tasks")
-      .update({ status: "completed", is_done: true, completed_at: new Date().toISOString() })
+      .update({ status: "completed", is_done: true, completed_at: now })
       .eq("id", task_id);
   }
 
