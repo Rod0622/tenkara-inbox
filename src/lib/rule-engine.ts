@@ -135,7 +135,7 @@ async function evaluateConditions(
       else if (c.operator === "not_equals") result = !lbls.includes(c.value);
       else result = lbls.includes(c.value);
     } else if (c.field === "message_count") {
-      const count = await getMsgCount();
+      const count = await getMsgCount() || 0;
       result = evaluateCondition(count.toString(), c.operator, c.value);
     } else {
       // Standard text-field conditions
