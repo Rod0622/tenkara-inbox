@@ -8,7 +8,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList
+  FileSignature, Check, ClipboardList, ClipboardCheck
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -53,6 +53,7 @@ const TABS = [
   { id: "rules", label: "Rules", icon: Zap },
   { id: "categories", label: "Task Categories", icon: Tag },
   { id: "task_templates", label: "Task Templates", icon: ClipboardList },
+  { id: "forms", label: "Forms", icon: ClipboardCheck },
   { id: "templates", label: "Email Templates", icon: FileSignature },
 ];
 
@@ -116,6 +117,7 @@ export default function SettingsPage() {
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "categories" && <TaskCategoriesTab />}
         {activeTab === "task_templates" && <TaskTemplatesTab />}
+        {activeTab === "forms" && <FormsTab />}
         {activeTab === "templates" && <EmailTemplatesTab />}
       </div>
 
@@ -2975,6 +2977,278 @@ function TaskTemplatesTab() {
 
 // ── Email Templates Tab ─────────────────────────────
 const TEMPLATE_CATEGORIES = ["General", "Sales", "Procurement", "Follow-up", "Introduction", "Compliance", "Shipping"];
+
+// ── Forms Tab ────────────────────────────────────────
+const FIELD_TYPES = [
+  { value: "text", label: "Text" },
+  { value: "textarea", label: "Long text" },
+  { value: "select", label: "Dropdown" },
+  { value: "multi_select", label: "Multi-select" },
+  { value: "checkbox", label: "Checkbox" },
+  { value: "date", label: "Date" },
+  { value: "time", label: "Time" },
+  { value: "number", label: "Number" },
+  { value: "email", label: "Email" },
+  { value: "phone", label: "Phone" },
+];
+
+function FormsTab() {
+  const [forms, setForms] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Form state
+  const [formName, setFormName] = useState("");
+  const [formDesc, setFormDesc] = useState("");
+  const [formCategoryId, setFormCategoryId] = useState("");
+  const [formFields, setFormFields] = useState<any[]>([
+    { label: "", field_type: "text", is_required: false, placeholder: "", options: null, default_value: "" },
+  ]);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/forms").then((r) => r.json()),
+      getSupabase().from("task_categories").select("id, name").order("sort_order"),
+    ]).then(([formsData, catRes]) => {
+      setForms(formsData.forms || []);
+      setCategories(catRes.data || []);
+      setLoading(false);
+    });
+  }, []);
+
+  const fetchForms = async () => {
+    const res = await fetch("/api/forms");
+    const data = await res.json();
+    setForms(data.forms || []);
+  };
+
+  const resetForm = () => {
+    setFormName(""); setFormDesc(""); setFormCategoryId("");
+    setFormFields([{ label: "", field_type: "text", is_required: false, placeholder: "", options: null, default_value: "" }]);
+    setError("");
+  };
+
+  const loadFormIntoEditor = (f: any) => {
+    setFormName(f.name || "");
+    setFormDesc(f.description || "");
+    setFormCategoryId(f.task_category_id || "");
+    setFormFields((f.fields || []).length > 0
+      ? f.fields.map((fld: any) => ({
+          label: fld.label, field_type: fld.field_type, is_required: fld.is_required,
+          placeholder: fld.placeholder || "", options: fld.options, default_value: fld.default_value || "",
+        }))
+      : [{ label: "", field_type: "text", is_required: false, placeholder: "", options: null, default_value: "" }]
+    );
+  };
+
+  const handleSave = async (id?: string) => {
+    if (!formName.trim() || formFields.some((f) => !f.label.trim())) return;
+    setSaving(true); setError("");
+    try {
+      const payload = {
+        ...(id ? { id } : {}),
+        name: formName, description: formDesc,
+        task_category_id: formCategoryId || null,
+        fields: formFields.map((f) => ({
+          ...f,
+          options: (f.field_type === "select" || f.field_type === "multi_select") && typeof f.options === "string"
+            ? f.options.split(",").map((o: string) => o.trim()).filter(Boolean)
+            : f.options,
+        })),
+      };
+      const res = await fetch("/api/forms", {
+        method: id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) { resetForm(); setShowAdd(false); setEditingId(null); fetchForms(); }
+      else { const d = await res.json(); setError(d.error); }
+    } catch { setError("Network error"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this form template?")) return;
+    await fetch(`/api/forms?id=${id}`, { method: "DELETE" });
+    fetchForms();
+  };
+
+  const updateField = (idx: number, patch: any) => {
+    setFormFields((prev) => prev.map((f, i) => i === idx ? { ...f, ...patch } : f));
+  };
+
+  const addField = () => {
+    setFormFields((prev) => [...prev, { label: "", field_type: "text", is_required: false, placeholder: "", options: null, default_value: "" }]);
+  };
+
+  const removeField = (idx: number) => {
+    if (formFields.length <= 1) return;
+    setFormFields((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const moveField = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= formFields.length) return;
+    setFormFields((prev) => {
+      const arr = [...prev];
+      [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+      return arr;
+    });
+  };
+
+  // ── Render form editor ──
+  const renderEditor = (isEdit: boolean, formId?: string) => (
+    <div className="space-y-3">
+      <input value={formName} onChange={(e) => setFormName(e.target.value)}
+        placeholder="Form name (e.g. 'Call Log Form')"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)}
+        placeholder="Description (optional)"
+        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold text-[#484F58] uppercase">Linked to task category:</span>
+        <select value={formCategoryId} onChange={(e) => setFormCategoryId(e.target.value)}
+          className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">None (available everywhere)</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+
+      {/* Fields */}
+      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Form Fields</span>
+          <div className="flex-1" />
+          <button onClick={addField} className="text-[10px] text-[#4ADE80] hover:underline font-semibold">+ Add Field</button>
+        </div>
+        <div className="space-y-2">
+          {formFields.map((field, idx) => (
+            <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-[#12161B] border border-[#1E242C]">
+              <div className="flex flex-col gap-0.5 mt-1">
+                <button onClick={() => moveField(idx, -1)} className="text-[#484F58] hover:text-[#E6EDF3]" title="Move up">▲</button>
+                <button onClick={() => moveField(idx, 1)} className="text-[#484F58] hover:text-[#E6EDF3]" title="Move down">▼</button>
+              </div>
+              <div className="flex-1 space-y-1.5">
+                <div className="flex gap-2">
+                  <input value={field.label} onChange={(e) => updateField(idx, { label: e.target.value })}
+                    placeholder="Field label..."
+                    className="flex-1 px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                  <select value={field.field_type} onChange={(e) => updateField(idx, { field_type: e.target.value })}
+                    className="px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                    {FIELD_TYPES.map((ft) => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
+                  </select>
+                  <button onClick={() => updateField(idx, { is_required: !field.is_required })}
+                    className={`px-2 py-1 rounded text-[9px] font-bold shrink-0 ${field.is_required ? "bg-[rgba(248,81,73,0.12)] text-[#F85149] border border-[rgba(248,81,73,0.3)]" : "text-[#484F58] border border-[#1E242C]"}`}>
+                    {field.is_required ? "Required" : "Optional"}
+                  </button>
+                </div>
+                {(field.field_type === "select" || field.field_type === "multi_select") && (
+                  <input
+                    value={Array.isArray(field.options) ? field.options.join(", ") : field.options || ""}
+                    onChange={(e) => updateField(idx, { options: e.target.value })}
+                    placeholder="Options (comma-separated): Option 1, Option 2, Option 3"
+                    className="w-full px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                )}
+                <input value={field.placeholder || ""} onChange={(e) => updateField(idx, { placeholder: e.target.value })}
+                  placeholder="Placeholder text (optional)"
+                  className="w-full px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#7D8590] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+              </div>
+              <button onClick={() => removeField(idx)} className="text-[#F85149] hover:text-[#FF8E88] mt-1" title="Remove">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {error && <div className="text-xs text-[#F85149]">{error}</div>}
+      <div className="flex gap-2">
+        <button onClick={() => handleSave(formId)} disabled={saving || !formName.trim()}
+          className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-bold hover:bg-[#3BC96E] disabled:opacity-50">
+          {saving ? "Saving..." : isEdit ? "Update" : "Create Form"}
+        </button>
+        <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
+          className="px-3 py-2 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#4ADE80]" size={24} /></div>;
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Form Templates</h1>
+          <p className="text-sm text-[#7D8590] mt-1">Create forms for call logs, meeting notes, and other structured data collection</p>
+        </div>
+        <button onClick={() => { resetForm(); setShowAdd(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors">
+          <Plus size={16} /> New Form
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30">
+          <div className="text-sm font-semibold text-[#E6EDF3] mb-3">New Form Template</div>
+          {renderEditor(false)}
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {forms.map((f) => (
+          <div key={f.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] ${!f.is_active ? "opacity-50" : ""}`}>
+            {editingId === f.id ? (
+              renderEditor(true, f.id)
+            ) : (
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="text-sm font-medium text-[#E6EDF3]">{f.name}</div>
+                    {f.task_category?.name && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
+                        {f.task_category.name}
+                      </span>
+                    )}
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#1E242C] text-[#484F58]">
+                      {f.fields?.length || 0} fields
+                    </span>
+                  </div>
+                  {f.description && <div className="text-[11px] text-[#7D8590] mb-2">{f.description}</div>}
+                  <div className="flex flex-wrap gap-1">
+                    {(f.fields || []).map((fld: any) => (
+                      <span key={fld.id} className="text-[10px] px-1.5 py-0.5 rounded bg-[#0B0E11] border border-[#1E242C] text-[#7D8590]">
+                        {fld.label} <span className="text-[#484F58]">({fld.field_type})</span>
+                        {fld.is_required && <span className="text-[#F85149] ml-0.5">*</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => { setEditingId(f.id); loadFormIntoEditor(f); }}
+                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"><Edit2 size={14} /></button>
+                  <button onClick={() => handleDelete(f.id)}
+                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149]"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {forms.length === 0 && !showAdd && (
+          <div className="text-center py-12 text-[#484F58]">
+            <ClipboardCheck size={32} className="mx-auto mb-3 opacity-50" />
+            <div className="text-sm">No form templates yet</div>
+            <div className="text-xs mt-1">Create a form for call logs, meeting notes, or any structured data</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function EmailTemplatesTab() {
   const [templates, setTemplates] = useState<any[]>([]);
