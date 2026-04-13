@@ -130,7 +130,7 @@ async function evaluateConditions(
       const convo = await getConvo();
       result = evaluateCondition(convo.folder_id || "", c.operator, c.value);
     } else if (c.field === "has_label") {
-      const lbls = await getLabels();
+      const lbls = await getLabels() || [];
       if (c.operator === "equals") result = lbls.includes(c.value);
       else if (c.operator === "not_equals") result = !lbls.includes(c.value);
       else result = lbls.includes(c.value);
