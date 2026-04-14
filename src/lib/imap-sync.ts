@@ -168,7 +168,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               .select("id").eq("provider_message_id", `gmail:${msgId}`).maybeSingle();
             if (existing) continue;
 
-            const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`;
+            const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=full`;
             const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
             if (!msgRes.ok) continue;
             const msgData = await msgRes.json();
@@ -189,6 +189,28 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             const snippet = msgData.snippet || "";
             const sentAt = headers.date ? new Date(headers.date).toISOString() : new Date(parseInt(msgData.internalDate)).toISOString();
             const hasAttachments = (msgData.payload?.parts || []).some((p: any) => p.filename && p.filename.length > 0);
+
+            // Extract HTML body from Gmail payload (nested MIME parts)
+            const extractBody = (payload: any): { html: string; text: string } => {
+              let html = "";
+              let text = "";
+              if (payload.mimeType === "text/html" && payload.body?.data) {
+                html = Buffer.from(payload.body.data, "base64url").toString("utf-8");
+              } else if (payload.mimeType === "text/plain" && payload.body?.data) {
+                text = Buffer.from(payload.body.data, "base64url").toString("utf-8");
+              }
+              if (payload.parts) {
+                for (const part of payload.parts) {
+                  const sub = extractBody(part);
+                  if (sub.html && !html) html = sub.html;
+                  if (sub.text && !text) text = sub.text;
+                }
+              }
+              return { html, text };
+            };
+            const extracted = extractBody(msgData.payload || {});
+            const bodyHtml = extracted.html || null;
+            const bodyText = extracted.text || snippet;
 
             // Check Gmail labels for category filtering
             const labels: string[] = msgData.labelIds || [];
@@ -229,7 +251,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               provider_message_id: `gmail:${msgId}`,
               from_name: fromName, from_email: fromEmail,
               to_addresses: toAddresses, cc_addresses: ccAddresses,
-              subject, body_text: snippet, body_html: null,
+              subject, body_text: bodyText.slice(0, 5000), body_html: bodyHtml,
               snippet: snippet.slice(0, 200),
               is_outbound: isOutbound, has_attachments: hasAttachments,
               sent_at: sentAt,

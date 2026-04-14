@@ -278,7 +278,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
 
       if (isInitialSync) {
         // Initial bulk sync with skip offset
-        const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${currentSkipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId`;
+        const pageUrl = `${GRAPH_BASE}/users/${account.email}/messages?$top=${BATCH_SIZE}&$skip=${currentSkipOffset}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId`;
 
         const res: Response = await fetch(pageUrl, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) {
@@ -375,7 +375,8 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             result.newConversations++;
           }
 
-          const bodyText = email.bodyPreview || (email.body?.content || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          const emailBodyHtml = email.body?.contentType === "html" ? email.body.content : null;
+          const bodyText = emailBodyHtml ? emailBodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : (email.bodyPreview || "");
           const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
           const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
@@ -386,7 +387,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             to_addresses: toAddr, cc_addresses: ccAddr,
             subject: email.subject || "(No Subject)",
             body_text: bodyText.slice(0, 5000),
-            body_html: null,
+            body_html: emailBodyHtml,
             snippet: bodyText.slice(0, 200),
             is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
             sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),

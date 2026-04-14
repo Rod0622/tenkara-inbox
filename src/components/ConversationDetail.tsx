@@ -1784,6 +1784,45 @@ export default function ConversationDetail({
     })();
   }, [convo?.id, currentUser?.id]);
 
+  // Auto-save draft when user stops typing for 3 seconds
+  useEffect(() => {
+    if (!convo?.id || !currentUser?.id || !showReplyEditor) return;
+    const plainText = (replyText || "").replace(/<[^>]*>/g, "").trim();
+    // Don't save empty or signature-only drafts
+    const sigText = (replySignature || "").replace(/<[^>]*>/g, "").trim();
+    if (!plainText || plainText === sigText) {
+      // If there was a loaded draft and user cleared the text, delete the draft
+      if (loadedDraftId && !plainText) {
+        fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: convo.id,
+            email_account_id: convo.email_account_id,
+            author_id: currentUser.id,
+            to_addresses: convo.from_email,
+            subject: `Re: ${convo.subject}`,
+            body_html: replyText,
+            is_reply: true,
+            source: "manual",
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.draft?.id) setLoadedDraftId(data.draft.id);
+        }
+      } catch { /* silent */ }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [replyText, convo?.id, showReplyEditor]);
+
   // Fetch account signature for replies
   useEffect(() => {
     if (convo?.email_account_id) {
@@ -3073,7 +3112,7 @@ export default function ConversationDetail({
                 <div className="text-[13px] leading-relaxed text-[#7D8590]">
                   {msg.body_html && !searchQ ? (
                     <div
-                      className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#1E242C] [&_td]:p-2 [&_th]:border [&_th]:border-[#1E242C] [&_th]:p-2 [&_th]:bg-[#161B22] [&_img]:max-w-full"
+                      className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#1E242C] [&_td]:p-2 [&_th]:border [&_th]:border-[#1E242C] [&_th]:p-2 [&_th]:bg-[#161B22] [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:my-2 [&_a]:text-[#58A6FF] [&_a]:underline [&_a]:break-all [&_blockquote]:border-l-2 [&_blockquote]:border-[#1E242C] [&_blockquote]:pl-3 [&_blockquote]:text-[#7D8590] [&_pre]:bg-[#161B22] [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_hr]:border-[#1E242C]"
                       dangerouslySetInnerHTML={{ __html: msg.body_html }}
                     />
                   ) : (

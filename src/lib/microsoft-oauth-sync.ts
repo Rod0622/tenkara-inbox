@@ -33,7 +33,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     // Fetch emails using delegated token (/me/ endpoint)
     const BATCH_SIZE = 10;
     let url: string;
-    const fields = "id,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
+    const fields = "id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
 
     if (account.last_sync_at) {
       // Incremental sync — fetch only new inbox messages
@@ -139,7 +139,8 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         }
 
         // Insert message
-        const bodyText = email.bodyPreview || "";
+        const bodyHtml = email.body?.contentType === "html" ? email.body.content : null;
+        const bodyText = bodyHtml ? bodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 5000) : (email.bodyPreview || "");
         const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
 
@@ -152,8 +153,8 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           cc_addresses: ccAddr,
           subject: email.subject || "(No Subject)",
           body_text: bodyText.slice(0, 5000),
-          body_html: null,
-          snippet: bodyText.slice(0, 200),
+          body_html: bodyHtml,
+          snippet: (email.bodyPreview || bodyText).slice(0, 200),
           is_outbound: isOutbound,
           has_attachments: email.hasAttachments || false,
           sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
