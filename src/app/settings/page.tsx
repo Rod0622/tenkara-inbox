@@ -1624,6 +1624,8 @@ const CONDITION_FIELDS = [
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
   { value: "message_count", label: "Number of messages", group: "More" },
+  { value: "days_since_last_outbound", label: "Days since last sent email", group: "Time-based" },
+  { value: "follow_up_count", label: "Follow-up count", group: "Time-based" },
 ];
 
 const CONDITION_OPERATORS = [
@@ -1657,11 +1659,15 @@ const ACTION_TYPES = [
   { value: "add_task", label: "Add task", group: "Tasks & Notes" },
   { value: "stop_processing", label: "Stop processing more rules", group: "Flow" },
   { value: "webhook", label: "Webhook (HTTP POST)", group: "Integration" },
+  { value: "send_follow_up", label: "Send follow-up email (template)", group: "Follow-up" },
+  { value: "create_draft", label: "Create draft & notify", group: "Follow-up" },
+  { value: "notify_assignee", label: "Notify user", group: "Follow-up" },
 ];
 
 const TRIGGER_TYPES = [
   { value: "incoming", label: "Incoming", icon: "📥", description: "Runs when a new email arrives" },
   { value: "outgoing", label: "Outgoing", icon: "📤", description: "Runs when an email is sent" },
+  { value: "unreplied", label: "Unreplied", icon: "⏰", description: "Runs automatically when we're waiting for a supplier reply (checked hourly)" },
   { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action" },
 ];
 
@@ -1689,6 +1695,7 @@ function RulesTab() {
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
   const [userGroups, setUserGroups] = useState<any[]>([]);
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
+  const [emailTemplates, setEmailTemplates] = useState<any[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -1699,7 +1706,8 @@ function RulesTab() {
       getSupabase().from("email_accounts").select("id, name, email").eq("is_active", true),
       getSupabase().from("user_groups").select("id, name").order("created_at"),
       getSupabase().from("task_categories").select("id, name").order("sort_order"),
-    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes, groupsRes, categoriesRes]) => {
+      getSupabase().from("email_templates").select("id, name, subject").order("sort_order"),
+    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes, groupsRes, categoriesRes, templatesRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
       setMembers(membersRes.data || []);
@@ -1707,6 +1715,7 @@ function RulesTab() {
       setEmailAccounts(accountsRes.data || []);
       setUserGroups(groupsRes.data || []);
       setTaskCategories(categoriesRes.data || []);
+      setEmailTemplates(templatesRes.data || []);
       setLoading(false);
     });
   }, []);
@@ -1751,7 +1760,7 @@ function RulesTab() {
 
   const handleAdd = async () => {
     if (!formName.trim() || formConditions.some((c) => !["has_attachments"].includes(c.field) && !c.value.trim())) return;
-    const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder", "add_note", "add_task", "webhook"].includes(t);
+    const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder", "add_note", "add_task", "webhook", "send_follow_up", "create_draft"].includes(t);
     if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
     try {
@@ -1934,6 +1943,24 @@ function RulesTab() {
           className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
       );
     }
+    if (t === "send_follow_up" || t === "create_draft") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select email template...</option>
+          {emailTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` — ${t.subject}` : ""}</option>)}
+        </select>
+      );
+    }
+    if (t === "notify_assignee") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="assignee">Notify assignee</option>
+          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      );
+    }
     return null;
   };
 
@@ -2020,7 +2047,7 @@ function RulesTab() {
               {CONDITION_OPERATORS.filter((o) => {
                 // Filter operators based on field type
                 const boolFields = ["has_attachments"];
-                const numFields = ["message_count"];
+                const numFields = ["message_count", "days_since_last_outbound", "follow_up_count"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (numFields.includes(cond.field)) return ["greater_than", "less_than", "equals"].includes(o.value);
                 if (["email_account", "assignee", "folder", "has_label", "conversation_status"].includes(cond.field)) return ["equals", "not_equals"].includes(o.value);
@@ -2066,8 +2093,8 @@ function RulesTab() {
               <input
                 value={cond.value}
                 onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                placeholder={cond.field === "message_count" ? "Number..." : "Value..."}
-                type={cond.field === "message_count" ? "number" : "text"}
+                placeholder={["message_count", "follow_up_count"].includes(cond.field) ? "Number..." : cond.field === "days_since_last_outbound" ? "Days (e.g. 3)..." : "Value..."}
+                type={["message_count", "days_since_last_outbound", "follow_up_count"].includes(cond.field) ? "number" : "text"}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
               />
             )}
