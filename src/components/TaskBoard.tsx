@@ -722,9 +722,9 @@ function TaskCard({
             <button
               type="button"
               onClick={() => task.conversation?.id && onOpenConversation?.(task.conversation.id)}
-              className="mt-1 inline-flex items-center gap-1 text-xs text-[#58A6FF] hover:text-[#7cc0ff] truncate"
+              className="mt-1 flex items-center gap-1 text-xs text-[#58A6FF] hover:text-[#7cc0ff] max-w-full overflow-hidden"
             >
-              <ExternalLink size={12} />
+              <ExternalLink size={12} className="shrink-0" />
               <span className="truncate">
                 Open thread: {task.conversation.subject || task.conversation.from_email || "Untitled thread"}
               </span>
