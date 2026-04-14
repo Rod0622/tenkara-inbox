@@ -145,30 +145,30 @@ export default function Sidebar({
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
   const [draftsCount, setDraftsCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
-  const [showNotifs, setShowNotifs] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   // Fetch notifications and check due reminders
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchNotifs = async () => {
       try {
-        // Fetch notifications
         const res = await fetch("/api/notifications?user_id=" + currentUser.id);
         const data = await res.json();
         const notifs = data.notifications || [];
         setNotifications(notifs);
-        setUnreadNotifCount(notifs.filter((n: any) => !n.is_read).length);
+        setNotifCount(notifs.filter((n: any) => !n.is_read).length);
 
-        // Check for due follow-up reminders (fires them and creates notifications)
+        // Fetch drafts count
+        const draftsRes = await fetch(`/api/drafts?author_id=${currentUser.id}`);
+        if (draftsRes.ok) { const d = await draftsRes.json(); setDraftsCount((d.drafts || []).length); }
+
+        // Check for due follow-up reminders
         await fetch("/api/reminders?user_id=" + currentUser.id + "&check_due=true");
       } catch (_e) {}
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 30000); // Poll every 30s
+    const interval = setInterval(fetchNotifs, 30000);
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -219,23 +219,7 @@ export default function Sidebar({
 
   useEffect(() => {
     fetchFolders();
-    fetchDraftsAndNotifs();
-    const interval = setInterval(fetchDraftsAndNotifs, 60000); // refresh every minute
-    return () => clearInterval(interval);
-  }, [currentUser?.id]);
-
-  const fetchDraftsAndNotifs = async () => {
-    try {
-      if (currentUser?.id) {
-        const [draftsRes, notifsRes] = await Promise.all([
-          fetch(`/api/drafts?author_id=${currentUser.id}`),
-          fetch(`/api/notifications?user_id=${currentUser.id}`),
-        ]);
-        if (draftsRes.ok) { const d = await draftsRes.json(); setDraftsCount((d.drafts || []).length); }
-        if (notifsRes.ok) { const n = await notifsRes.json(); setNotifCount(n.unread_count || 0); setNotifications(n.notifications || []); }
-      }
-    } catch { /* silent */ }
-  };
+  }, []);
 
   const fetchFolders = async () => {
     try {
@@ -340,9 +324,9 @@ export default function Sidebar({
       className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11] hover:opacity-90 transition-opacity"
     >
       T
-      {unreadNotifCount > 0 && (
+      {notifCount > 0 && (
         <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#F85149] text-[9px] font-bold text-white flex items-center justify-center">
-          {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+          {notifCount > 99 ? "99+" : notifCount}
         </span>
       )}
     </button>
@@ -386,7 +370,7 @@ export default function Sidebar({
           <div className="absolute left-0 top-14 z-50 w-[300px] max-h-[400px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden flex flex-col ml-2">
             <div className="flex items-center justify-between px-3 py-2 border-b border-[#1E242C]">
               <span className="text-xs font-bold text-[#E6EDF3]">Notifications</span>
-              {unreadNotifCount > 0 && (
+              {notifCount > 0 && (
                 <button onClick={markAllRead} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Mark all read</button>
               )}
             </div>
@@ -663,55 +647,6 @@ export default function Sidebar({
             <BarChart3 size={16} />
             <span>Dashboard</span>
           </Link>
-          {/* Notifications */}
-          <button
-            onClick={() => setShowNotifs(!showNotifs)}
-            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full relative"
-          >
-            <Bell size={16} />
-            <span>Notifications</span>
-            {notifCount > 0 && (
-              <span className="ml-auto bg-[#F85149] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{notifCount}</span>
-            )}
-          </button>
-          {showNotifs && (
-            <div className="mx-1 mb-1 max-h-[300px] overflow-y-auto rounded-lg border border-[#1E242C] bg-[#0B0E11]">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-[#1E242C]">
-                <span className="text-[10px] font-bold text-[#484F58] uppercase">Recent Notifications</span>
-                {notifCount > 0 && (
-                  <button onClick={async () => {
-                    await fetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mark_all: true, user_id: currentUser?.id }) });
-                    fetchDraftsAndNotifs();
-                  }} className="text-[10px] text-[#58A6FF] hover:underline">Mark all read</button>
-                )}
-              </div>
-              {notifications.length === 0 ? (
-                <div className="px-3 py-4 text-center text-[11px] text-[#484F58]">No notifications</div>
-              ) : (
-                notifications.slice(0, 20).map((n: any) => (
-                  <button key={n.id} onClick={() => {
-                    if (n.conversation_id) {
-                      window.location.hash = `#conversation=${n.conversation_id}`;
-                      setShowNotifs(false);
-                    }
-                    if (!n.is_read) {
-                      fetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notification_ids: [n.id] }) });
-                    }
-                  }}
-                    className={`w-full text-left px-3 py-2 hover:bg-[#12161B] border-b border-[#1E242C] last:border-0 ${!n.is_read ? "bg-[#12161B]/50" : ""}`}>
-                    <div className="flex items-start gap-2">
-                      {!n.is_read && <div className="w-1.5 h-1.5 rounded-full bg-[#58A6FF] mt-1.5 shrink-0" />}
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-medium text-[#E6EDF3] truncate">{n.title}</div>
-                        {n.body && <div className="text-[10px] text-[#7D8590] truncate mt-0.5">{n.body}</div>}
-                        <div className="text-[9px] text-[#484F58] mt-0.5">{new Date(n.created_at).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          )}
           <Link
             href="/settings"
             className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
