@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
         if (!lastMsg || !lastMsg.is_outbound) continue; // skip if last message is inbound or no messages
 
         const lastMsgTime = new Date(lastMsg.sent_at || lastMsg.created_at).getTime();
-        const daysSinceLastOutbound = (Date.now() - lastMsgTime) / (1000 * 60 * 60 * 24);
+        const hoursSinceLastOutbound = (Date.now() - lastMsgTime) / (1000 * 60 * 60);
 
         // Get follow-up tracking for this conversation
         const { data: trackingRows } = await supabase
@@ -83,12 +83,18 @@ export async function GET(req: NextRequest) {
           const actions = rule.actions || [];
 
           // Parse conditions
-          let requiredDays = 0;
+          let requiredHours = 0; // internally we work in hours
           let requiredFollowUpCount: number | null = null;
 
           for (const cond of conditions) {
-            if (cond.field === "days_since_last_outbound") {
-              requiredDays = parseFloat(cond.value) || 0;
+            if (cond.field === "time_since_last_outbound" || cond.field === "days_since_last_outbound") {
+              // Value format: "3:days" or "2:hours" or "30:minutes" or just "3" (legacy = days)
+              const parts = (cond.value || "").split(":");
+              const amount = parseFloat(parts[0]) || 0;
+              const unit = parts[1] || "days";
+              if (unit === "minutes") requiredHours = amount / 60;
+              else if (unit === "hours") requiredHours = amount;
+              else requiredHours = amount * 24; // days
             } else if (cond.field === "follow_up_count") {
               if (cond.operator === "equals") requiredFollowUpCount = parseInt(cond.value) || 0;
               else if (cond.operator === "greater_than") requiredFollowUpCount = (parseInt(cond.value) || 0) + 0.5; // hack: gt check
@@ -96,10 +102,10 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          if (requiredDays <= 0) continue; // must have a days condition
+          if (requiredHours <= 0) continue; // must have a time condition
 
           // Check if enough days have passed
-          if (daysSinceLastOutbound < requiredDays) continue;
+          if (hoursSinceLastOutbound < requiredHours) continue;
 
           // Get or create tracking for this conversation+rule
           let tracking = (trackingRows || []).find((t: any) => t.rule_id === rule.id);
@@ -125,10 +131,12 @@ export async function GET(req: NextRequest) {
           // Check if we already ran this rule recently (prevent double-firing)
           if (tracking?.last_follow_up_at) {
             const hoursSinceLastAction = (Date.now() - new Date(tracking.last_follow_up_at).getTime()) / (1000 * 60 * 60);
-            if (hoursSinceLastAction < 23) continue; // min 23 hours between follow-ups
+            // Min gap between follow-ups: at least half the required time, but minimum 5 minutes
+            const minGapHours = Math.max(requiredHours * 0.5, 5 / 60);
+            if (hoursSinceLastAction < minGapHours) continue;
           }
 
-          console.log(`[follow-up] Rule "${rule.name}" matched conversation ${convo.id} (${daysSinceLastOutbound.toFixed(1)} days, ${currentFollowUpCount} follow-ups)`);
+          console.log(`[follow-up] Rule "${rule.name}" matched conversation ${convo.id} (${hoursSinceLastOutbound.toFixed(1)}h, ${currentFollowUpCount} follow-ups)`);
 
           // Execute actions
           for (const action of actions) {
@@ -178,7 +186,7 @@ export async function GET(req: NextRequest) {
               rule_id: rule.id,
               rule_name: rule.name,
               follow_up_number: currentFollowUpCount + 1,
-              days_since_outbound: Math.round(daysSinceLastOutbound * 10) / 10,
+              hours_since_outbound: Math.round(hoursSinceLastOutbound * 10) / 10,
             },
           });
         }

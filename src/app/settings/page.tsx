@@ -1624,7 +1624,7 @@ const CONDITION_FIELDS = [
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
   { value: "message_count", label: "Number of messages", group: "More" },
-  { value: "days_since_last_outbound", label: "Days since last sent email", group: "Time-based" },
+  { value: "time_since_last_outbound", label: "Time since last sent email", group: "Time-based" },
   { value: "follow_up_count", label: "Follow-up count", group: "Time-based" },
 ];
 
@@ -2047,7 +2047,7 @@ function RulesTab() {
               {CONDITION_OPERATORS.filter((o) => {
                 // Filter operators based on field type
                 const boolFields = ["has_attachments"];
-                const numFields = ["message_count", "days_since_last_outbound", "follow_up_count"];
+                const numFields = ["message_count", "time_since_last_outbound", "follow_up_count"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (numFields.includes(cond.field)) return ["greater_than", "less_than", "equals"].includes(o.value);
                 if (["email_account", "assignee", "folder", "has_label", "conversation_status"].includes(cond.field)) return ["equals", "not_equals"].includes(o.value);
@@ -2089,12 +2089,39 @@ function RulesTab() {
                 <option value="closed">Closed</option>
                 <option value="snoozed">Snoozed</option>
               </select>
+            ) : cond.field === "time_since_last_outbound" ? (
+              <div className="flex-1 flex gap-1.5 min-w-[100px]">
+                <input
+                  value={(cond.value || "").split(":")[0] || ""}
+                  onChange={(e) => {
+                    const unit = (cond.value || "").split(":")[1] || "days";
+                    updateCondition(idx, { value: `${e.target.value}:${unit}` });
+                  }}
+                  placeholder="Amount..."
+                  type="number"
+                  min="0"
+                  step="any"
+                  className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+                <select
+                  value={(cond.value || "").split(":")[1] || "days"}
+                  onChange={(e) => {
+                    const num = (cond.value || "").split(":")[0] || "0";
+                    updateCondition(idx, { value: `${num}:${e.target.value}` });
+                  }}
+                  className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                >
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
             ) : (
               <input
                 value={cond.value}
                 onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                placeholder={["message_count", "follow_up_count"].includes(cond.field) ? "Number..." : cond.field === "days_since_last_outbound" ? "Days (e.g. 3)..." : "Value..."}
-                type={["message_count", "days_since_last_outbound", "follow_up_count"].includes(cond.field) ? "number" : "text"}
+                placeholder={["message_count", "follow_up_count"].includes(cond.field) ? "Number..." : "Value..."}
+                type={["message_count", "follow_up_count"].includes(cond.field) ? "number" : "text"}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
               />
             )}
