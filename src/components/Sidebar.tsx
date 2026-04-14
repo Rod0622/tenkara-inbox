@@ -180,7 +180,7 @@ export default function Sidebar({
       body: JSON.stringify({ user_id: currentUser.id, mark_all: true }),
     });
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    setUnreadNotifCount(0);
+    setNotifCount(0);
   };
 
   const handleNotifClick = (notif: any) => {
@@ -191,7 +191,7 @@ export default function Sidebar({
       body: JSON.stringify({ notification_ids: [notif.id] }),
     });
     setNotifications((prev) => prev.map((n) => n.id === notif.id ? { ...n, is_read: true } : n));
-    setUnreadNotifCount((prev) => Math.max(0, prev - (notif.is_read ? 0 : 1)));
+    setNotifCount((prev) => Math.max(0, prev - (notif.is_read ? 0 : 1)));
     setShowNotifications(false);
 
     // Navigate based on type — include highlight param
