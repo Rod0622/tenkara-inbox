@@ -6,11 +6,6 @@ import nodemailer from "nodemailer";
 
 // Runs every hour to check for unreplied conversations and execute follow-up rules
 export async function GET(req: NextRequest) {
-  // Verify cron secret
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   const startTime = Date.now();
   const supabase = createClient(
@@ -30,18 +25,26 @@ export async function GET(req: NextRequest) {
       .eq("trigger_type", "unreplied")
       .order("sort_order");
 
-    if (rulesErr || !rules || rules.length === 0) {
+    if (rulesErr) {
+      console.error("[follow-up] Rules query error:", rulesErr.message);
+      return NextResponse.json({ error: rulesErr.message, duration_ms: Date.now() - startTime }, { status: 500 });
+    }
+
+    if (!rules || rules.length === 0) {
+      console.log("[follow-up] No active unreplied rules found");
       return NextResponse.json({ message: "No active follow-up rules", duration_ms: Date.now() - startTime });
     }
 
     results.rulesChecked = rules.length;
-    console.log(`[follow-up] Checking ${rules.length} unreplied rules`);
+    console.log(`[follow-up] Found ${rules.length} unreplied rules:`, rules.map((r: any) => `${r.name} (${r.id.slice(0,8)})`).join(", "));
 
     // Get all open conversations with their last message info
     const { data: conversations } = await supabase
       .from("conversations")
       .select("id, email_account_id, status, from_email, subject, assignee_id")
       .eq("status", "open");
+
+    console.log(`[follow-up] Found ${conversations?.length || 0} open conversations`);
 
     if (!conversations || conversations.length === 0) {
       return NextResponse.json({ message: "No open conversations", ...results, duration_ms: Date.now() - startTime });
