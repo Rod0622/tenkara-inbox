@@ -139,7 +139,7 @@ export async function GET(req: NextRequest) {
             if (hoursSinceLastAction < minGapHours) continue;
           }
 
-          console.log(`[follow-up] Rule "${rule.name}" matched conversation ${convo.id} (${hoursSinceLastOutbound.toFixed(1)}h, ${currentFollowUpCount} follow-ups)`);
+          console.log(`[follow-up] Rule "${rule.name}" matched conversation ${convo.id} (account=${convo.email_account_id?.slice(0,8)}, ${hoursSinceLastOutbound.toFixed(1)}h, ${currentFollowUpCount} follow-ups)`);
 
           // Execute actions
           for (const action of actions) {
