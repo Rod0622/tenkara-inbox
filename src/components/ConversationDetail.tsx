@@ -1761,6 +1761,28 @@ export default function ConversationDetail({
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [showFormModal, setShowFormModal] = useState<{ taskId?: string; categoryId?: string } | null>(null);
   const [replySignature, setReplySignature] = useState("");
+  const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+
+  // Check for drafts when conversation loads
+  useEffect(() => {
+    if (!convo?.id || !currentUser?.id) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/drafts?conversation_id=${convo.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          const myDraft = (data.drafts || []).find((d: any) => d.author_id === currentUser.id) || (data.drafts || [])[0];
+          if (myDraft) {
+            setReplyText(myDraft.body_html || myDraft.body_text || "");
+            setLoadedDraftId(myDraft.id);
+            setShowReplyEditor(true);
+          } else {
+            setLoadedDraftId(null);
+          }
+        }
+      } catch { /* silent */ }
+    })();
+  }, [convo?.id, currentUser?.id]);
 
   // Fetch account signature for replies
   useEffect(() => {
@@ -2236,6 +2258,11 @@ export default function ConversationDetail({
       await onSendReply(convo.id, replyText, replyAttachments.length > 0 ? replyAttachments : undefined);
       setReplyText("");
       setReplyAttachments([]);
+      // Delete draft if one was loaded
+      if (loadedDraftId) {
+        fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
       await refetchDetail();
     } finally {
       setSending(false);
@@ -4416,20 +4443,41 @@ export default function ConversationDetail({
                 </div>
               )}
               <div className="flex justify-between items-center">
-                <button
-                  onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
-                  className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
-                >
-                  Collapse
-                </button>
-                <button
-                  onClick={handleSendReplyInternal}
-                  disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] disabled:opacity-40 transition-all text-[11px] font-bold"
-                >
-                  <Send size={12} />
-                  {sending ? "Sending..." : "Send"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
+                    className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
+                  >
+                    Collapse
+                  </button>
+                  {loadedDraftId && (
+                    <button
+                      onClick={async () => {
+                        await fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+                        setLoadedDraftId(null);
+                        setReplyText("");
+                        setShowReplyEditor(false);
+                        setReplyAttachments([]);
+                      }}
+                      className="text-[11px] text-[#F85149] hover:text-[#FF8E88] transition-colors"
+                    >
+                      Discard draft
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {loadedDraftId && (
+                    <span className="text-[9px] text-[#F0883E] font-semibold px-1.5 py-0.5 rounded bg-[#F0883E]/10 border border-[#F0883E]/20">Draft</span>
+                  )}
+                  <button
+                    onClick={handleSendReplyInternal}
+                    disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] disabled:opacity-40 transition-all text-[11px] font-bold"
+                  >
+                    <Send size={12} />
+                    {sending ? "Sending..." : "Send"}
+                  </button>
+                </div>
               </div>
 
               {/* Reply Template Picker Modal */}
