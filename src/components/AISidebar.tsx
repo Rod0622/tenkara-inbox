@@ -67,41 +67,26 @@ export default function AISidebar({ conversation: convo }: AiSidebarProps) {
 
   return (
     <>
-      {/* ── Floating Kara Button ── */}
+      {/* ── Thin Right Tool Rail ── */}
       {!isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-5 right-5 z-50 group"
-          title="Ask Kara"
-        >
-          <div className="relative">
-            {/* Glow ring */}
-            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] opacity-20 blur-md group-hover:opacity-40 transition-opacity" />
-            {/* Button */}
-            <div className="relative w-12 h-12 rounded-full bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center shadow-lg shadow-[rgba(74,222,128,0.2)] hover:shadow-[rgba(74,222,128,0.35)] hover:scale-105 active:scale-95 transition-all cursor-pointer">
-              <Sparkles size={20} className="text-[#0B0E11]" />
-            </div>
-            {/* Unread-style badge when convo is selected */}
+        <div className="w-10 min-w-[40px] h-full bg-[#0B0E11] border-l border-[#1E242C] flex flex-col items-center py-3 gap-2 shrink-0">
+          <button
+            onClick={() => setIsOpen(true)}
+            className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center hover:opacity-90 hover:scale-105 active:scale-95 transition-all relative"
+            title="Ask Kara"
+          >
+            <Sparkles size={15} className="text-[#0B0E11]" />
             {convo && (
-              <div className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#4ADE80] border-2 border-[#0B0E11]" />
+              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#4ADE80] border-2 border-[#0B0E11]" />
             )}
-          </div>
-        </button>
-      )}
-
-      {/* ── Backdrop ── */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] transition-opacity"
-          onClick={() => setIsOpen(false)}
-        />
+          </button>
+        </div>
       )}
 
       {/* ── Slide-out Panel ── */}
+      {isOpen && (
       <div
-        className={`fixed top-0 right-0 z-50 h-screen w-[340px] max-w-[90vw] bg-[#0D1117] border-l border-[#1E242C] flex flex-col shadow-2xl shadow-black/50 transition-transform duration-300 ease-out ${
-          isOpen ? "translate-x-0" : "translate-x-full"
-        }`}
+        className="w-[340px] min-w-[340px] h-full bg-[#0D1117] border-l border-[#1E242C] flex flex-col shrink-0"
       >
         {/* Header */}
         <div className="px-4 py-3 border-b border-[#1E242C] flex items-center justify-between shrink-0">
@@ -216,6 +201,7 @@ export default function AISidebar({ conversation: convo }: AiSidebarProps) {
           </div>
         </div>
       </div>
+      )}
     </>
   );
 }

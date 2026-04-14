@@ -477,7 +477,7 @@ export default function InboxPage() {
         </>
       )}
 
-      {!isComposing && !isTaskView && <AISidebar conversation={activeConvo} />}
+      <AISidebar conversation={activeConvo} />
     </div>
   );
 }

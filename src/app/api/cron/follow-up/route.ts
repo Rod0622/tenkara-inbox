@@ -335,15 +335,6 @@ async function createDraftNote(supabase: any, convo: any, templateId: string) {
     source: "auto_follow_up",
   });
 
-  // Also create a note for visibility
-  const noteText = `📧 **Auto Follow-up Draft Created**\n\nTemplate: ${templateName}\nSubject: ${subject}\n\n_A draft has been saved to your Drafts folder. Review and send when ready._`;
-
-  await supabase.from("notes").insert({
-    conversation_id: convo.id,
-    text: noteText,
-    author_id: null,
-  });
-
   // Notify assignee
   if (convo.assignee_id) {
     await supabase.from("notifications").insert({
