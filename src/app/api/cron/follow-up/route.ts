@@ -319,9 +319,24 @@ async function sendFollowUpEmail(supabase: any, convo: any, templateId: string) 
 async function createDraftNote(supabase: any, convo: any, templateId: string) {
   const { data: template } = await supabase.from("email_templates").select("*").eq("id", templateId).maybeSingle();
   const templateName = template?.name || "follow-up";
-  const templateBody = template?.body?.replace(/<[^>]*>/g, "").slice(0, 200) || "";
+  const subject = template?.subject || `Re: ${convo.subject}`;
+  const bodyHtml = template?.body || "";
 
-  const noteText = `📧 **Auto Follow-up Draft Ready**\n\nTemplate: ${templateName}\nPreview: ${templateBody}...\n\n_Please review and send manually from the reply editor._`;
+  // Create actual email draft
+  await supabase.from("email_drafts").insert({
+    conversation_id: convo.id,
+    email_account_id: convo.email_account_id,
+    author_id: convo.assignee_id || null,
+    to_addresses: convo.from_email,
+    subject,
+    body_html: bodyHtml,
+    body_text: bodyHtml.replace(/<[^>]*>/g, "").slice(0, 5000),
+    is_reply: true,
+    source: "auto_follow_up",
+  });
+
+  // Also create a note for visibility
+  const noteText = `📧 **Auto Follow-up Draft Created**\n\nTemplate: ${templateName}\nSubject: ${subject}\n\n_A draft has been saved to your Drafts folder. Review and send when ready._`;
 
   await supabase.from("notes").insert({
     conversation_id: convo.id,
@@ -329,13 +344,13 @@ async function createDraftNote(supabase: any, convo: any, templateId: string) {
     author_id: null,
   });
 
-  // Also notify assignee
+  // Notify assignee
   if (convo.assignee_id) {
     await supabase.from("notifications").insert({
       user_id: convo.assignee_id,
       conversation_id: convo.id,
       title: "Follow-up draft ready",
-      body: `A follow-up draft for "${convo.subject}" is ready for your review.`,
+      body: `A follow-up draft for "${convo.subject}" is ready in your Drafts.`,
       type: "follow_up",
     });
   }

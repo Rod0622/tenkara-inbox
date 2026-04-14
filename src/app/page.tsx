@@ -18,6 +18,7 @@ import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
 import AISidebar from "@/components/AISidebar";
 import TaskBoard from "@/components/TaskBoard";
+import DraftsPanel from "@/components/DraftsPanel";
 import CreateConversation from "@/components/CreateConversation";
 import type { Conversation, TaskStatus } from "@/types";
 
@@ -116,6 +117,7 @@ export default function InboxPage() {
     accountEmails.has(c.from_email?.toLowerCase?.() || "");
 
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
+  const isDraftsView = activeView === "drafts" && !activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
   const displayConversations = useMemo(() => {
@@ -431,6 +433,14 @@ export default function InboxPage() {
           onTasksChanged={refetchTasks}
           autoOpenComposer={activeView === "new-task"}
           onOpenConversation={openConversationFromTask}
+        />
+      ) : isDraftsView ? (
+        <DraftsPanel
+          currentUser={currentUser}
+          onOpenConversation={(conversationId) => {
+            setActiveView("inbox");
+            window.location.hash = `#conversation=${conversationId}`;
+          }}
         />
       ) : (
         <>
