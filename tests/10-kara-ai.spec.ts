@@ -15,26 +15,19 @@ test.describe('Kara AI Assistant', () => {
     const karaButton = page.locator('button[title="Ask Kara"]');
     await karaButton.click();
     await page.waitForTimeout(500);
-    // Should see Kara header
-    await expect(page.locator('text=Kara')).toBeVisible();
-    // Should see close button
-    const closeButton = page.locator('button').filter({ has: page.locator('svg') }).last();
-    expect(true).toBeTruthy();
+    await expect(page.getByText('Kara', { exact: true })).toBeVisible();
   });
 
   test('Kara shows quick actions when conversation is selected', async ({ page }) => {
-    // Open a conversation first
     await page.waitForTimeout(2000);
     const firstConvo = page.locator('[class*="cursor-pointer"]').first();
     if (await firstConvo.isVisible()) {
       await firstConvo.click();
       await page.waitForTimeout(1000);
-      // Open Kara
       const karaButton = page.locator('button[title="Ask Kara"]');
       await karaButton.click();
       await page.waitForTimeout(500);
-      // Should see quick actions
-      const quickAction = page.locator('text=Draft reply, text=Summarize, text=Action items').first();
+      const quickAction = page.getByText('Draft reply').first();
       if (await quickAction.isVisible()) {
         expect(true).toBeTruthy();
       }
@@ -45,7 +38,7 @@ test.describe('Kara AI Assistant', () => {
     const karaButton = page.locator('button[title="Ask Kara"]');
     await karaButton.click();
     await page.waitForTimeout(500);
-    const input = page.locator('input[placeholder*="Kara"]');
+    const input = page.locator('input[placeholder*="conversation"]');
     await expect(input).toBeVisible();
   });
 });
