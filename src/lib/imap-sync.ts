@@ -284,15 +284,38 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
       }
     }
 
-    // 2. Connect to IMAP and fetch emails
-    let emails: ParsedEmail[];
-    try {
-      emails = await fetchEmailsViaImap(acct);
-      console.log(`IMAP sync ${accountId}: fetched ${emails.length} emails`);
-    } catch (imapErr: any) {
-      console.error(`IMAP sync ${accountId}: connection failed:`, imapErr.message);
-      await supabase.from("email_accounts").update({ sync_error: imapErr.message }).eq("id", accountId);
-      result.errors.push(imapErr.message);
+    // 2. Connect to IMAP and fetch emails (with retry for transient errors)
+    const TRANSIENT_ERRORS = ["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNREFUSED", "timed out", "socket hang up"];
+    const MAX_RETRIES = 2;
+    let emails: ParsedEmail[] = [];
+    let lastImapErr: any = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          const backoffMs = attempt * 2000;
+          console.log(`IMAP sync ${accountId}: retry ${attempt}/${MAX_RETRIES} after ${backoffMs}ms backoff...`);
+          await new Promise(r => setTimeout(r, backoffMs));
+        }
+        emails = await fetchEmailsViaImap(acct);
+        console.log(`IMAP sync ${accountId}: fetched ${emails.length} emails${attempt > 0 ? ` (retry ${attempt})` : ""}`);
+        lastImapErr = null;
+        break;
+      } catch (imapErr: any) {
+        lastImapErr = imapErr;
+        const isTransient = TRANSIENT_ERRORS.some(e => imapErr.message?.toLowerCase().includes(e.toLowerCase()));
+        if (isTransient && attempt < MAX_RETRIES) {
+          console.warn(`IMAP sync ${accountId}: transient error (attempt ${attempt + 1}): ${imapErr.message} — will retry`);
+          continue;
+        }
+        console.error(`IMAP sync ${accountId}: connection failed after ${attempt + 1} attempt(s):`, imapErr.message);
+        break;
+      }
+    }
+
+    if (lastImapErr) {
+      await supabase.from("email_accounts").update({ sync_error: lastImapErr.message }).eq("id", accountId);
+      result.errors.push(lastImapErr.message);
       return result;
     }
 
@@ -572,22 +595,18 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
       });
     });
 
-    imap.once("error", (err: Error) => {
-      reject(new Error(`IMAP connection error: ${err.message}`));
-    });
-
-    imap.once("end", () => {});
-
     imap.once("error", (err: any) => {
       clearTimeout(timeout);
       console.error(`IMAP sync error for ${account.email}:`, err.message);
       reject(new Error(`IMAP connection error: ${err.message}`));
     });
 
+    imap.once("end", () => {});
+
     const timeout = setTimeout(() => {
       try { imap.end(); } catch {}
-      reject(new Error("IMAP sync timed out (10s)"));
-    }, 10000);
+      reject(new Error("IMAP sync timed out (15s)"));
+    }, 15000);
 
     imap.once("ready", () => clearTimeout(timeout));
 
