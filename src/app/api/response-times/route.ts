@@ -118,6 +118,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, new_records: count });
   }
 
+  if (action === "update_aggregates") {
+    await updateAllSupplierAggregates(supabase);
+    return NextResponse.json({ success: true, message: "Supplier aggregates updated" });
+  }
+
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -126,22 +131,29 @@ export async function POST(req: NextRequest) {
 // ══════════════════════════════════════════════════════
 async function backfillAll(supabase: any) {
   const startTime = Date.now();
+  const TIME_LIMIT = 45000; // 45s — leave margin for the 60s timeout
 
-  // Clear existing response_times to avoid duplicates
+  // Clear existing response_times to avoid duplicates on first call
   await supabase.from("response_times").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
   // Fetch all conversations
   const { data: conversations, error: convErr } = await supabase
     .from("conversations")
-    .select("id, email_account_id, from_email")
-    .neq("status", "trash");
+    .select("id")
+    .neq("status", "trash")
+    .order("created_at", { ascending: true });
 
   if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
 
   let totalRecords = 0;
   let processedConvos = 0;
+  let timedOut = false;
 
   for (const convo of (conversations || [])) {
+    if (Date.now() - startTime > TIME_LIMIT) {
+      timedOut = true;
+      break;
+    }
     try {
       const count = await backfillConversation(supabase, convo.id);
       totalRecords += count;
@@ -152,13 +164,20 @@ async function backfillAll(supabase: any) {
   }
 
   // Update supplier_contacts aggregates
-  await updateAllSupplierAggregates(supabase);
+  if (!timedOut) {
+    try { await updateAllSupplierAggregates(supabase); } catch (_e) {}
+  }
 
   return NextResponse.json({
     success: true,
     conversations_processed: processedConvos,
+    conversations_total: (conversations || []).length,
     response_times_created: totalRecords,
+    timed_out: timedOut,
     duration_ms: Date.now() - startTime,
+    message: timedOut
+      ? `Processed ${processedConvos}/${(conversations || []).length} conversations before timeout. Run backfill again to continue — already-processed conversations will be re-processed (idempotent).`
+      : "Backfill complete",
   });
 }
 
