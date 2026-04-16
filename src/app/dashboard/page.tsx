@@ -196,6 +196,8 @@ export default function DashboardPage() {
   const [userRtData, setUserRtData] = useState<any[]>([]);
   const [rtAccountFilter, setRtAccountFilter] = useState<string>("all");
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   useEffect(() => { loadDashboardData(); }, [dateFrom, dateTo]);
 
@@ -229,40 +231,77 @@ export default function DashboardPage() {
       const recJson = await recRes.json();
       const records = recJson.records || [];
 
-      // Aggregate suppliers
-      const suppMap: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; accounts: Set<string> }> = {};
+      // Fetch conversation metadata for subjects and assignees
+      const convoIds = Array.from(new Set(records.map((r: any) => r.conversation_id).filter(Boolean)));
+      const convoMeta: Record<string, { subject: string; assignee_id: string | null }> = {};
+      if (convoIds.length > 0) {
+        // Fetch in chunks of 200
+        for (let ci = 0; ci < convoIds.length; ci += 200) {
+          const chunk = convoIds.slice(ci, ci + 200);
+          const { data: convos } = await getSupabase()
+            .from("conversations")
+            .select("id, subject, assignee_id")
+            .in("id", chunk);
+          for (const c of (convos || [])) convoMeta[c.id] = { subject: c.subject, assignee_id: c.assignee_id };
+        }
+      }
+
+      // Aggregate suppliers (with assignee tracking and subjects)
+      const suppMap: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; accounts: Set<string>; assignees: Set<string>; subjects: Set<string> }> = {};
       for (const r of records) {
         if (!r.supplier_email) continue;
-        if (!suppMap[r.supplier_email]) suppMap[r.supplier_email] = { email: r.supplier_email, domain: r.supplier_domain || "", supplier_replies: [], team_replies: [], accounts: new Set() };
+        if (!suppMap[r.supplier_email]) suppMap[r.supplier_email] = { email: r.supplier_email, domain: r.supplier_domain || "", supplier_replies: [], team_replies: [], accounts: new Set(), assignees: new Set(), subjects: new Set() };
         if (r.direction === "supplier_reply") suppMap[r.supplier_email].supplier_replies.push(r.response_minutes);
         else suppMap[r.supplier_email].team_replies.push(r.response_minutes);
         if (r.email_account_id) suppMap[r.supplier_email].accounts.add(r.email_account_id);
+        // Track assignees and subjects from conversation metadata
+        const cm = convoMeta[r.conversation_id];
+        if (cm?.assignee_id) suppMap[r.supplier_email].assignees.add(cm.assignee_id);
+        if (cm?.subject) suppMap[r.supplier_email].subjects.add(cm.subject);
       }
       const suppList = Object.values(suppMap).map(s => ({
         ...s,
         accounts: Array.from(s.accounts),
+        assignee_ids: Array.from(s.assignees),
+        subjects: Array.from(s.subjects),
         supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
         team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
         total: s.supplier_replies.length + s.team_replies.length,
       })).sort((a, b) => b.total - a.total);
       setSupplierRtData(suppList);
 
-      // Aggregate user response times
-      const userMap: Record<string, number[]> = {};
+      // Aggregate user response times (with per-supplier breakdown)
+      const userMap: Record<string, { total_mins: number[]; by_supplier: Record<string, { mins: number[]; subjects: Set<string> }> }> = {};
       for (const r of records) {
         if (r.direction !== "team_reply" || !r.team_member_id) continue;
-        if (!userMap[r.team_member_id]) userMap[r.team_member_id] = [];
-        userMap[r.team_member_id].push(r.response_minutes);
+        if (!userMap[r.team_member_id]) userMap[r.team_member_id] = { total_mins: [], by_supplier: {} };
+        userMap[r.team_member_id].total_mins.push(r.response_minutes);
+        // Per-supplier breakdown
+        const se = r.supplier_email || "unknown";
+        if (!userMap[r.team_member_id].by_supplier[se]) userMap[r.team_member_id].by_supplier[se] = { mins: [], subjects: new Set() };
+        userMap[r.team_member_id].by_supplier[se].mins.push(r.response_minutes);
+        const cm = convoMeta[r.conversation_id];
+        if (cm?.subject) userMap[r.team_member_id].by_supplier[se].subjects.add(cm.subject);
       }
-      const userList = Object.entries(userMap).map(([uid, mins]) => {
-        const sorted = mins.slice().sort((a, b) => a - b);
+      const userList = Object.entries(userMap).map(([uid, data]) => {
+        const sorted = data.total_mins.slice().sort((a, b) => a - b);
         const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+        const suppliers = Object.entries(data.by_supplier).map(([email, sd]) => {
+          const sMins = sd.mins.slice().sort((a, b) => a - b);
+          return {
+            email,
+            avg_minutes: Math.round(sMins.reduce((a, b) => a + b, 0) / sMins.length),
+            total: sMins.length,
+            subjects: Array.from(sd.subjects),
+          };
+        }).sort((a, b) => b.total - a.total);
         return {
           user_id: uid,
           avg_minutes: Math.round(avg),
           fastest_minutes: Math.round(sorted[0]),
           slowest_minutes: Math.round(sorted[sorted.length - 1]),
           total: sorted.length,
+          suppliers,
         };
       }).sort((a, b) => a.avg_minutes - b.avg_minutes);
       setUserRtData(userList);
@@ -946,24 +985,48 @@ export default function DashboardPage() {
                     {userRtData.map((stat: any) => {
                       const user = userStats.find((u) => u.id === stat.user_id);
                       const fmtM = (m: number) => m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
+                      const isExpanded = expandedUserId === stat.user_id;
                       return (
-                        <div key={stat.user_id} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center">
-                          <div className="flex items-center gap-3">
-                            {user ? (
-                              <>
-                                <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11]" style={{ background: user.color }}>{user.initials}</div>
-                                <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[#484F58]">{user.department}</div></div>
-                              </>
-                            ) : (
-                              <div className="text-[13px] text-[#484F58]">Unassigned</div>
-                            )}
+                        <div key={stat.user_id}>
+                          <div onClick={() => setExpandedUserId(isExpanded ? null : stat.user_id)}
+                            className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border items-center cursor-pointer transition-colors ${isExpanded ? "border-[#58A6FF]/30 bg-[#12161B]" : "border-[#1E242C] bg-[#0F1318] hover:border-[#58A6FF]/20"}`}>
+                            <div className="flex items-center gap-3">
+                              {user ? (
+                                <>
+                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11]" style={{ background: user.color }}>{user.initials}</div>
+                                  <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[#484F58]">{user.department} · {stat.suppliers?.length || 0} suppliers</div></div>
+                                </>
+                              ) : (
+                                <div className="text-[13px] text-[#484F58]">Unassigned</div>
+                              )}
+                            </div>
+                            <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "#4ADE80" : stat.avg_minutes <= 660 ? "#F0883E" : "#F85149" }}>
+                              {fmtM(stat.avg_minutes)}
+                            </div>
+                            <div className="text-center text-sm text-[#4ADE80]">{fmtM(stat.fastest_minutes)}</div>
+                            <div className="text-center text-sm text-[#F0883E]">{fmtM(stat.slowest_minutes)}</div>
+                            <div className="text-center text-sm text-[#E6EDF3]">{stat.total}</div>
                           </div>
-                          <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "#4ADE80" : stat.avg_minutes <= 660 ? "#F0883E" : "#F85149" }}>
-                            {fmtM(stat.avg_minutes)}
-                          </div>
-                          <div className="text-center text-sm text-[#4ADE80]">{fmtM(stat.fastest_minutes)}</div>
-                          <div className="text-center text-sm text-[#F0883E]">{fmtM(stat.slowest_minutes)}</div>
-                          <div className="text-center text-sm text-[#E6EDF3]">{stat.total}</div>
+                          {/* Expanded: per-supplier breakdown */}
+                          {isExpanded && stat.suppliers && stat.suppliers.length > 0 && (
+                            <div className="ml-11 mt-1 mb-2 space-y-1">
+                              <div className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-1.5 text-[9px] text-[#484F58] uppercase tracking-wider font-semibold">
+                                <span>Supplier</span><span className="text-center">Avg Response</span><span className="text-center">Replies</span><span>Materials / Subjects</span>
+                              </div>
+                              {stat.suppliers.map((sup: any) => {
+                                const sc = sup.avg_minutes <= 240 ? "#4ADE80" : sup.avg_minutes <= 660 ? "#F0883E" : "#F85149";
+                                return (
+                                  <a key={sup.email} href={"/contacts/" + encodeURIComponent(sup.email)}
+                                    className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-2 rounded-lg border border-[#1E242C]/50 bg-[#0B0E11] items-center hover:border-[#58A6FF]/20 transition-colors">
+                                    <div className="text-[11px] text-[#C9D1D9] truncate">{sup.email}</div>
+                                    <div className="text-center text-[11px] font-semibold" style={{ color: sc }}>{fmtM(sup.avg_minutes)}</div>
+                                    <div className="text-center text-[11px] text-[#7D8590]">{sup.total}</div>
+                                    <div className="text-[10px] text-[#484F58] truncate">{sup.subjects?.slice(0, 2).join("; ") || "—"}{sup.subjects?.length > 2 ? " +" + (sup.subjects.length - 2) + " more" : ""}</div>
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -980,26 +1043,44 @@ export default function DashboardPage() {
                         <option value="all">All Accounts</option>
                         {emailAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </select>
+                      <input type="text" placeholder="Search suppliers..." value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none flex-1 max-w-xs" />
+                      <span className="text-[10px] text-[#484F58] ml-auto">
+                        {supplierRtData.filter((s: any) => (rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter)) && (!supplierSearch || s.email.toLowerCase().includes(supplierSearch.toLowerCase()) || s.domain.toLowerCase().includes(supplierSearch.toLowerCase()))).length} suppliers
+                      </span>
                     </div>
                     <div className="space-y-1">
-                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
-                        <span>Supplier</span><span className="text-center">Their Avg Response</span><span className="text-center">Our Avg Response</span><span className="text-center">Total Exchanges</span><span className="text-center">Domain</span>
+                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+                        <span>Supplier</span><span className="text-center">Their Avg Response</span><span className="text-center">Our Avg Response</span><span className="text-center">Exchanges</span><span className="text-center">Assigned To</span><span className="text-center">Domain</span>
                       </div>
                       {supplierRtData
                         .filter((s: any) => rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter))
+                        .filter((s: any) => !supplierSearch || s.email.toLowerCase().includes(supplierSearch.toLowerCase()) || s.domain.toLowerCase().includes(supplierSearch.toLowerCase()))
                         .map((s: any) => {
                           const fmtM = (m: number | null) => m === null ? "—" : m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
                           const sColor = s.supplier_avg === null ? "#484F58" : s.supplier_avg <= 240 ? "#4ADE80" : s.supplier_avg <= 720 ? "#F5D547" : s.supplier_avg <= 1440 ? "#F0883E" : "#F85149";
                           const tColor = s.team_avg === null ? "#484F58" : s.team_avg <= 240 ? "#4ADE80" : s.team_avg <= 720 ? "#F5D547" : s.team_avg <= 1440 ? "#F0883E" : "#F85149";
+                          const assignees = (s.assignee_ids || []).map((id: string) => userStats.find(u => u.id === id)).filter(Boolean);
                           return (
                             <a key={s.email} href={"/contacts/" + encodeURIComponent(s.email)}
-                              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center hover:border-[#58A6FF]/30 transition-colors cursor-pointer">
+                              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center hover:border-[#58A6FF]/30 transition-colors cursor-pointer">
                               <div className="truncate">
                                 <div className="text-[13px] font-medium truncate">{s.email}</div>
+                                {s.subjects && s.subjects.length > 0 && <div className="text-[10px] text-[#484F58] truncate mt-0.5">{s.subjects[0]}{s.subjects.length > 1 ? ` +${s.subjects.length - 1} more` : ""}</div>}
                               </div>
                               <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_avg)}</div>
                               <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_avg)}</div>
                               <div className="text-center text-sm text-[#E6EDF3]">{s.total}</div>
+                              <div className="text-center">
+                                {assignees.length > 0 ? (
+                                  <div className="flex items-center justify-center gap-1 flex-wrap">
+                                    {assignees.slice(0, 2).map((u: any) => (
+                                      <div key={u.id} className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: u.color }} title={u.name}>{u.initials}</div>
+                                    ))}
+                                    {assignees.length > 2 && <span className="text-[9px] text-[#484F58]">+{assignees.length - 2}</span>}
+                                  </div>
+                                ) : <span className="text-[10px] text-[#484F58]">—</span>}
+                              </div>
                               <div className="text-center text-[11px] text-[#484F58]">{s.domain}</div>
                             </a>
                           );
