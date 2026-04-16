@@ -1,4 +1,3 @@
-import { createServerClient } from "@/lib/supabase";
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 
 // Sync a microsoft_oauth account using delegated Graph API token
@@ -8,7 +7,17 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
   newConversations: number;
   errors: string[];
 }> {
-  const supabase = createServerClient();
+  // Use a fresh Supabase client with cache-busting to avoid stale read-replica data
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: { persistSession: false },
+      db: { schema: "inbox" },
+      global: { headers: { "Cache-Control": "no-cache", "x-cache-bust": Date.now().toString() } },
+    }
+  );
   const result = { success: false, newMessages: 0, newConversations: 0, errors: [] as string[] };
 
   try {
