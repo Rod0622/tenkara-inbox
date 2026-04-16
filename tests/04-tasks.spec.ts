@@ -10,9 +10,9 @@ test.describe('Tasks', () => {
 
   test('task board loads with columns', async ({ page }) => {
     await expect(page.getByText('My Tasks')).toBeVisible();
-    await expect(page.getByText('To do', { exact: true })).toBeVisible();
-    await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Completed', { exact: true }).first()).toBeVisible();
+    await expect(page.locator('div.text-sm.font-semibold:has-text("To do")')).toBeVisible();
+    await expect(page.locator('div.text-sm.font-semibold:has-text("In progress")')).toBeVisible();
+    await expect(page.locator('div.text-sm.font-semibold:has-text("Completed")')).toBeVisible();
   });
 
   test('new task button is visible', async ({ page }) => {
