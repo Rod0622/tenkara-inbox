@@ -218,7 +218,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
         // Compute response time for this new message
         try {
-          await computeResponseTime(conversationId);
+          if (conversationId) await computeResponseTime(conversationId);
         } catch (_rtErr) { /* best-effort */ }
       } catch (msgErr: any) {
         console.error("MS OAuth sync msg error:", msgErr.message);
