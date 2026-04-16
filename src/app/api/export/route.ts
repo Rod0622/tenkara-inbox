@@ -235,6 +235,42 @@ export async function GET(req: NextRequest) {
     }
 
     result.sla = slaRows;
+
+    // Enhance SLA rows with response_times data
+    const convoIds = slaRows.map((r: any) => r.conversation_id);
+    if (convoIds.length > 0) {
+      const { data: rtData } = await supabase
+        .from("response_times")
+        .select("conversation_id, direction, response_minutes")
+        .in("conversation_id", convoIds.slice(0, 500));
+
+      const rtByConvo: Record<string, { supplier: number[]; team: number[] }> = {};
+      for (const rt of (rtData || [])) {
+        if (!rtByConvo[rt.conversation_id]) rtByConvo[rt.conversation_id] = { supplier: [], team: [] };
+        if (rt.direction === "supplier_reply") rtByConvo[rt.conversation_id].supplier.push(rt.response_minutes);
+        else rtByConvo[rt.conversation_id].team.push(rt.response_minutes);
+      }
+
+      const fmtM = (m: number) => m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
+
+      for (const row of slaRows) {
+        const rt = rtByConvo[row.conversation_id];
+        if (rt) {
+          if (rt.supplier.length > 0) {
+            const avg = rt.supplier.reduce((a: number, b: number) => a + b, 0) / rt.supplier.length;
+            row.supplier_avg_response = fmtM(avg);
+            row.supplier_response_count = rt.supplier.length;
+          }
+          if (rt.team.length > 0) {
+            const avg = rt.team.reduce((a: number, b: number) => a + b, 0) / rt.team.length;
+            row.team_avg_response = fmtM(avg);
+            row.team_response_count = rt.team.length;
+          }
+        }
+        if (!row.supplier_avg_response) { row.supplier_avg_response = ""; row.supplier_response_count = 0; }
+        if (!row.team_avg_response) { row.team_avg_response = ""; row.team_response_count = 0; }
+      }
+    }
   }
 
   // ── USER PERFORMANCE ──
@@ -429,6 +465,109 @@ export async function GET(req: NextRequest) {
       details: JSON.stringify(a.details || {}),
       created_at: a.created_at,
     }));
+  }
+
+  // ── SUPPLIER RESPONSIVENESS ──
+  if (dataset === "all" || dataset === "supplier_responsiveness") {
+    let rtQuery = supabase
+      .from("response_times")
+      .select("supplier_email, supplier_domain, direction, response_minutes, response_sent_at, email_account_id, team_member_id")
+      .order("response_sent_at", { ascending: false });
+
+    if (dateFrom) rtQuery = rtQuery.gte("response_sent_at", dateFrom + "T00:00:00Z");
+    if (dateTo) rtQuery = rtQuery.lte("response_sent_at", dateTo + "T23:59:59Z");
+
+    const { data: rtData } = await rtQuery;
+
+    // Fetch account names for mapping
+    const { data: accounts } = await supabase.from("email_accounts").select("id, name, email");
+    const acctMap: Record<string, any> = {};
+    for (const a of (accounts || [])) acctMap[a.id] = a;
+
+    // Fetch team member names
+    const { data: tmMembers } = await supabase.from("team_members").select("id, name, email");
+    const tmMap: Record<string, any> = {};
+    for (const m of (tmMembers || [])) tmMap[m.id] = m;
+
+    // Aggregate by supplier email
+    const supplierAgg: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; last_at: string; accounts: Set<string> }> = {};
+    for (const rt of (rtData || [])) {
+      if (!rt.supplier_email) continue;
+      if (!supplierAgg[rt.supplier_email]) {
+        supplierAgg[rt.supplier_email] = { email: rt.supplier_email, domain: rt.supplier_domain || "", supplier_replies: [], team_replies: [], last_at: "", accounts: new Set() };
+      }
+      const s = supplierAgg[rt.supplier_email];
+      if (rt.direction === "supplier_reply") s.supplier_replies.push(rt.response_minutes);
+      else s.team_replies.push(rt.response_minutes);
+      if (!s.last_at || rt.response_sent_at > s.last_at) s.last_at = rt.response_sent_at;
+      if (rt.email_account_id) s.accounts.add(acctMap[rt.email_account_id]?.name || rt.email_account_id);
+    }
+
+    const fmtMin = (m: number) => m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
+    const calcStats = (arr: number[]) => {
+      if (arr.length === 0) return { avg: "", median: "", fastest: "", slowest: "", count: 0 };
+      const sorted = arr.slice().sort((a, b) => a - b);
+      const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+      return {
+        avg: fmtMin(avg),
+        median: fmtMin(sorted[Math.floor(sorted.length / 2)]),
+        fastest: fmtMin(sorted[0]),
+        slowest: fmtMin(sorted[sorted.length - 1]),
+        count: sorted.length,
+      };
+    };
+
+    const supplierRows: any[] = [];
+    for (const [email, s] of Object.entries(supplierAgg)) {
+      const sr = calcStats(s.supplier_replies);
+      const tr = calcStats(s.team_replies);
+      supplierRows.push({
+        supplier_email: email,
+        supplier_domain: s.domain,
+        accounts: Array.from(s.accounts).join(", "),
+        supplier_avg_response: sr.avg,
+        supplier_median_response: sr.median,
+        supplier_fastest: sr.fastest,
+        supplier_slowest: sr.slowest,
+        supplier_total_replies: sr.count,
+        team_avg_response: tr.avg,
+        team_median_response: tr.median,
+        team_fastest: tr.fastest,
+        team_slowest: tr.slowest,
+        team_total_replies: tr.count,
+        last_activity: s.last_at,
+      });
+    }
+
+    // Sort by total interactions desc
+    supplierRows.sort((a, b) => (b.supplier_total_replies + b.team_total_replies) - (a.supplier_total_replies + a.team_total_replies));
+
+    result.supplier_responsiveness = supplierRows;
+
+    // Also generate per-user response time summary
+    const userAgg: Record<string, number[]> = {};
+    for (const rt of (rtData || [])) {
+      if (rt.direction !== "team_reply" || !rt.team_member_id) continue;
+      if (!userAgg[rt.team_member_id]) userAgg[rt.team_member_id] = [];
+      userAgg[rt.team_member_id].push(rt.response_minutes);
+    }
+
+    const userRtRows: any[] = [];
+    for (const [userId, mins] of Object.entries(userAgg)) {
+      const stats = calcStats(mins);
+      const member = tmMap[userId];
+      userRtRows.push({
+        user_name: member?.name || "Unknown",
+        user_email: member?.email || "",
+        avg_response: stats.avg,
+        median_response: stats.median,
+        fastest: stats.fastest,
+        slowest: stats.slowest,
+        total_replies: stats.count,
+      });
+    }
+
+    result.user_response_times = userRtRows;
   }
 
   return NextResponse.json(result);

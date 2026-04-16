@@ -191,7 +191,11 @@ export default function DashboardPage() {
   // SLA/KPI metrics
   const [slaData, setSlaData] = useState<any>(null);
   const [slaLoading, setSlaLoading] = useState(false);
-  const [slaSubTab, setSlaSubTab] = useState<"response-times" | "awaiting-ours" | "awaiting-supplier">("response-times");
+  const [slaSubTab, setSlaSubTab] = useState<"response-times" | "supplier-responsiveness" | "awaiting-ours" | "awaiting-supplier">("response-times");
+  const [supplierRtData, setSupplierRtData] = useState<any[]>([]);
+  const [userRtData, setUserRtData] = useState<any[]>([]);
+  const [rtAccountFilter, setRtAccountFilter] = useState<string>("all");
+  const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
 
   useEffect(() => { loadDashboardData(); }, [dateFrom, dateTo]);
 
@@ -209,6 +213,60 @@ export default function DashboardPage() {
       const res = await fetch(url);
       const data = await res.json();
       setSlaData(data);
+
+      // Also load response_times from the response_times table for supplier and user breakdowns
+      let rtUrl = "/api/response-times?summary=true";
+      if (effectiveDateFrom) rtUrl += "&date_from=" + effectiveDateFrom;
+      if (effectiveDateTo) rtUrl += "&date_to=" + effectiveDateTo;
+      const rtRes = await fetch(rtUrl);
+      const rtJson = await rtRes.json();
+
+      // Build supplier list from response_times records
+      let rtRecordsUrl = "/api/response-times?";
+      if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
+      if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
+      const recRes = await fetch(rtRecordsUrl);
+      const recJson = await recRes.json();
+      const records = recJson.records || [];
+
+      // Aggregate suppliers
+      const suppMap: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; accounts: Set<string> }> = {};
+      for (const r of records) {
+        if (!r.supplier_email) continue;
+        if (!suppMap[r.supplier_email]) suppMap[r.supplier_email] = { email: r.supplier_email, domain: r.supplier_domain || "", supplier_replies: [], team_replies: [], accounts: new Set() };
+        if (r.direction === "supplier_reply") suppMap[r.supplier_email].supplier_replies.push(r.response_minutes);
+        else suppMap[r.supplier_email].team_replies.push(r.response_minutes);
+        if (r.email_account_id) suppMap[r.supplier_email].accounts.add(r.email_account_id);
+      }
+      const suppList = Object.values(suppMap).map(s => ({
+        ...s,
+        accounts: Array.from(s.accounts),
+        supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
+        team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
+        total: s.supplier_replies.length + s.team_replies.length,
+      })).sort((a, b) => b.total - a.total);
+      setSupplierRtData(suppList);
+
+      // Aggregate user response times
+      const userMap: Record<string, number[]> = {};
+      for (const r of records) {
+        if (r.direction !== "team_reply" || !r.team_member_id) continue;
+        if (!userMap[r.team_member_id]) userMap[r.team_member_id] = [];
+        userMap[r.team_member_id].push(r.response_minutes);
+      }
+      const userList = Object.entries(userMap).map(([uid, mins]) => {
+        const sorted = mins.slice().sort((a, b) => a - b);
+        const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+        return {
+          user_id: uid,
+          avg_minutes: Math.round(avg),
+          fastest_minutes: Math.round(sorted[0]),
+          slowest_minutes: Math.round(sorted[sorted.length - 1]),
+          total: sorted.length,
+        };
+      }).sort((a, b) => a.avg_minutes - b.avg_minutes);
+      setUserRtData(userList);
+
     } catch (_e) {
       console.error("Failed to load SLA metrics");
     } finally {
@@ -234,6 +292,10 @@ export default function DashboardPage() {
       .select("id, name, email, initials, color, role, department")
       .eq("is_active", true)
       .order("name");
+
+    // Fetch email accounts for filters
+    const { data: accts } = await getSupabase().from("email_accounts").select("id, name, email").eq("is_active", true);
+    setEmailAccounts(accts || []);
 
     // Tasks query with optional date filter
     let tasksQuery = getSupabase()
@@ -863,6 +925,7 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-1 mb-3">
                   {([
                     { id: "response-times" as const, label: "Response Times by User" },
+                    { id: "supplier-responsiveness" as const, label: "Supplier Response Times" },
                     { id: "awaiting-ours" as const, label: "Awaiting Our Reply (" + slaData.overall.awaiting_our_reply + ")" },
                     { id: "awaiting-supplier" as const, label: "Awaiting Supplier Reply (" + slaData.overall.awaiting_supplier_reply + ")" },
                   ]).map((t) => (
@@ -874,14 +937,15 @@ export default function DashboardPage() {
                   ))}
                 </div>
 
-                {/* Response Times by User */}
+                {/* Response Times by User (from response_times table) */}
                 {slaSubTab === "response-times" && (
                   <div className="space-y-1">
                     <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
                       <span>Team Member</span><span className="text-center">Avg Response</span><span className="text-center">Fastest</span><span className="text-center">Slowest</span><span className="text-center">Responses</span>
                     </div>
-                    {slaData.per_user.map((stat: any) => {
+                    {userRtData.map((stat: any) => {
                       const user = userStats.find((u) => u.id === stat.user_id);
+                      const fmtM = (m: number) => m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
                       return (
                         <div key={stat.user_id} className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center">
                           <div className="flex items-center gap-3">
@@ -894,16 +958,54 @@ export default function DashboardPage() {
                               <div className="text-[13px] text-[#484F58]">Unassigned</div>
                             )}
                           </div>
-                          <div className="text-center text-sm font-semibold" style={{ color: stat.avg_response_hours <= 4 ? "#4ADE80" : stat.avg_response_hours <= 11 ? "#F0883E" : "#F85149" }}>
-                            {formatBusinessTime(stat.avg_response_hours)}
+                          <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "#4ADE80" : stat.avg_minutes <= 660 ? "#F0883E" : "#F85149" }}>
+                            {fmtM(stat.avg_minutes)}
                           </div>
-                          <div className="text-center text-sm text-[#4ADE80]">{formatBusinessTime(stat.fastest_response_hours)}</div>
-                          <div className="text-center text-sm text-[#F0883E]">{formatBusinessTime(stat.slowest_response_hours)}</div>
-                          <div className="text-center text-sm text-[#E6EDF3]">{stat.total_responses}</div>
+                          <div className="text-center text-sm text-[#4ADE80]">{fmtM(stat.fastest_minutes)}</div>
+                          <div className="text-center text-sm text-[#F0883E]">{fmtM(stat.slowest_minutes)}</div>
+                          <div className="text-center text-sm text-[#E6EDF3]">{stat.total}</div>
                         </div>
                       );
                     })}
-                    {slaData.per_user.length === 0 && <Empty text="No response data yet" />}
+                    {userRtData.length === 0 && <Empty text="No response data yet" />}
+                  </div>
+                )}
+
+                {/* Supplier Response Times */}
+                {slaSubTab === "supplier-responsiveness" && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <select value={rtAccountFilter} onChange={(e) => setRtAccountFilter(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none">
+                        <option value="all">All Accounts</option>
+                        {emailAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+                        <span>Supplier</span><span className="text-center">Their Avg Response</span><span className="text-center">Our Avg Response</span><span className="text-center">Total Exchanges</span><span className="text-center">Domain</span>
+                      </div>
+                      {supplierRtData
+                        .filter((s: any) => rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter))
+                        .map((s: any) => {
+                          const fmtM = (m: number | null) => m === null ? "—" : m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
+                          const sColor = s.supplier_avg === null ? "#484F58" : s.supplier_avg <= 240 ? "#4ADE80" : s.supplier_avg <= 720 ? "#F5D547" : s.supplier_avg <= 1440 ? "#F0883E" : "#F85149";
+                          const tColor = s.team_avg === null ? "#484F58" : s.team_avg <= 240 ? "#4ADE80" : s.team_avg <= 720 ? "#F5D547" : s.team_avg <= 1440 ? "#F0883E" : "#F85149";
+                          return (
+                            <a key={s.email} href={"/contacts/" + encodeURIComponent(s.email)}
+                              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center hover:border-[#58A6FF]/30 transition-colors cursor-pointer">
+                              <div className="truncate">
+                                <div className="text-[13px] font-medium truncate">{s.email}</div>
+                              </div>
+                              <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_avg)}</div>
+                              <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_avg)}</div>
+                              <div className="text-center text-sm text-[#E6EDF3]">{s.total}</div>
+                              <div className="text-center text-[11px] text-[#484F58]">{s.domain}</div>
+                            </a>
+                          );
+                        })}
+                      {supplierRtData.length === 0 && <Empty text="No supplier response data yet. Run the backfill first." />}
+                    </div>
                   </div>
                 )}
 
@@ -1102,6 +1204,7 @@ const DATASETS = [
   { id: "team_members", label: "Team Members", desc: "User profiles, roles, departments" },
   { id: "sla", label: "SLA Metrics", desc: "Response times, waiting times, reply status per conversation" },
   { id: "user_performance", label: "User Performance", desc: "Per-user task breakdown, completion rates, categories, conversation SLA & response times" },
+  { id: "supplier_responsiveness", label: "Supplier Response Times", desc: "Per-supplier avg response time, our team response time, total exchanges" },
   { id: "activity", label: "Activity Log", desc: "All actions: assignments, replies, status changes" },
 ] as const;
 
@@ -1188,6 +1291,8 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
         } else {
           rows = perfData[perfSubSheet] || [];
         }
+      } else if (selectedDataset === "supplier_responsiveness") {
+        rows = data.supplier_responsiveness || [];
       } else {
         rows = data[selectedDataset] || [];
       }
