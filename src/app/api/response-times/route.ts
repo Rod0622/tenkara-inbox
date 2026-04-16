@@ -135,21 +135,40 @@ async function backfillAll(supabase: any) {
   // Clear existing response_times
   await supabase.from("response_times").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
-  // Fetch ALL messages in bulk (much faster than per-conversation queries)
-  const { data: allMessages, error: msgErr } = await supabase
-    .from("messages")
-    .select("id, conversation_id, from_email, is_outbound, sent_at, sent_by_user_id")
-    .order("sent_at", { ascending: true });
+  // Fetch ALL messages in bulk with pagination (Supabase default limit is 1000)
+  let allMessages: any[] = [];
+  let msgOffset = 0;
+  const PAGE_SIZE = 5000;
+  while (true) {
+    const { data: batch, error: msgErr } = await supabase
+      .from("messages")
+      .select("id, conversation_id, from_email, is_outbound, sent_at, sent_by_user_id")
+      .order("sent_at", { ascending: true })
+      .range(msgOffset, msgOffset + PAGE_SIZE - 1);
 
-  if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
+    if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
+    if (!batch || batch.length === 0) break;
+    allMessages = allMessages.concat(batch);
+    if (batch.length < PAGE_SIZE) break;
+    msgOffset += PAGE_SIZE;
+  }
 
-  // Fetch all conversations for metadata
-  const { data: allConvos, error: convErr } = await supabase
-    .from("conversations")
-    .select("id, email_account_id, assignee_id")
-    .neq("status", "trash");
+  // Fetch all conversations for metadata (with pagination)
+  let allConvos: any[] = [];
+  let convoOffset = 0;
+  while (true) {
+    const { data: batch, error: convErr } = await supabase
+      .from("conversations")
+      .select("id, email_account_id, assignee_id")
+      .neq("status", "trash")
+      .range(convoOffset, convoOffset + PAGE_SIZE - 1);
 
-  if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
+    if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
+    if (!batch || batch.length === 0) break;
+    allConvos = allConvos.concat(batch);
+    if (batch.length < PAGE_SIZE) break;
+    convoOffset += PAGE_SIZE;
+  }
 
   const convoMap: Record<string, any> = {};
   for (const c of (allConvos || [])) convoMap[c.id] = c;
