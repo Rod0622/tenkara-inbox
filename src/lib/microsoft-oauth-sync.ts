@@ -20,7 +20,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     // Get fresh access token
     let token: string;
     try {
-      token = await refreshMicrosoftToken(accountId);
+      token = await refreshMicrosoftToken(accountId, true);
     } catch (tokenErr: any) {
       const msg = "OAuth token refresh failed: " + tokenErr.message;
       console.error("MS OAuth sync " + accountId + ": " + msg);
@@ -42,8 +42,21 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
       const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
       url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=" + fields + "&$filter=receivedDateTime ge " + syncDate;
     } else {
-      // Initial sync — use skip offset for pagination
       const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
+
+      // Safety: if initial sync has been paginating too long (skip > 500),
+      // force-complete it and switch to incremental sync going forward
+      if (skipOffset > 500) {
+        console.log("MS OAuth sync " + accountId + ": initial sync stuck at skip=" + skipOffset + ", forcing transition to incremental sync");
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(),
+          sync_error: null,
+        }).eq("id", accountId);
+        result.success = true;
+        return result;
+      }
+
+      // Initial sync — use skip offset for pagination
       url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$skip=" + skipOffset + "&$orderby=receivedDateTime desc&$select=" + fields;
     }
 

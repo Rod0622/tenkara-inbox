@@ -1,12 +1,22 @@
 import { createServerClient } from "@/lib/supabase";
 
 // Refresh a Microsoft OAuth access token using the stored refresh token
-export async function refreshMicrosoftToken(accountId: string): Promise<string> {
-  const supabase = createServerClient();
+export async function refreshMicrosoftToken(accountId: string, forceRefresh: boolean = false): Promise<string> {
+  // Use a fresh Supabase client with cache-busting to avoid stale read-replica data
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: { persistSession: false },
+      db: { schema: "inbox" },
+      global: { headers: { "Cache-Control": "no-cache", "x-cache-bust": Date.now().toString() } },
+    }
+  );
 
   const { data: account } = await supabase
     .from("email_accounts")
-    .select("oauth_refresh_token, oauth_access_token, oauth_expires_at")
+    .select("email, oauth_refresh_token, oauth_access_token, oauth_expires_at")
     .eq("id", accountId)
     .single();
 
@@ -14,15 +24,18 @@ export async function refreshMicrosoftToken(accountId: string): Promise<string> 
     throw new Error("No refresh token stored for this account");
   }
 
-  // Check if current token is still valid (with 5 min buffer)
-  if (account.oauth_access_token && account.oauth_expires_at) {
+  // Check if current token is still valid (with 5 min buffer) — skip if forceRefresh
+  if (!forceRefresh && account.oauth_access_token && account.oauth_expires_at) {
     const expiresAt = new Date(account.oauth_expires_at).getTime();
     if (Date.now() < expiresAt - 5 * 60 * 1000) {
+      console.log(`[ms-oauth] ${account.email || accountId}: using cached token (expires in ${Math.round((expiresAt - Date.now()) / 60000)}m)`);
       return account.oauth_access_token;
     }
   }
 
   // Refresh the token
+  console.log(`[ms-oauth] ${account.email || accountId}: refreshing access token...`);
+  const refreshStart = Date.now();
   const res = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -37,10 +50,13 @@ export async function refreshMicrosoftToken(accountId: string): Promise<string> 
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    console.error(`[ms-oauth] ${account.email || accountId}: refresh failed (${res.status}):`, err.error_description || err.error);
     throw new Error("Token refresh failed: " + (err.error_description || err.error || "unknown"));
   }
 
   const tokens = await res.json();
+  const refreshDuration = Date.now() - refreshStart;
+  console.log(`[ms-oauth] ${account.email || accountId}: got new token in ${refreshDuration}ms, expires_in=${tokens.expires_in}s, token_start=${(tokens.access_token || "").slice(0, 20)}`);
 
   // Update stored tokens
   const update: any = {
