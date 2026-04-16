@@ -405,7 +405,7 @@ async function updateAllSupplierAggregates(supabase: any) {
     .eq("direction", "supplier_reply")
     .not("supplier_email", "is", null);
 
-  const uniqueEmails = [...new Set((allRt || []).map((r: any) => r.supplier_email).filter(Boolean))];
+  const uniqueEmails = Array.from(new Set((allRt || []).map((r: any) => r.supplier_email).filter(Boolean)));
 
   for (const email of uniqueEmails) {
     try {
