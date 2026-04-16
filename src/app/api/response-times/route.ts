@@ -22,28 +22,39 @@ export async function GET(req: NextRequest) {
   const dateTo = sp.get("date_to");
   const summary = sp.get("summary") === "true";
 
-  let query = supabase
-    .from("response_times")
-    .select("*")
-    .order("response_sent_at", { ascending: false });
+  // Paginate to get ALL matching records (Supabase default limit is 1000)
+  let allRecords: any[] = [];
+  let offset = 0;
+  const PAGE = 5000;
+  while (true) {
+    let q = supabase
+      .from("response_times")
+      .select("*")
+      .order("response_sent_at", { ascending: false })
+      .range(offset, offset + PAGE - 1);
 
-  if (supplierEmail) query = query.eq("supplier_email", supplierEmail.toLowerCase());
-  if (supplierDomain) query = query.eq("supplier_domain", supplierDomain.toLowerCase());
-  if (teamMemberId) query = query.eq("team_member_id", teamMemberId);
-  if (direction) query = query.eq("direction", direction);
-  if (dateFrom) query = query.gte("response_sent_at", dateFrom + "T00:00:00Z");
-  if (dateTo) query = query.lte("response_sent_at", dateTo + "T23:59:59Z");
+    if (supplierEmail) q = q.eq("supplier_email", supplierEmail.toLowerCase());
+    if (supplierDomain) q = q.eq("supplier_domain", supplierDomain.toLowerCase());
+    if (teamMemberId) q = q.eq("team_member_id", teamMemberId);
+    if (direction) q = q.eq("direction", direction);
+    if (dateFrom) q = q.gte("response_sent_at", dateFrom + "T00:00:00Z");
+    if (dateTo) q = q.lte("response_sent_at", dateTo + "T23:59:59Z");
 
-  const { data: records, error } = await query.limit(500);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: batch, error: batchErr } = await q;
+    if (batchErr) return NextResponse.json({ error: batchErr.message }, { status: 500 });
+    if (!batch || batch.length === 0) break;
+    allRecords = allRecords.concat(batch);
+    if (batch.length < PAGE) break;
+    offset += PAGE;
+  }
 
   if (!summary) {
-    return NextResponse.json({ records: records || [] });
+    return NextResponse.json({ records: allRecords });
   }
 
   // Aggregate stats
-  const supplierReplies = (records || []).filter((r: any) => r.direction === "supplier_reply");
-  const teamReplies = (records || []).filter((r: any) => r.direction === "team_reply");
+  const supplierReplies = allRecords.filter((r: any) => r.direction === "supplier_reply");
+  const teamReplies = allRecords.filter((r: any) => r.direction === "team_reply");
 
   const calcStats = (items: any[]) => {
     if (items.length === 0) return { avg_minutes: 0, median_minutes: 0, fastest_minutes: 0, slowest_minutes: 0, total: 0 };
