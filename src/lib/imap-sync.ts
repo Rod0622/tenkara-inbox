@@ -759,18 +759,69 @@ function isOutbound(fromEmail: string, accountEmail: string): boolean {
 // ── Compute response time for latest message in a conversation ──
 async function computeResponseTime(supabase: any, conversationId: string) {
   try {
-    const res = await fetch(
-      (process.env.NEXTAUTH_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000") + "/api/response-times",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "compute", conversation_id: conversationId }),
+    // Fetch conversation metadata
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("id, email_account_id, assignee_id")
+      .eq("id", conversationId)
+      .single();
+    if (!convo) return;
+
+    // Fetch last few messages to find the response pair
+    const { data: messages } = await supabase
+      .from("messages")
+      .select("id, from_email, is_outbound, sent_at, sent_by_user_id")
+      .eq("conversation_id", conversationId)
+      .order("sent_at", { ascending: true });
+
+    if (!messages || messages.length < 2) return;
+
+    const newMsg = messages[messages.length - 1];
+    // Look backwards for the most recent message in the opposite direction
+    let triggerMsg = null;
+    for (let i = messages.length - 2; i >= 0; i--) {
+      if (messages[i].is_outbound !== newMsg.is_outbound) {
+        triggerMsg = messages[i];
+        break;
       }
-    );
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`Response time compute failed for ${conversationId}: ${err}`);
     }
+    if (!triggerMsg) return;
+
+    const diffMinutes = (new Date(newMsg.sent_at).getTime() - new Date(triggerMsg.sent_at).getTime()) / (1000 * 60);
+    if (diffMinutes <= 0 || diffMinutes > 30 * 24 * 60) return;
+
+    // Check if this pair already exists
+    const { data: existing } = await supabase
+      .from("response_times")
+      .select("id")
+      .eq("trigger_message_id", triggerMsg.id)
+      .eq("response_message_id", newMsg.id)
+      .maybeSingle();
+    if (existing) return;
+
+    const supplierEmail = triggerMsg.is_outbound
+      ? newMsg.from_email?.toLowerCase()
+      : triggerMsg.from_email?.toLowerCase();
+    const supplierDomain = supplierEmail ? supplierEmail.split("@")[1] || null : null;
+    const direction = triggerMsg.is_outbound ? "supplier_reply" : "team_reply";
+    const teamMemberId = direction === "team_reply"
+      ? (newMsg.sent_by_user_id || convo.assignee_id || null)
+      : null;
+
+    await supabase.from("response_times").insert({
+      conversation_id: conversationId,
+      email_account_id: convo.email_account_id,
+      direction,
+      trigger_message_id: triggerMsg.id,
+      trigger_sent_at: triggerMsg.sent_at,
+      response_message_id: newMsg.id,
+      response_sent_at: newMsg.sent_at,
+      response_minutes: Math.round(diffMinutes * 10) / 10,
+      response_business_minutes: null,
+      supplier_email: supplierEmail || null,
+      supplier_domain: supplierDomain || null,
+      team_member_id: teamMemberId,
+    });
   } catch (err: any) {
     // Non-critical — silently ignore
   }
