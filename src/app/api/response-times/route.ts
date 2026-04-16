@@ -133,10 +133,7 @@ async function backfillAll(supabase: any) {
   const startTime = Date.now();
   const TIME_LIMIT = 45000; // 45s — leave margin for the 60s timeout
 
-  // Clear existing response_times to avoid duplicates on first call
-  await supabase.from("response_times").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-
-  // Fetch all conversations
+  // Fetch all conversations that have at least 2 messages (skip empty ones)
   const { data: conversations, error: convErr } = await supabase
     .from("conversations")
     .select("id")
@@ -147,6 +144,7 @@ async function backfillAll(supabase: any) {
 
   let totalRecords = 0;
   let processedConvos = 0;
+  let skippedConvos = 0;
   let timedOut = false;
 
   for (const convo of (conversations || [])) {
@@ -156,8 +154,9 @@ async function backfillAll(supabase: any) {
     }
     try {
       const count = await backfillConversation(supabase, convo.id);
+      if (count > 0) processedConvos++;
+      else skippedConvos++;
       totalRecords += count;
-      processedConvos++;
     } catch (err: any) {
       console.error(`Response time backfill error for ${convo.id}:`, err.message);
     }
@@ -170,14 +169,15 @@ async function backfillAll(supabase: any) {
 
   return NextResponse.json({
     success: true,
-    conversations_processed: processedConvos,
+    conversations_with_pairs: processedConvos,
+    conversations_skipped: skippedConvos,
     conversations_total: (conversations || []).length,
     response_times_created: totalRecords,
     timed_out: timedOut,
     duration_ms: Date.now() - startTime,
     message: timedOut
-      ? `Processed ${processedConvos}/${(conversations || []).length} conversations before timeout. Run backfill again to continue — already-processed conversations will be re-processed (idempotent).`
-      : "Backfill complete",
+      ? `Processed ${processedConvos + skippedConvos}/${(conversations || []).length} conversations before timeout. Run backfill again to continue.`
+      : `Backfill complete. ${processedConvos} conversations had response pairs, ${skippedConvos} skipped (no back-and-forth).`,
   });
 }
 
@@ -212,6 +212,11 @@ async function backfillConversation(supabase: any, conversationId: string): Prom
     .order("sent_at", { ascending: true });
 
   if (!messages || messages.length < 2) return 0;
+
+  // Check if there are messages in both directions
+  const hasOutbound = messages.some((m: any) => m.is_outbound === true);
+  const hasInbound = messages.some((m: any) => m.is_outbound === false);
+  if (!hasOutbound || !hasInbound) return 0;
 
   // Delete existing response_times for this conversation to avoid duplicates
   await supabase.from("response_times").delete().eq("conversation_id", conversationId);
