@@ -32,7 +32,8 @@ test.describe('Inbox & Conversations', () => {
       await expect(page.getByRole('button', { name: /Messages/ })).toBeVisible();
       await expect(page.getByRole('button', { name: /Notes/ })).toBeVisible();
       // Tasks tab - use exact match to avoid sidebar Tasks button
-      await expect(page.getByRole('button', { name: 'Tasks', exact: true }).last()).toBeVisible();
+      // Replace line 35 with:
+      await expect(page.getByRole('button', { name: /^Tasks \d/ }).last()).toBeVisible();
       await expect(page.getByRole('button', { name: /Activity/ })).toBeVisible();
     }
   });

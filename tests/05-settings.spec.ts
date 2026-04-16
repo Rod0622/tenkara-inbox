@@ -15,7 +15,7 @@ test.describe('Settings', () => {
   test('accounts tab shows email accounts', async ({ page }) => {
     await page.getByText('Accounts').first().click();
     await page.waitForTimeout(500);
-    await expect(page.getByText('Email Accounts')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email Accounts' })).toBeVisible();
   });
 
   test('team members tab shows members', async ({ page }) => {
