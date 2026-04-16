@@ -131,53 +131,122 @@ export async function POST(req: NextRequest) {
 // ══════════════════════════════════════════════════════
 async function backfillAll(supabase: any) {
   const startTime = Date.now();
-  const TIME_LIMIT = 45000; // 45s — leave margin for the 60s timeout
 
-  // Fetch all conversations that have at least 2 messages (skip empty ones)
-  const { data: conversations, error: convErr } = await supabase
+  // Clear existing response_times
+  await supabase.from("response_times").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+
+  // Fetch ALL messages in bulk (much faster than per-conversation queries)
+  const { data: allMessages, error: msgErr } = await supabase
+    .from("messages")
+    .select("id, conversation_id, from_email, is_outbound, sent_at, sent_by_user_id")
+    .order("sent_at", { ascending: true });
+
+  if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
+
+  // Fetch all conversations for metadata
+  const { data: allConvos, error: convErr } = await supabase
     .from("conversations")
-    .select("id")
-    .neq("status", "trash")
-    .order("created_at", { ascending: true });
+    .select("id, email_account_id, assignee_id")
+    .neq("status", "trash");
 
   if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
 
-  let totalRecords = 0;
-  let processedConvos = 0;
-  let skippedConvos = 0;
-  let timedOut = false;
+  const convoMap: Record<string, any> = {};
+  for (const c of (allConvos || [])) convoMap[c.id] = c;
 
-  for (const convo of (conversations || [])) {
-    if (Date.now() - startTime > TIME_LIMIT) {
-      timedOut = true;
-      break;
+  // Group messages by conversation
+  const msgsByConvo: Record<string, any[]> = {};
+  for (const msg of (allMessages || [])) {
+    if (!msgsByConvo[msg.conversation_id]) msgsByConvo[msg.conversation_id] = [];
+    msgsByConvo[msg.conversation_id].push(msg);
+  }
+
+  // Process each conversation in memory
+  const allInserts: any[] = [];
+  let conversationsWithPairs = 0;
+  let conversationsSkipped = 0;
+
+  for (const convoId of Object.keys(msgsByConvo)) {
+    const messages = msgsByConvo[convoId];
+    if (messages.length < 2) { conversationsSkipped++; continue; }
+
+    const hasOutbound = messages.some((m: any) => m.is_outbound === true);
+    const hasInbound = messages.some((m: any) => m.is_outbound === false);
+    if (!hasOutbound || !hasInbound) { conversationsSkipped++; continue; }
+
+    const convo = convoMap[convoId];
+    if (!convo) { conversationsSkipped++; continue; }
+
+    let foundPair = false;
+
+    for (let i = 0; i < messages.length - 1; i++) {
+      const trigger = messages[i];
+
+      for (let j = i + 1; j < messages.length; j++) {
+        const response = messages[j];
+        if (trigger.is_outbound === response.is_outbound) continue;
+
+        const diffMinutes = (new Date(response.sent_at).getTime() - new Date(trigger.sent_at).getTime()) / (1000 * 60);
+        if (diffMinutes <= 0) break;
+        if (diffMinutes > 30 * 24 * 60) break;
+
+        const supplierEmail = trigger.is_outbound
+          ? response.from_email?.toLowerCase()
+          : trigger.from_email?.toLowerCase();
+        const supplierDomain = supplierEmail ? supplierEmail.split("@")[1] || null : null;
+        const direction = trigger.is_outbound ? "supplier_reply" : "team_reply";
+        const teamMemberId = direction === "team_reply"
+          ? (response.sent_by_user_id || convo.assignee_id || null)
+          : null;
+
+        allInserts.push({
+          conversation_id: convoId,
+          email_account_id: convo.email_account_id,
+          direction,
+          trigger_message_id: trigger.id,
+          trigger_sent_at: trigger.sent_at,
+          response_message_id: response.id,
+          response_sent_at: response.sent_at,
+          response_minutes: Math.round(diffMinutes * 10) / 10,
+          response_business_minutes: null,
+          supplier_email: supplierEmail || null,
+          supplier_domain: supplierDomain || null,
+          team_member_id: teamMemberId,
+        });
+
+        foundPair = true;
+        break;
+      }
     }
-    try {
-      const count = await backfillConversation(supabase, convo.id);
-      if (count > 0) processedConvos++;
-      else skippedConvos++;
-      totalRecords += count;
-    } catch (err: any) {
-      console.error(`Response time backfill error for ${convo.id}:`, err.message);
+
+    if (foundPair) conversationsWithPairs++;
+    else conversationsSkipped++;
+  }
+
+  // Batch insert all records in chunks of 100
+  let insertedCount = 0;
+  for (let k = 0; k < allInserts.length; k += 100) {
+    const chunk = allInserts.slice(k, k + 100);
+    const { error: insertErr } = await supabase.from("response_times").insert(chunk);
+    if (insertErr) {
+      console.error("Response time batch insert error:", insertErr.message);
+    } else {
+      insertedCount += chunk.length;
     }
   }
 
-  // Update supplier_contacts aggregates
-  if (!timedOut) {
-    try { await updateAllSupplierAggregates(supabase); } catch (_e) {}
-  }
+  // Update supplier aggregates
+  try { await updateAllSupplierAggregates(supabase); } catch (_e) {}
 
   return NextResponse.json({
     success: true,
-    conversations_with_pairs: processedConvos,
-    conversations_skipped: skippedConvos,
-    conversations_total: (conversations || []).length,
-    response_times_created: totalRecords,
-    timed_out: timedOut,
+    conversations_with_pairs: conversationsWithPairs,
+    conversations_skipped: conversationsSkipped,
+    conversations_total: Object.keys(msgsByConvo).length,
+    response_times_created: insertedCount,
+    total_messages_scanned: (allMessages || []).length,
     duration_ms: Date.now() - startTime,
-    message: timedOut
-      ? `Processed ${processedConvos + skippedConvos}/${(conversations || []).length} conversations before timeout. Run backfill again to continue.`
-      : `Backfill complete. ${processedConvos} conversations had response pairs, ${skippedConvos} skipped (no back-and-forth).`,
+    message: "Backfill complete. " + conversationsWithPairs + " conversations had response pairs, " + conversationsSkipped + " skipped.",
   });
 }
 
