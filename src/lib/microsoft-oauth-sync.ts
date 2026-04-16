@@ -23,12 +23,14 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
       token = await refreshMicrosoftToken(accountId);
     } catch (tokenErr: any) {
       const msg = "OAuth token refresh failed: " + tokenErr.message;
+      console.error("MS OAuth sync " + accountId + ": " + msg);
       await supabase.from("email_accounts").update({ sync_error: msg }).eq("id", accountId);
       result.errors.push(msg);
       return result;
     }
 
     console.log("MS OAuth sync " + accountId + ": token refreshed, fetching emails");
+    console.log("MS OAuth sync " + accountId + ": last_sync_at=" + (account.last_sync_at || "null") + ", Graph URL prefix: " + (account.last_sync_at ? "incremental" : "initial skip=" + (account.last_sync_uid || "0")));
 
     // Fetch emails using delegated token (/me/ endpoint)
     const BATCH_SIZE = 10;
@@ -52,6 +54,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       const msg = "Graph API error: " + (err.error?.message || res.statusText);
+      console.error("MS OAuth sync " + accountId + ": " + msg + " (status: " + res.status + ", code: " + (err.error?.code || "none") + ")");
       await supabase.from("email_accounts").update({ sync_error: msg }).eq("id", accountId);
       result.errors.push(msg);
       return result;
