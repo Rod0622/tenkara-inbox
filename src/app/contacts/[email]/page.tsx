@@ -77,11 +77,26 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   if (loading) return <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]"><div className="mx-auto max-w-7xl px-6 py-10"><div className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-6 text-sm text-[#7D8590]">Loading command center...</div></div></div>;
   if (error || !data) return <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]"><div className="mx-auto max-w-5xl px-6 py-10"><div className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-6"><AlertTriangle className="text-[#F87171] mb-2" size={20} /><div className="text-lg font-semibold text-[#F87171]">Unable to load</div><div className="mt-2 text-sm text-[#9BA7B4]">{error}</div><Link href="/" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-4 py-2 text-sm font-semibold text-[#58A6FF] hover:bg-[#151A21]"><ArrowLeft size={16} /> Back</Link></div></div></div>;
 
-  const { contact, summary, threads, cross_account_threads=[], tasks, notes, thread_summaries, supplier_hours } = data;
+  const { contact, summary, threads, cross_account_threads=[], tasks, notes, thread_summaries, supplier_hours, responsiveness } = data;
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
   const dismissedTasks = tasks.filter((t: any) => t.status === "dismissed");
   const completedTasks = tasks.filter((t: any) => ["completed","done"].includes((t.status||"").toLowerCase()) || t.is_done);
+
+  const fmtMinutes = (m: number | null | undefined) => {
+    if (!m && m !== 0) return "—";
+    if (m < 60) return Math.round(m) + "m";
+    if (m < 1440) return Math.round(m / 60 * 10) / 10 + "h";
+    return Math.round(m / 1440 * 10) / 10 + "d";
+  };
+  const responseColor = (m: number | null | undefined) => {
+    if (!m && m !== 0) return "#7D8590";
+    if (m <= 60) return "#4ADE80";
+    if (m <= 240) return "#58A6FF";
+    if (m <= 720) return "#F5D547";
+    if (m <= 1440) return "#F0883E";
+    return "#F85149";
+  };
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3] overflow-y-auto">
@@ -140,6 +155,45 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             </div>
           )}
         </div>
+
+        {/* Responsiveness */}
+        {responsiveness && (responsiveness.supplier || responsiveness.team) && (
+          <div className="mb-4 rounded-2xl border border-[#1E242C] bg-[#0F1318] p-4">
+            <div className="flex items-center gap-2 mb-3"><Clock3 size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Response Times</span></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {responsiveness.supplier && (
+                <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-[#7D8590] mb-2">Supplier Responsiveness</div>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <span className="text-2xl font-bold" style={{ color: responseColor(responsiveness.supplier.avg_minutes) }}>{fmtMinutes(responsiveness.supplier.avg_minutes)}</span>
+                    <span className="text-xs text-[#484F58]">avg response</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[11px] text-[#7D8590]">
+                    <span>Median: <span className="text-[#C9D1D9] font-medium">{fmtMinutes(responsiveness.supplier.median_minutes)}</span></span>
+                    <span>Fastest: <span className="text-[#4ADE80] font-medium">{fmtMinutes(responsiveness.supplier.fastest_minutes)}</span></span>
+                    <span>Slowest: <span className="text-[#F85149] font-medium">{fmtMinutes(responsiveness.supplier.slowest_minutes)}</span></span>
+                    <span>Total: <span className="text-[#C9D1D9] font-medium">{responsiveness.supplier.total} replies</span></span>
+                  </div>
+                </div>
+              )}
+              {responsiveness.team && (
+                <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-[#7D8590] mb-2">Our Team Responsiveness</div>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <span className="text-2xl font-bold" style={{ color: responseColor(responsiveness.team.avg_minutes) }}>{fmtMinutes(responsiveness.team.avg_minutes)}</span>
+                    <span className="text-xs text-[#484F58]">avg response</span>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[11px] text-[#7D8590]">
+                    <span>Median: <span className="text-[#C9D1D9] font-medium">{fmtMinutes(responsiveness.team.median_minutes)}</span></span>
+                    <span>Fastest: <span className="text-[#4ADE80] font-medium">{fmtMinutes(responsiveness.team.fastest_minutes)}</span></span>
+                    <span>Slowest: <span className="text-[#F85149] font-medium">{fmtMinutes(responsiveness.team.slowest_minutes)}</span></span>
+                    <span>Total: <span className="text-[#C9D1D9] font-medium">{responsiveness.team.total} replies</span></span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">

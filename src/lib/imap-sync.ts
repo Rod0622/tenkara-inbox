@@ -264,6 +264,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             }).eq("id", conversationId);
 
             result.newMessages++;
+
+            // Compute response time for this new message
+            try {
+              await computeResponseTime(supabase, conversationId!);
+            } catch (_rtErr) { /* best-effort */ }
           } catch (msgErr: any) {
             result.errors.push(msgErr.message);
           }
@@ -421,6 +426,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
         result.newMessages++;
         result.lastUid = Math.max(result.lastUid || 0, email.uid);
+
+        // Compute response time for this new message
+        try {
+          await computeResponseTime(supabase, conversationId);
+        } catch (_rtErr) { /* best-effort */ }
       } catch (emailErr: any) {
         result.errors.push(`Email ${email.uid}: ${emailErr.message}`);
       }
@@ -744,4 +754,24 @@ function normalizeSubject(subject: string): string {
 
 function isOutbound(fromEmail: string, accountEmail: string): boolean {
   return fromEmail.toLowerCase() === accountEmail.toLowerCase();
+}
+
+// ── Compute response time for latest message in a conversation ──
+async function computeResponseTime(supabase: any, conversationId: string) {
+  try {
+    const res = await fetch(
+      (process.env.NEXTAUTH_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000") + "/api/response-times",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "compute", conversation_id: conversationId }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      console.error(`Response time compute failed for ${conversationId}: ${err}`);
+    }
+  } catch (err: any) {
+    // Non-critical — silently ignore
+  }
 }

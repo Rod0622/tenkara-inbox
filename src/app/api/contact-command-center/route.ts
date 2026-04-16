@@ -373,6 +373,41 @@ export async function GET(req: NextRequest) {
       riskSignals,
     });
 
+    // ── Fetch responsiveness data for this supplier ──
+    let responsiveness = null;
+    try {
+      const { data: supplierRts } = await supabase
+        .from("response_times")
+        .select("direction, response_minutes, response_sent_at, team_member_id")
+        .eq("supplier_email", email)
+        .order("response_sent_at", { ascending: false })
+        .limit(100);
+
+      if (supplierRts && supplierRts.length > 0) {
+        const supplierReplies = supplierRts.filter((r: any) => r.direction === "supplier_reply");
+        const teamReplies = supplierRts.filter((r: any) => r.direction === "team_reply");
+
+        const calcStats = (items: any[]) => {
+          if (items.length === 0) return null;
+          const mins = items.map((r: any) => r.response_minutes).sort((a: number, b: number) => a - b);
+          const sum = mins.reduce((a: number, b: number) => a + b, 0);
+          return {
+            avg_minutes: Math.round(sum / mins.length),
+            median_minutes: Math.round(mins[Math.floor(mins.length / 2)]),
+            fastest_minutes: Math.round(mins[0]),
+            slowest_minutes: Math.round(mins[mins.length - 1]),
+            total: mins.length,
+            last_at: items[0]?.response_sent_at || null,
+          };
+        };
+
+        responsiveness = {
+          supplier: calcStats(supplierReplies),
+          team: calcStats(teamReplies),
+        };
+      }
+    } catch (_rtErr) { /* non-critical */ }
+
     return NextResponse.json({
       contact: {
         email,
@@ -386,6 +421,7 @@ export async function GET(req: NextRequest) {
         work_end: supplierContact.work_end,
         work_days: supplierContact.work_days,
       } : null,
+      responsiveness,
       summary: {
         total_threads: relatedThreads.length + crossAccountThreads.length,
         open_threads: openThreads,

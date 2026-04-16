@@ -215,6 +215,11 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
             });
           } catch (_e) { /* best-effort */ }
         }
+
+        // Compute response time for this new message
+        try {
+          await computeResponseTime(conversationId);
+        } catch (_rtErr) { /* best-effort */ }
       } catch (msgErr: any) {
         console.error("MS OAuth sync msg error:", msgErr.message);
       }
@@ -260,4 +265,16 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     result.errors.push(err.message);
     return result;
   }
+}
+
+// ── Compute response time for latest message in a conversation ──
+async function computeResponseTime(conversationId: string) {
+  try {
+    const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+    await fetch(baseUrl + "/api/response-times", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "compute", conversation_id: conversationId }),
+    });
+  } catch (_err) { /* non-critical */ }
 }
