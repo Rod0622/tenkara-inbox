@@ -347,11 +347,19 @@ export default function DashboardPage() {
 
     const { data: tasks } = await tasksQuery;
 
-    // Conversations
-    let convosQuery = getSupabase().from("conversations").select("id, assignee_id, is_unread, status, email_account_id").neq("status", "trash");
-    if (effectiveDateFrom) convosQuery = convosQuery.gte("last_message_at", effectiveDateFrom);
-    if (effectiveDateTo) convosQuery = convosQuery.lte("last_message_at", effectiveDateTo);
-    const { data: conversations } = await convosQuery;
+    // Conversations — paginate to get ALL (Supabase default limit is 1000)
+    let conversations: any[] = [];
+    let convoOffset = 0;
+    while (true) {
+      let convosQuery = getSupabase().from("conversations").select("id, assignee_id, is_unread, status, email_account_id").neq("status", "trash").range(convoOffset, convoOffset + 4999);
+      if (effectiveDateFrom) convosQuery = convosQuery.gte("last_message_at", effectiveDateFrom);
+      if (effectiveDateTo) convosQuery = convosQuery.lte("last_message_at", effectiveDateTo);
+      const { data: batch } = await convosQuery;
+      if (!batch || batch.length === 0) break;
+      conversations = conversations.concat(batch);
+      if (batch.length < 5000) break;
+      convoOffset += 5000;
+    }
 
     // Sent emails — count by sent_by_user_id (most accurate), fallback to account_access
     let outboundQuery = getSupabase()
