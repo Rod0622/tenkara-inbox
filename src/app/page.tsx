@@ -355,14 +355,30 @@ export default function InboxPage() {
     await Promise.all([refetch(), refetchTasks()]);
   };
 
-  const openConversationFromTask = (conversationId: string) => {
-    const match = conversations.find((conversation) => conversation.id === conversationId);
-    if (!match) return;
+  const openConversationFromTask = async (conversationId: string) => {
+    let match = conversations.find((conversation) => conversation.id === conversationId);
 
-    setActiveConvo(match);
+    if (!match) {
+      // Conversation not in current list (different mailbox/folder) — fetch it
+      const sb = createBrowserClient();
+      const { data } = await sb
+        .from("conversations")
+        .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at")
+        .eq("id", conversationId)
+        .maybeSingle();
+
+      if (!data) return;
+      match = data as any;
+
+      // Switch to the correct mailbox/folder
+      if (data.email_account_id) setActiveMailbox(data.email_account_id);
+      if (data.folder_id) setActiveFolder(data.folder_id);
+    }
+
+    setActiveConvo(match!);
     setActiveView("inbox");
-    setActiveMailbox(match.email_account_id || null);
-    setActiveFolder(match.folder_id || null);
+    if (match!.email_account_id) setActiveMailbox(match!.email_account_id);
+    if (match!.folder_id) setActiveFolder(match!.folder_id);
     setSearchQuery("");
   };
 

@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     }
 
     results.rulesChecked = rules.length;
-    console.log(`[follow-up] Found ${rules.length} unreplied rules:`, rules.map((r: any) => `${r.name} (${r.id.slice(0,8)})`).join(", "));
+    console.log(`[follow-up] Found ${rules.length} active unreplied rules:`, rules.map((r: any) => `${r.name} (${r.id.slice(0,8)}, active=${r.is_active})`).join(", "));
 
     // Get all open conversations with their last message info
     const { data: conversations } = await supabase
@@ -134,8 +134,8 @@ export async function GET(req: NextRequest) {
           // Check if we already ran this rule recently (prevent double-firing)
           if (tracking?.last_follow_up_at) {
             const hoursSinceLastAction = (Date.now() - new Date(tracking.last_follow_up_at).getTime()) / (1000 * 60 * 60);
-            // Min gap between follow-ups: at least half the required time, but minimum 5 minutes
-            const minGapHours = Math.max(requiredHours * 0.5, 5 / 60);
+            // Min gap between follow-ups: at least the required time (so it doesn't fire every cron cycle)
+            const minGapHours = Math.max(requiredHours, 1); // minimum 1 hour between firings
             if (hoursSinceLastAction < minGapHours) continue;
           }
 

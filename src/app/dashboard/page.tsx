@@ -176,7 +176,7 @@ export default function DashboardPage() {
   const [userTasks, setUserTasks] = useState<TaskDetail[]>([]);
   const [userConversations, setUserConversations] = useState<ConversationDetail[]>([]);
   const [userSentEmails, setUserSentEmails] = useState<SentEmail[]>([]);
-  const [userDetailTab, setUserDetailTab] = useState<"tasks" | "emails" | "sent">("tasks");
+  const [userDetailTab, setUserDetailTab] = useState<"tasks" | "emails" | "unread" | "sent">("tasks");
   const [userDetailLoading, setUserDetailLoading] = useState(false);
 
   // Date filter
@@ -705,11 +705,12 @@ export default function DashboardPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="px-6 py-3 grid grid-cols-5 gap-3 flex-shrink-0">
+      <div className="px-6 py-3 grid grid-cols-6 gap-3 flex-shrink-0">
         <SummaryCard icon={<Users size={14} />} label="Team Members" value={userStats.length} color="#484F58" />
         <SummaryCard icon={<ListTodo size={14} />} label="Open Tasks" value={totals.todo + totals.inProgress} sub={totals.completed + " completed"} color="#484F58" />
         <SummaryCard icon={<AlertTriangle size={14} />} label="Overdue" value={totals.overdue} sub={totals.dueSoon + " due within 48h"} color="#F85149" />
         <SummaryCard icon={<Mail size={14} />} label="Assigned Emails" value={totals.totalConvos} sub={totals.unreadConvos + " unread"} color="#484F58" />
+        <SummaryCard icon={<Eye size={14} />} label="Total Unread" value={totals.unreadConvos} color="#F0883E" />
         <SummaryCard icon={<Send size={14} />} label="Emails Sent" value={totals.totalSent} color="#4ADE80" />
       </div>
 
@@ -792,6 +793,7 @@ export default function DashboardPage() {
                 <div><div className="text-xl font-bold text-[#F0883E]">{selectedUser.tasks.dismissed}</div><div className="text-[10px] text-[#484F58]">Dismissed</div></div>
                 <div><div className="text-xl font-bold" style={{ color: selectedUser.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{selectedUser.tasks.overdue}</div><div className="text-[10px] text-[#484F58]">Overdue</div></div>
                 <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[#484F58]">Sent</div></div>
+                <div><div className="text-xl font-bold text-[#F0883E]">{selectedUser.conversations.unread}</div><div className="text-[10px] text-[#484F58]">Unread</div></div>
                 <div><div className="text-xl font-bold text-[#F85149]">{userConversations.filter((c) => c.reply_status === "awaiting_our_reply").length}</div><div className="text-[10px] text-[#484F58]">Need Reply</div></div>
                 <div><div className="text-xl font-bold text-[#F0883E]">{userConversations.filter((c) => c.reply_status === "awaiting_supplier_reply").length}</div><div className="text-[10px] text-[#484F58]">Waiting Supplier</div></div>
               </div>
@@ -838,6 +840,7 @@ export default function DashboardPage() {
               {([
                 { id: "tasks" as const, label: "Tasks (" + userTasks.length + ")", icon: <ListTodo size={13} /> },
                 { id: "emails" as const, label: "Assigned Emails (" + userConversations.length + ")", icon: <Inbox size={13} /> },
+                { id: "unread" as const, label: "Unread (" + userConversations.filter((c) => c.is_unread).length + ")", icon: <Eye size={13} /> },
                 { id: "sent" as const, label: "Sent (" + userSentEmails.length + ")", icon: <Send size={13} /> },
               ]).map((tab) => (
                 <button key={tab.id} onClick={() => setUserDetailTab(tab.id)}
@@ -902,6 +905,33 @@ export default function DashboardPage() {
                         <div className="text-[10px] text-[#484F58] flex-shrink-0">{c.email_account_name}</div>
                         <div className="text-[10px] text-[#484F58] flex-shrink-0">{new Date(c.last_message_at).toLocaleDateString()}</div>
                         <ExternalLink size={12} className="text-[#484F58]" />
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                {userDetailTab === "unread" && (
+                  <div className="space-y-1">
+                    {userConversations.filter((c) => c.is_unread).length === 0 ? <Empty text="No unread emails" /> : userConversations.filter((c) => c.is_unread).map((c) => (
+                      <Link key={c.id} href={"/#conversation=" + c.id}
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#F0883E]/20 bg-[#0F1318] hover:border-[#F0883E]/40 transition-all"
+                      >
+                        <div className="flex-shrink-0 w-2.5">
+                          <div className="w-2.5 h-2.5 rounded-full bg-[#F0883E]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold truncate">{c.subject}</div>
+                          <div className="text-[11px] text-[#7D8590] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
+                          <div className="text-[10px] text-[#484F58] truncate mt-0.5">{c.preview}</div>
+                        </div>
+                        <div className="flex flex-col items-end flex-shrink-0 gap-1">
+                          <div className="text-[10px] text-[#484F58]">{c.email_account_name}</div>
+                          <div className="text-[10px] text-[#484F58]">{new Date(c.last_message_at).toLocaleDateString()} {new Date(c.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                          {c.reply_status === "awaiting_our_reply" && (
+                            <span className="text-[9px] font-semibold text-[#F85149] bg-[#F85149]/10 px-1.5 py-0.5 rounded">Needs reply · {c.waiting_hours < 24 ? Math.round(c.waiting_hours) + "h" : Math.round(c.waiting_hours / 24) + "d"}</span>
+                          )}
+                        </div>
+                        <ExternalLink size={12} className="text-[#484F58] flex-shrink-0" />
                       </Link>
                     ))}
                   </div>
