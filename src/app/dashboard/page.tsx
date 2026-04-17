@@ -425,6 +425,12 @@ export default function DashboardPage() {
       }).length;
 
       const assignedConvos = (conversations || []).filter((c: any) => c.assignee_id === member.id);
+      const unreadCount = assignedConvos.filter((c: any) => c.is_unread).length;
+
+      // Debug log for Rod
+      if (member.email === "rod@trytenkara.com") {
+        console.log(`[dashboard-debug] Rod: ${conversations.length} total convos loaded, ${assignedConvos.length} assigned, ${unreadCount} unread`);
+      }
 
       // Sent count: attributed (sent_by_user_id) + share of unattributed from accessible accounts
       const attributedSent = sentByUser[member.id] || 0;
