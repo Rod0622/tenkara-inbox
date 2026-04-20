@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false }, db: { schema: "inbox" }, global: { headers: { "Cache-Control": "no-cache" } } }
+    { auth: { persistSession: false }, db: { schema: "inbox" }, global: { headers: { "Cache-Control": "no-cache, no-store", "x-cache-bust": Date.now().toString() } } }
   );
 
   const results = { rulesChecked: 0, conversationsChecked: 0, actionsExecuted: 0, errors: [] as string[] };
