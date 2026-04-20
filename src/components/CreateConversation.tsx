@@ -43,6 +43,7 @@ export default function CreateConversation({
   const [supplierWorkStart, setSupplierWorkStart] = useState("09:00");
   const [supplierWorkEnd, setSupplierWorkEnd] = useState("17:00");
   const [supplierWorkDays, setSupplierWorkDays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [createCallTask, setCreateCallTask] = useState(true);
 
   // Get callers (team members with call skillset)
   const [callers, setCallers] = useState<TeamMember[]>([]);
@@ -112,6 +113,7 @@ export default function CreateConversation({
           actor_id: currentUser?.id,
           notes: notes.trim() || null,
           caller_assignee_id: callerId || null,
+          create_call_task: callerId ? createCallTask : false,
           supplier_contact_id: supplierContactId,
           from_email: supplierEmail.trim() || null,
           from_name: supplierName.trim() || supplierCompany.trim() || null,
@@ -217,6 +219,19 @@ export default function CreateConversation({
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
+          {callerId && (
+            <label className="flex items-center gap-2 mt-2 cursor-pointer">
+              <div
+                onClick={() => setCreateCallTask(!createCallTask)}
+                className={`w-8 h-[18px] rounded-full flex items-center px-0.5 transition-colors cursor-pointer ${
+                  createCallTask ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
+                }`}
+              >
+                <div className="w-3.5 h-3.5 rounded-full bg-white shadow" />
+              </div>
+              <span className="text-[11px] text-[#7D8590]">Create call task</span>
+            </label>
+          )}
         </div>
 
         {/* Supplier Contact Info */}

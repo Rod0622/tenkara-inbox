@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     actor_id,
     notes,
     caller_assignee_id,
+    create_call_task,
     task_category_id,
     supplier_contact_id,
     from_email,
@@ -76,8 +77,8 @@ export async function POST(req: NextRequest) {
     } catch (_e) { /* best-effort */ }
   }
 
-  // Create call assignment task if caller specified
-  if (caller_assignee_id) {
+  // Create call assignment task if caller specified AND task creation is enabled
+  if (caller_assignee_id && create_call_task !== false) {
     // Find or create "Calls" category
     let callCategoryId = task_category_id || null;
     if (!callCategoryId) {
