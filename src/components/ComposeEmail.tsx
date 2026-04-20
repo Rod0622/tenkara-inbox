@@ -190,6 +190,28 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
       return;
     }
 
+    // Check for missing attachments
+    const bodyLower = plainText.toLowerCase();
+    const attachmentKeywords = [
+      "attached", "attachment", "attachments", "attaching", "enclosed", "enclosing",
+      "find attached", "see attached", "please find", "i have attached", "i've attached",
+      "sending you the file", "here is the file", "here are the files",
+    ];
+    const imageKeywords = ["image", "images", "photo", "photos", "picture", "pictures", "screenshot", "screenshots"];
+    const infoKeywords = ["my address", "our address", "my phone", "our phone", "phone number", "contact number", "my number"];
+    if (attachments.length === 0) {
+      const matchedAtt = attachmentKeywords.find(kw => bodyLower.includes(kw));
+      const matchedImg = !matchedAtt ? imageKeywords.find(kw => bodyLower.includes(kw)) : null;
+      const matchedInfo = !matchedAtt && !matchedImg ? infoKeywords.find(kw => bodyLower.includes(kw)) : null;
+      const matched = matchedAtt || matchedImg || matchedInfo;
+      if (matched) {
+        const msg = matchedInfo
+          ? `Your message mentions "${matched}" — did you include the details?`
+          : `Your message mentions "${matched}" but no files are attached.`;
+        if (!confirm(msg + "\n\nSend anyway?")) return;
+      }
+    }
+
     setSending(true);
     setError("");
 
