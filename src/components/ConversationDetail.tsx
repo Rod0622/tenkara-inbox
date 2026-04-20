@@ -1,4 +1,4 @@
-"use client";
+\"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1868,6 +1868,7 @@ export default function ConversationDetail({
   const [accountAccessMap, setAccountAccessMap] = useState<Record<string, string[]>>({});
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
+  const [supplierHoursInfo, setSupplierHoursInfo] = useState<{ timezone: string; work_start: string; work_end: string; work_days: number[] } | null>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [forwardTo, setForwardTo] = useState("");
@@ -1895,6 +1896,18 @@ export default function ConversationDetail({
       setActiveTab("messages");
     }
   }, [convo?.id, globalSearchQuery]);
+
+  // Fetch supplier business hours for header display
+  useEffect(() => {
+    setSupplierHoursInfo(null);
+    if (!convo?.from_email || convo.from_email === "internal") return;
+    import("@/lib/supabase").then(({ createBrowserClient }) => {
+      const sb = createBrowserClient();
+      sb.from("supplier_contacts").select("timezone, work_start, work_end, work_days").eq("email", convo.from_email.toLowerCase()).maybeSingle().then(({ data }: any) => {
+        if (data) setSupplierHoursInfo(data);
+      });
+    });
+  }, [convo?.id, convo?.from_email]);
 
   // Re-scroll when messages load
   useEffect(() => {
@@ -2774,6 +2787,20 @@ export default function ConversationDetail({
               </div>
             );
           })()}
+
+          {/* Supplier Business Hours badge */}
+          {supplierHoursInfo && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <AlarmClock size={11} className="text-[#4ADE80] shrink-0" />
+              <span className="text-[10px] text-[#7D8590]">
+                <span className="text-[#484F58]">Hours:</span> {supplierHoursInfo.work_start || "09:00"}–{supplierHoursInfo.work_end || "17:00"}
+                {supplierHoursInfo.timezone && <> · <span className="text-[#484F58]">TZ:</span> {supplierHoursInfo.timezone}</>}
+                {supplierHoursInfo.work_days && supplierHoursInfo.work_days.length < 7 && (
+                  <> · {supplierHoursInfo.work_days.map((d: number) => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d]).join(", ")}</>
+                )}
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {(convo.labels || []).map(

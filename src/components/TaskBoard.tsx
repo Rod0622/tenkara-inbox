@@ -746,11 +746,38 @@ function TaskCard({
             <button
               type="button"
               onClick={async () => {
+                const choice = prompt(
+                  "Reopen this task?\n\n" +
+                  "1 = Keep current deadline" + (task.due_date ? ` (${task.due_date})` : " (none)") + "\n" +
+                  "2 = Reset to 24 hours from now\n" +
+                  "3 = Set a new date (YYYY-MM-DD)\n\n" +
+                  "Enter 1, 2, or 3 (or a date like 2026-04-25):"
+                );
+                if (!choice) return;
                 try {
+                  const trimmed = choice.trim();
+                  let newDueDate: string | undefined = undefined;
+
+                  if (trimmed === "2") {
+                    // Reset to 24 business hours from now
+                    const { addBusinessHours } = await import("@/lib/business-hours");
+                    const result = addBusinessHours(new Date(), 24, null);
+                    newDueDate = result.dueDate;
+                  } else if (trimmed === "3" || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+                    // Custom date
+                    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : prompt("Enter new deadline date (YYYY-MM-DD):");
+                    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+                    newDueDate = dateStr;
+                  }
+                  // trimmed === "1" or anything else = keep current deadline
+
+                  const body: any = { task_id: task.id, status: "todo" };
+                  if (newDueDate) body.due_date = newDueDate;
+
                   await fetch("/api/tasks", {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ task_id: task.id, status: "todo" }),
+                    body: JSON.stringify(body),
                   });
                   onRefetch?.();
                 } catch (e) { console.error(e); }

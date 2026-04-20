@@ -336,9 +336,11 @@ export default function InboxPage() {
     conversationId: string,
     text: string,
     assigneeIds?: string[],
-    dueDate?: string
+    dueDate?: string,
+    categoryId?: string,
+    dueTime?: string
   ) => {
-    await actions.addTask(conversationId, text, assigneeIds, dueDate);
+    await actions.addTask(conversationId, text, assigneeIds, dueDate, categoryId, dueTime);
     await Promise.all([refetch(), refetchTasks()]);
   };
 
