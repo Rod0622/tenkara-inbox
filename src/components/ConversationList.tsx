@@ -273,7 +273,7 @@ function FilterPanel({
           >
             Unassigned
           </button>
-          {teamMembers.slice(0, 6).map((m) => (
+          {teamMembers.map((m) => (
             <button
               key={m.id}
               onClick={() => setFilters({ ...filters, assignedTo: m.id })}
