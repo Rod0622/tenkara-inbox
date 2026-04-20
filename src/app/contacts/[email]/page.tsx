@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, Globe, ListTodo, Mail, MessageSquare, Save, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, Globe, ListTodo, Mail, MessageSquare, Save, ShieldAlert, Users, X } from "lucide-react";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -77,7 +77,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   if (loading) return <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]"><div className="mx-auto max-w-7xl px-6 py-10"><div className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-6 text-sm text-[#7D8590]">Loading command center...</div></div></div>;
   if (error || !data) return <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]"><div className="mx-auto max-w-5xl px-6 py-10"><div className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-6"><AlertTriangle className="text-[#F87171] mb-2" size={20} /><div className="text-lg font-semibold text-[#F87171]">Unable to load</div><div className="mt-2 text-sm text-[#9BA7B4]">{error}</div><Link href="/" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-4 py-2 text-sm font-semibold text-[#58A6FF] hover:bg-[#151A21]"><ArrowLeft size={16} /> Back</Link></div></div></div>;
 
-  const { contact, summary, threads, cross_account_threads=[], tasks, notes, thread_summaries, supplier_hours, responsiveness } = data;
+  const { contact, summary, threads, cross_account_threads=[], domain_threads=[], domain_contacts=[], tasks, notes, thread_summaries, supplier_hours, responsiveness } = data;
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
   const dismissedTasks = tasks.filter((t: any) => t.status === "dismissed");
@@ -225,6 +225,27 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
               <section className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-5">
                 <div className="mb-4 flex items-center gap-2"><Globe size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Related Threads — Other Accounts ({cross_account_threads.length})</span></div>
                 <div className="space-y-2">{cross_account_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount />)}</div>
+              </section>
+            )}
+
+            {/* Domain Threads — same domain, different contacts */}
+            {domain_threads.length > 0 && (
+              <section className="rounded-2xl border border-[#1E242C] bg-[#0F1318] p-5">
+                <div className="mb-4 flex items-center gap-2">
+                  <Users size={16} className="text-[#F5D547]" />
+                  <span className="text-sm font-semibold">Same Domain — {contact.email.split("@")[1]} ({domain_threads.length})</span>
+                </div>
+                {domain_contacts.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-1.5">
+                    {domain_contacts.map((dc: string) => (
+                      <Link key={dc} href={`/contacts/${encodeURIComponent(dc)}`}
+                        className="px-2 py-0.5 rounded-full bg-[#F5D547]/10 border border-[#F5D547]/20 text-[10px] text-[#F5D547] hover:bg-[#F5D547]/20 transition-colors">
+                        {dc}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-2">{domain_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount />)}</div>
               </section>
             )}
 

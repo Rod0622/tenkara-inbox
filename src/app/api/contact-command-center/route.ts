@@ -185,6 +185,52 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // ── Fetch domain-related threads (same domain, different contacts) ──
+    const domain = email.split("@")[1]?.toLowerCase();
+    let domainThreads: any[] = [];
+    let domainContacts: string[] = [];
+    if (domain && !["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "mail.com", "protonmail.com"].includes(domain)) {
+      const domainSearch = "%@" + domain;
+      // Find messages from the same domain but different email
+      const { data: domainMsgMatches } = await supabase
+        .from("messages")
+        .select("conversation_id, from_email")
+        .ilike("from_email", domainSearch)
+        .neq("from_email", email)
+        .eq("is_outbound", false)
+        .limit(500);
+
+      const domainConvoIds = new Set<string>();
+      const domainEmailSet = new Set<string>();
+      for (const m of (domainMsgMatches || [])) {
+        if (m.conversation_id && !allRelatedIds.includes(m.conversation_id)) {
+          domainConvoIds.add(m.conversation_id);
+        }
+        if (m.from_email) domainEmailSet.add(m.from_email.toLowerCase());
+      }
+      domainContacts = Array.from(domainEmailSet).sort();
+
+      if (domainConvoIds.size > 0) {
+        const domainIdArray = Array.from(domainConvoIds);
+        for (let i = 0; i < domainIdArray.length; i += 50) {
+          const batch = domainIdArray.slice(i, i + 50);
+          const { data: domainConvos } = await supabase
+            .from("conversations")
+            .select(`
+              id, subject, status, from_name, from_email, preview, is_unread, is_starred,
+              last_message_at, email_account_id, folder_id,
+              folders ( id, name ),
+              email_accounts:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
+              conversation_labels ( label_id, labels ( id, name, color, bg_color ) )
+            `)
+            .in("id", batch)
+            .neq("status", "trash")
+            .order("last_message_at", { ascending: false });
+          if (domainConvos) domainThreads.push(...domainConvos);
+        }
+      }
+    }
+
     const allRelatedIds = [
       ...relatedThreads.map((t: any) => t.id),
       ...crossAccountThreads.map((t: any) => t.id),
@@ -206,7 +252,7 @@ export async function GET(req: NextRequest) {
           open_tasks: 0, completed_tasks: 0, notes_count: 0,
           activity_count: 0, last_activity: null, risk_signals: [], rollup: `${email} has no related threads.`,
         },
-        threads: [], cross_account_threads: [], tasks: [], notes: [],
+        threads: [], cross_account_threads: [], domain_threads: [], domain_contacts: [], tasks: [], notes: [],
         activities: [], thread_summaries: [],
       });
     }
@@ -454,6 +500,17 @@ export async function GET(req: NextRequest) {
           label: item.labels,
         })),
       })),
+      domain_threads: domainThreads.map((thread: any) => ({
+        ...thread,
+        folder: thread.folders || null,
+        account_name: thread.email_accounts?.name || null,
+        account_email: thread.email_accounts?.email || null,
+        labels: (thread.conversation_labels || []).map((item: any) => ({
+          label_id: item.label_id,
+          label: item.labels,
+        })),
+      })),
+      domain_contacts: domainContacts,
       tasks: hydratedTasks,
       notes: notes || [],
       activities,
