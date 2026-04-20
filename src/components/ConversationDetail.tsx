@@ -2422,10 +2422,40 @@ export default function ConversationDetail({
     } catch (e) { console.error(e); }
   };
 
+  // ── Pre-send checks ──
+  const checkMissingAttachments = (bodyHtml: string, attachmentCount: number): string | null => {
+    const text = bodyHtml.replace(/<[^>]*>/g, "").toLowerCase();
+    const attachmentKeywords = [
+      "attached", "attachment", "attachments", "attaching", "enclosed", "enclosing",
+      "find attached", "see attached", "please find", "i have attached", "i've attached",
+      "sending you the file", "here is the file", "here are the files",
+    ];
+    const imageKeywords = ["image", "images", "photo", "photos", "picture", "pictures", "screenshot", "screenshots"];
+    const infoKeywords = ["my address", "our address", "my phone", "our phone", "phone number", "contact number", "my number"];
+
+    if (attachmentCount > 0) return null; // has attachments, no warning needed
+
+    const matchedAttachment = attachmentKeywords.find(kw => text.includes(kw));
+    if (matchedAttachment) return `Your message mentions "${matchedAttachment}" but no files are attached.`;
+
+    const matchedImage = imageKeywords.find(kw => text.includes(kw));
+    if (matchedImage) return `Your message mentions "${matchedImage}" but no files are attached.`;
+
+    const matchedInfo = infoKeywords.find(kw => text.includes(kw));
+    if (matchedInfo) return `Your message mentions "${matchedInfo}" — did you include the details?`;
+
+    return null;
+  };
+
   const handleSendReplyInternal = async () => {
     if (!convo) return;
     const textContent = replyText.replace(/<[^>]*>/g, "").trim();
     if (!textContent && replyAttachments.length === 0) return;
+
+    // Check for missing attachments
+    const warning = checkMissingAttachments(replyText, replyAttachments.length);
+    if (warning && !confirm(warning + "\n\nSend anyway?")) return;
+
     setSending(true);
     try {
       await onSendReply(convo.id, replyText, replyAttachments.length > 0 ? replyAttachments : undefined);
@@ -2506,6 +2536,10 @@ export default function ConversationDetail({
   const handleSendForward = async () => {
     if (!convo) return;
     if (!forwardTo.trim() || !forwardSubject.trim() || !forwardBody.trim()) return;
+
+    // Check for missing attachments in forward body
+    const warning = checkMissingAttachments(forwardBody, 0);
+    if (warning && !confirm(warning + "\n\nSend anyway?")) return;
 
     try {
       setForwardSending(true);
@@ -2623,6 +2657,11 @@ export default function ConversationDetail({
 
   const handleInlineComposeSend = async () => {
     if (!convo || !inlineComposeTo.trim()) return;
+
+    // Check for missing attachments
+    const warning = checkMissingAttachments(inlineComposeBody, 0);
+    if (warning && !confirm(warning + "\n\nSend anyway?")) return;
+
     setSendingInlineCompose(true);
     try {
       const subject = inlineComposeSubject.trim() || convo.subject;
