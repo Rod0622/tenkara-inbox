@@ -669,7 +669,7 @@ export default function ConversationList({
               className={`px-2 py-0.5 rounded text-[9px] font-medium ${taskUserFilter === "all" ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
               All
             </button>
-            {teamMembers.filter(m => searchTaskResults!.some((t: any) => (t.task_assignees || []).some((a: any) => a.team_member_id === m.id))).map(m => (
+            {teamMembers.map(m => (
               <button key={m.id} onClick={() => setTaskUserFilter(taskUserFilter === m.id ? "all" : m.id)}
                 className={`px-2 py-0.5 rounded text-[9px] font-medium flex items-center gap-1 ${taskUserFilter === m.id ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
                 <span className="w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
