@@ -626,6 +626,10 @@ function TaskCard({
   const assignees = task.assignees || [];
   const isMulti = assignees.length > 1;
   const doneCount = assignees.filter((a: any) => a.is_done).length;
+  const [showReopenPanel, setShowReopenPanel] = useState(false);
+  const [reopenDeadlineChoice, setReopenDeadlineChoice] = useState<"keep" | "reset" | "custom">("keep");
+  const [reopenCustomDate, setReopenCustomDate] = useState("");
+  const [reopening, setReopening] = useState(false);
 
   const toggleMyCompletion = async () => {
     if (!currentUser) return;
@@ -743,50 +747,71 @@ function TaskCard({
             <ClipboardCheck size={14} />
           </button>
           {task.status === "dismissed" ? (
-            <button
-              type="button"
-              onClick={async () => {
-                const choice = prompt(
-                  "Reopen this task?\n\n" +
-                  "1 = Keep current deadline" + (task.due_date ? ` (${task.due_date})` : " (none)") + "\n" +
-                  "2 = Reset to 24 hours from now\n" +
-                  "3 = Set a new date (YYYY-MM-DD)\n\n" +
-                  "Enter 1, 2, or 3 (or a date like 2026-04-25):"
-                );
-                if (!choice) return;
-                try {
-                  const trimmed = choice.trim();
-                  let newDueDate: string | undefined = undefined;
-
-                  if (trimmed === "2") {
-                    // Reset to 24 business hours from now
-                    const { addBusinessHours } = await import("@/lib/business-hours");
-                    const result = addBusinessHours(new Date(), 24, null);
-                    newDueDate = result.dueDate;
-                  } else if (trimmed === "3" || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-                    // Custom date
-                    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : prompt("Enter new deadline date (YYYY-MM-DD):");
-                    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
-                    newDueDate = dateStr;
-                  }
-                  // trimmed === "1" or anything else = keep current deadline
-
-                  const body: any = { task_id: task.id, status: "todo" };
-                  if (newDueDate) body.due_date = newDueDate;
-
-                  await fetch("/api/tasks", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                  });
-                  onRefetch?.();
-                } catch (e) { console.error(e); }
-              }}
-              className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
-              title="Reopen this task"
-            >
-              <RotateCcw size={14} />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowReopenPanel(!showReopenPanel)}
+                className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
+                title="Reopen this task"
+              >
+                <RotateCcw size={14} />
+              </button>
+              {showReopenPanel && (
+                <div className="absolute right-0 top-7 z-50 w-64 rounded-xl border border-[#1E242C] bg-[#12161B] p-3 shadow-xl">
+                  <div className="text-[11px] font-semibold text-[#E6EDF3] mb-2">Reopen Task</div>
+                  <div className="space-y-1.5 mb-3">
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
+                      <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "keep"} onChange={() => setReopenDeadlineChoice("keep")}
+                        className="accent-[#4ADE80]" />
+                      Keep deadline{task.due_date ? ` (${task.due_date})` : " (none)"}
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
+                      <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "reset"} onChange={() => setReopenDeadlineChoice("reset")}
+                        className="accent-[#4ADE80]" />
+                      Reset to 24hrs from now
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
+                      <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "custom"} onChange={() => setReopenDeadlineChoice("custom")}
+                        className="accent-[#4ADE80]" />
+                      Set new date
+                    </label>
+                    {reopenDeadlineChoice === "custom" && (
+                      <input type="date" value={reopenCustomDate} onChange={(e) => setReopenCustomDate(e.target.value)}
+                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      disabled={reopening || (reopenDeadlineChoice === "custom" && !reopenCustomDate)}
+                      onClick={async () => {
+                        setReopening(true);
+                        try {
+                          const body: any = { task_id: task.id, status: "todo" };
+                          if (reopenDeadlineChoice === "reset") {
+                            const { addBusinessHours } = await import("@/lib/business-hours");
+                            const result = addBusinessHours(new Date(), 24, null);
+                            body.due_date = result.dueDate;
+                          } else if (reopenDeadlineChoice === "custom" && reopenCustomDate) {
+                            body.due_date = reopenCustomDate;
+                          }
+                          await fetch("/api/tasks", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+                          setShowReopenPanel(false);
+                          onRefetch?.();
+                        } catch (e) { console.error(e); }
+                        setReopening(false);
+                      }}
+                      className="flex-1 px-2 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[10px] font-semibold disabled:opacity-50"
+                    >
+                      {reopening ? "Reopening..." : "Reopen"}
+                    </button>
+                    <button onClick={() => setShowReopenPanel(false)}
+                      className="px-2 py-1.5 rounded-lg border border-[#1E242C] text-[10px] text-[#7D8590] hover:text-[#E6EDF3]">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
             task.status !== "completed" && !task.is_done && (
               <button
