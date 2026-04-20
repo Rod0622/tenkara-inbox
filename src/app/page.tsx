@@ -220,9 +220,8 @@ export default function InboxPage() {
   const processedHashRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const handleHashNav = () => {
+    const handleHashNav = async () => {
       if (activeView === "new-conversation" || activeView === "compose" || activeView === "new-task") return;
-      if (conversations.length === 0) return;
 
       const { conversation, mailbox, folder } = parseHashParams();
       if (!conversation) return;
@@ -240,7 +239,21 @@ export default function InboxPage() {
         setActiveFolder(folder);
       }
 
-      const match = conversations.find((item) => item.id === conversation);
+      let match = conversations.find((item) => item.id === conversation);
+
+      if (!match) {
+        // Conversation not in current list — fetch from Supabase
+        try {
+          const sb = createBrowserClient();
+          const { data } = await sb
+            .from("conversations")
+            .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at")
+            .eq("id", conversation)
+            .maybeSingle();
+          if (data) match = data as any;
+        } catch (_e) {}
+      }
+
       if (match) {
         setActiveConvo(match);
         setActiveView("inbox");
