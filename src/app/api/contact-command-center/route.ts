@@ -185,6 +185,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    const allRelatedIds = [
+      ...relatedThreads.map((t: any) => t.id),
+      ...crossAccountThreads.map((t: any) => t.id),
+    ];
+    const conversationIds = relatedThreads.map((t: any) => t.id);
+
     // ── Fetch domain-related threads (same domain, different contacts) ──
     const domain = email.split("@")[1]?.toLowerCase();
     let domainThreads: any[] = [];
@@ -231,13 +237,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const allRelatedIds = [
-      ...relatedThreads.map((t: any) => t.id),
-      ...crossAccountThreads.map((t: any) => t.id),
-    ];
-    const conversationIds = relatedThreads.map((t: any) => t.id);
-
-    if (allRelatedIds.length === 0) {
+    if (allRelatedIds.length === 0 && domainThreads.length === 0) {
       return NextResponse.json({
         contact: { email, name: supplierContact?.name || supplierContact?.company || email.split("@")[1]?.split(".")[0] || email, company: supplierContact?.company || null },
         supplier_hours: supplierContact ? {
