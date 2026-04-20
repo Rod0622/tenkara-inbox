@@ -338,14 +338,22 @@ function FilterPanel({
 export default function ConversationList({
   conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery,
   searchScope = "all", setSearchScope, activeMailbox, activeFolder, emailAccounts = [], folders = [],
-  teamMembers, onBulkAction, searchSnippets,
-}: ConversationListProps) {
+  teamMembers, onBulkAction, searchSnippets, searchTaskResults = [], onOpenConversation,
+}: ConversationListProps & { searchTaskResults?: any[]; onOpenConversation?: (id: string) => void }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [highlightedConvoId, setHighlightedConvoId] = useState<string | null>(null);
   const highlightConvoRef = useRef<HTMLDivElement>(null);
   const [reminderConvoIds, setReminderConvoIds] = useState<Record<string, string>>({}); // convo_id -> remind_at
+  const [searchTab, setSearchTab] = useState<"conversations" | "tasks">("conversations");
+  const [taskUserFilter, setTaskUserFilter] = useState<string>("all");
+
+  // Reset search tab when query changes
+  useEffect(() => {
+    setSearchTab("conversations");
+    setTaskUserFilter("all");
+  }, [searchQuery]);
 
   // Fetch active reminders to show alarm icons
   useEffect(() => {
@@ -635,6 +643,82 @@ export default function ConversationList({
       )}
 
       {/* List */}
+      {/* Search result tabs — Conversations vs Tasks */}
+      {searchQuery.trim().length >= 2 && searchTaskResults && searchTaskResults.length > 0 && (
+        <div className="px-3 pb-1">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setSearchTab("conversations")}
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "conversations" ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"}`}>
+              Conversations ({conversations.length})
+            </button>
+            <button onClick={() => setSearchTab("tasks")}
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "tasks" ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"}`}>
+              Tasks ({searchTaskResults.length})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Task search results */}
+      {searchQuery.trim().length >= 2 && searchTab === "tasks" && searchTaskResults && searchTaskResults.length > 0 && (
+        <div className="flex-1 overflow-y-auto px-1.5">
+          {/* User filter */}
+          <div className="px-2.5 py-2 flex items-center gap-1 flex-wrap">
+            <span className="text-[9px] text-[#484F58] uppercase">Filter:</span>
+            <button onClick={() => setTaskUserFilter("all")}
+              className={`px-2 py-0.5 rounded text-[9px] font-medium ${taskUserFilter === "all" ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
+              All
+            </button>
+            {teamMembers.filter(m => searchTaskResults!.some((t: any) => (t.task_assignees || []).some((a: any) => a.team_member_id === m.id))).map(m => (
+              <button key={m.id} onClick={() => setTaskUserFilter(taskUserFilter === m.id ? "all" : m.id)}
+                className={`px-2 py-0.5 rounded text-[9px] font-medium flex items-center gap-1 ${taskUserFilter === m.id ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
+                <span className="w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
+                {m.name.split(" ")[0]}
+              </button>
+            ))}
+          </div>
+          {searchTaskResults
+            .filter((t: any) => taskUserFilter === "all" || (t.task_assignees || []).some((a: any) => a.team_member_id === taskUserFilter))
+            .map((t: any) => {
+              const assignees = (t.task_assignees || []).map((a: any) => a.team_member || {});
+              const statusColors: Record<string, string> = { todo: "#58A6FF", in_progress: "#F5D547", completed: "#4ADE80", dismissed: "#F0883E" };
+              return (
+                <div key={t.id}
+                  className="relative flex flex-col gap-1 p-2.5 mb-0.5 rounded-lg hover:bg-[#181D24] cursor-pointer transition-all"
+                  onClick={() => t.conversation?.id && onOpenConversation?.(t.conversation.id)}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: statusColors[t.status] || "#484F58" }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-medium text-[#E6EDF3] leading-tight">{t.text}</div>
+                      {t.conversation?.subject && (
+                        <div className="text-[10px] text-[#484F58] truncate mt-0.5">Thread: {t.conversation.subject}</div>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded border border-[#1E242C] text-[#7D8590]">{t.status}</span>
+                        {t.category && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: (t.category.color || "#484F58") + "20", color: t.category.color || "#484F58" }}>{t.category.name}</span>
+                        )}
+                        {t.due_date && (
+                          <span className="text-[9px] text-[#F0883E]">{t.due_date}</span>
+                        )}
+                        {assignees.map((a: any) => (
+                          <span key={a.id} className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold text-[#0B0E11]" style={{ background: a.color || "#484F58" }} title={a.name}>{(a.initials || "?").slice(0, 2)}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          {searchTaskResults.filter((t: any) => taskUserFilter === "all" || (t.task_assignees || []).some((a: any) => a.team_member_id === taskUserFilter)).length === 0 && (
+            <div className="text-center py-8 text-[#484F58] text-[11px]">No tasks match this filter</div>
+          )}
+        </div>
+      )}
+
+      {/* Conversation list — hide when showing task search results */}
+      {(searchTab === "conversations" || searchQuery.trim().length < 2 || !searchTaskResults || searchTaskResults.length === 0) && (
       <div className="flex-1 overflow-y-auto px-1.5">
         {Object.entries(grouped).map(([date, convos]) => (
           <div key={date}>
@@ -741,6 +825,7 @@ export default function ConversationList({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -56,6 +56,7 @@ export default function InboxPage() {
   const [searchScope, setSearchScope] = useState<"all" | "account" | "folder">("all");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
   const [searchSnippets, setSearchSnippets] = useState<Record<string, string>>({});
+  const [searchTaskResults, setSearchTaskResults] = useState<any[]>([]);
   const searchTimerRef = useRef<any>(null);
 
   const { conversations, refetch } = useConversations(activeMailbox);
@@ -70,6 +71,7 @@ export default function InboxPage() {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
       setSearchResults(null);
       setSearchSnippets({});
+      setSearchTaskResults([]);
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -84,6 +86,7 @@ export default function InboxPage() {
         const data = await res.json();
         setSearchResults((data.conversations || []) as Conversation[]);
         setSearchSnippets(data.match_snippets || {});
+        setSearchTaskResults(data.tasks || []);
       } catch (_e) {
         setSearchResults(null);
         setSearchSnippets({});
@@ -477,6 +480,8 @@ export default function InboxPage() {
             teamMembers={teamMembers}
             onBulkAction={handleBulkAction}
             searchSnippets={searchSnippets}
+            searchTaskResults={searchTaskResults}
+            onOpenConversation={openConversationFromTask}
           />
 
           <ConversationDetail

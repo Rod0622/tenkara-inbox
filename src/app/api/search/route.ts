@@ -61,6 +61,24 @@ export async function GET(req: NextRequest) {
     .ilike("text", searchTerm)
     .limit(200);
 
+  // Search in tasks
+  const { data: taskMatches } = await supabase
+    .from("tasks")
+    .select("id, text, status, due_date, due_time, conversation_id, created_at, category:task_categories(name, color), task_assignees(team_member_id, team_member:team_members!task_assignees_team_member_id_fkey(id, name, initials, color)), conversation:conversations(id, subject)")
+    .ilike("text", searchTerm)
+    .neq("status", "trash")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  // Optional: filter tasks by user
+  const filterUserId = req.nextUrl.searchParams.get("filter_user_id") || null;
+  let filteredTasks = taskMatches || [];
+  if (filterUserId) {
+    filteredTasks = filteredTasks.filter((t: any) =>
+      (t.task_assignees || []).some((a: any) => a.team_member_id === filterUserId)
+    );
+  }
+
   // Build match snippets - extract text around the matched word
   const matchSnippets: Record<string, string> = {};
   const qLower = q.toLowerCase();
@@ -94,8 +112,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  if (ids.size === 0 && filteredTasks.length === 0) {
+    return NextResponse.json({ conversations: [], match_snippets: {}, tasks: [] });
+  }
+
   if (ids.size === 0) {
-    return NextResponse.json({ conversations: [], match_snippets: {} });
+    return NextResponse.json({ conversations: [], match_snippets: {}, tasks: filteredTasks });
   }
 
   // Fetch full conversation objects
@@ -115,5 +137,5 @@ export async function GET(req: NextRequest) {
     if (data) allConvos.push(...data);
   }
 
-  return NextResponse.json({ conversations: allConvos, match_snippets: matchSnippets });
+  return NextResponse.json({ conversations: allConvos, match_snippets: matchSnippets, tasks: filteredTasks });
 }
