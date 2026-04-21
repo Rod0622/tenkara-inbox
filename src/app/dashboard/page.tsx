@@ -18,10 +18,8 @@ import {
 } from "@/lib/business-hours";
 
 // Lazy-init supabase client (avoid module-level call that breaks static generation)
-let _supabase: ReturnType<typeof createBrowserClient> | null = null;
 function getSupabase() {
-  if (!_supabase) _supabase = createBrowserClient();
-  return _supabase;
+  return createBrowserClient();
 }
 
 // ── Types ─────────────────────────────────────────────
