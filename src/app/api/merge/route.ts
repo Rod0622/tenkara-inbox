@@ -113,12 +113,12 @@ export async function POST(req: NextRequest) {
 
       // Move all records in parallel
       const moveOps: Promise<any>[] = [];
-      if (msgs.length > 0) moveOps.push(supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
-      if (tasks.length > 0) moveOps.push(supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
-      if (notes.length > 0) moveOps.push(supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
-      if (activ.length > 0) moveOps.push(supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
-      if (drafts.length > 0) moveOps.push(supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
-      if (rts.length > 0) moveOps.push(supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (msgs.length > 0) moveOps.push(supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (tasks.length > 0) moveOps.push(supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (notes.length > 0) moveOps.push(supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (activ.length > 0) moveOps.push(supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (drafts.length > 0) moveOps.push(supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (rts.length > 0) moveOps.push(supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
 
       // Handle labels: move non-duplicates, delete duplicates
       if (labels.length > 0) {
@@ -126,12 +126,12 @@ export async function POST(req: NextRequest) {
         const existingLabelIds = new Set((existingLabels || []).map((l: any) => l.label_id));
         const toMove = labels.filter((l: any) => !existingLabelIds.has(l.label_id));
         const toDel = labels.filter((l: any) => existingLabelIds.has(l.label_id));
-        if (toMove.length > 0) moveOps.push(supabase.from("conversation_labels").update({ conversation_id: primary_id }).in("id", toMove.map((l: any) => l.id)));
-        if (toDel.length > 0) moveOps.push(supabase.from("conversation_labels").delete().in("id", toDel.map((l: any) => l.id)));
+        if (toMove.length > 0) moveOps.push(supabase.from("conversation_labels").update({ conversation_id: primary_id }).in("id", toMove.map((l: any) => l.id)).select().then(r => r));
+        if (toDel.length > 0) moveOps.push(supabase.from("conversation_labels").delete().in("id", toDel.map((l: any) => l.id)).select().then(r => r));
       }
 
       // Mark merged conversation
-      moveOps.push(supabase.from("conversations").update({ merged_into: primary_id, status: "merged" }).eq("id", mergeId));
+      moveOps.push(supabase.from("conversations").update({ merged_into: primary_id, status: "merged" }).eq("id", mergeId).select().then(r => r));
 
       await Promise.all(moveOps);
 
@@ -215,17 +215,17 @@ export async function DELETE(req: NextRequest) {
       const ids = records.map(r => r.record_id);
       const origConvoId = records[0].original_conversation_id;
       restoreOps.push(
-        supabase.from(table).update({ conversation_id: origConvoId }).in("id", ids)
+        supabase.from(table).update({ conversation_id: origConvoId }).in("id", ids).select().then(r => r)
       );
     }
     await Promise.all(restoreOps);
 
     // Restore conversation, mark merge inactive, clean up — in parallel
     await Promise.all([
-      supabase.from("conversations").update({ merged_into: null, status: "open" }).eq("id", merge.merged_conversation_id),
-      supabase.from("conversation_merges").update({ is_active: false, unmerged_at: new Date().toISOString(), unmerged_by: actorId || null }).eq("id", mergeId),
-      supabase.from("merge_moved_records").delete().eq("merge_id", mergeId),
-      supabase.from("activity_log").insert({ conversation_id: merge.primary_conversation_id, actor_id: actorId || null, action: "unmerge", details: { unmerged_conversation_id: merge.merged_conversation_id, merge_record_id: mergeId } }),
+      supabase.from("conversations").update({ merged_into: null, status: "open" }).eq("id", merge.merged_conversation_id).select().then(r => r),
+      supabase.from("conversation_merges").update({ is_active: false, unmerged_at: new Date().toISOString(), unmerged_by: actorId || null }).eq("id", mergeId).select().then(r => r),
+      supabase.from("merge_moved_records").delete().eq("merge_id", mergeId).select().then(r => r),
+      supabase.from("activity_log").insert({ conversation_id: merge.primary_conversation_id, actor_id: actorId || null, action: "unmerge", details: { unmerged_conversation_id: merge.merged_conversation_id, merge_record_id: mergeId } }).select().then(r => r),
     ]);
 
     // Update primary conversation's last_message_at
