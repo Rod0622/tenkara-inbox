@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Browser client singleton (uses anon key, respects RLS)
-let _browserClient: ReturnType<typeof createClient> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _browserClient: any = null;
 
 export function createBrowserClient() {
   if (!_browserClient) {
@@ -11,7 +12,7 @@ export function createBrowserClient() {
       { db: { schema: "inbox" } }
     );
   }
-  return _browserClient!;
+  return _browserClient as ReturnType<typeof createClient>;
 }
 
 // Server client (uses service role, bypasses RLS)
