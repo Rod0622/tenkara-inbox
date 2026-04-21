@@ -1610,6 +1610,7 @@ function LabelsTab() {
 // ── Rules Tab ───────────────────────────────────────
 const CONDITION_FIELDS = [
   { value: "from_email", label: "From", group: "Address" },
+  { value: "sender_domain", label: "Sender domain", group: "Address" },
   { value: "to_addresses", label: "To", group: "Address" },
   { value: "to_cc_bcc", label: "To / Cc / Bcc", group: "Address" },
   { value: "cc_addresses", label: "Cc", group: "Address" },
@@ -1624,7 +1625,9 @@ const CONDITION_FIELDS = [
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
   { value: "message_count", label: "Number of messages", group: "More" },
+  { value: "has_reply", label: "Has been replied to?", group: "More" },
   { value: "time_since_last_outbound", label: "Time since last sent email", group: "Time-based" },
+  { value: "time_since_created", label: "Time since conversation created", group: "Time-based" },
   { value: "follow_up_count", label: "Follow-up count", group: "Time-based" },
 ];
 
@@ -1644,6 +1647,7 @@ const CONDITION_OPERATORS = [
 const ACTION_TYPES = [
   { value: "add_label", label: "Add label", group: "Labels" },
   { value: "remove_label", label: "Remove label", group: "Labels" },
+  { value: "set_priority", label: "Set priority (add Urgent label)", group: "Labels" },
   { value: "assign_to", label: "Assign to", group: "Assignment" },
   { value: "unassign", label: "Unassign", group: "Assignment" },
   { value: "move_to_folder", label: "Move to folder / team", group: "Organization" },
@@ -1657,8 +1661,11 @@ const ACTION_TYPES = [
   { value: "mark_unread", label: "Mark as unread", group: "Flags" },
   { value: "add_note", label: "Add note", group: "Tasks & Notes" },
   { value: "add_task", label: "Add task", group: "Tasks & Notes" },
-  { value: "stop_processing", label: "Stop processing more rules", group: "Flow" },
+  { value: "create_task_template", label: "Create task from template", group: "Tasks & Notes" },
+  { value: "forward_email", label: "Forward to email address", group: "Integration" },
+  { value: "slack_notify", label: "Send Slack notification", group: "Integration" },
   { value: "webhook", label: "Webhook (HTTP POST)", group: "Integration" },
+  { value: "stop_processing", label: "Stop processing more rules", group: "Flow" },
   { value: "send_follow_up", label: "Send follow-up email (template)", group: "Follow-up" },
   { value: "create_draft", label: "Create draft & notify", group: "Follow-up" },
   { value: "notify_assignee", label: "Notify user", group: "Follow-up" },
@@ -1696,6 +1703,7 @@ function RulesTab() {
   const [userGroups, setUserGroups] = useState<any[]>([]);
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
   const [emailTemplates, setEmailTemplates] = useState<any[]>([]);
+  const [taskTemplates, setTaskTemplates] = useState<any[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -1707,7 +1715,8 @@ function RulesTab() {
       getSupabase().from("user_groups").select("id, name").order("created_at"),
       getSupabase().from("task_categories").select("id, name").order("sort_order"),
       getSupabase().from("email_templates").select("id, name, subject").order("sort_order"),
-    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes, groupsRes, categoriesRes, templatesRes]) => {
+      getSupabase().from("task_templates").select("id, name").order("sort_order"),
+    ]).then(([rulesData, labelsRes, membersRes, foldersRes, accountsRes, groupsRes, categoriesRes, templatesRes, taskTplRes]) => {
       setRules(rulesData.rules || []);
       setLabels(labelsRes.data || []);
       setMembers(membersRes.data || []);
@@ -1716,6 +1725,7 @@ function RulesTab() {
       setUserGroups(groupsRes.data || []);
       setTaskCategories(categoriesRes.data || []);
       setEmailTemplates(templatesRes.data || []);
+      setTaskTemplates(taskTplRes.data || []);
       setLoading(false);
     });
   }, []);
@@ -1959,6 +1969,29 @@ function RulesTab() {
           <option value="assignee">Notify assignee</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
+      );
+    }
+    if (t === "create_task_template") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select task template...</option>
+          {taskTemplates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      );
+    }
+    if (t === "forward_email") {
+      return (
+        <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          placeholder="forward-to@example.com"
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      );
+    }
+    if (t === "slack_notify") {
+      return (
+        <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          placeholder="Slack webhook URL (leave empty for default)"
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
       );
     }
     return null;

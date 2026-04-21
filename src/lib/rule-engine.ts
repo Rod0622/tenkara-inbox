@@ -46,6 +46,7 @@ function getFieldValue(msg: MessageContext, field: string): string {
   switch (field) {
     case "subject": return msg.subject || "";
     case "from_email": return msg.from_email || "";
+    case "sender_domain": return (msg.from_email || "").split("@")[1] || "";
     case "from_name": return msg.from_name || "";
     case "to_addresses": return msg.to_addresses || "";
     case "cc_addresses": return msg.cc_addresses || "";
@@ -93,7 +94,7 @@ async function evaluateConditions(
 
   const getConvo = async () => {
     if (!convoData) {
-      const { data } = await supabase.from("conversations").select("status, assignee_id, folder_id").eq("id", conversationId).maybeSingle();
+      const { data } = await supabase.from("conversations").select("status, assignee_id, folder_id, created_at").eq("id", conversationId).maybeSingle();
       convoData = data || {};
     }
     return convoData;
@@ -137,6 +138,20 @@ async function evaluateConditions(
     } else if (c.field === "message_count") {
       const count = await getMsgCount() || 0;
       result = evaluateCondition(count.toString(), c.operator, c.value);
+    } else if (c.field === "has_reply") {
+      // Check if any outbound message exists in this conversation
+      const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conversationId).eq("is_outbound", true);
+      const hasReply = (count || 0) > 0;
+      result = c.operator === "is_true" ? hasReply : !hasReply;
+    } else if (c.field === "time_since_created") {
+      // Get conversation created_at and compute hours since creation
+      const convo = await getConvo();
+      if (convo.created_at) {
+        const hoursSince = (Date.now() - new Date(convo.created_at).getTime()) / (1000 * 60 * 60);
+        result = evaluateCondition(hoursSince.toString(), c.operator, c.value);
+      } else {
+        result = false;
+      }
     } else {
       // Standard text-field conditions
       const fieldValue = getFieldValue(msg, c.field);
@@ -325,6 +340,90 @@ async function executeAction(
       }
       case "stop_processing": {
         return "__STOP__";
+      }
+      case "set_priority": {
+        // Find or create an "Urgent" label and add it
+        let urgentLabelId = action.value;
+        if (!urgentLabelId) {
+          const { data: existing } = await supabase.from("labels").select("id").ilike("name", "%urgent%").limit(1).maybeSingle();
+          if (existing) {
+            urgentLabelId = existing.id;
+          } else {
+            const { data: created } = await supabase.from("labels").insert({ name: "Urgent", color: "#F85149", bg_color: "rgba(248,81,73,0.12)" }).select("id").single();
+            urgentLabelId = created?.id;
+          }
+        }
+        if (urgentLabelId) {
+          await supabase.from("conversation_labels").upsert({ conversation_id: conversationId, label_id: urgentLabelId });
+        }
+        return "Set priority (Urgent)";
+      }
+      case "create_task_template": {
+        if (!action.value) return null;
+        // Fetch template and create task from it
+        const { data: template } = await supabase.from("task_templates").select("*").eq("id", action.value).maybeSingle();
+        if (!template) return "Template not found";
+        const taskPayload: any = {
+          conversation_id: conversationId,
+          text: template.text || template.name || "Task from template",
+          status: "todo",
+          is_done: false,
+          category_id: template.category_id || null,
+        };
+        if (template.deadline_hours) {
+          const dueDate = new Date(Date.now() + template.deadline_hours * 60 * 60 * 1000);
+          taskPayload.due_date = dueDate.toISOString().slice(0, 10);
+          taskPayload.due_time = dueDate.toTimeString().slice(0, 5);
+        }
+        const { data: newTask } = await supabase.from("tasks").insert(taskPayload).select("id").single();
+        // Auto-assign if template has default assignees
+        if (newTask && template.default_assignee_ids && Array.isArray(template.default_assignee_ids)) {
+          for (const mid of template.default_assignee_ids) {
+            await supabase.from("task_assignees").insert({ task_id: newTask.id, team_member_id: mid });
+          }
+        }
+        return `Created task from template: ${template.name || template.text}`;
+      }
+      case "forward_email": {
+        if (!action.value || !msg) return null;
+        // Forward via the send API internally
+        try {
+          const { data: account } = await supabase.from("conversations").select("email_account_id").eq("id", conversationId).single();
+          if (account?.email_account_id) {
+            await fetch(process.env.NEXTAUTH_URL + "/api/send", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                account_id: account.email_account_id,
+                to: action.value,
+                subject: `Fwd: ${msg.subject}`,
+                body: `---------- Forwarded message ----------\nFrom: ${msg.from_name} <${msg.from_email}>\nSubject: ${msg.subject}\n\n${msg.body_text}`,
+              }),
+            });
+            return `Forwarded to ${action.value}`;
+          }
+        } catch (fwdErr: any) {
+          console.error("Forward action failed:", fwdErr.message);
+          return "Forward failed";
+        }
+        return null;
+      }
+      case "slack_notify": {
+        const slackUrl = action.value || process.env.SLACK_WEBHOOK_URL;
+        if (!slackUrl) return null;
+        try {
+          await fetch(slackUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: `📧 Rule triggered: *${msg?.subject || "Unknown subject"}*\nFrom: ${msg?.from_email || "Unknown"}\nTo: ${msg?.to_addresses || ""}\n<${process.env.NEXTAUTH_URL || ""}/#conversation=${conversationId}|Open in Tenkara>`,
+            }),
+          });
+          return "Slack notification sent";
+        } catch (slackErr: any) {
+          console.error("Slack notify failed:", slackErr.message);
+          return "Slack notification failed";
+        }
       }
       case "webhook": {
         if (!action.value) return null;

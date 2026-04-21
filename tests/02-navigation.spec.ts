@@ -40,6 +40,16 @@ test.describe('Sidebar & Navigation', () => {
     expect(page.url()).toContain('/settings');
   });
 
+  test('My Performance link is visible for all users', async ({ page }) => {
+    await expect(page.locator('a:has-text("My Performance")')).toBeVisible();
+  });
+
+  test('can navigate to My Performance', async ({ page }) => {
+    await page.click('a:has-text("My Performance")');
+    await page.waitForTimeout(3000);
+    expect(page.url()).toContain('/my-performance');
+  });
+
   test('notification bell shows on T logo', async ({ page }) => {
     const tLogo = page.locator('button:has-text("T")').first();
     await expect(tLogo).toBeVisible();
