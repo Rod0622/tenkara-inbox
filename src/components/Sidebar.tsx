@@ -638,22 +638,33 @@ export default function Sidebar({
         })}
       </div>
 
-      {currentUser?.role === "admin" && (
+      {currentUser && (
         <div className="px-2 pb-1 space-y-0.5">
           <Link
-            href="/dashboard"
+            href="/my-performance"
             className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
           >
             <BarChart3 size={16} />
-            <span>Dashboard</span>
+            <span>My Performance</span>
           </Link>
-          <Link
-            href="/settings"
-            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
-          >
-            <Settings size={16} />
-            <span>Settings</span>
-          </Link>
+          {currentUser.role === "admin" && (
+            <>
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
+              >
+                <BarChart3 size={16} />
+                <span>Dashboard</span>
+              </Link>
+              <Link
+                href="/settings"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
+              >
+                <Settings size={16} />
+                <span>Settings</span>
+              </Link>
+            </>
+          )}
         </div>
       )}
 
