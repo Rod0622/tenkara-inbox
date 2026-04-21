@@ -402,7 +402,7 @@ export default function DashboardPage() {
     const now = new Date();
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    const stats: UserStats[] = (members || []).map((member) => {
+    const stats: UserStats[] = (members || []).map((member: any) => {
       const memberTasks = (tasks || []).filter((t: any) =>
         (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
       );
