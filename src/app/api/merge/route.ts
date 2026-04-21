@@ -21,8 +21,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "primary_id and merge_ids[] are required" }, { status: 400 });
   }
 
-  // Validate all conversations exist
-  const allIds = [primary_id, ...merge_ids];
+  // Check for duplicate merges — prevent merging the same thread twice
+  const { data: existingMerges } = await supabase
+    .from("conversation_merges")
+    .select("merged_conversation_id")
+    .eq("primary_conversation_id", primary_id)
+    .eq("is_active", true);
+  const alreadyMergedIds = new Set((existingMerges || []).map((m: any) => m.merged_conversation_id));
+  const newMergeIds = merge_ids.filter((id: string) => !alreadyMergedIds.has(id));
+
+  if (newMergeIds.length === 0) {
+    return NextResponse.json({ error: "These threads are already merged" }, { status: 400 });
+  }
+
+  // Validate all conversations exist and aren't already merged elsewhere
+  const allIds = [primary_id, ...newMergeIds];
   const { data: convos } = await supabase
     .from("conversations")
     .select("id, subject, email_account_id, merged_into")
@@ -32,16 +45,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "One or more conversations not found" }, { status: 404 });
   }
 
-  // Check none are already merged
-  const alreadyMerged = convos.filter((c: any) => c.merged_into);
-  if (alreadyMerged.length > 0) {
+  const alreadyMergedElsewhere = convos.filter((c: any) => c.merged_into && c.id !== primary_id);
+  if (alreadyMergedElsewhere.length > 0) {
     return NextResponse.json({ error: "One or more conversations are already merged into another thread" }, { status: 400 });
   }
 
   const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0 } };
 
   try {
-    for (const mergeId of merge_ids) {
+    for (const mergeId of newMergeIds) {
       // Create merge record
       const { data: mergeRecord, error: mergeErr } = await supabase
         .from("conversation_merges")
@@ -58,105 +70,91 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const merge_id_ref = mergeRecord.id;
+      const mid = mergeRecord.id;
 
-      // Move messages
-      const { data: msgs } = await supabase.from("messages").select("id").eq("conversation_id", mergeId);
-      if (msgs && msgs.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          msgs.map((m: any) => ({ merge_id: merge_id_ref, table_name: "messages", record_id: m.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.messages += msgs.length;
-      }
+      // Fetch all record IDs in parallel
+      const [msgsR, tasksR, notesR, activR, labelsR, draftsR, rtsR] = await Promise.all([
+        supabase.from("messages").select("id").eq("conversation_id", mergeId),
+        supabase.from("tasks").select("id").eq("conversation_id", mergeId),
+        supabase.from("notes").select("id").eq("conversation_id", mergeId),
+        supabase.from("activity_log").select("id").eq("conversation_id", mergeId),
+        supabase.from("conversation_labels").select("id, label_id").eq("conversation_id", mergeId),
+        supabase.from("email_drafts").select("id").eq("conversation_id", mergeId),
+        supabase.from("response_times").select("id").eq("conversation_id", mergeId),
+      ]);
 
-      // Move tasks
-      const { data: tasks } = await supabase.from("tasks").select("id").eq("conversation_id", mergeId);
-      if (tasks && tasks.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          tasks.map((t: any) => ({ merge_id: merge_id_ref, table_name: "tasks", record_id: t.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.tasks += tasks.length;
-      }
+      const msgs = msgsR.data || [];
+      const tasks = tasksR.data || [];
+      const notes = notesR.data || [];
+      const activ = activR.data || [];
+      const labels = labelsR.data || [];
+      const drafts = draftsR.data || [];
+      const rts = rtsR.data || [];
 
-      // Move notes
-      const { data: notes } = await supabase.from("notes").select("id").eq("conversation_id", mergeId);
-      if (notes && notes.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          notes.map((n: any) => ({ merge_id: merge_id_ref, table_name: "notes", record_id: n.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.notes += notes.length;
-      }
-
-      // Move activity_log
-      const { data: activities } = await supabase.from("activity_log").select("id").eq("conversation_id", mergeId);
-      if (activities && activities.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          activities.map((a: any) => ({ merge_id: merge_id_ref, table_name: "activity_log", record_id: a.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.activities += activities.length;
-      }
-
-      // Move conversation_labels (avoid duplicates)
-      const { data: labels } = await supabase.from("conversation_labels").select("id, label_id").eq("conversation_id", mergeId);
-      const { data: existingLabels } = await supabase.from("conversation_labels").select("label_id").eq("conversation_id", primary_id);
-      const existingLabelIds = new Set((existingLabels || []).map((l: any) => l.label_id));
-      if (labels && labels.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          labels.map((l: any) => ({ merge_id: merge_id_ref, table_name: "conversation_labels", record_id: l.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        // Only move non-duplicate labels
-        for (const label of labels) {
-          if (!existingLabelIds.has(label.label_id)) {
-            await supabase.from("conversation_labels").update({ conversation_id: primary_id }).eq("id", label.id);
-          } else {
-            await supabase.from("conversation_labels").delete().eq("id", label.id);
-          }
+      // Build all tracking records in one batch
+      const trackingRecords: any[] = [];
+      const mkTrack = (table: string, records: any[]) => {
+        for (const r of records) {
+          trackingRecords.push({ merge_id: mid, table_name: table, record_id: r.id, original_conversation_id: mergeId, target_conversation_id: primary_id });
         }
-        results.moved.labels += labels.length;
+      };
+      mkTrack("messages", msgs);
+      mkTrack("tasks", tasks);
+      mkTrack("notes", notes);
+      mkTrack("activity_log", activ);
+      mkTrack("conversation_labels", labels);
+      mkTrack("email_drafts", drafts);
+      mkTrack("response_times", rts);
+
+      // Insert all tracking records in one call
+      if (trackingRecords.length > 0) {
+        await supabase.from("merge_moved_records").insert(trackingRecords);
       }
 
-      // Move email_drafts
-      const { data: drafts } = await supabase.from("email_drafts").select("id").eq("conversation_id", mergeId);
-      if (drafts && drafts.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          drafts.map((d: any) => ({ merge_id: merge_id_ref, table_name: "email_drafts", record_id: d.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.drafts += drafts.length;
-      }
+      // Move all records in parallel
+      const moveOps: Promise<any>[] = [];
+      if (msgs.length > 0) moveOps.push(supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (tasks.length > 0) moveOps.push(supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (notes.length > 0) moveOps.push(supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (activ.length > 0) moveOps.push(supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (drafts.length > 0) moveOps.push(supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
+      if (rts.length > 0) moveOps.push(supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId));
 
-      // Move response_times
-      const { data: rts } = await supabase.from("response_times").select("id").eq("conversation_id", mergeId);
-      if (rts && rts.length > 0) {
-        await supabase.from("merge_moved_records").insert(
-          rts.map((r: any) => ({ merge_id: merge_id_ref, table_name: "response_times", record_id: r.id, original_conversation_id: mergeId, target_conversation_id: primary_id }))
-        );
-        await supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId);
-        results.moved.response_times += rts.length;
+      // Handle labels: move non-duplicates, delete duplicates
+      if (labels.length > 0) {
+        const { data: existingLabels } = await supabase.from("conversation_labels").select("label_id").eq("conversation_id", primary_id);
+        const existingLabelIds = new Set((existingLabels || []).map((l: any) => l.label_id));
+        const toMove = labels.filter((l: any) => !existingLabelIds.has(l.label_id));
+        const toDel = labels.filter((l: any) => existingLabelIds.has(l.label_id));
+        if (toMove.length > 0) moveOps.push(supabase.from("conversation_labels").update({ conversation_id: primary_id }).in("id", toMove.map((l: any) => l.id)));
+        if (toDel.length > 0) moveOps.push(supabase.from("conversation_labels").delete().in("id", toDel.map((l: any) => l.id)));
       }
 
       // Mark merged conversation
-      await supabase.from("conversations").update({
-        merged_into: primary_id,
-        status: "merged",
-      }).eq("id", mergeId);
+      moveOps.push(supabase.from("conversations").update({ merged_into: primary_id, status: "merged" }).eq("id", mergeId));
+
+      await Promise.all(moveOps);
+
+      results.moved.messages += msgs.length;
+      results.moved.tasks += tasks.length;
+      results.moved.notes += notes.length;
+      results.moved.activities += activ.length;
+      results.moved.labels += labels.length;
+      results.moved.drafts += drafts.length;
+      results.moved.response_times += rts.length;
 
       // Log activity
       await supabase.from("activity_log").insert({
         conversation_id: primary_id,
         actor_id: actor_id || null,
         action: "merge",
-        details: { merged_conversation_id: mergeId, merge_record_id: merge_id_ref },
+        details: { merged_conversation_id: mergeId, merge_record_id: mid },
       });
 
       results.merges++;
     }
 
-    // Update primary conversation's last_message_at to the most recent message
+    // Update primary conversation's last_message_at
     const { data: latestMsg } = await supabase
       .from("messages")
       .select("sent_at")
@@ -186,7 +184,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "merge_id is required" }, { status: 400 });
   }
 
-  // Get merge record
   const { data: merge } = await supabase
     .from("conversation_merges")
     .select("*")
@@ -198,43 +195,38 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Merge not found or already unmerged" }, { status: 404 });
   }
 
-  const results = { restored: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0 } };
-
   try {
-    // Get all moved records for this merge
+    // Get all moved records grouped by table
     const { data: movedRecords } = await supabase
       .from("merge_moved_records")
       .select("*")
       .eq("merge_id", mergeId);
 
-    // Restore each record to its original conversation
-    for (const record of (movedRecords || [])) {
-      const table = record.table_name;
-      const key = table === "conversation_labels" ? "id" : "id";
-
-      await supabase
-        .from(table)
-        .update({ conversation_id: record.original_conversation_id })
-        .eq(key, record.record_id);
-
-      const category = table as keyof typeof results.restored;
-      if (results.restored[category] !== undefined) {
-        results.restored[category]++;
-      }
+    // Group by table for batch updates
+    const byTable: Record<string, any[]> = {};
+    for (const r of (movedRecords || [])) {
+      if (!byTable[r.table_name]) byTable[r.table_name] = [];
+      byTable[r.table_name].push(r);
     }
 
-    // Restore the merged conversation
-    await supabase.from("conversations").update({
-      merged_into: null,
-      status: "open",
-    }).eq("id", merge.merged_conversation_id);
+    // Restore records in parallel — batch by table using record IDs
+    const restoreOps: Promise<any>[] = [];
+    for (const [table, records] of Object.entries(byTable)) {
+      const ids = records.map(r => r.record_id);
+      const origConvoId = records[0].original_conversation_id;
+      restoreOps.push(
+        supabase.from(table).update({ conversation_id: origConvoId }).in("id", ids)
+      );
+    }
+    await Promise.all(restoreOps);
 
-    // Mark merge as inactive
-    await supabase.from("conversation_merges").update({
-      is_active: false,
-      unmerged_at: new Date().toISOString(),
-      unmerged_by: actorId || null,
-    }).eq("id", mergeId);
+    // Restore conversation, mark merge inactive, clean up — in parallel
+    await Promise.all([
+      supabase.from("conversations").update({ merged_into: null, status: "open" }).eq("id", merge.merged_conversation_id),
+      supabase.from("conversation_merges").update({ is_active: false, unmerged_at: new Date().toISOString(), unmerged_by: actorId || null }).eq("id", mergeId),
+      supabase.from("merge_moved_records").delete().eq("merge_id", mergeId),
+      supabase.from("activity_log").insert({ conversation_id: merge.primary_conversation_id, actor_id: actorId || null, action: "unmerge", details: { unmerged_conversation_id: merge.merged_conversation_id, merge_record_id: mergeId } }),
+    ]);
 
     // Update primary conversation's last_message_at
     const { data: latestMsg } = await supabase
@@ -249,18 +241,10 @@ export async function DELETE(req: NextRequest) {
       await supabase.from("conversations").update({ last_message_at: latestMsg.sent_at }).eq("id", merge.primary_conversation_id);
     }
 
-    // Log activity
-    await supabase.from("activity_log").insert({
-      conversation_id: merge.primary_conversation_id,
-      actor_id: actorId || null,
-      action: "unmerge",
-      details: { unmerged_conversation_id: merge.merged_conversation_id, merge_record_id: mergeId },
-    });
+    const counts: Record<string, number> = {};
+    for (const [table, records] of Object.entries(byTable)) counts[table] = records.length;
 
-    // Delete moved records tracking
-    await supabase.from("merge_moved_records").delete().eq("merge_id", mergeId);
-
-    return NextResponse.json({ success: true, ...results });
+    return NextResponse.json({ success: true, restored: counts });
   } catch (error: any) {
     console.error("[unmerge] Failed:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -276,7 +260,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
   }
 
-  // Get active merges where this conversation is the primary
   const { data: merges } = await supabase
     .from("conversation_merges")
     .select(`
