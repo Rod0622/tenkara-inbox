@@ -2067,15 +2067,22 @@ export default function ConversationDetail({
   const [mergedThreads, setMergedThreads] = useState<any[]>([]);
   const [mergingThreadId, setMergingThreadId] = useState<string | null>(null);
   const [unmergingId, setUnmergingId] = useState<string | null>(null);
+  const [mergeDataLoaded, setMergeDataLoaded] = useState(false);
 
-  // Fetch active merges for this conversation
+  // Lazy-load merge data only when Related Threads tab is opened
   useEffect(() => {
-    if (!convo?.id) { setMergedThreads([]); return; }
+    if (activeTab !== "related" || !convo?.id || mergeDataLoaded) return;
     fetch(`/api/merge?conversation_id=${convo.id}`)
       .then(r => r.json())
-      .then(d => setMergedThreads(d.merges || []))
-      .catch(() => setMergedThreads([]));
-  }, [convo?.id, messages.length]);
+      .then(d => { setMergedThreads(d.merges || []); setMergeDataLoaded(true); })
+      .catch(() => { setMergedThreads([]); setMergeDataLoaded(true); });
+  }, [activeTab, convo?.id, mergeDataLoaded]);
+
+  // Reset merge data when conversation changes
+  useEffect(() => {
+    setMergedThreads([]);
+    setMergeDataLoaded(false);
+  }, [convo?.id]);
 
   const handleMerge = async (threadId: string) => {
     if (!convo?.id || !confirm("Merge this thread into the current conversation?\n\nAll messages, tasks, notes, and activities will be moved here. This can be undone later.")) return;
@@ -2088,9 +2095,7 @@ export default function ConversationDetail({
       });
       if (res.ok) {
         await refetchDetail();
-        // Refresh merges and related threads
-        const d = await fetch(`/api/merge?conversation_id=${convo.id}`).then(r => r.json());
-        setMergedThreads(d.merges || []);
+        setMergeDataLoaded(false); // trigger refetch of merge data
       } else {
         const err = await res.json();
         alert("Merge failed: " + (err.error || "Unknown error"));
@@ -2106,8 +2111,7 @@ export default function ConversationDetail({
       const res = await fetch(`/api/merge?merge_id=${mergeId}&actor_id=${currentUser?.id || ""}`, { method: "DELETE" });
       if (res.ok) {
         await refetchDetail();
-        const d = await fetch(`/api/merge?conversation_id=${convo!.id}`).then(r => r.json());
-        setMergedThreads(d.merges || []);
+        setMergeDataLoaded(false); // trigger refetch of merge data
       } else {
         const err = await res.json();
         alert("Unmerge failed: " + (err.error || "Unknown error"));
