@@ -218,6 +218,7 @@ export function useConversations(accountId: string | null) {
         .from("conversations")
         .select(selectFields)
         .eq("email_account_id", accountId)
+        .neq("status", "merged")
         .order("last_message_at", { ascending: false })
         .limit(500);
 
@@ -233,12 +234,14 @@ export function useConversations(accountId: string | null) {
         supabase
           .from("conversations")
           .select(selectFields)
+          .neq("status", "merged")
           .order("last_message_at", { ascending: false })
           .limit(300),
         supabase
           .from("conversations")
           .select(selectFields)
           .not("assignee_id", "is", null)
+          .neq("status", "merged")
           .order("last_message_at", { ascending: false })
           .limit(200),
       ]);

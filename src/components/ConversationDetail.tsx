@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Forward,
   GitBranch,
+  GitMerge,
   Image,
   Loader2,
   Mail,
@@ -2061,6 +2062,59 @@ export default function ConversationDetail({
     summary,
     loading: relatedThreadsLoading,
   } = useRelatedThreads(convo?.id || null);
+
+  // Merge state
+  const [mergedThreads, setMergedThreads] = useState<any[]>([]);
+  const [mergingThreadId, setMergingThreadId] = useState<string | null>(null);
+  const [unmergingId, setUnmergingId] = useState<string | null>(null);
+
+  // Fetch active merges for this conversation
+  useEffect(() => {
+    if (!convo?.id) { setMergedThreads([]); return; }
+    fetch(`/api/merge?conversation_id=${convo.id}`)
+      .then(r => r.json())
+      .then(d => setMergedThreads(d.merges || []))
+      .catch(() => setMergedThreads([]));
+  }, [convo?.id, messages.length]);
+
+  const handleMerge = async (threadId: string) => {
+    if (!convo?.id || !confirm("Merge this thread into the current conversation?\n\nAll messages, tasks, notes, and activities will be moved here. This can be undone later.")) return;
+    setMergingThreadId(threadId);
+    try {
+      const res = await fetch("/api/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primary_id: convo.id, merge_ids: [threadId], actor_id: currentUser?.id }),
+      });
+      if (res.ok) {
+        await refetchDetail();
+        // Refresh merges and related threads
+        const d = await fetch(`/api/merge?conversation_id=${convo.id}`).then(r => r.json());
+        setMergedThreads(d.merges || []);
+      } else {
+        const err = await res.json();
+        alert("Merge failed: " + (err.error || "Unknown error"));
+      }
+    } catch (e: any) { alert("Merge failed: " + e.message); }
+    setMergingThreadId(null);
+  };
+
+  const handleUnmerge = async (mergeId: string) => {
+    if (!confirm("Unmerge this thread?\n\nAll original messages, tasks, notes will be restored to the original conversation.")) return;
+    setUnmergingId(mergeId);
+    try {
+      const res = await fetch(`/api/merge?merge_id=${mergeId}&actor_id=${currentUser?.id || ""}`, { method: "DELETE" });
+      if (res.ok) {
+        await refetchDetail();
+        const d = await fetch(`/api/merge?conversation_id=${convo!.id}`).then(r => r.json());
+        setMergedThreads(d.merges || []);
+      } else {
+        const err = await res.json();
+        alert("Unmerge failed: " + (err.error || "Unknown error"));
+      }
+    } catch (e: any) { alert("Unmerge failed: " + e.message); }
+    setUnmergingId(null);
+  };
 
   const {
     summary: threadSummary,
@@ -4177,6 +4231,37 @@ export default function ConversationDetail({
               </div>
             </div>
 
+            {/* Merged Threads */}
+            {mergedThreads.length > 0 && (
+              <div className="mb-3 rounded-xl border border-[#BC8CFF]/20 bg-[rgba(188,140,255,0.05)] p-4">
+                <div className="flex items-center gap-2 mb-3 text-[12px] font-semibold text-[#BC8CFF]">
+                  <GitMerge size={14} />
+                  Merged Threads ({mergedThreads.length})
+                </div>
+                <div className="space-y-2">
+                  {mergedThreads.map((m: any) => (
+                    <div key={m.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-[#1E242C] bg-[#12161B]">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12px] font-medium text-[#E6EDF3] truncate">{m.merged_conversation?.subject || "(No subject)"}</div>
+                        <div className="text-[10px] text-[#7D8590] mt-0.5">
+                          {m.merged_conversation?.from_name || m.merged_conversation?.from_email || "Unknown"} · Merged {new Date(m.merged_at).toLocaleDateString()}
+                          {m.merged_by_user && <> by {m.merged_by_user.name}</>}
+                        </div>
+                      </div>
+                      <button
+                        disabled={unmergingId === m.id}
+                        onClick={() => handleUnmerge(m.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#F0883E]/30 bg-[rgba(240,136,62,0.08)] text-[10px] font-semibold text-[#F0883E] hover:bg-[rgba(240,136,62,0.15)] disabled:opacity-50 shrink-0"
+                      >
+                        <GitBranch size={11} />
+                        {unmergingId === m.id ? "Unmerging..." : "Unmerge"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {relatedThreadsLoading && (
               <div className="text-center py-10 text-[#484F58] text-sm">
                 Loading related threads...
@@ -4266,15 +4351,27 @@ export default function ConversationDetail({
                         )}
                       </div>
 
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] shrink-0"
-                      >
-                        <ExternalLink size={13} />
-                        Open
-                      </a>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11] text-[11px] font-semibold text-[#58A6FF] hover:bg-[#181D24] shrink-0"
+                        >
+                          <ExternalLink size={13} />
+                          Open
+                        </a>
+                        {thread.id !== convo.id && !thread.merged_into && (
+                          <button
+                            disabled={mergingThreadId === thread.id}
+                            onClick={() => handleMerge(thread.id)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[#BC8CFF]/30 bg-[rgba(188,140,255,0.08)] text-[11px] font-semibold text-[#BC8CFF] hover:bg-[rgba(188,140,255,0.15)] disabled:opacity-50 shrink-0"
+                          >
+                            <GitMerge size={11} />
+                            {mergingThreadId === thread.id ? "Merging..." : "Merge"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
