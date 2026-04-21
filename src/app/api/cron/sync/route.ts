@@ -128,6 +128,68 @@ export async function GET(req: NextRequest) {
     const totalNew = results.reduce((sum, r) => sum + (r.newMessages || 0), 0);
     const totalFailed = results.filter((r) => !r.success).length;
 
+    // ── Check for users with too many unread emails and notify ──
+    const UNREAD_THRESHOLD = 5; // Alert when user has 5+ unread assigned emails
+    try {
+      // Get all active team members
+      const { data: members } = await supabase.from("team_members").select("id, name").eq("is_active", true);
+
+      if (members && members.length > 0) {
+        // Count unread conversations per assignee — paginate to avoid 1000-row cap
+        let allConvos: any[] = [];
+        let offset = 0;
+        while (true) {
+          const { data: batch } = await supabase
+            .from("conversations")
+            .select("assignee_id")
+            .eq("is_unread", true)
+            .neq("status", "trash")
+            .neq("status", "merged")
+            .not("assignee_id", "is", null)
+            .range(offset, offset + 998);
+          if (!batch || batch.length === 0) break;
+          allConvos = allConvos.concat(batch);
+          if (batch.length < 999) break;
+          offset += 999;
+        }
+
+        // Count per user
+        const unreadByUser: Record<string, number> = {};
+        for (const c of allConvos) {
+          unreadByUser[c.assignee_id] = (unreadByUser[c.assignee_id] || 0) + 1;
+        }
+
+        // Check which users exceed threshold
+        for (const member of members) {
+          const count = unreadByUser[member.id] || 0;
+          if (count < UNREAD_THRESHOLD) continue;
+
+          // Check if we already sent this alert in the last 24 hours
+          const { data: recentAlert } = await supabase
+            .from("notifications")
+            .select("id")
+            .eq("user_id", member.id)
+            .eq("type", "unread_alert")
+            .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .limit(1);
+
+          if (recentAlert && recentAlert.length > 0) continue; // Already alerted recently
+
+          // Create notification
+          await supabase.from("notifications").insert({
+            user_id: member.id,
+            title: `You have ${count} unread emails`,
+            body: `${count} assigned emails are waiting for your attention. Please review and respond.`,
+            type: "unread_alert",
+          });
+
+          console.log(`[cron-sync] Unread alert: ${member.name} has ${count} unread emails`);
+        }
+      }
+    } catch (alertErr: any) {
+      console.error("[cron-sync] Unread alert check failed:", alertErr.message);
+    }
+
     console.log(`[cron-sync] Done: ${accounts.length} accounts, ${totalNew} new messages, ${totalFailed} failed, ${Date.now() - startTime}ms`);
 
     return NextResponse.json({

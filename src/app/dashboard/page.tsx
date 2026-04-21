@@ -743,11 +743,24 @@ export default function DashboardPage() {
             </div>
             {userStats.map((user) => (
               <button key={user.id} onClick={() => loadUserDetail(user.id)}
-                className="w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all items-center text-left"
+                className={`w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all items-center text-left ${
+                  user.conversations.unread >= 5 ? "border-[#F85149]/30" : "border-[#1E242C]"
+                }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11] flex-shrink-0" style={{ background: user.color }}>{user.initials}</div>
-                  <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[#484F58]">{user.department}</div></div>
+                  <div className="relative">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11] flex-shrink-0" style={{ background: user.color }}>{user.initials}</div>
+                    {user.conversations.unread >= 5 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#F85149] text-[7px] font-bold text-white flex items-center justify-center border border-[#0F1318]">{user.conversations.unread > 99 ? "99" : user.conversations.unread}</span>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-semibold">{user.name}</div>
+                    <div className="text-[10px] text-[#484F58]">{user.department}</div>
+                    {user.conversations.unread >= 5 && (
+                      <div className="text-[9px] font-semibold text-[#F85149] mt-0.5">{user.conversations.unread} unread emails need attention</div>
+                    )}
+                  </div>
                 </div>
                 <div className="text-center text-sm font-semibold text-[#58A6FF]">{user.tasks.todo}</div>
                 <div className="text-center text-sm font-semibold text-[#F5D547]">{user.tasks.in_progress}</div>
