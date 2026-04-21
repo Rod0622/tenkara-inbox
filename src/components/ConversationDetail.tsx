@@ -449,7 +449,6 @@ function CallAssignment({
           }),
         });
         // Also update task_assignees: remove old, add new
-        const { createBrowserClient } = await import("@/lib/supabase");
         const sb = createBrowserClient();
         await sb.from("task_assignees").delete().eq("task_id", existingCallTask.id);
         await sb.from("task_assignees").insert({ task_id: existingCallTask.id, team_member_id: member.id });
@@ -581,7 +580,7 @@ function SlaResetPanel({ task, convo, onAddNote, onUpdateTask, onDone }: {
 
       let supplierHrs: any = null;
       try {
-        const sb = (await import("@/lib/supabase")).createBrowserClient();
+        const sb = createBrowserClient();
         if (convo?.supplier_contact_id) {
           const { data: sc } = await sb.from("supplier_contacts")
             .select("timezone, work_start, work_end, work_days")
@@ -609,7 +608,7 @@ function SlaResetPanel({ task, convo, onAddNote, onUpdateTask, onDone }: {
 
       await onUpdateTask(task.id, { dueDate: newDueDate });
       if (newDueTime) {
-        const sb = (await import("@/lib/supabase")).createBrowserClient();
+        const sb = createBrowserClient();
         await sb.from("tasks").update({ due_time: newDueTime }).eq("id", task.id);
       }
 
@@ -1948,7 +1947,7 @@ export default function ConversationDetail({
   // Fetch account signature for replies
   useEffect(() => {
     if (convo?.email_account_id) {
-      import("@/lib/supabase").then(({ createBrowserClient }) => {
+      Promise.resolve().then(() => {
         const sb = createBrowserClient();
         sb.from("email_accounts")
           .select("signature, signature_enabled")
@@ -2023,7 +2022,7 @@ export default function ConversationDetail({
   useEffect(() => {
     setSupplierHoursInfo(null);
     if (!convo?.from_email || convo.from_email === "internal") return;
-    import("@/lib/supabase").then(({ createBrowserClient }) => {
+    Promise.resolve().then(() => {
       const sb = createBrowserClient();
       sb.from("supplier_contacts").select("timezone, work_start, work_end, work_days").eq("email", convo.from_email.toLowerCase()).maybeSingle().then(({ data }: any) => {
         if (data) setSupplierHoursInfo(data);
@@ -2129,7 +2128,7 @@ export default function ConversationDetail({
 
   // Load task categories and user groups (including account-based groups)
   useEffect(() => {
-    import("@/lib/supabase").then(({ createBrowserClient }) => {
+    Promise.resolve().then(() => {
       const sb = createBrowserClient();
       sb.from("task_categories").select("*").eq("is_active", true).order("sort_order")
         .then(({ data }) => setTaskCategories(data || []));
@@ -2272,7 +2271,7 @@ export default function ConversationDetail({
         let supplierHrs: SupplierHours | null = null;
         try {
           if ((convo as any)?.supplier_contact_id) {
-            const sb = (await import("@/lib/supabase")).createBrowserClient();
+            const sb = createBrowserClient();
             const { data: sc } = await sb.from("supplier_contacts")
               .select("timezone, work_start, work_end, work_days")
               .eq("id", (convo as any).supplier_contact_id)
@@ -2358,7 +2357,7 @@ export default function ConversationDetail({
           let supplierHrs: SupplierHours | null = null;
           try {
             if ((convo as any)?.supplier_contact_id) {
-              const sb = (await import("@/lib/supabase")).createBrowserClient();
+              const sb = createBrowserClient();
               const { data: sc } = await sb.from("supplier_contacts")
                 .select("timezone, work_start, work_end, work_days")
                 .eq("id", (convo as any).supplier_contact_id)
@@ -2387,7 +2386,6 @@ export default function ConversationDetail({
       });
 
       // Update task_assignees: rebuild the join table
-      const { createBrowserClient } = await import("@/lib/supabase");
       const sb = createBrowserClient();
       await sb.from("task_assignees").delete().eq("task_id", editingTaskId);
       if (editTaskAssigneeIds.length > 0) {
@@ -2404,7 +2402,7 @@ export default function ConversationDetail({
   const openReplyTemplatePicker = async () => {
     setShowReplyTemplateModal(true);
     if (replyTemplates.length === 0) {
-      import("@/lib/supabase").then(({ createBrowserClient }) => {
+      Promise.resolve().then(() => {
         const sb = createBrowserClient();
         sb.from("email_templates").select("*").eq("is_active", true).order("scope").order("sort_order")
           .then(({ data }) => setReplyTemplates(data || []));

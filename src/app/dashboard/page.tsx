@@ -18,8 +18,10 @@ import {
 } from "@/lib/business-hours";
 
 // Lazy-init supabase client (avoid module-level call that breaks static generation)
-function getSupabase(): any {
-  return createBrowserClient();
+let _supabase: ReturnType<typeof createBrowserClient> | null = null;
+function getSupabase() {
+  if (!_supabase) _supabase = createBrowserClient();
+  return _supabase;
 }
 
 // ── Types ─────────────────────────────────────────────
@@ -402,7 +404,7 @@ export default function DashboardPage() {
     const now = new Date();
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    const stats: UserStats[] = (members || []).map((member: any) => {
+    const stats: UserStats[] = (members || []).map((member) => {
       const memberTasks = (tasks || []).filter((t: any) =>
         (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
       );
