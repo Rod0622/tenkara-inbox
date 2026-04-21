@@ -402,7 +402,7 @@ export default function DashboardPage() {
     const now = new Date();
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    const stats: UserStats[] = (members || []).map((member: any) => {
+    const stats: UserStats[] = (members || []).map((member) => {
       const memberTasks = (tasks || []).filter((t: any) =>
         (t.task_assignees || []).some((a: any) => a.team_member_id === member.id)
       );
@@ -462,11 +462,11 @@ export default function DashboardPage() {
 
     const critical = (tasks || [])
       .filter((t: any) => !t.is_done && t.status !== "completed" && t.status !== "dismissed" && !(t.task_assignees || []).every((a: any) => a.is_done) && t.due_date && new Date(t.due_date) <= in48Hours)
-      .map(mapTask).sort((a: any, b: any) => (a.due_date || "").localeCompare(b.due_date || ""));
+      .map(mapTask).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));
 
     const all = (tasks || [])
       .filter((t: any) => !(t.task_assignees || []).every((a: any) => a.is_done) && t.status !== "completed" && t.status !== "dismissed" && !t.is_done)
-      .map(mapTask).sort((a: any, b: any) => (a.due_date || "z").localeCompare(b.due_date || "z"));
+      .map(mapTask).sort((a, b) => (a.due_date || "z").localeCompare(b.due_date || "z"));
 
     setUserStats(stats);
     setCriticalTasks(critical);
