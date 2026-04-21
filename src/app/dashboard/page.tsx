@@ -18,7 +18,7 @@ import {
 } from "@/lib/business-hours";
 
 // Lazy-init supabase client (avoid module-level call that breaks static generation)
-function getSupabase() {
+function getSupabase(): any {
   return createBrowserClient();
 }
 
@@ -239,8 +239,8 @@ export default function DashboardPage() {
           const { data: convos } = await getSupabase()
             .from("conversations")
             .select("id, subject, assignee_id")
-            .in("id", chunk) as any;
-          for (const c of (convos || [])) convoMeta[(c as any).id] = { subject: (c as any).subject, assignee_id: (c as any).assignee_id };
+            .in("id", chunk);
+          for (const c of (convos || [])) convoMeta[c.id] = { subject: c.subject, assignee_id: c.assignee_id };
         }
       }
 
