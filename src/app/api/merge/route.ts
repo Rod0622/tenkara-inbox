@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Move all records in parallel
-      const moveOps: Promise<any>[] = [];
+      const moveOps: any[] = [];
       if (msgs.length > 0) moveOps.push(supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (tasks.length > 0) moveOps.push(supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (notes.length > 0) moveOps.push(supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
@@ -210,7 +210,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Restore records in parallel — batch by table using record IDs
-    const restoreOps: Promise<any>[] = [];
+    const restoreOps: any[] = [];
     for (const [table, records] of Object.entries(byTable)) {
       const ids = records.map(r => r.record_id);
       const origConvoId = records[0].original_conversation_id;
