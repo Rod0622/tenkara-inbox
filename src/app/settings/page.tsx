@@ -1631,6 +1631,11 @@ const CONDITION_FIELDS = [
   { value: "time_since_last_outbound", label: "Time since last sent email", group: "Time-based" },
   { value: "time_since_created", label: "Time since conversation created", group: "Time-based" },
   { value: "follow_up_count", label: "Follow-up count", group: "Time-based" },
+  { value: "added_label_name", label: "Added label name", group: "Event" },
+  { value: "removed_label_name", label: "Removed label name", group: "Event" },
+  { value: "comment_text", label: "Comment text", group: "Event" },
+  { value: "comment_type", label: "Comment type (note/task)", group: "Event" },
+  { value: "action_initiator", label: "Action initiator", group: "Event" },
 ];
 
 const CONDITION_OPERATORS = [
@@ -1646,6 +1651,8 @@ const CONDITION_OPERATORS = [
   { value: "is_false", label: "Is false" },
   { value: "greater_than", label: "Greater than" },
   { value: "less_than", label: "Less than" },
+  { value: "is_present", label: "Is present" },
+  { value: "is_absent", label: "Is absent" },
 ];
 
 const ACTION_TYPES = [
@@ -1655,9 +1662,11 @@ const ACTION_TYPES = [
   { value: "assign_to", label: "Assign to", group: "Assignment" },
   { value: "assign_sender", label: "Assign sender", group: "Assignment" },
   { value: "unassign", label: "Unassign", group: "Assignment" },
+  { value: "unassign_all", label: "Unassign all (event rules)", group: "Assignment" },
   { value: "move_to_folder", label: "Move to folder / team", group: "Organization" },
   { value: "set_status", label: "Set status", group: "Organization" },
   { value: "archive", label: "Archive (close)", group: "Organization" },
+  { value: "close_conversation", label: "Close conversation", group: "Organization" },
   { value: "snooze", label: "Snooze", group: "Organization" },
   { value: "trash", label: "Trash", group: "Organization" },
   { value: "mark_starred", label: "Star", group: "Flags" },
@@ -1681,6 +1690,11 @@ const TRIGGER_TYPES = [
   { value: "outgoing", label: "Outgoing", icon: "📤", description: "Runs when an email is sent" },
   { value: "unreplied", label: "Unreplied", icon: "⏰", description: "Runs automatically when we're waiting for a supplier reply (checked hourly)" },
   { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action" },
+  { value: "label_added", label: "Label Added", icon: "🏷️", description: "Runs when a label is added to a conversation" },
+  { value: "label_removed", label: "Label Removed", icon: "❌", description: "Runs when a label is removed from a conversation" },
+  { value: "new_comment", label: "New Comment", icon: "💬", description: "Runs when someone posts a note or task (internal comment)" },
+  { value: "assignee_changed", label: "Assignee Changed", icon: "👥", description: "Runs when a conversation's assignee changes" },
+  { value: "conversation_closed", label: "Conversation Closed", icon: "✅", description: "Runs when a conversation is closed" },
 ];
 
 interface RuleCondition { field: string; operator: string; value: string; required?: boolean; }
@@ -1941,6 +1955,7 @@ function RulesTab() {
     }
     if (t === "assign_to") {
       const isAuto = action.value.startsWith("auto:");
+      const isInitiator = action.value === "__initiator__";
       const autoParts = isAuto ? action.value.split(":") : [];
       const autoStrategy = autoParts[1] || "";
       const autoPool = autoParts[2] || "all";
@@ -1955,15 +1970,23 @@ function RulesTab() {
       return (
         <div className="flex-1 flex flex-col gap-1.5">
           {/* Mode selector */}
-          <div className="flex gap-1">
+          <div className="flex gap-1 flex-wrap">
             <button onClick={() => updateAction(idx, { value: "" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${!isAuto ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              className={`px-2 py-1 rounded text-[10px] font-medium ${!isAuto && !isInitiator ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
               Specific person</button>
             <button onClick={() => updateAction(idx, { value: "auto:random:all" })}
               className={`px-2 py-1 rounded text-[10px] font-medium ${isAuto ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
               Auto-assign</button>
+            <button onClick={() => updateAction(idx, { value: "__initiator__" })}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${isInitiator ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30" : "text-[#7D8590] border border-[#1E242C]"}`}
+              title="Assign to the user who triggered the event (only works for event-based rules)">
+              Action initiator</button>
           </div>
-          {!isAuto ? (
+          {isInitiator ? (
+            <div className="text-[10px] text-[#7D8590] italic py-1">
+              Conversation will be assigned to whoever triggered the rule (only fires for event-based triggers: label changes, comments, assignment changes, etc.).
+            </div>
+          ) : !isAuto ? (
             <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
               className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
               <option value="">Select member...</option>
@@ -2039,6 +2062,7 @@ function RulesTab() {
               <option value="">No assignees</option>
               <option value="assigned_users">Assigned users</option>
               <option value="all">Everyone</option>
+              <option value="initiator">Action initiator (event rules only)</option>
               <option value="specific">Specific users...</option>
             </select>
             {(action as any).task_assignee_mode === "specific" && (
@@ -2080,6 +2104,32 @@ function RulesTab() {
     }
     if (t === "assign_sender") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation will be assigned to the message sender.</div>;
+    }
+    if (t === "unassign_all") {
+      const exceptInitiator = action.value === "__except_initiator__";
+      return (
+        <div className="flex-1 flex flex-col gap-1.5">
+          <div className="flex gap-1">
+            <button onClick={() => updateAction(idx, { value: "" })}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${!exceptInitiator ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              Always unassign</button>
+            <button onClick={() => updateAction(idx, { value: "__except_initiator__" })}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${exceptInitiator ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              Keep initiator</button>
+          </div>
+          <div className="text-[10px] text-[#7D8590] italic">
+            {exceptInitiator
+              ? "Unassign unless the current assignee is the user who triggered the rule."
+              : "Clear the conversation's assignee."}
+          </div>
+        </div>
+      );
+    }
+    if (t === "close_conversation") {
+      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation status will be set to closed.</div>;
+    }
+    if (t === "assign_sender_legacy_placeholder") {
+      return null;
     }
     if (t === "send_follow_up" || t === "create_draft") {
       return (
@@ -2127,7 +2177,11 @@ function RulesTab() {
 
   const getActionLabel = (type: string, value: string) => {
     if (type === "add_label" || type === "remove_label") return labels.find((l) => l.id === value)?.name || "";
-    if (type === "assign_to") return members.find((m) => m.id === value)?.name || "";
+    if (type === "assign_to") {
+      if (value === "__initiator__") return "action initiator";
+      return members.find((m) => m.id === value)?.name || "";
+    }
+    if (type === "unassign_all") return value === "__except_initiator__" ? "(keep initiator)" : "";
     if (type === "move_to_folder") { const f = allFolders.find((f) => f.id === value); return f ? `${f.icon} ${f.name}` : ""; }
     if (type === "set_status") return value;
     return "";
@@ -2226,7 +2280,28 @@ function RulesTab() {
                       className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                       {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    {subItem.field === "has_label" ? (
+                    {subItem.operator === "is_present" || subItem.operator === "is_absent" ? (
+                      <span className="text-[10px] text-[#484F58] px-2 flex-1">(no value needed)</span>
+                    ) : subItem.field === "action_initiator" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Any user</option>
+                        {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    ) : subItem.field === "comment_type" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select...</option>
+                        <option value="note">Note</option>
+                        <option value="task">Task</option>
+                      </select>
+                    ) : subItem.field === "added_label_name" || subItem.field === "removed_label_name" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select label...</option>
+                        {labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+                      </select>
+                    ) : subItem.field === "has_label" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                         <option value="">Select label...</option>
@@ -2277,16 +2352,43 @@ function RulesTab() {
                 const boolFields = ["has_attachments", "has_reply"];
                 const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
                 const delayField = ["delay"];
+                const eventTextFields = ["added_label_name", "removed_label_name", "comment_text"];
+                const eventIdFields = ["action_initiator"];
+                const eventChoiceFields = ["comment_type"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (delayField.includes(cond.field)) return ["greater_than"].includes(o.value); // delay just needs "elapsed >= X"
                 if (numFields.includes(cond.field)) return ["greater_than", "less_than", "equals"].includes(o.value);
+                if (eventIdFields.includes(cond.field)) return ["is_present", "is_absent", "is", "is_not"].includes(o.value);
+                if (eventChoiceFields.includes(cond.field)) return ["is", "is_not"].includes(o.value);
+                if (eventTextFields.includes(cond.field)) return ["contains", "not_contains", "is", "is_not", "starts_with", "ends_with", "is_present", "is_absent"].includes(o.value);
                 if (["email_account", "assignee", "folder", "has_label", "conversation_status"].includes(cond.field)) return ["equals", "not_equals"].includes(o.value);
-                return !["is_true", "is_false", "greater_than", "less_than"].includes(o.value);
+                return !["is_true", "is_false", "greater_than", "less_than", "is_present", "is_absent"].includes(o.value);
               }).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {/* Smart value input based on field type */}
             {cond.field === "has_attachments" ? (
               <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+            ) : cond.operator === "is_present" || cond.operator === "is_absent" ? (
+              <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+            ) : cond.field === "action_initiator" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Any user (just checks presence)</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "comment_type" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select type...</option>
+                <option value="note">Note</option>
+                <option value="task">Task</option>
+              </select>
+            ) : cond.field === "added_label_name" || cond.field === "removed_label_name" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select label (or leave empty for any)...</option>
+                {labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+              </select>
             ) : cond.field === "email_account" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
