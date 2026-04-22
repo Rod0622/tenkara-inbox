@@ -377,8 +377,8 @@ async function executeAction(
         }
         const { data: newTask } = await supabase.from("tasks").insert(taskPayload).select("id").single();
         // Auto-assign if template has default assignees
-        if (newTask && template.default_assignee_ids && Array.isArray(template.default_assignee_ids)) {
-          for (const mid of template.default_assignee_ids) {
+        if (newTask && template.assignee_ids && Array.isArray(template.assignee_ids)) {
+          for (const mid of template.assignee_ids) {
             await supabase.from("task_assignees").insert({ task_id: newTask.id, team_member_id: mid });
           }
         }
@@ -386,27 +386,54 @@ async function executeAction(
       }
       case "forward_email": {
         if (!action.value || !msg) return null;
-        // Forward via the send API internally
         try {
-          const { data: account } = await supabase.from("conversations").select("email_account_id").eq("id", conversationId).single();
-          if (account?.email_account_id) {
-            await fetch(process.env.NEXTAUTH_URL + "/api/send", {
+          // Get account details to send via SMTP/OAuth
+          const { data: convo } = await supabase.from("conversations").select("email_account_id").eq("id", conversationId).single();
+          if (!convo?.email_account_id) return "No account found";
+          const { data: account } = await supabase.from("email_accounts").select("*").eq("id", convo.email_account_id).single();
+          if (!account) return "Account not found";
+
+          const nodemailer = (await import("nodemailer")).default;
+          const subject = `Fwd: ${msg.subject}`;
+          const body = `---------- Forwarded message ----------\nFrom: ${msg.from_name} <${msg.from_email}>\nSubject: ${msg.subject}\n\n${msg.body_text}`;
+
+          const smtpAuth: any = { user: account.smtp_user || account.email };
+          if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+            const { refreshGoogleToken } = await import("@/lib/google-oauth");
+            const accessToken = await refreshGoogleToken(account.id);
+            smtpAuth.type = "OAuth2";
+            smtpAuth.accessToken = accessToken;
+          } else {
+            smtpAuth.pass = account.smtp_password || account.imap_password;
+          }
+
+          if (account.smtp_host) {
+            const transport = nodemailer.createTransport({
+              host: account.smtp_host, port: account.smtp_port || 587,
+              secure: account.smtp_port === 465, auth: smtpAuth,
+              tls: { rejectUnauthorized: false },
+            });
+            await transport.sendMail({
+              from: `"${account.name}" <${account.email}>`,
+              to: action.value,
+              subject, text: body,
+            });
+            return `Forwarded to ${action.value}`;
+          } else if (account.provider === "microsoft_oauth") {
+            const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
+            const token = await refreshMicrosoftToken(account.id);
+            await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                account_id: account.email_account_id,
-                to: action.value,
-                subject: `Fwd: ${msg.subject}`,
-                body: `---------- Forwarded message ----------\nFrom: ${msg.from_name} <${msg.from_email}>\nSubject: ${msg.subject}\n\n${msg.body_text}`,
-              }),
+              headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+              body: JSON.stringify({ message: { subject, body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: action.value } }] }, saveToSentItems: false }),
             });
             return `Forwarded to ${action.value}`;
           }
+          return "No sending method available";
         } catch (fwdErr: any) {
           console.error("Forward action failed:", fwdErr.message);
-          return "Forward failed";
+          return "Forward failed: " + fwdErr.message;
         }
-        return null;
       }
       case "slack_notify": {
         const slackUrl = action.value || process.env.SLACK_WEBHOOK_URL;
