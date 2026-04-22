@@ -19,7 +19,7 @@ interface Action {
   type: string;
   value: string;
   task_description?: string;
-  task_assignee_mode?: "all" | "assigned_users" | "specific";
+  task_assignee_mode?: "all" | "assigned_users" | "specific" | "initiator";
   task_assignee_ids?: string[];
   task_due_days?: number;
   task_due_hours?: number;
@@ -60,13 +60,62 @@ export interface MessageContext {
   headers?: Record<string, string>;
 }
 
+// Event-based trigger context (label changes, comments, assignment, status)
+export interface RuleEvent {
+  event_type:
+    | "label_added"
+    | "label_removed"
+    | "new_comment"
+    | "assignee_changed"
+    | "conversation_closed";
+  conversation_id: string;
+  initiator_user_id?: string | null;
+  event_key: string;
+  label_id?: string;
+  label_name?: string;
+  comment_text?: string;
+  comment_type?: "note" | "task";
+  comment_id?: string;
+  new_assignee_id?: string | null;
+  old_assignee_id?: string | null;
+  new_status?: string;
+  old_status?: string;
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function isConditionGroup(item: any): item is ConditionGroup {
   return item && "match_mode" in item && "conditions" in item && Array.isArray(item.conditions);
 }
 
-function getFieldValue(msg: MessageContext, field: string): string {
+function getFieldValue(msg: MessageContext | undefined, field: string, event?: RuleEvent): string {
+  if (event) {
+    switch (field) {
+      case "added_label_name":
+        return event.event_type === "label_added" ? event.label_name || "" : "";
+      case "removed_label_name":
+        return event.event_type === "label_removed" ? event.label_name || "" : "";
+      case "comment_text":
+        return event.comment_text || "";
+      case "comment_type":
+        return event.comment_type || "";
+      case "action_initiator":
+        return event.initiator_user_id || "";
+    }
+  } else {
+    if (
+      field === "added_label_name" ||
+      field === "removed_label_name" ||
+      field === "comment_text" ||
+      field === "comment_type" ||
+      field === "action_initiator"
+    ) {
+      return "";
+    }
+  }
+
+  if (!msg) return "";
+
   switch (field) {
     case "subject": return msg.subject || "";
     case "from_email": return msg.from_email || "";
@@ -97,6 +146,8 @@ function evaluateCondition(fieldValue: string, operator: string, conditionValue:
     case "ends_with": return field.endsWith(value);
     case "is_true": return field === "true";
     case "is_false": return field === "false" || field === "";
+    case "is_present": return field.length > 0;
+    case "is_absent": return field.length === 0;
     case "greater_than": return parseFloat(field) > parseFloat(value);
     case "less_than": return parseFloat(field) < parseFloat(value);
     default: return false;
@@ -116,12 +167,11 @@ function parseDelayToHours(value: string): number {
   return totalHours || parseFloat(v) * 24;
 }
 
-// ── Lazy Context for DB lookups ────────────────────────────
-
 interface LazyContext {
   supabase: any;
   conversationId: string;
-  msg: MessageContext;
+  msg?: MessageContext;
+  event?: RuleEvent;
   _convo: any;
   _labels: string[] | null;
   _msgCount: number | null;
@@ -151,10 +201,46 @@ async function getMsgCount(ctx: LazyContext) {
   return ctx._msgCount!;
 }
 
-// ── Condition Evaluation (supports nested groups) ──────────
+async function resolveLabelIdFromValue(supabase: any, value: string): Promise<string | null> {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+    return trimmed;
+  }
+  const { data } = await supabase.from("labels").select("id").ilike("name", trimmed).limit(1).maybeSingle();
+  return data?.id || null;
+}
 
 async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<boolean> {
   const { supabase, conversationId } = ctx;
+
+  if (c.field === "added_label_name" || c.field === "removed_label_name") {
+    const eventMatches =
+      (c.field === "added_label_name" && ctx.event?.event_type === "label_added") ||
+      (c.field === "removed_label_name" && ctx.event?.event_type === "label_removed");
+    if (!eventMatches) return false;
+    const labelName = ctx.event?.label_name || "";
+    const labelId = ctx.event?.label_id || "";
+    const target = (c.value || "").trim();
+    if (!target) return c.operator === "is_present" ? !!labelName : false;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target)) {
+      return evaluateCondition(labelId, c.operator, target);
+    }
+    return evaluateCondition(labelName, c.operator, target);
+  }
+
+  if (c.field === "comment_text") {
+    return evaluateCondition(ctx.event?.comment_text || "", c.operator, c.value);
+  }
+  if (c.field === "comment_type") {
+    return evaluateCondition(ctx.event?.comment_type || "", c.operator, c.value);
+  }
+  if (c.field === "action_initiator") {
+    const initiator = ctx.event?.initiator_user_id || "";
+    if (c.operator === "is_present") return initiator.length > 0;
+    if (c.operator === "is_absent") return initiator.length === 0;
+    return evaluateCondition(initiator, c.operator, c.value);
+  }
 
   if (c.field === "conversation_status") {
     const convo = await getConvo(ctx);
@@ -170,9 +256,14 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
   }
   if (c.field === "has_label") {
     const lbls = await getLabels(ctx);
-    if (c.operator === "equals" || c.operator === "is") return lbls.includes(c.value);
-    if (c.operator === "not_equals" || c.operator === "is_not") return !lbls.includes(c.value);
-    return lbls.includes(c.value);
+    const labelId = await resolveLabelIdFromValue(supabase, c.value);
+    if (!labelId) {
+      if (c.operator === "is_not" || c.operator === "not_equals") return true;
+      return false;
+    }
+    if (c.operator === "equals" || c.operator === "is") return lbls.includes(labelId);
+    if (c.operator === "not_equals" || c.operator === "is_not") return !lbls.includes(labelId);
+    return lbls.includes(labelId);
   }
   if (c.field === "message_count") {
     const count = await getMsgCount(ctx);
@@ -201,8 +292,7 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
     return evaluateCondition(hours.toString(), c.operator, c.value);
   }
 
-  // Standard text-field conditions
-  return evaluateCondition(getFieldValue(ctx.msg, c.field), c.operator, c.value);
+  return evaluateCondition(getFieldValue(ctx.msg, c.field, ctx.event), c.operator, c.value);
 }
 
 async function evaluateNode(ctx: LazyContext, node: Condition | ConditionGroup): Promise<boolean> {
@@ -225,18 +315,17 @@ async function evaluateGroupNode(ctx: LazyContext, group: ConditionGroup): Promi
 }
 
 async function evaluateConditions(
-  supabase: any, conversationId: string, msg: MessageContext,
+  supabase: any, conversationId: string,
+  msg: MessageContext | undefined, event: RuleEvent | undefined,
   conditions: (Condition | ConditionGroup)[], matchMode: "all" | "any" | "none"
 ): Promise<boolean> {
   if (conditions.length === 0) return false;
-  const ctx: LazyContext = { supabase, conversationId, msg, _convo: null, _labels: null, _msgCount: null };
+  const ctx: LazyContext = { supabase, conversationId, msg, event, _convo: null, _labels: null, _msgCount: null };
 
-  // If any item is a group, use tree evaluator for all
   if (conditions.some(isConditionGroup)) {
     return evaluateGroupNode(ctx, { match_mode: matchMode, conditions });
   }
 
-  // Flat conditions with required/optional (backward compatible)
   const flat = conditions as Condition[];
   const results: { required: boolean; result: boolean }[] = [];
   for (const c of flat) {
@@ -257,9 +346,10 @@ async function evaluateConditions(
   }
 }
 
-// ── Action Execution ──────────────────────────────────────
-
-async function executeAction(supabase: any, conversationId: string, action: Action, msg?: MessageContext, ruleId?: string): Promise<string | null> {
+async function executeAction(
+  supabase: any, conversationId: string, action: Action,
+  msg?: MessageContext, ruleId?: string, event?: RuleEvent
+): Promise<string | null> {
   try {
     switch (action.type) {
       case "add_label": {
@@ -274,6 +364,12 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
       }
       case "assign_to": {
         if (!action.value) return null;
+        if (action.value === "__initiator__") {
+          const initiatorId = event?.initiator_user_id;
+          if (!initiatorId) return null;
+          await supabase.from("conversations").update({ assignee_id: initiatorId }).eq("id", conversationId);
+          return "Assigned to initiator";
+        }
         if (action.value.startsWith("auto:")) {
           const parts = action.value.split(":");
           const strategy = parts[1]; const pool = parts[2] || "all"; const extra = parts[3] || "all";
@@ -319,13 +415,23 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
           if (sender) { await supabase.from("conversations").update({ assignee_id: sender.id }).eq("id", conversationId); return `Assigned to sender`; }
           const { data: acct } = await supabase.from("email_accounts").select("id").eq("email", msg.from_email).maybeSingle();
           if (acct) {
-            const { data: access } = await supabase.from("email_account_access").select("team_member_id").eq("email_account_id", acct.id).limit(1).maybeSingle();
+            const { data: access } = await supabase.from("account_access").select("team_member_id").eq("email_account_id", acct.id).limit(1).maybeSingle();
             if (access) { await supabase.from("conversations").update({ assignee_id: access.team_member_id }).eq("id", conversationId); return "Assigned to sender (via account)"; }
           }
         }
         return null;
       }
       case "unassign": { await supabase.from("conversations").update({ assignee_id: null }).eq("id", conversationId); return "Unassigned"; }
+      case "unassign_all": {
+        if (action.value === "__except_initiator__" && event?.initiator_user_id) {
+          const { data: convo } = await supabase.from("conversations").select("assignee_id").eq("id", conversationId).maybeSingle();
+          if (convo?.assignee_id && convo.assignee_id === event.initiator_user_id) {
+            return "Skipped unassign (initiator)";
+          }
+        }
+        await supabase.from("conversations").update({ assignee_id: null }).eq("id", conversationId);
+        return "Unassigned";
+      }
       case "mark_starred": { await supabase.from("conversations").update({ is_starred: true }).eq("id", conversationId); return "Starred"; }
       case "unstar": { await supabase.from("conversations").update({ is_starred: false }).eq("id", conversationId); return "Unstarred"; }
       case "mark_read": { await supabase.from("conversations").update({ is_unread: false }).eq("id", conversationId); return "Marked as read"; }
@@ -333,9 +439,15 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
       case "move_to_folder": { if (!action.value) return null; await supabase.from("conversations").update({ folder_id: action.value }).eq("id", conversationId); return "Moved to folder"; }
       case "set_status": { if (!action.value) return null; await supabase.from("conversations").update({ status: action.value }).eq("id", conversationId); return `Set status to ${action.value}`; }
       case "archive": { await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId); return "Archived"; }
+      case "close_conversation": { await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId); return "Closed conversation"; }
       case "snooze": { await supabase.from("conversations").update({ status: "snoozed" }).eq("id", conversationId); return "Snoozed"; }
       case "trash": { await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId); return "Trashed"; }
-      case "add_note": { if (!action.value) return null; await supabase.from("notes").insert({ conversation_id: conversationId, text: action.value, author_id: null }); return "Added note"; }
+      case "add_note": {
+        if (!action.value) return null;
+        const authorId = event?.initiator_user_id || null;
+        await supabase.from("notes").insert({ conversation_id: conversationId, text: action.value, author_id: authorId });
+        return "Added note";
+      }
       case "add_task": {
         if (!action.value) return null;
         const taskPayload: any = { conversation_id: conversationId, text: action.value, status: "todo", is_done: false };
@@ -348,10 +460,13 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
         const { data: newTask } = await supabase.from("tasks").insert(taskPayload).select("id").single();
         if (newTask) {
           let assigneeIds: string[] = [];
-          if (action.task_assignee_mode === "specific" && action.task_assignee_ids?.length) { assigneeIds = action.task_assignee_ids; }
-          else if (action.task_assignee_mode === "assigned_users") {
+          if (action.task_assignee_mode === "specific" && action.task_assignee_ids?.length) {
+            assigneeIds = action.task_assignee_ids;
+          } else if (action.task_assignee_mode === "assigned_users") {
             const { data: convo } = await supabase.from("conversations").select("assignee_id").eq("id", conversationId).maybeSingle();
             if (convo?.assignee_id) assigneeIds = [convo.assignee_id];
+          } else if (action.task_assignee_mode === "initiator") {
+            if (event?.initiator_user_id) assigneeIds = [event.initiator_user_id];
           } else if (action.task_assignee_mode === "all") {
             const { data: all } = await supabase.from("team_members").select("id").eq("is_active", true);
             assigneeIds = (all || []).map((m: any) => m.id);
@@ -396,7 +511,13 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
       case "slack_notify": {
         const url = action.value || process.env.SLACK_WEBHOOK_URL;
         if (!url) return null;
-        try { await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: `📧 Rule triggered: *${msg?.subject || "Unknown"}*\nFrom: ${msg?.from_email || "Unknown"}\nTo: ${msg?.to_addresses || ""}\n<${process.env.NEXTAUTH_URL || ""}/#conversation=${conversationId}|Open in Tenkara>` }) }); return "Slack notification sent"; }
+        try {
+          const subject = msg?.subject || event?.event_type || "Tenkara event";
+          const from = msg?.from_email || "system";
+          const to = msg?.to_addresses || "";
+          await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: `📧 Rule triggered: *${subject}*\nFrom: ${from}\nTo: ${to}\n<${process.env.NEXTAUTH_URL || ""}/#conversation=${conversationId}|Open in Tenkara>` }) });
+          return "Slack notification sent";
+        }
         catch (e: any) { console.error("Slack failed:", e.message); return "Slack failed"; }
       }
       case "stop_processing": { return "__STOP__"; }
@@ -407,7 +528,27 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
           if (existing) return null;
         }
         try {
-          const payload = JSON.stringify({ event: "rule_triggered", conversation_id: conversationId, message_id: msg?.message_id || null, subject: msg?.subject, from_email: msg?.from_email, from_name: msg?.from_name, to_addresses: msg?.to_addresses, cc_addresses: msg?.cc_addresses || "", has_attachments: msg?.has_attachments || false, timestamp: new Date().toISOString() });
+          const payload = JSON.stringify({
+            event: event?.event_type || "rule_triggered",
+            conversation_id: conversationId,
+            message_id: msg?.message_id || null,
+            subject: msg?.subject,
+            from_email: msg?.from_email,
+            from_name: msg?.from_name,
+            to_addresses: msg?.to_addresses,
+            cc_addresses: msg?.cc_addresses || "",
+            has_attachments: msg?.has_attachments || false,
+            initiator_user_id: event?.initiator_user_id || null,
+            label_id: event?.label_id || null,
+            label_name: event?.label_name || null,
+            comment_text: event?.comment_text || null,
+            comment_type: event?.comment_type || null,
+            new_assignee_id: event?.new_assignee_id || null,
+            old_assignee_id: event?.old_assignee_id || null,
+            new_status: event?.new_status || null,
+            old_status: event?.old_status || null,
+            timestamp: new Date().toISOString(),
+          });
           const hdrs: Record<string, string> = { "Content-Type": "application/json" };
           if (action.webhook_secret) { hdrs["X-Webhook-Signature"] = crypto.createHmac("sha256", action.webhook_secret).update(payload).digest("hex"); }
           await fetch(action.value, { method: "POST", headers: hdrs, body: payload });
@@ -420,7 +561,24 @@ async function executeAction(supabase: any, conversationId: string, action: Acti
   } catch (err: any) { console.error(`Rule action ${action.type} failed:`, err.message); return null; }
 }
 
-// ── Main Entry Point ──────────────────────────────────────
+async function tryClaimRuleRun(supabase: any, ruleId: string, eventKey: string, conversationId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("rule_runs").insert({
+      rule_id: ruleId,
+      event_key: eventKey,
+      conversation_id: conversationId,
+    });
+    if (!error) return true;
+    if (error.code === "23505" || (error.message || "").toLowerCase().includes("duplicate")) {
+      return false;
+    }
+    console.error("rule_runs insert error (failing open):", error.message);
+    return true;
+  } catch (e: any) {
+    console.error("rule_runs dedupe check failed (failing open):", e?.message);
+    return true;
+  }
+}
 
 export async function runRulesForMessage(
   conversationId: string, msg: MessageContext, triggerType: "incoming" | "outgoing" | "user_action" = "incoming"
@@ -441,12 +599,12 @@ export async function runRulesForMessage(
       if (rule.actions && Array.isArray(rule.actions) && rule.actions.length > 0) { ruleActions = rule.actions; }
       else if (rule.action_type) { ruleActions = [{ type: rule.action_type, value: rule.action_value || "" }]; }
       const matchMode = rule.match_mode || "all";
-      const matches = await evaluateConditions(supabase, conversationId, msg, conditions, matchMode);
+      const matches = await evaluateConditions(supabase, conversationId, msg, undefined, conditions, matchMode);
       if (matches) {
         result.matched++;
         let stop = false;
         for (const action of ruleActions) {
-          const r = await executeAction(supabase, conversationId, action, msg, rule.id);
+          const r = await executeAction(supabase, conversationId, action, msg, rule.id, undefined);
           if (r === "__STOP__") { stop = true; result.actions.push(`${rule.name}: Stopped processing`); break; }
           if (r) result.actions.push(`${rule.name}: ${r}`);
         }
@@ -455,5 +613,92 @@ export async function runRulesForMessage(
       }
     }
   } catch (err: any) { console.error("Rule engine error:", err.message); }
+  return result;
+}
+
+export async function runRulesForEvent(
+  event: RuleEvent
+): Promise<{ matched: number; actions: string[] }> {
+  const supabase = createServerClient();
+  const result = { matched: 0, actions: [] as string[] };
+  const { conversation_id: conversationId, event_type: triggerType, event_key } = event;
+  if (!conversationId || !triggerType || !event_key) return result;
+
+  try {
+    const { data: rules, error } = await supabase
+      .from("rules")
+      .select("*")
+      .eq("is_active", true)
+      .eq("trigger_type", triggerType)
+      .order("sort_order");
+    if (error || !rules || rules.length === 0) return result;
+
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("email_account_id, subject, from_email, from_name")
+      .eq("id", conversationId)
+      .maybeSingle();
+
+    const msgShell: MessageContext = {
+      conversation_id: conversationId,
+      subject: convo?.subject || "",
+      from_email: convo?.from_email || "",
+      from_name: convo?.from_name || "",
+      to_addresses: "",
+      body_text: "",
+      email_account_id: convo?.email_account_id || undefined,
+    };
+
+    for (const rule of rules as RuleRow[]) {
+      if (rule.account_ids && Array.isArray(rule.account_ids) && rule.account_ids.length > 0) {
+        if (!msgShell.email_account_id || !rule.account_ids.includes(msgShell.email_account_id)) continue;
+      }
+
+      let conditions: (Condition | ConditionGroup)[] = [];
+      if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) {
+        conditions = rule.conditions;
+      } else if (rule.condition_field && rule.condition_operator) {
+        conditions = [{ field: rule.condition_field, operator: rule.condition_operator, value: rule.condition_value || "" }];
+      }
+      let ruleActions: Action[] = [];
+      if (rule.actions && Array.isArray(rule.actions) && rule.actions.length > 0) {
+        ruleActions = rule.actions;
+      } else if (rule.action_type) {
+        ruleActions = [{ type: rule.action_type, value: rule.action_value || "" }];
+      }
+
+      const matchMode = rule.match_mode || "all";
+      const matches = await evaluateConditions(supabase, conversationId, msgShell, event, conditions, matchMode);
+      if (!matches) continue;
+
+      const claimed = await tryClaimRuleRun(supabase, rule.id, event_key, conversationId);
+      if (!claimed) continue;
+
+      result.matched++;
+      let stop = false;
+      for (const action of ruleActions) {
+        const r = await executeAction(supabase, conversationId, action, msgShell, rule.id, event);
+        if (r === "__STOP__") { stop = true; result.actions.push(`${rule.name}: Stopped processing`); break; }
+        if (r) result.actions.push(`${rule.name}: ${r}`);
+      }
+      await supabase.from("activity_log").insert({
+        conversation_id: conversationId,
+        actor_id: event.initiator_user_id || null,
+        action: "rule_executed",
+        details: {
+          rule_id: rule.id,
+          rule_name: rule.name,
+          trigger_type: triggerType,
+          event_key,
+          match_mode: matchMode,
+          conditions_count: conditions.length,
+          actions_count: ruleActions.length,
+        },
+      });
+      if (stop) break;
+    }
+  } catch (err: any) {
+    console.error("Rule engine (event) error:", err.message);
+  }
   return result;
 }
