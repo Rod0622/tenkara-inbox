@@ -1619,13 +1619,15 @@ const CONDITION_FIELDS = [
   { value: "any_field", label: "Message content (all fields)", group: "Content" },
   { value: "body_text", label: "Message body", group: "Content" },
   { value: "has_attachments", label: "Has attachments?", group: "Content" },
+  { value: "headers", label: "Headers", group: "Content" },
   { value: "email_account", label: "Email account", group: "More" },
   { value: "conversation_status", label: "Conversation state", group: "More" },
   { value: "assignee", label: "Assignee", group: "More" },
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
-  { value: "message_count", label: "Number of messages", group: "More" },
+  { value: "message_count", label: "Number of messages in conversation", group: "More" },
   { value: "has_reply", label: "Has been replied to?", group: "More" },
+  { value: "delay", label: "Delay (period of time)", group: "Time-based" },
   { value: "time_since_last_outbound", label: "Time since last sent email", group: "Time-based" },
   { value: "time_since_created", label: "Time since conversation created", group: "Time-based" },
   { value: "follow_up_count", label: "Follow-up count", group: "Time-based" },
@@ -1636,6 +1638,8 @@ const CONDITION_OPERATORS = [
   { value: "not_contains", label: "Does not contain" },
   { value: "equals", label: "Equals" },
   { value: "not_equals", label: "Does not equal" },
+  { value: "is", label: "Is" },
+  { value: "is_not", label: "Is not" },
   { value: "starts_with", label: "Starts with" },
   { value: "ends_with", label: "Ends with" },
   { value: "is_true", label: "Is true" },
@@ -1649,6 +1653,7 @@ const ACTION_TYPES = [
   { value: "remove_label", label: "Remove label", group: "Labels" },
   { value: "set_priority", label: "Set priority (add Urgent label)", group: "Labels" },
   { value: "assign_to", label: "Assign to", group: "Assignment" },
+  { value: "assign_sender", label: "Assign sender", group: "Assignment" },
   { value: "unassign", label: "Unassign", group: "Assignment" },
   { value: "move_to_folder", label: "Move to folder / team", group: "Organization" },
   { value: "set_status", label: "Set status", group: "Organization" },
@@ -1679,7 +1684,12 @@ const TRIGGER_TYPES = [
 ];
 
 interface RuleCondition { field: string; operator: string; value: string; required?: boolean; }
-interface RuleAction { type: string; value: string; }
+interface RuleConditionGroup { match_mode: "all" | "any" | "none"; conditions: (RuleCondition | RuleConditionGroup)[]; }
+interface RuleAction { type: string; value: string; task_description?: string; task_assignee_mode?: string; task_assignee_ids?: string[]; task_due_days?: number; task_due_hours?: number; webhook_secret?: string; webhook_run_once?: boolean; }
+
+function isGroup(item: any): item is RuleConditionGroup {
+  return item && "match_mode" in item && "conditions" in item && Array.isArray(item.conditions);
+}
 
 function RulesTab() {
   const [rules, setRules] = useState<any[]>([]);
@@ -1696,7 +1706,7 @@ function RulesTab() {
   // Form state — kept at this level so nested inputs don't lose focus
   const [formName, setFormName] = useState("");
   const [formMatchMode, setFormMatchMode] = useState<"all" | "any" | "none">("all");
-  const [formConditions, setFormConditions] = useState<RuleCondition[]>([{ field: "subject", operator: "contains", value: "" }]);
+  const [formConditions, setFormConditions] = useState<(RuleCondition | RuleConditionGroup)[]>([{ field: "subject", operator: "contains", value: "" }]);
   const [formActions, setFormActions] = useState<RuleAction[]>([{ type: "add_label", value: "" }]);
   const [formAccountIds, setFormAccountIds] = useState<string[]>([]);
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
@@ -1769,7 +1779,10 @@ function RulesTab() {
   };
 
   const handleAdd = async () => {
-    if (!formName.trim() || formConditions.some((c) => !["has_attachments"].includes(c.field) && !c.value.trim())) return;
+    if (!formName.trim()) return;
+    // Validate flat conditions only (groups validated separately)
+    const flatConds = formConditions.filter((c) => !isGroup(c)) as RuleCondition[];
+    if (flatConds.some((c) => !["has_attachments", "has_reply", "delay"].includes(c.field) && !c.value?.trim())) return;
     const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder", "add_note", "add_task", "webhook", "send_follow_up", "create_draft"].includes(t);
     if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
@@ -1826,15 +1839,80 @@ function RulesTab() {
   };
 
   // Condition helpers
+  // Tree-aware condition helpers — use path arrays to address nested items
+  const updateConditionAtPath = (path: number[], patch: Partial<RuleCondition>) => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      let target: any = clone;
+      for (let i = 0; i < path.length - 1; i++) {
+        target = isGroup(target[path[i]]) ? target[path[i]].conditions : target;
+        if (i < path.length - 2) target = target[path[i + 1]] !== undefined ? target : target;
+      }
+      const idx = path[path.length - 1];
+      if (target[idx] && !isGroup(target[idx])) target[idx] = { ...target[idx], ...patch };
+      return clone;
+    });
+  };
+  // Simpler: flat update for top-level (backward compat used by existing renderers)
   const updateCondition = (idx: number, patch: Partial<RuleCondition>) => {
-    setFormConditions((prev) => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+    setFormConditions((prev) => prev.map((c, i) => i === idx ? { ...(c as any), ...patch } : c));
   };
   const addCondition = () => {
     setFormConditions((prev) => [...prev, { field: "subject", operator: "contains", value: "" }]);
   };
+  const addConditionGroup = () => {
+    setFormConditions((prev) => [...prev, { match_mode: "any" as const, conditions: [{ field: "subject", operator: "contains", value: "" }] }]);
+  };
   const removeCondition = (idx: number) => {
     if (formConditions.length <= 1) return;
     setFormConditions((prev) => prev.filter((_, i) => i !== idx));
+  };
+  // Add condition inside a group
+  const addConditionToGroup = (groupIdx: number) => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      const g = clone[groupIdx];
+      if (isGroup(g)) g.conditions.push({ field: "subject", operator: "contains", value: "" });
+      return clone;
+    });
+  };
+  // Add nested group inside a group
+  const addNestedGroup = (groupIdx: number) => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      const g = clone[groupIdx];
+      if (isGroup(g)) g.conditions.push({ match_mode: "any" as const, conditions: [{ field: "subject", operator: "contains", value: "" }] });
+      return clone;
+    });
+  };
+  // Remove condition inside a group
+  const removeConditionFromGroup = (groupIdx: number, condIdx: number) => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      const g = clone[groupIdx];
+      if (isGroup(g) && g.conditions.length > 1) g.conditions.splice(condIdx, 1);
+      return clone;
+    });
+  };
+  // Update condition inside a group
+  const updateConditionInGroup = (groupIdx: number, condIdx: number, patch: Partial<RuleCondition>) => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      const g = clone[groupIdx];
+      if (isGroup(g) && g.conditions[condIdx] && !isGroup(g.conditions[condIdx])) {
+        g.conditions[condIdx] = { ...g.conditions[condIdx], ...patch };
+      }
+      return clone;
+    });
+  };
+  // Update group match mode
+  const updateGroupMatchMode = (groupIdx: number, mode: "all" | "any" | "none") => {
+    setFormConditions((prev) => {
+      const clone = JSON.parse(JSON.stringify(prev));
+      const g = clone[groupIdx];
+      if (isGroup(g)) g.match_mode = mode;
+      return clone;
+    });
   };
 
   // Action helpers
@@ -1939,19 +2017,69 @@ function RulesTab() {
         </select>
       );
     }
-    if (t === "add_note" || t === "add_task") {
+    if (t === "add_note") {
       return (
         <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          placeholder={t === "add_note" ? "Note text..." : "Task description..."}
+          placeholder="Note text..."
           className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+      );
+    }
+    if (t === "add_task") {
+      return (
+        <div className="flex-1 space-y-1.5">
+          <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+            placeholder="Task description..."
+            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          <input value={(action as any).task_description || ""} onChange={(e) => updateAction(idx, { task_description: e.target.value } as any)}
+            placeholder="Description (optional)"
+            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          <div className="flex items-center gap-2">
+            <select value={(action as any).task_assignee_mode || ""} onChange={(e) => updateAction(idx, { task_assignee_mode: e.target.value } as any)}
+              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              <option value="">No assignees</option>
+              <option value="assigned_users">Assigned users</option>
+              <option value="all">Everyone</option>
+              <option value="specific">Specific users...</option>
+            </select>
+            {(action as any).task_assignee_mode === "specific" && (
+              <select multiple value={(action as any).task_assignee_ids || []} onChange={(e) => updateAction(idx, { task_assignee_ids: Array.from(e.target.selectedOptions, o => o.value) } as any)}
+                className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] max-h-20">
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[#7D8590]">Due in</span>
+            <input type="number" min="0" value={(action as any).task_due_days || ""} onChange={(e) => updateAction(idx, { task_due_days: parseInt(e.target.value) || 0 } as any)}
+              placeholder="Days" className="w-16 px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            <span className="text-[10px] text-[#7D8590]">days</span>
+            <input type="number" min="0" value={(action as any).task_due_hours || ""} onChange={(e) => updateAction(idx, { task_due_hours: parseInt(e.target.value) || 0 } as any)}
+              placeholder="Hours" className="w-16 px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            <span className="text-[10px] text-[#7D8590]">hours</span>
+          </div>
+        </div>
       );
     }
     if (t === "webhook") {
       return (
-        <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          placeholder="https://example.com/webhook"
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        <div className="flex-1 space-y-1.5">
+          <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+            placeholder="https://example.com/webhook"
+            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          <input value={(action as any).webhook_secret || ""} onChange={(e) => updateAction(idx, { webhook_secret: e.target.value } as any)}
+            placeholder="Signature secret (optional)"
+            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          <label className="flex items-center gap-1.5 text-[10px] text-[#7D8590] cursor-pointer">
+            <input type="checkbox" checked={(action as any).webhook_run_once || false} onChange={(e) => updateAction(idx, { webhook_run_once: e.target.checked } as any)}
+              className="rounded border-[#1E242C]" />
+            Run only once per message
+          </label>
+          <div className="text-[9px] text-[#484F58]">URL will receive POST requests with JSON payloads.</div>
+        </div>
       );
+    }
+    if (t === "assign_sender") {
+      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation will be assigned to the message sender.</div>;
     }
     if (t === "send_follow_up" || t === "create_draft") {
       return (
@@ -2069,8 +2197,75 @@ function RulesTab() {
           </select>
         </div>
 
-        {formConditions.map((cond, idx) => (
-          <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
+        {formConditions.map((item, idx) => (
+          isGroup(item) ? (
+            /* ── Nested Condition Group ── */
+            <div key={idx} className="mb-2 ml-4 p-2.5 rounded-lg border border-[#1E242C] bg-[#12161B]/50 relative">
+              <div className="flex items-center gap-2 mb-2">
+                <select value={item.match_mode} onChange={(e) => updateGroupMatchMode(idx, e.target.value as any)}
+                  className="px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-[10px] font-semibold text-[#58A6FF] outline-none focus:border-[#4ADE80]">
+                  <option value="all">All must match</option>
+                  <option value="any">At least one matches</option>
+                  <option value="none">None must match</option>
+                </select>
+                <span className="text-[9px] text-[#484F58]">of these {item.conditions.length} conditions</span>
+                <div className="flex-1" />
+                <button onClick={() => removeCondition(idx)}
+                  className="p-1 rounded text-[#484F58] hover:text-[#F85149] transition-colors" title="Remove group">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              {item.conditions.map((subItem: any, subIdx: number) => (
+                !isGroup(subItem) ? (
+                  <div key={subIdx} className="flex gap-1.5 mb-1.5 items-center">
+                    <select value={subItem.field} onChange={(e) => updateConditionInGroup(idx, subIdx, { field: e.target.value })}
+                      className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                      {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                    <select value={subItem.operator} onChange={(e) => updateConditionInGroup(idx, subIdx, { operator: e.target.value })}
+                      className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                      {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    {subItem.field === "has_label" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select label...</option>
+                        {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    ) : subItem.field === "assignee" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select...</option>
+                        <option value="__unassigned__">Unassigned</option>
+                        {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    ) : subItem.field === "email_account" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select...</option>
+                        {emailAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.email})</option>)}
+                      </select>
+                    ) : (
+                      <input value={subItem.value || ""} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        placeholder="Value..." className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                    )}
+                    <button onClick={() => removeConditionFromGroup(idx, subIdx)} disabled={item.conditions.length <= 1}
+                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove"><Trash2 size={12} /></button>
+                  </div>
+                ) : (
+                  <div key={subIdx} className="text-[9px] text-[#484F58] italic py-1">Deeply nested groups must be edited via API</div>
+                )
+              ))}
+              <button onClick={() => addConditionToGroup(idx)}
+                className="flex items-center gap-1 text-[9px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold mt-1 transition-colors">
+                <Plus size={10} /> Add condition to group
+              </button>
+            </div>
+          ) : (() => {
+            const cond = item as RuleCondition;
+            return (
+            /* ── Flat Condition Row ── */
+            <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
             <select value={cond.field} onChange={(e) => updateCondition(idx, { field: e.target.value })}
               className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
               {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
@@ -2079,9 +2274,11 @@ function RulesTab() {
               className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
               {CONDITION_OPERATORS.filter((o) => {
                 // Filter operators based on field type
-                const boolFields = ["has_attachments"];
-                const numFields = ["message_count", "time_since_last_outbound", "follow_up_count"];
+                const boolFields = ["has_attachments", "has_reply"];
+                const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
+                const delayField = ["delay"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
+                if (delayField.includes(cond.field)) return ["greater_than"].includes(o.value); // delay just needs "elapsed >= X"
                 if (numFields.includes(cond.field)) return ["greater_than", "less_than", "equals"].includes(o.value);
                 if (["email_account", "assignee", "folder", "has_label", "conversation_status"].includes(cond.field)) return ["equals", "not_equals"].includes(o.value);
                 return !["is_true", "is_false", "greater_than", "less_than"].includes(o.value);
@@ -2149,6 +2346,45 @@ function RulesTab() {
                   <option value="days">Days</option>
                 </select>
               </div>
+            ) : cond.field === "delay" ? (
+              <div className="flex-1 flex gap-1.5 items-center min-w-[150px]">
+                <span className="text-[10px] text-[#7D8590]">Days:</span>
+                <input
+                  value={(() => { const m = (cond.value || "").match(/(\d+)\s*d/); return m ? m[1] : (cond.value || "").match(/^\d+$/) ? cond.value : ""; })()}
+                  onChange={(e) => {
+                    const d = e.target.value || "0";
+                    const hm = (cond.value || "").match(/(\d+)\s*h/);
+                    const mm = (cond.value || "").match(/(\d+)\s*m/);
+                    updateCondition(idx, { value: `${d}d${hm ? ` ${hm[1]}h` : ""}${mm ? ` ${mm[1]}m` : ""}`.trim() });
+                  }}
+                  type="number" min="0" placeholder="7"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+                <span className="text-[10px] text-[#7D8590]">Hours:</span>
+                <input
+                  value={(() => { const m = (cond.value || "").match(/(\d+)\s*h/); return m ? m[1] : ""; })()}
+                  onChange={(e) => {
+                    const dm = (cond.value || "").match(/(\d+)\s*d/);
+                    const mm = (cond.value || "").match(/(\d+)\s*m/);
+                    const d = dm ? dm[1] : (cond.value || "").match(/^\d+$/) ? cond.value : "0";
+                    updateCondition(idx, { value: `${d}d${e.target.value ? ` ${e.target.value}h` : ""}${mm ? ` ${mm[1]}m` : ""}`.trim() });
+                  }}
+                  type="number" min="0" placeholder="0"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+                <span className="text-[10px] text-[#7D8590]">Minutes:</span>
+                <input
+                  value={(() => { const m = (cond.value || "").match(/(\d+)\s*m/); return m ? m[1] : ""; })()}
+                  onChange={(e) => {
+                    const dm = (cond.value || "").match(/(\d+)\s*d/);
+                    const hm = (cond.value || "").match(/(\d+)\s*h/);
+                    const d = dm ? dm[1] : (cond.value || "").match(/^\d+$/) ? cond.value : "0";
+                    updateCondition(idx, { value: `${d}d${hm ? ` ${hm[1]}h` : ""}${e.target.value ? ` ${e.target.value}m` : ""}`.trim() });
+                  }}
+                  type="number" min="0" placeholder="0"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                />
+              </div>
             ) : (
               <input
                 value={cond.value}
@@ -2174,11 +2410,19 @@ function RulesTab() {
               <Trash2 size={12} />
             </button>
           </div>
+            );
+          })()
         ))}
-        <button onClick={addCondition}
-          className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold mt-1 transition-colors">
-          <Plus size={11} /> Add condition
-        </button>
+        <div className="flex items-center gap-3 mt-1">
+          <button onClick={addCondition}
+            className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors">
+            <Plus size={11} /> Condition
+          </button>
+          <button onClick={addConditionGroup}
+            className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold transition-colors">
+            <Plus size={11} /> Condition group
+          </button>
+        </div>
       </div>
 
       {/* Actions */}
@@ -2369,13 +2613,19 @@ function RulesTab() {
                       {/* Conditions summary */}
                       <div className="text-[11px] text-[#7D8590] leading-relaxed mb-0.5">
                         <span className="text-[10px] font-bold text-[#484F58] bg-[#1E242C] px-1.5 py-0.5 rounded mr-1">{modeLabel}</span>
-                        {conds.map((c, i) => (
+                        {conds.map((c: any, i: number) => (
                           <span key={i}>
                             {i > 0 && <span className="text-[#484F58]"> · </span>}
-                            {c.required && <span className="text-[8px] font-bold text-[#F85149] bg-[rgba(248,81,73,0.12)] px-1 py-0.5 rounded mr-0.5">REQ</span>}
-                            <span className="text-[#58A6FF]">{CONDITION_FIELDS.find((f) => f.value === c.field)?.label}</span>{" "}
-                            <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
-                            <span className="text-[#E6EDF3]">"{c.value}"</span>
+                            {isGroup(c) ? (
+                              <span className="text-[#F5D547]">[{c.match_mode === "any" ? "Any" : c.match_mode === "none" ? "None" : "All"} of {c.conditions?.length || 0}]</span>
+                            ) : (
+                              <>
+                                {c.required && <span className="text-[8px] font-bold text-[#F85149] bg-[rgba(248,81,73,0.12)] px-1 py-0.5 rounded mr-0.5">REQ</span>}
+                                <span className="text-[#58A6FF]">{CONDITION_FIELDS.find((f: any) => f.value === c.field)?.label}</span>{" "}
+                                <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o: any) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
+                                <span className="text-[#E6EDF3]">"{c.value}"</span>
+                              </>
+                            )}
                           </span>
                         ))}
                       </div>

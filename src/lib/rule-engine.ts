@@ -1,4 +1,7 @@
 import { createServerClient } from "@/lib/supabase";
+import crypto from "crypto";
+
+// ── Types ──────────────────────────────────────────────────
 
 interface Condition {
   field: string;
@@ -7,9 +10,21 @@ interface Condition {
   required?: boolean;
 }
 
+interface ConditionGroup {
+  match_mode: "all" | "any" | "none";
+  conditions: (Condition | ConditionGroup)[];
+}
+
 interface Action {
   type: string;
   value: string;
+  task_description?: string;
+  task_assignee_mode?: "all" | "assigned_users" | "specific";
+  task_assignee_ids?: string[];
+  task_due_days?: number;
+  task_due_hours?: number;
+  webhook_secret?: string;
+  webhook_run_once?: boolean;
 }
 
 interface RuleRow {
@@ -18,10 +33,9 @@ interface RuleRow {
   is_active: boolean;
   trigger_type: string;
   match_mode: "all" | "any" | "none";
-  conditions: Condition[];
+  conditions: (Condition | ConditionGroup)[];
   actions: Action[];
   account_ids?: string[] | null;
-  // Legacy single fields (fallback)
   condition_field?: string;
   condition_operator?: string;
   condition_value?: string;
@@ -29,8 +43,9 @@ interface RuleRow {
   action_value?: string;
 }
 
-interface MessageContext {
+export interface MessageContext {
   conversation_id: string;
+  message_id?: string;
   subject: string;
   from_email: string;
   from_name: string;
@@ -38,8 +53,17 @@ interface MessageContext {
   cc_addresses?: string;
   bcc_addresses?: string;
   body_text: string;
+  body_html?: string;
   email_account_id?: string;
   has_attachments?: boolean;
+  sent_by_user_id?: string;
+  headers?: Record<string, string>;
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+function isConditionGroup(item: any): item is ConditionGroup {
+  return item && "match_mode" in item && "conditions" in item && Array.isArray(item.conditions);
 }
 
 function getFieldValue(msg: MessageContext, field: string): string {
@@ -56,6 +80,7 @@ function getFieldValue(msg: MessageContext, field: string): string {
     case "any_field": return [msg.from_email, msg.from_name, msg.to_addresses, msg.cc_addresses, msg.bcc_addresses, msg.subject, msg.body_text].filter(Boolean).join(" ");
     case "email_account": return msg.email_account_id || "";
     case "has_attachments": return msg.has_attachments ? "true" : "false";
+    case "headers": return msg.headers ? Object.entries(msg.headers).map(([k, v]) => `${k}: ${v}`).join("\n") : "";
     default: return "";
   }
 }
@@ -66,8 +91,8 @@ function evaluateCondition(fieldValue: string, operator: string, conditionValue:
   switch (operator) {
     case "contains": return field.includes(value);
     case "not_contains": return !field.includes(value);
-    case "equals": return field === value;
-    case "not_equals": return field !== value;
+    case "equals": case "is": return field === value;
+    case "not_equals": case "is_not": return field !== value;
     case "starts_with": return field.startsWith(value);
     case "ends_with": return field.endsWith(value);
     case "is_true": return field === "true";
@@ -78,97 +103,152 @@ function evaluateCondition(fieldValue: string, operator: string, conditionValue:
   }
 }
 
-async function evaluateConditions(
-  supabase: any,
-  conversationId: string,
-  msg: MessageContext,
-  conditions: Condition[],
-  matchMode: "all" | "any" | "none"
-): Promise<boolean> {
-  if (conditions.length === 0) return false;
+function parseDelayToHours(value: string): number {
+  const v = value.trim().toLowerCase();
+  if (/^\d+(\.\d+)?$/.test(v)) return parseFloat(v) * 24;
+  let totalHours = 0;
+  const dayMatch = v.match(/(\d+)\s*d/);
+  const hourMatch = v.match(/(\d+)\s*h/);
+  const minMatch = v.match(/(\d+)\s*m/);
+  if (dayMatch) totalHours += parseInt(dayMatch[1]) * 24;
+  if (hourMatch) totalHours += parseInt(hourMatch[1]);
+  if (minMatch) totalHours += parseInt(minMatch[1]) / 60;
+  return totalHours || parseFloat(v) * 24;
+}
 
-  // Lazy-load conversation data only if needed
-  let convoData: any = null;
-  let convoLabels: string[] | null = null;
-  let msgCount: number | null = null;
+// ── Lazy Context for DB lookups ────────────────────────────
 
-  const getConvo = async () => {
-    if (!convoData) {
-      const { data } = await supabase.from("conversations").select("status, assignee_id, folder_id, created_at").eq("id", conversationId).maybeSingle();
-      convoData = data || {};
-    }
-    return convoData;
-  };
-  const getLabels = async () => {
-    if (convoLabels === null) {
-      const { data } = await supabase.from("conversation_labels").select("label_id").eq("conversation_id", conversationId);
-      convoLabels = (data || []).map((r: any) => r.label_id);
-    }
-    return convoLabels;
-  };
-  const getMsgCount = async () => {
-    if (msgCount === null) {
-      const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conversationId);
-      msgCount = count || 0;
-    }
-    return msgCount;
-  };
+interface LazyContext {
+  supabase: any;
+  conversationId: string;
+  msg: MessageContext;
+  _convo: any;
+  _labels: string[] | null;
+  _msgCount: number | null;
+}
 
-  const results: { required: boolean; result: boolean }[] = [];
+async function getConvo(ctx: LazyContext) {
+  if (!ctx._convo) {
+    const { data } = await ctx.supabase.from("conversations").select("status, assignee_id, folder_id, created_at").eq("id", ctx.conversationId).maybeSingle();
+    ctx._convo = data || {};
+  }
+  return ctx._convo;
+}
 
-  for (const c of conditions) {
-    let result: boolean;
+async function getLabels(ctx: LazyContext) {
+  if (ctx._labels === null) {
+    const { data } = await ctx.supabase.from("conversation_labels").select("label_id").eq("conversation_id", ctx.conversationId);
+    ctx._labels = (data || []).map((r: any) => r.label_id);
+  }
+  return ctx._labels!;
+}
 
-    // DB-lookup conditions
-    if (c.field === "conversation_status") {
-      const convo = await getConvo();
-      result = evaluateCondition(convo.status || "open", c.operator, c.value);
-    } else if (c.field === "assignee") {
-      const convo = await getConvo();
-      const assigneeVal = c.value === "__unassigned__" ? "" : c.value;
-      result = evaluateCondition(convo.assignee_id || "", c.operator, assigneeVal);
-    } else if (c.field === "folder") {
-      const convo = await getConvo();
-      result = evaluateCondition(convo.folder_id || "", c.operator, c.value);
-    } else if (c.field === "has_label") {
-      const lbls = await getLabels() || [];
-      if (c.operator === "equals") result = lbls.includes(c.value);
-      else if (c.operator === "not_equals") result = !lbls.includes(c.value);
-      else result = lbls.includes(c.value);
-    } else if (c.field === "message_count") {
-      const count = await getMsgCount() || 0;
-      result = evaluateCondition(count.toString(), c.operator, c.value);
-    } else if (c.field === "has_reply") {
-      // Check if any outbound message exists in this conversation
-      const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conversationId).eq("is_outbound", true);
-      const hasReply = (count || 0) > 0;
-      result = c.operator === "is_true" ? hasReply : !hasReply;
-    } else if (c.field === "time_since_created") {
-      // Get conversation created_at and compute hours since creation
-      const convo = await getConvo();
-      if (convo.created_at) {
-        const hoursSince = (Date.now() - new Date(convo.created_at).getTime()) / (1000 * 60 * 60);
-        result = evaluateCondition(hoursSince.toString(), c.operator, c.value);
-      } else {
-        result = false;
-      }
-    } else {
-      // Standard text-field conditions
-      const fieldValue = getFieldValue(msg, c.field);
-      result = evaluateCondition(fieldValue, c.operator, c.value);
-    }
+async function getMsgCount(ctx: LazyContext) {
+  if (ctx._msgCount === null) {
+    const { count } = await ctx.supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", ctx.conversationId);
+    ctx._msgCount = count || 0;
+  }
+  return ctx._msgCount!;
+}
 
-    results.push({ required: !!c.required, result });
+// ── Condition Evaluation (supports nested groups) ──────────
+
+async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<boolean> {
+  const { supabase, conversationId } = ctx;
+
+  if (c.field === "conversation_status") {
+    const convo = await getConvo(ctx);
+    return evaluateCondition(convo.status || "open", c.operator, c.value);
+  }
+  if (c.field === "assignee") {
+    const convo = await getConvo(ctx);
+    return evaluateCondition(convo.assignee_id || "", c.operator, c.value === "__unassigned__" ? "" : c.value);
+  }
+  if (c.field === "folder") {
+    const convo = await getConvo(ctx);
+    return evaluateCondition(convo.folder_id || "", c.operator, c.value);
+  }
+  if (c.field === "has_label") {
+    const lbls = await getLabels(ctx);
+    if (c.operator === "equals" || c.operator === "is") return lbls.includes(c.value);
+    if (c.operator === "not_equals" || c.operator === "is_not") return !lbls.includes(c.value);
+    return lbls.includes(c.value);
+  }
+  if (c.field === "message_count") {
+    const count = await getMsgCount(ctx);
+    return evaluateCondition(count.toString(), c.operator, c.value);
+  }
+  if (c.field === "has_reply") {
+    const { count } = await supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conversationId).eq("is_outbound", true);
+    return c.operator === "is_true" ? (count || 0) > 0 : (count || 0) === 0;
+  }
+  if (c.field === "time_since_created") {
+    const convo = await getConvo(ctx);
+    if (!convo.created_at) return false;
+    const hours = (Date.now() - new Date(convo.created_at).getTime()) / (1000 * 60 * 60);
+    return evaluateCondition(hours.toString(), c.operator, c.value);
+  }
+  if (c.field === "delay") {
+    const convo = await getConvo(ctx);
+    if (!convo.created_at) return false;
+    const elapsed = (Date.now() - new Date(convo.created_at).getTime()) / (1000 * 60 * 60);
+    return elapsed >= parseDelayToHours(c.value);
+  }
+  if (c.field === "time_since_last_outbound") {
+    const { data: lastOut } = await supabase.from("messages").select("sent_at").eq("conversation_id", conversationId).eq("is_outbound", true).order("sent_at", { ascending: false }).limit(1).maybeSingle();
+    if (!lastOut) return false;
+    const hours = (Date.now() - new Date(lastOut.sent_at).getTime()) / (1000 * 60 * 60);
+    return evaluateCondition(hours.toString(), c.operator, c.value);
   }
 
-  // Required conditions MUST always match
-  const requiredResults = results.filter((r) => r.required);
-  const optionalResults = results.filter((r) => !r.required);
+  // Standard text-field conditions
+  return evaluateCondition(getFieldValue(ctx.msg, c.field), c.operator, c.value);
+}
 
-  if (requiredResults.length > 0 && !requiredResults.every((r) => r.result)) return false;
-  if (optionalResults.length === 0) return requiredResults.length > 0 ? requiredResults.every((r) => r.result) : false;
+async function evaluateNode(ctx: LazyContext, node: Condition | ConditionGroup): Promise<boolean> {
+  if (isConditionGroup(node)) return evaluateGroupNode(ctx, node);
+  return evaluateSingleCondition(ctx, node as Condition);
+}
 
-  const optVals = optionalResults.map((r) => r.result);
+async function evaluateGroupNode(ctx: LazyContext, group: ConditionGroup): Promise<boolean> {
+  if (!group.conditions || group.conditions.length === 0) return false;
+  const results: boolean[] = [];
+  for (const item of group.conditions) {
+    results.push(await evaluateNode(ctx, item));
+  }
+  switch (group.match_mode) {
+    case "all": return results.every(Boolean);
+    case "any": return results.some(Boolean);
+    case "none": return results.every((r) => !r);
+    default: return false;
+  }
+}
+
+async function evaluateConditions(
+  supabase: any, conversationId: string, msg: MessageContext,
+  conditions: (Condition | ConditionGroup)[], matchMode: "all" | "any" | "none"
+): Promise<boolean> {
+  if (conditions.length === 0) return false;
+  const ctx: LazyContext = { supabase, conversationId, msg, _convo: null, _labels: null, _msgCount: null };
+
+  // If any item is a group, use tree evaluator for all
+  if (conditions.some(isConditionGroup)) {
+    return evaluateGroupNode(ctx, { match_mode: matchMode, conditions });
+  }
+
+  // Flat conditions with required/optional (backward compatible)
+  const flat = conditions as Condition[];
+  const results: { required: boolean; result: boolean }[] = [];
+  for (const c of flat) {
+    results.push({ required: !!c.required, result: await evaluateSingleCondition(ctx, c) });
+  }
+
+  const req = results.filter((r) => r.required);
+  const opt = results.filter((r) => !r.required);
+  if (req.length > 0 && !req.every((r) => r.result)) return false;
+  if (opt.length === 0) return req.length > 0 ? req.every((r) => r.result) : false;
+
+  const optVals = opt.map((r) => r.result);
   switch (matchMode) {
     case "all": return optVals.every(Boolean);
     case "any": return optVals.some(Boolean);
@@ -177,12 +257,9 @@ async function evaluateConditions(
   }
 }
 
-async function executeAction(
-  supabase: any,
-  conversationId: string,
-  action: Action,
-  msg?: MessageContext
-): Promise<string | null> {
+// ── Action Execution ──────────────────────────────────────
+
+async function executeAction(supabase: any, conversationId: string, action: Action, msg?: MessageContext, ruleId?: string): Promise<string | null> {
   try {
     switch (action.type) {
       case "add_label": {
@@ -197,374 +274,186 @@ async function executeAction(
       }
       case "assign_to": {
         if (!action.value) return null;
-
-        // Auto-assignment modes: auto:{strategy}:{pool}:{extra}
         if (action.value.startsWith("auto:")) {
           const parts = action.value.split(":");
-          const strategy = parts[1]; // random, round_robin, least_conversations, least_tasks
-          const pool = parts[2] || "all"; // group ID or "all"
-          const extra = parts[3] || "all"; // task category ID or "all" (for least_tasks)
-
-          // Get eligible members
+          const strategy = parts[1]; const pool = parts[2] || "all"; const extra = parts[3] || "all";
           let memberIds: string[] = [];
           if (pool === "all") {
-            const { data: allMembers } = await supabase.from("team_members").select("id").eq("is_active", true);
-            memberIds = (allMembers || []).map((m: any) => m.id);
+            const { data } = await supabase.from("team_members").select("id").eq("is_active", true);
+            memberIds = (data || []).map((m: any) => m.id);
           } else {
-            const { data: groupMembers } = await supabase.from("user_group_members").select("team_member_id").eq("user_group_id", pool);
-            memberIds = (groupMembers || []).map((m: any) => m.team_member_id);
+            const { data } = await supabase.from("user_group_members").select("team_member_id").eq("user_group_id", pool);
+            memberIds = (data || []).map((m: any) => m.team_member_id);
           }
-
           if (memberIds.length === 0) return null;
-
           let chosenId: string;
-
-          if (strategy === "random") {
-            chosenId = memberIds[Math.floor(Math.random() * memberIds.length)];
-
-          } else if (strategy === "round_robin") {
-            // Get the last assigned member for this rule from activity_log
-            const { data: lastAssignment } = await supabase
-              .from("activity_log")
-              .select("details")
-              .eq("action", "rule_executed")
-              .order("created_at", { ascending: false })
-              .limit(20);
-            // Find last auto-assigned member in eligible pool
-            let lastIdx = -1;
-            for (const log of (lastAssignment || [])) {
-              const assignedTo = log.details?.auto_assigned_to;
-              if (assignedTo && memberIds.includes(assignedTo)) {
-                lastIdx = memberIds.indexOf(assignedTo);
-                break;
-              }
-            }
+          if (strategy === "random") { chosenId = memberIds[Math.floor(Math.random() * memberIds.length)]; }
+          else if (strategy === "round_robin") {
+            const { data: last } = await supabase.from("activity_log").select("details").eq("action", "rule_executed").not("details->auto_assigned_to", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+            const lastIdx = last?.details?.auto_assigned_to ? memberIds.indexOf(last.details.auto_assigned_to) : -1;
             chosenId = memberIds[(lastIdx + 1) % memberIds.length];
-
           } else if (strategy === "least_conversations") {
-            // Count open conversations per member
             const counts: { id: string; count: number }[] = [];
-            for (const mid of memberIds) {
-              const { count } = await supabase.from("conversations").select("id", { count: "exact", head: true })
-                .eq("assignee_id", mid).eq("status", "open");
-              counts.push({ id: mid, count: count || 0 });
-            }
-            counts.sort((a, b) => a.count - b.count);
-            chosenId = counts[0].id;
-
+            for (const mid of memberIds) { const { count } = await supabase.from("conversations").select("id", { count: "exact", head: true }).eq("assignee_id", mid).eq("status", "open"); counts.push({ id: mid, count: count || 0 }); }
+            counts.sort((a, b) => a.count - b.count); chosenId = counts[0].id;
           } else if (strategy === "least_tasks") {
-            // Count open tasks per member
             const counts: { id: string; count: number }[] = [];
-            for (const mid of memberIds) {
-              let query = supabase.from("tasks").select("id", { count: "exact", head: true })
-                .eq("assignee_id", mid).eq("status", "todo");
-              if (extra !== "all") query = query.eq("category_id", extra);
-              const { count } = await query;
-              counts.push({ id: mid, count: count || 0 });
-            }
-            counts.sort((a, b) => a.count - b.count);
-            chosenId = counts[0].id;
-
-          } else {
-            chosenId = memberIds[0];
-          }
-
+            for (const mid of memberIds) { let q = supabase.from("tasks").select("id", { count: "exact", head: true }).eq("assignee_id", mid).eq("status", "todo"); if (extra !== "all") q = q.eq("category_id", extra); const { count } = await q; counts.push({ id: mid, count: count || 0 }); }
+            counts.sort((a, b) => a.count - b.count); chosenId = counts[0].id;
+          } else { chosenId = memberIds[0]; }
           await supabase.from("conversations").update({ assignee_id: chosenId }).eq("id", conversationId);
-
-          // Log the auto-assignment for round-robin tracking
-          await supabase.from("activity_log").insert({
-            conversation_id: conversationId, actor_id: null, action: "rule_executed",
-            details: { auto_assigned_to: chosenId, strategy, pool },
-          });
-
-          // Get member name for log
-          const { data: chosenMember } = await supabase.from("team_members").select("name").eq("id", chosenId).maybeSingle();
-          return `Auto-assigned to ${chosenMember?.name || chosenId} (${strategy})`;
+          await supabase.from("activity_log").insert({ conversation_id: conversationId, actor_id: null, action: "rule_executed", details: { auto_assigned_to: chosenId, strategy, pool } });
+          const { data: member } = await supabase.from("team_members").select("name").eq("id", chosenId).maybeSingle();
+          return `Auto-assigned to ${member?.name || chosenId} (${strategy})`;
         }
-
-        // Direct assignment (existing behavior)
         await supabase.from("conversations").update({ assignee_id: action.value }).eq("id", conversationId);
         return "Assigned";
       }
-      case "unassign": {
-        await supabase.from("conversations").update({ assignee_id: null }).eq("id", conversationId);
-        return "Unassigned";
-      }
-      case "mark_starred": {
-        await supabase.from("conversations").update({ is_starred: true }).eq("id", conversationId);
-        return "Starred";
-      }
-      case "unstar": {
-        await supabase.from("conversations").update({ is_starred: false }).eq("id", conversationId);
-        return "Unstarred";
-      }
-      case "mark_read": {
-        await supabase.from("conversations").update({ is_unread: false }).eq("id", conversationId);
-        return "Marked as read";
-      }
-      case "mark_unread": {
-        await supabase.from("conversations").update({ is_unread: true }).eq("id", conversationId);
-        return "Marked as unread";
-      }
-      case "move_to_folder": {
-        if (!action.value) return null;
-        await supabase.from("conversations").update({ folder_id: action.value }).eq("id", conversationId);
-        return "Moved to folder";
-      }
-      case "set_status": {
-        if (!action.value) return null;
-        await supabase.from("conversations").update({ status: action.value }).eq("id", conversationId);
-        return `Set status to ${action.value}`;
-      }
-      case "archive": {
-        await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId);
-        return "Archived";
-      }
-      case "snooze": {
-        await supabase.from("conversations").update({ status: "snoozed" }).eq("id", conversationId);
-        return "Snoozed";
-      }
-      case "trash": {
-        await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId);
-        return "Trashed";
-      }
-      case "add_note": {
-        if (!action.value) return null;
-        await supabase.from("notes").insert({ conversation_id: conversationId, text: action.value, author_id: null });
-        return "Added note";
-      }
-      case "add_task": {
-        if (!action.value) return null;
-        await supabase.from("tasks").insert({ conversation_id: conversationId, text: action.value, status: "todo", is_done: false });
-        return "Added task";
-      }
-      case "stop_processing": {
-        return "__STOP__";
-      }
-      case "set_priority": {
-        // Find or create an "Urgent" label and add it
-        let urgentLabelId = action.value;
-        if (!urgentLabelId) {
-          const { data: existing } = await supabase.from("labels").select("id").ilike("name", "%urgent%").limit(1).maybeSingle();
-          if (existing) {
-            urgentLabelId = existing.id;
-          } else {
-            const { data: created } = await supabase.from("labels").insert({ name: "Urgent", color: "#F85149", bg_color: "rgba(248,81,73,0.12)" }).select("id").single();
-            urgentLabelId = created?.id;
+      case "assign_sender": {
+        if (msg?.sent_by_user_id) {
+          await supabase.from("conversations").update({ assignee_id: msg.sent_by_user_id }).eq("id", conversationId);
+          return "Assigned to sender";
+        }
+        if (msg?.from_email) {
+          const { data: sender } = await supabase.from("team_members").select("id").eq("email", msg.from_email).maybeSingle();
+          if (sender) { await supabase.from("conversations").update({ assignee_id: sender.id }).eq("id", conversationId); return `Assigned to sender`; }
+          const { data: acct } = await supabase.from("email_accounts").select("id").eq("email", msg.from_email).maybeSingle();
+          if (acct) {
+            const { data: access } = await supabase.from("email_account_access").select("team_member_id").eq("email_account_id", acct.id).limit(1).maybeSingle();
+            if (access) { await supabase.from("conversations").update({ assignee_id: access.team_member_id }).eq("id", conversationId); return "Assigned to sender (via account)"; }
           }
         }
-        if (urgentLabelId) {
-          await supabase.from("conversation_labels").upsert({ conversation_id: conversationId, label_id: urgentLabelId });
-        }
-        return "Set priority (Urgent)";
+        return null;
       }
-      case "create_task_template": {
+      case "unassign": { await supabase.from("conversations").update({ assignee_id: null }).eq("id", conversationId); return "Unassigned"; }
+      case "mark_starred": { await supabase.from("conversations").update({ is_starred: true }).eq("id", conversationId); return "Starred"; }
+      case "unstar": { await supabase.from("conversations").update({ is_starred: false }).eq("id", conversationId); return "Unstarred"; }
+      case "mark_read": { await supabase.from("conversations").update({ is_unread: false }).eq("id", conversationId); return "Marked as read"; }
+      case "mark_unread": { await supabase.from("conversations").update({ is_unread: true }).eq("id", conversationId); return "Marked as unread"; }
+      case "move_to_folder": { if (!action.value) return null; await supabase.from("conversations").update({ folder_id: action.value }).eq("id", conversationId); return "Moved to folder"; }
+      case "set_status": { if (!action.value) return null; await supabase.from("conversations").update({ status: action.value }).eq("id", conversationId); return `Set status to ${action.value}`; }
+      case "archive": { await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId); return "Archived"; }
+      case "snooze": { await supabase.from("conversations").update({ status: "snoozed" }).eq("id", conversationId); return "Snoozed"; }
+      case "trash": { await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId); return "Trashed"; }
+      case "add_note": { if (!action.value) return null; await supabase.from("notes").insert({ conversation_id: conversationId, text: action.value, author_id: null }); return "Added note"; }
+      case "add_task": {
         if (!action.value) return null;
-        // Fetch template and create task from it
-        const { data: template } = await supabase.from("task_templates").select("*").eq("id", action.value).maybeSingle();
-        if (!template) return "Template not found";
-        const taskPayload: any = {
-          conversation_id: conversationId,
-          text: template.text || template.name || "Task from template",
-          status: "todo",
-          is_done: false,
-          category_id: template.category_id || null,
-        };
-        if (template.deadline_hours) {
-          const dueDate = new Date(Date.now() + template.deadline_hours * 60 * 60 * 1000);
+        const taskPayload: any = { conversation_id: conversationId, text: action.value, status: "todo", is_done: false };
+        if (action.task_due_days || action.task_due_hours) {
+          const totalMs = ((action.task_due_days || 0) * 24 * 60 * 60 * 1000) + ((action.task_due_hours || 0) * 60 * 60 * 1000);
+          const dueDate = new Date(Date.now() + totalMs);
           taskPayload.due_date = dueDate.toISOString().slice(0, 10);
           taskPayload.due_time = dueDate.toTimeString().slice(0, 5);
         }
         const { data: newTask } = await supabase.from("tasks").insert(taskPayload).select("id").single();
-        // Auto-assign if template has default assignees
-        if (newTask && template.assignee_ids && Array.isArray(template.assignee_ids)) {
-          for (const mid of template.assignee_ids) {
-            await supabase.from("task_assignees").insert({ task_id: newTask.id, team_member_id: mid });
+        if (newTask) {
+          let assigneeIds: string[] = [];
+          if (action.task_assignee_mode === "specific" && action.task_assignee_ids?.length) { assigneeIds = action.task_assignee_ids; }
+          else if (action.task_assignee_mode === "assigned_users") {
+            const { data: convo } = await supabase.from("conversations").select("assignee_id").eq("id", conversationId).maybeSingle();
+            if (convo?.assignee_id) assigneeIds = [convo.assignee_id];
+          } else if (action.task_assignee_mode === "all") {
+            const { data: all } = await supabase.from("team_members").select("id").eq("is_active", true);
+            assigneeIds = (all || []).map((m: any) => m.id);
           }
+          for (const mid of assigneeIds) { await supabase.from("task_assignees").insert({ task_id: newTask.id, team_member_id: mid }); }
         }
-        return `Created task from template: ${template.name || template.text}`;
+        return "Added task";
+      }
+      case "create_task_template": {
+        if (!action.value) return null;
+        const { data: tpl } = await supabase.from("task_templates").select("*").eq("id", action.value).maybeSingle();
+        if (!tpl) return "Template not found";
+        const p: any = { conversation_id: conversationId, text: tpl.text || tpl.name || "Task from template", status: "todo", is_done: false, category_id: tpl.category_id || null };
+        if (tpl.deadline_hours) { const d = new Date(Date.now() + tpl.deadline_hours * 60 * 60 * 1000); p.due_date = d.toISOString().slice(0, 10); p.due_time = d.toTimeString().slice(0, 5); }
+        const { data: nt } = await supabase.from("tasks").insert(p).select("id").single();
+        if (nt && tpl.assignee_ids && Array.isArray(tpl.assignee_ids)) { for (const mid of tpl.assignee_ids) { await supabase.from("task_assignees").insert({ task_id: nt.id, team_member_id: mid }); } }
+        return `Created task from template: ${tpl.name || tpl.text}`;
+      }
+      case "set_priority": {
+        let lid = action.value;
+        if (!lid) { const { data: e } = await supabase.from("labels").select("id").ilike("name", "%urgent%").limit(1).maybeSingle(); if (e) lid = e.id; else { const { data: c } = await supabase.from("labels").insert({ name: "Urgent", color: "#F85149", bg_color: "rgba(248,81,73,0.12)" }).select("id").single(); lid = c?.id; } }
+        if (lid) await supabase.from("conversation_labels").upsert({ conversation_id: conversationId, label_id: lid });
+        return "Set priority (Urgent)";
       }
       case "forward_email": {
         if (!action.value || !msg) return null;
         try {
-          // Get account details to send via SMTP/OAuth
           const { data: convo } = await supabase.from("conversations").select("email_account_id").eq("id", conversationId).single();
-          if (!convo?.email_account_id) return "No account found";
-          const { data: account } = await supabase.from("email_accounts").select("*").eq("id", convo.email_account_id).single();
-          if (!account) return "Account not found";
-
+          if (!convo?.email_account_id) return "No account";
+          const { data: acct } = await supabase.from("email_accounts").select("*").eq("id", convo.email_account_id).single();
+          if (!acct) return "Account not found";
           const nodemailer = (await import("nodemailer")).default;
-          const subject = `Fwd: ${msg.subject}`;
+          const subj = `Fwd: ${msg.subject}`;
           const body = `---------- Forwarded message ----------\nFrom: ${msg.from_name} <${msg.from_email}>\nSubject: ${msg.subject}\n\n${msg.body_text}`;
-
-          const smtpAuth: any = { user: account.smtp_user || account.email };
-          if (account.provider === "google_oauth" && account.oauth_refresh_token) {
-            const { refreshGoogleToken } = await import("@/lib/google-oauth");
-            const accessToken = await refreshGoogleToken(account.id);
-            smtpAuth.type = "OAuth2";
-            smtpAuth.accessToken = accessToken;
-          } else {
-            smtpAuth.pass = account.smtp_password || account.imap_password;
-          }
-
-          if (account.smtp_host) {
-            const transport = nodemailer.createTransport({
-              host: account.smtp_host, port: account.smtp_port || 587,
-              secure: account.smtp_port === 465, auth: smtpAuth,
-              tls: { rejectUnauthorized: false },
-            });
-            await transport.sendMail({
-              from: `"${account.name}" <${account.email}>`,
-              to: action.value,
-              subject, text: body,
-            });
-            return `Forwarded to ${action.value}`;
-          } else if (account.provider === "microsoft_oauth") {
-            const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
-            const token = await refreshMicrosoftToken(account.id);
-            await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-              method: "POST",
-              headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-              body: JSON.stringify({ message: { subject, body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: action.value } }] }, saveToSentItems: false }),
-            });
-            return `Forwarded to ${action.value}`;
-          }
-          return "No sending method available";
-        } catch (fwdErr: any) {
-          console.error("Forward action failed:", fwdErr.message);
-          return "Forward failed: " + fwdErr.message;
-        }
+          const auth: any = { user: acct.smtp_user || acct.email };
+          if (acct.provider === "google_oauth" && acct.oauth_refresh_token) { const { refreshGoogleToken } = await import("@/lib/google-oauth"); auth.type = "OAuth2"; auth.accessToken = await refreshGoogleToken(acct.id); } else { auth.pass = acct.smtp_password || acct.imap_password; }
+          if (acct.smtp_host) { const t = nodemailer.createTransport({ host: acct.smtp_host, port: acct.smtp_port || 587, secure: acct.smtp_port === 465, auth, tls: { rejectUnauthorized: false } }); await t.sendMail({ from: `"${acct.name}" <${acct.email}>`, to: action.value, subject: subj, text: body }); return `Forwarded to ${action.value}`; }
+          else if (acct.provider === "microsoft_oauth") { const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth"); const token = await refreshMicrosoftToken(acct.id); await fetch("https://graph.microsoft.com/v1.0/me/sendMail", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ message: { subject: subj, body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: action.value } }] }, saveToSentItems: false }) }); return `Forwarded to ${action.value}`; }
+          return "No sending method";
+        } catch (e: any) { console.error("Forward failed:", e.message); return "Forward failed"; }
       }
       case "slack_notify": {
-        const slackUrl = action.value || process.env.SLACK_WEBHOOK_URL;
-        if (!slackUrl) return null;
-        try {
-          await fetch(slackUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text: `📧 Rule triggered: *${msg?.subject || "Unknown subject"}*\nFrom: ${msg?.from_email || "Unknown"}\nTo: ${msg?.to_addresses || ""}\n<${process.env.NEXTAUTH_URL || ""}/#conversation=${conversationId}|Open in Tenkara>`,
-            }),
-          });
-          return "Slack notification sent";
-        } catch (slackErr: any) {
-          console.error("Slack notify failed:", slackErr.message);
-          return "Slack notification failed";
-        }
+        const url = action.value || process.env.SLACK_WEBHOOK_URL;
+        if (!url) return null;
+        try { await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: `📧 Rule triggered: *${msg?.subject || "Unknown"}*\nFrom: ${msg?.from_email || "Unknown"}\nTo: ${msg?.to_addresses || ""}\n<${process.env.NEXTAUTH_URL || ""}/#conversation=${conversationId}|Open in Tenkara>` }) }); return "Slack notification sent"; }
+        catch (e: any) { console.error("Slack failed:", e.message); return "Slack failed"; }
       }
+      case "stop_processing": { return "__STOP__"; }
       case "webhook": {
         if (!action.value) return null;
-        try {
-          await fetch(action.value, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              event: "rule_triggered",
-              conversation_id: conversationId,
-              subject: msg?.subject,
-              from_email: msg?.from_email,
-              to_addresses: msg?.to_addresses,
-              timestamp: new Date().toISOString(),
-            }),
-          });
-          return "Webhook sent";
-        } catch (webhookErr: any) {
-          console.error("Webhook failed:", webhookErr.message);
-          return "Webhook failed";
+        if (action.webhook_run_once && msg?.message_id && ruleId) {
+          const { data: existing } = await supabase.from("activity_log").select("id").eq("action", "webhook_sent").eq("conversation_id", conversationId).contains("details", { rule_id: ruleId, message_id: msg.message_id }).limit(1).maybeSingle();
+          if (existing) return null;
         }
+        try {
+          const payload = JSON.stringify({ event: "rule_triggered", conversation_id: conversationId, message_id: msg?.message_id || null, subject: msg?.subject, from_email: msg?.from_email, from_name: msg?.from_name, to_addresses: msg?.to_addresses, cc_addresses: msg?.cc_addresses || "", has_attachments: msg?.has_attachments || false, timestamp: new Date().toISOString() });
+          const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+          if (action.webhook_secret) { hdrs["X-Webhook-Signature"] = crypto.createHmac("sha256", action.webhook_secret).update(payload).digest("hex"); }
+          await fetch(action.value, { method: "POST", headers: hdrs, body: payload });
+          if (action.webhook_run_once && msg?.message_id && ruleId) { await supabase.from("activity_log").insert({ conversation_id: conversationId, actor_id: null, action: "webhook_sent", details: { rule_id: ruleId, message_id: msg.message_id, webhook_url: action.value } }); }
+          return "Webhook sent";
+        } catch (e: any) { console.error("Webhook failed:", e.message); return "Webhook failed"; }
       }
       default: return null;
     }
-  } catch (err: any) {
-    console.error(`Rule action ${action.type} failed:`, err.message);
-    return null;
-  }
+  } catch (err: any) { console.error(`Rule action ${action.type} failed:`, err.message); return null; }
 }
 
-/**
- * Run all active rules against a message/conversation.
- */
+// ── Main Entry Point ──────────────────────────────────────
+
 export async function runRulesForMessage(
-  conversationId: string,
-  msg: MessageContext,
-  triggerType: "incoming" | "outgoing" | "user_action" = "incoming"
+  conversationId: string, msg: MessageContext, triggerType: "incoming" | "outgoing" | "user_action" = "incoming"
 ): Promise<{ matched: number; actions: string[] }> {
   const supabase = createServerClient();
   const result = { matched: 0, actions: [] as string[] };
-
   try {
-    const { data: rules, error } = await supabase
-      .from("rules")
-      .select("*")
-      .eq("is_active", true)
-      .eq("trigger_type", triggerType)
-      .order("sort_order");
-
+    const { data: rules, error } = await supabase.from("rules").select("*").eq("is_active", true).eq("trigger_type", triggerType).order("sort_order");
     if (error || !rules || rules.length === 0) return result;
-
     for (const rule of rules as RuleRow[]) {
-      // Skip if rule is restricted to specific accounts and this conversation doesn't belong
       if (rule.account_ids && Array.isArray(rule.account_ids) && rule.account_ids.length > 0) {
-        if (!msg.email_account_id || !rule.account_ids.includes(msg.email_account_id)) {
-          continue;
-        }
+        if (!msg.email_account_id || !rule.account_ids.includes(msg.email_account_id)) continue;
       }
-
-      // Build conditions array — support both new JSONB and legacy single fields
-      let conditions: Condition[] = [];
-      if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) {
-        conditions = rule.conditions;
-      } else if (rule.condition_field && rule.condition_operator) {
-        conditions = [{ field: rule.condition_field, operator: rule.condition_operator, value: rule.condition_value || "" }];
-      }
-
-      // Build actions array
+      let conditions: (Condition | ConditionGroup)[] = [];
+      if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) { conditions = rule.conditions; }
+      else if (rule.condition_field && rule.condition_operator) { conditions = [{ field: rule.condition_field, operator: rule.condition_operator, value: rule.condition_value || "" }]; }
       let ruleActions: Action[] = [];
-      if (rule.actions && Array.isArray(rule.actions) && rule.actions.length > 0) {
-        ruleActions = rule.actions;
-      } else if (rule.action_type) {
-        ruleActions = [{ type: rule.action_type, value: rule.action_value || "" }];
-      }
-
+      if (rule.actions && Array.isArray(rule.actions) && rule.actions.length > 0) { ruleActions = rule.actions; }
+      else if (rule.action_type) { ruleActions = [{ type: rule.action_type, value: rule.action_value || "" }]; }
       const matchMode = rule.match_mode || "all";
       const matches = await evaluateConditions(supabase, conversationId, msg, conditions, matchMode);
-
       if (matches) {
         result.matched++;
-        let stopProcessing = false;
-
+        let stop = false;
         for (const action of ruleActions) {
-          const actionResult = await executeAction(supabase, conversationId, action, msg);
-          if (actionResult === "__STOP__") {
-            stopProcessing = true;
-            result.actions.push(`${rule.name}: Stopped processing`);
-            break;
-          }
-          if (actionResult) {
-            result.actions.push(`${rule.name}: ${actionResult}`);
-          }
+          const r = await executeAction(supabase, conversationId, action, msg, rule.id);
+          if (r === "__STOP__") { stop = true; result.actions.push(`${rule.name}: Stopped processing`); break; }
+          if (r) result.actions.push(`${rule.name}: ${r}`);
         }
-
-        // Log to activity_log
-        await supabase.from("activity_log").insert({
-          conversation_id: conversationId,
-          actor_id: null,
-          action: "rule_executed",
-          details: {
-            rule_id: rule.id,
-            rule_name: rule.name,
-            match_mode: matchMode,
-            conditions_count: conditions.length,
-            actions_count: ruleActions.length,
-          },
-        });
-
-        if (stopProcessing) break;
+        await supabase.from("activity_log").insert({ conversation_id: conversationId, actor_id: null, action: "rule_executed", details: { rule_id: rule.id, rule_name: rule.name, match_mode: matchMode, conditions_count: conditions.length, actions_count: ruleActions.length } });
+        if (stop) break;
       }
     }
-  } catch (err: any) {
-    console.error("Rule engine error:", err.message);
-  }
-
+  } catch (err: any) { console.error("Rule engine error:", err.message); }
   return result;
 }
