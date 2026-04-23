@@ -1689,13 +1689,23 @@ const TRIGGER_TYPES = [
   { value: "incoming", label: "Incoming", icon: "📥", description: "Runs when a new email arrives" },
   { value: "outgoing", label: "Outgoing", icon: "📤", description: "Runs when an email is sent" },
   { value: "unreplied", label: "Unreplied", icon: "⏰", description: "Runs automatically when we're waiting for a supplier reply (checked hourly)" },
-  { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action" },
-  { value: "label_added", label: "Label Added", icon: "🏷️", description: "Runs when a label is added to a conversation" },
-  { value: "label_removed", label: "Label Removed", icon: "❌", description: "Runs when a label is removed from a conversation" },
-  { value: "new_comment", label: "New Comment", icon: "💬", description: "Runs when someone posts a note or task (internal comment)" },
-  { value: "assignee_changed", label: "Assignee Changed", icon: "👥", description: "Runs when a conversation's assignee changes" },
-  { value: "conversation_closed", label: "Conversation Closed", icon: "✅", description: "Runs when a conversation is closed" },
+  { value: "user_action", label: "User Action", icon: "👤", description: "Runs when a user performs an action (see 'Triggers on' dropdown)" },
 ];
+
+// Sub-triggers that live under the "User Action" tab.
+// The "any" option maps to the legacy trigger_type = "user_action".
+// All others map to their own trigger_type value in the database.
+const USER_ACTION_SUBTYPES = [
+  { value: "user_action", label: "Any user action", icon: "👤", description: "Generic user-triggered rule" },
+  { value: "label_added", label: "Label added", icon: "🏷️", description: "Runs when a label is added to a conversation" },
+  { value: "label_removed", label: "Label removed", icon: "❌", description: "Runs when a label is removed from a conversation" },
+  { value: "new_comment", label: "New comment (note or task)", icon: "💬", description: "Runs when someone posts an internal note or task" },
+  { value: "assignee_changed", label: "Assignee changed", icon: "👥", description: "Runs when a conversation's assignee changes" },
+  { value: "conversation_closed", label: "Conversation closed", icon: "✅", description: "Runs when a conversation is closed" },
+];
+
+// The 5 event-based trigger types that appear in the UI under "User Action" tab.
+const EVENT_TRIGGER_TYPES = new Set(["label_added", "label_removed", "new_comment", "assignee_changed", "conversation_closed"]);
 
 interface RuleCondition { field: string; operator: string; value: string; required?: boolean; }
 interface RuleConditionGroup { match_mode: "all" | "any" | "none"; conditions: (RuleCondition | RuleConditionGroup)[]; }
@@ -1723,6 +1733,9 @@ function RulesTab() {
   const [formConditions, setFormConditions] = useState<(RuleCondition | RuleConditionGroup)[]>([{ field: "subject", operator: "contains", value: "" }]);
   const [formActions, setFormActions] = useState<RuleAction[]>([{ type: "add_label", value: "" }]);
   const [formAccountIds, setFormAccountIds] = useState<string[]>([]);
+  // When activeTrigger === "user_action", this can narrow the rule to a specific event sub-type.
+  // Defaults to "user_action" (generic user-action rule).
+  const [formSubTrigger, setFormSubTrigger] = useState<string>("user_action");
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
   const [userGroups, setUserGroups] = useState<any[]>([]);
   const [taskCategories, setTaskCategories] = useState<any[]>([]);
@@ -1766,6 +1779,7 @@ function RulesTab() {
     setFormConditions([{ field: "subject", operator: "contains", value: "" }]);
     setFormActions([{ type: "add_label", value: "" }]);
     setFormAccountIds([]);
+    setFormSubTrigger("user_action");
     setError("");
   };
 
@@ -1789,6 +1803,12 @@ function RulesTab() {
       setFormActions([{ type: "add_label", value: "" }]);
     }
     setFormAccountIds(r.account_ids || []);
+    // If this is an event-based rule (label_added, etc.), remember its sub-type.
+    if (EVENT_TRIGGER_TYPES.has(r.trigger_type)) {
+      setFormSubTrigger(r.trigger_type);
+    } else {
+      setFormSubTrigger("user_action");
+    }
     setError("");
   };
 
@@ -1801,12 +1821,14 @@ function RulesTab() {
     if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
     try {
+      // When the active tab is User Action, let the sub-trigger narrow to a specific event type.
+      const effectiveTriggerType = activeTrigger === "user_action" ? formSubTrigger : activeTrigger;
       const res = await fetch("/api/rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: formName,
-          trigger_type: activeTrigger,
+          trigger_type: effectiveTriggerType,
           match_mode: formMatchMode,
           conditions: formConditions,
           actions: formActions,
@@ -1823,12 +1845,15 @@ function RulesTab() {
   const handleUpdate = async (id: string) => {
     setSaving(true); setError("");
     try {
+      // Allow editing a rule to change its sub-trigger when on User Action tab.
+      const effectiveTriggerType = activeTrigger === "user_action" ? formSubTrigger : activeTrigger;
       const res = await fetch("/api/rules", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id,
           name: formName,
+          trigger_type: effectiveTriggerType,
           match_mode: formMatchMode,
           conditions: formConditions,
           actions: formActions,
@@ -2128,9 +2153,6 @@ function RulesTab() {
     if (t === "close_conversation") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation status will be set to closed.</div>;
     }
-    if (t === "assign_sender_legacy_placeholder") {
-      return null;
-    }
     if (t === "send_follow_up" || t === "create_draft") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
@@ -2197,6 +2219,32 @@ function RulesTab() {
         placeholder="Rule name (e.g. 'Auto-label RFQ emails')"
         className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
       />
+
+      {/* Triggers on — only visible under User Action tab */}
+      {activeTrigger === "user_action" && (
+        <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+          <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Triggers on</div>
+          <div className="flex flex-wrap gap-1.5">
+            {USER_ACTION_SUBTYPES.map((sub) => (
+              <button
+                key={sub.value}
+                onClick={() => setFormSubTrigger(sub.value)}
+                title={sub.description}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                  formSubTrigger === sub.value
+                    ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30"
+                    : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                }`}
+              >
+                <span className="mr-1">{sub.icon}</span>{sub.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-[#484F58] mt-1.5">
+            {USER_ACTION_SUBTYPES.find((s) => s.value === formSubTrigger)?.description}
+          </div>
+        </div>
+      )}
 
       {/* Account scope */}
       <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
@@ -2577,7 +2625,10 @@ function RulesTab() {
   const [filterAccountId, setFilterAccountId] = useState<string>("");
 
   const filteredRules = rules.filter((r) => {
-    if ((r.trigger_type || "incoming") !== activeTrigger) return false;
+    const ruleTrigger = r.trigger_type || "incoming";
+    // Event-based triggers (label_added, etc.) live under the User Action tab in the UI.
+    const effectiveTab = EVENT_TRIGGER_TYPES.has(ruleTrigger) ? "user_action" : ruleTrigger;
+    if (effectiveTab !== activeTrigger) return false;
     if (filterAccountId) {
       // Show rules that apply to this account (account_ids includes it) OR are global (no account_ids)
       if (r.account_ids && Array.isArray(r.account_ids) && r.account_ids.length > 0) {
@@ -2619,7 +2670,11 @@ function RulesTab() {
       {/* Trigger type tabs */}
       <div className="flex gap-1 mb-6 p-1 rounded-lg bg-[#12161B] border border-[#1E242C]">
         {TRIGGER_TYPES.map((t) => {
-          const count = rules.filter((r) => (r.trigger_type || "incoming") === t.value).length;
+          const count = rules.filter((r) => {
+            const rt = r.trigger_type || "incoming";
+            const tab = EVENT_TRIGGER_TYPES.has(rt) ? "user_action" : rt;
+            return tab === t.value;
+          }).length;
           return (
             <button key={t.value} onClick={() => setActiveTrigger(t.value)}
               className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-[12px] font-semibold transition-all ${
@@ -2701,8 +2756,16 @@ function RulesTab() {
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <div className="text-sm font-medium text-[#E6EDF3]">{r.name}</div>
+                        {EVENT_TRIGGER_TYPES.has(r.trigger_type) && (() => {
+                          const sub = USER_ACTION_SUBTYPES.find((s) => s.value === r.trigger_type);
+                          return sub ? (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30">
+                              {sub.icon} {sub.label}
+                            </span>
+                          ) : null;
+                        })()}
                         {r.account_ids && r.account_ids.length > 0 ? (
                           <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
                             {r.account_ids.map((id: string) => emailAccounts.find((a) => a.id === id)?.name || "?").join(", ")}
