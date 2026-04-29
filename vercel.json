@@ -1,5 +1,18 @@
 {
-  "crons": [],
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/follow-up",
+      "schedule": "0 */1 * * *"
+    },
+    {
+      "path": "/api/cron/unread-alerts",
+      "schedule": "0 */1 * * *"
+    }
+  ],
   "functions": {
     "src/app/api/cron/sync/route.ts": {
       "maxDuration": 60
