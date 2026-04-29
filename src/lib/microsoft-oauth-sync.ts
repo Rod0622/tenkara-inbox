@@ -107,16 +107,32 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
       runRulesFn = mod.runRulesForMessage;
     } catch (_e) { /* rules optional */ }
 
+    // ── OPTIMIZATION: Batch existence check ──
+    // Build a Set of provider_message_ids we already have, in one query.
+    // Replaces N single-row lookups (one per message) with one IN query.
+    const providerIds = messages.map((email: any) => "ms:" + (email.internetMessageId || email.id));
+    const existingIds = new Set<string>();
+    const BATCH = 200;
+    for (let i = 0; i < providerIds.length; i += BATCH) {
+      const slice = providerIds.slice(i, i + BATCH);
+      const { data: existingRows } = await supabase
+        .from("messages")
+        .select("provider_message_id")
+        .in("provider_message_id", slice);
+      for (const row of (existingRows || [])) existingIds.add(row.provider_message_id);
+    }
+    if (existingIds.size > 0) {
+      console.log(`MS OAuth sync ${accountId}: skipping ${existingIds.size}/${messages.length} already-synced messages`);
+    }
+
     // Process each message
     for (const email of messages) {
       try {
         const msgId = email.internetMessageId || email.id;
         const providerId = "ms:" + msgId;
 
-        // Check if already synced
-        const { data: existing } = await supabase
-          .from("messages").select("id").eq("provider_message_id", providerId).maybeSingle();
-        if (existing) continue;
+        // Skip messages we already have (checked in batch above)
+        if (existingIds.has(providerId)) continue;
 
         const isOutbound = (email.from?.emailAddress?.address || "").toLowerCase() === account.email.toLowerCase();
         let conversationId: string | null = null;

@@ -1,8 +1,17 @@
 {
   "crons": [],
   "functions": {
-    "src/app/api/cron/sync/route.ts": { "maxDuration": 60 },
-    "src/app/api/sync/route.ts": { "maxDuration": 60 },
-    "src/app/api/cron/follow-up/route.ts": { "maxDuration": 60 }
+    "src/app/api/cron/sync/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/sync/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/follow-up/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/unread-alerts/route.ts": {
+      "maxDuration": 30
+    }
   }
 }

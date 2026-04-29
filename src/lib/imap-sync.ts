@@ -160,14 +160,37 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           return result;
         }
 
-        // Fetch each message detail
-        for (const msgId of messageIds) {
-          try {
-            // Check if already synced
-            const { data: existing } = await supabase.from("messages")
-              .select("id").eq("provider_message_id", `gmail:${msgId}`).maybeSingle();
-            if (existing) continue;
+        // ── OPTIMIZATION: Batch existence check ──
+        // Previously we ran one SELECT per message ID (50 queries). Now we ask
+        // Supabase once which provider_message_ids already exist, then skip them.
+        // This is roughly 50× fewer DB round-trips per sync run.
+        const providerIds = messageIds.map((id) => `gmail:${id}`);
+        const existingIds = new Set<string>();
+        // Postgres IN list has a practical cap; we batch in chunks of 200 even
+        // though we expect 50 here, so we don't accidentally break if BATCH_SIZE grows later.
+        const BATCH = 200;
+        for (let i = 0; i < providerIds.length; i += BATCH) {
+          const slice = providerIds.slice(i, i + BATCH);
+          const { data: existingRows } = await supabase
+            .from("messages")
+            .select("provider_message_id")
+            .in("provider_message_id", slice);
+          for (const row of (existingRows || [])) existingIds.add(row.provider_message_id);
+        }
 
+        // Filter down to only NEW message IDs we actually need to fetch from Gmail
+        const newMessageIds = messageIds.filter((id) => !existingIds.has(`gmail:${id}`));
+        if (newMessageIds.length === 0) {
+          console.log(`IMAP sync ${accountId}: all ${messageIds.length} messages already synced`);
+          result.success = true;
+          await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+          return result;
+        }
+        console.log(`IMAP sync ${accountId}: ${newMessageIds.length} new messages to fetch (${existingIds.size} already synced, skipped)`);
+
+        // Fetch each NEW message detail (skipping those we already have)
+        for (const msgId of newMessageIds) {
+          try {
             const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=full`;
             const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
             if (!msgRes.ok) continue;
