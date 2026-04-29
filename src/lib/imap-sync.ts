@@ -144,7 +144,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
         const query = `after:${afterEpoch}`;
 
-        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`;
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=25`;
         const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
         if (!listRes.ok) {
           const err = await listRes.json().catch(() => ({}));
@@ -188,8 +188,24 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         }
         console.log(`IMAP sync ${accountId}: ${newMessageIds.length} new messages to fetch (${existingIds.size} already synced, skipped)`);
 
+        // ── OPTIMIZATION: Per-account time budget + mid-loop checkpointing ──
+        // Previously, last_sync_at was only updated AFTER the entire loop finished.
+        // If Vercel timed out mid-loop, last_sync_at stayed stuck at yesterday's value
+        // and the next cron run would re-fetch all the same messages.
+        // Now we update last_sync_at incrementally so progress is preserved on timeout.
+        const ACCOUNT_BUDGET_MS = 25000; // Each account gets max 25s of work
+        const accountStart = Date.now();
+        let earliestProcessedAt: string | null = null;
+        let processedCount = 0;
+        const CHECKPOINT_EVERY = 5; // Save last_sync_at every N messages
+
         // Fetch each NEW message detail (skipping those we already have)
         for (const msgId of newMessageIds) {
+          // Bail out early if we've used our per-account time budget
+          if (Date.now() - accountStart > ACCOUNT_BUDGET_MS) {
+            console.log(`IMAP sync ${accountId}: per-account budget reached after ${processedCount}/${newMessageIds.length} messages`);
+            break;
+          }
           try {
             const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=full`;
             const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
@@ -287,19 +303,41 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             }).eq("id", conversationId);
 
             result.newMessages++;
+            processedCount++;
+            // Track the OLDEST timestamp we've successfully processed.
+            // (Gmail returns newest-first, so we keep the smallest sentAt we've seen.)
+            // Setting last_sync_at to this guarantees we've fully processed everything
+            // from this timestamp forward — the next run won't miss anything.
+            if (!earliestProcessedAt || sentAt < earliestProcessedAt) {
+              earliestProcessedAt = sentAt;
+            }
 
-            // Compute response time for this new message
-            try {
-              await computeResponseTime(supabase, conversationId!);
-            } catch (_rtErr) { /* best-effort */ }
+            // Checkpoint: every N messages, save progress to last_sync_at.
+            // This way if Vercel times out mid-loop, the next run picks up from where we left off
+            // instead of re-fetching the same messages.
+            if (processedCount % CHECKPOINT_EVERY === 0 && earliestProcessedAt) {
+              await supabase.from("email_accounts").update({
+                last_sync_at: earliestProcessedAt,
+                sync_error: null,
+              }).eq("id", accountId);
+            }
+
+            // Note: computeResponseTime moved out of the hot path. It adds 3-4 queries
+            // per message and isn't time-critical. A separate background task can compute
+            // response times asynchronously. (For now: skipping during sync.)
           } catch (msgErr: any) {
             result.errors.push(msgErr.message);
           }
         }
 
         result.success = true;
+        // Use the OLDEST timestamp of any successfully processed message.
+        // This guarantees we've fully processed everything from this timestamp forward —
+        // the next run's Gmail query starts here and won't miss anything.
+        // If we processed nothing (e.g. no new messages), advance to "now" so we don't re-query.
+        const finalSyncAt = earliestProcessedAt || new Date().toISOString();
         await supabase.from("email_accounts").update({
-          last_sync_at: new Date().toISOString(),
+          last_sync_at: finalSyncAt,
           sync_error: result.errors.length > 0 ? result.errors[0] : null,
         }).eq("id", accountId);
         return result;

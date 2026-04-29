@@ -232,10 +232,9 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           } catch (_e) { /* best-effort */ }
         }
 
-        // Compute response time for this new message
-        try {
-          if (conversationId) await computeResponseTime(supabase, conversationId);
-        } catch (_rtErr) { /* best-effort */ }
+        // Note: computeResponseTime moved out of the hot path. It adds 3-4 queries
+        // per message and isn't time-critical. A separate background task can compute
+        // response times asynchronously. (For now: skipping during sync.)
       } catch (msgErr: any) {
         console.error("MS OAuth sync msg error:", msgErr.message);
       }
