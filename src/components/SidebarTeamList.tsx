@@ -76,7 +76,7 @@ export default function SidebarTeamList({
       </button>
 
       {open && (
-        <div className="space-y-0.5 mt-1">
+        <div className="space-y-0.5 mt-1 max-h-[280px] overflow-y-auto pr-0.5">
           {sortedMembers.map((m) => {
             const canEdit = isAdmin || m.id === currentUser?.id;
             const isMe = m.id === currentUser?.id;
