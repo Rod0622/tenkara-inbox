@@ -1634,7 +1634,8 @@ const CONDITION_FIELDS = [
   { value: "added_label_name", label: "Added label name", group: "Event" },
   { value: "removed_label_name", label: "Removed label name", group: "Event" },
   { value: "comment_text", label: "Comment text", group: "Event" },
-  { value: "comment_type", label: "Comment type (note/task)", group: "Event" },
+  { value: "comment_type", label: "Comment type (note/task/comment)", group: "Event" },
+  { value: "comment_mention", label: "Comment mentions user", group: "Event" },
   { value: "action_initiator", label: "Action initiator", group: "Event" },
   { value: "new_team", label: "New team (after team change)", group: "Event" },
   { value: "previous_team", label: "Previous team (before team change)", group: "Event" },
@@ -2356,6 +2357,13 @@ function RulesTab() {
                         <option value="">Any user</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
+                    ) : subItem.field === "comment_mention" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Any mention</option>
+                        <option value="@everyone">@everyone</option>
+                        {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
                     ) : subItem.field === "new_team" || subItem.field === "previous_team" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
@@ -2427,7 +2435,7 @@ function RulesTab() {
                 const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
                 const delayField = ["delay"];
                 const eventTextFields = ["added_label_name", "removed_label_name", "comment_text"];
-                const eventIdFields = ["action_initiator", "new_team", "previous_team", "added_assignee", "removed_assignee"];
+                const eventIdFields = ["action_initiator", "new_team", "previous_team", "added_assignee", "removed_assignee", "comment_mention"];
                 const eventChoiceFields = ["comment_type"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (delayField.includes(cond.field)) return ["greater_than"].includes(o.value); // delay just needs "elapsed >= X"
@@ -2454,6 +2462,13 @@ function RulesTab() {
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                 <option value="">Any user (just checks presence)</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "comment_mention" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Any mention (just checks presence)</option>
+                <option value="@everyone">@everyone</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "new_team" || cond.field === "previous_team" ? (

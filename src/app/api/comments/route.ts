@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { notifyMention } from "@/lib/notifications";
+import { runRulesForEvent } from "@/lib/rule-engine";
 
 // GET /api/comments?conversation_id=xxx
 export async function GET(req: NextRequest) {
@@ -27,6 +29,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/comments — create a new comment
+// Body shape:
+//   { conversation_id, author_id, body, mentions?: string[] }
+// `mentions` is an array of team_member IDs and/or the special token "@everyone".
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
@@ -40,13 +45,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Normalize and de-duplicate mentions array
+  const rawMentions: string[] = Array.isArray(mentions) ? mentions : [];
+  const cleanedMentions = Array.from(new Set(
+    rawMentions
+      .filter((m) => typeof m === "string" && m.length > 0)
+  ));
+
   const { data: comment, error } = await supabase
     .from("comments")
     .insert({
       conversation_id,
       author_id,
       body: commentBody.trim(),
-      mentions: mentions || [],
+      mentions: cleanedMentions,
     })
     .select(`
       *,
@@ -56,6 +68,53 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Resolve @everyone -> all active member IDs (excluding the author).
+  // This produces the actual list of users to notify.
+  let notifyUserIds: string[] = [];
+  const hasEveryone = cleanedMentions.includes("@everyone");
+
+  if (hasEveryone) {
+    const { data: allActive } = await supabase
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true);
+    notifyUserIds = (allActive || []).map((m: any) => m.id);
+  }
+
+  // Add specific user IDs (non-everyone tokens)
+  for (const m of cleanedMentions) {
+    if (m === "@everyone") continue;
+    if (!notifyUserIds.includes(m)) notifyUserIds.push(m);
+  }
+
+  // Don't notify the author of their own message
+  notifyUserIds = notifyUserIds.filter((id) => id !== author_id);
+
+  // Fire mention notifications (best-effort)
+  if (notifyUserIds.length > 0) {
+    try {
+      await notifyMention(notifyUserIds, author_id, commentBody.trim(), conversation_id);
+    } catch (notifyErr: any) {
+      console.error("[comments/POST] notify error:", notifyErr?.message || notifyErr);
+    }
+  }
+
+  // Fire event-based rules (new_comment trigger, comment_type: comment)
+  try {
+    await runRulesForEvent({
+      event_type: "new_comment",
+      conversation_id,
+      initiator_user_id: author_id || null,
+      event_key: `new_comment:comment:${comment?.id}`,
+      comment_id: comment?.id,
+      comment_type: "comment",
+      comment_text: commentBody.trim(),
+      mentioned_user_ids: cleanedMentions,
+    });
+  } catch (ruleErr: any) {
+    console.error("[comments/POST] rule processing error:", ruleErr?.message || ruleErr);
   }
 
   return NextResponse.json({ comment });

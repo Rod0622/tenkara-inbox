@@ -78,8 +78,11 @@ export interface RuleEvent {
   label_name?: string;
   // Comment context
   comment_text?: string;
-  comment_type?: "note" | "task";
+  comment_type?: "note" | "task" | "comment";
   comment_id?: string;
+  // Comment mentions (Batch 2): list of mentioned user IDs.
+  // The special token "@everyone" is included as a literal string when @everyone was used.
+  mentioned_user_ids?: string[];
   // Assignment context (assignee_changed)
   new_assignee_id?: string | null;
   old_assignee_id?: string | null;
@@ -253,6 +256,31 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
     if (c.operator === "is_present") return initiator.length > 0;
     if (c.operator === "is_absent") return initiator.length === 0;
     return evaluateCondition(initiator, c.operator, c.value);
+  }
+
+  // Comment mention condition (Batch 2): only meaningful for new_comment events
+  if (c.field === "comment_mention") {
+    if (ctx.event?.event_type !== "new_comment") return false;
+    const mentions = ctx.event?.mentioned_user_ids || [];
+
+    // is_present: any mention at all (including @everyone)
+    if (c.operator === "is_present") return mentions.length > 0;
+    // is_absent: no mentions
+    if (c.operator === "is_absent") return mentions.length === 0;
+
+    // is / is_not / equals / etc — check if the value (a user ID or "@everyone")
+    // is in the mentioned_user_ids list. Special handling: an @everyone mention
+    // matches any specific-user check too, since @everyone implies the user was notified.
+    const target = c.value;
+    if (!target) return false;
+
+    const directMatch = mentions.includes(target);
+    const everyoneIncludes = mentions.includes("@everyone") && target !== "@everyone";
+
+    const matched = directMatch || everyoneIncludes;
+    if (c.operator === "is" || c.operator === "equals") return matched;
+    if (c.operator === "is_not" || c.operator === "not_equals") return !matched;
+    return matched;
   }
 
   // ── Team change conditions (only meaningful for team_changed event) ──
@@ -597,6 +625,7 @@ async function executeAction(
             label_name: event?.label_name || null,
             comment_text: event?.comment_text || null,
             comment_type: event?.comment_type || null,
+            mentioned_user_ids: event?.mentioned_user_ids || null,
             new_assignee_id: event?.new_assignee_id || null,
             old_assignee_id: event?.old_assignee_id || null,
             new_status: event?.new_status || null,
