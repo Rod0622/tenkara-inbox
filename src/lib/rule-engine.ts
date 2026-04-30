@@ -60,26 +60,39 @@ export interface MessageContext {
   headers?: Record<string, string>;
 }
 
-// Event-based trigger context (label changes, comments, assignment, status)
+// Event-based trigger context (label changes, comments, assignment, status, team)
 export interface RuleEvent {
   event_type:
     | "label_added"
     | "label_removed"
     | "new_comment"
     | "assignee_changed"
-    | "conversation_closed";
+    | "conversation_closed"
+    | "team_changed"
+    | "conversation_reopened";
   conversation_id: string;
   initiator_user_id?: string | null;
   event_key: string;
+  // Label change context
   label_id?: string;
   label_name?: string;
+  // Comment context
   comment_text?: string;
   comment_type?: "note" | "task";
   comment_id?: string;
+  // Assignment context (assignee_changed)
   new_assignee_id?: string | null;
   old_assignee_id?: string | null;
+  added_assignee_id?: string | null;     // Same as new when assignment changes; null on pure unassign
+  removed_assignee_id?: string | null;   // Same as old; null on pure assign-from-empty
+  // Status context (conversation_closed, conversation_reopened)
   new_status?: string;
   old_status?: string;
+  // Team / folder context (team_changed)
+  new_team_id?: string | null;
+  old_team_id?: string | null;
+  new_team_name?: string | null;
+  old_team_name?: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -240,6 +253,38 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
     if (c.operator === "is_present") return initiator.length > 0;
     if (c.operator === "is_absent") return initiator.length === 0;
     return evaluateCondition(initiator, c.operator, c.value);
+  }
+
+  // ── Team change conditions (only meaningful for team_changed event) ──
+  if (c.field === "new_team") {
+    if (ctx.event?.event_type !== "team_changed") return false;
+    const teamId = ctx.event?.new_team_id || "";
+    if (c.operator === "is_present") return teamId.length > 0;
+    if (c.operator === "is_absent") return teamId.length === 0;
+    return evaluateCondition(teamId, c.operator, c.value);
+  }
+  if (c.field === "previous_team") {
+    if (ctx.event?.event_type !== "team_changed") return false;
+    const teamId = ctx.event?.old_team_id || "";
+    if (c.operator === "is_present") return teamId.length > 0;
+    if (c.operator === "is_absent") return teamId.length === 0;
+    return evaluateCondition(teamId, c.operator, c.value);
+  }
+
+  // ── Assignee change conditions (only meaningful for assignee_changed event) ──
+  if (c.field === "added_assignee") {
+    if (ctx.event?.event_type !== "assignee_changed") return false;
+    const assigneeId = ctx.event?.added_assignee_id || "";
+    if (c.operator === "is_present") return assigneeId.length > 0;
+    if (c.operator === "is_absent") return assigneeId.length === 0;
+    return evaluateCondition(assigneeId, c.operator, c.value);
+  }
+  if (c.field === "removed_assignee") {
+    if (ctx.event?.event_type !== "assignee_changed") return false;
+    const assigneeId = ctx.event?.removed_assignee_id || "";
+    if (c.operator === "is_present") return assigneeId.length > 0;
+    if (c.operator === "is_absent") return assigneeId.length === 0;
+    return evaluateCondition(assigneeId, c.operator, c.value);
   }
 
   if (c.field === "conversation_status") {
@@ -441,6 +486,15 @@ async function executeAction(
       case "archive": { await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId); return "Archived"; }
       case "close_conversation": { await supabase.from("conversations").update({ status: "closed" }).eq("id", conversationId); return "Closed conversation"; }
       case "snooze": { await supabase.from("conversations").update({ status: "snoozed" }).eq("id", conversationId); return "Snoozed"; }
+      case "discard_snooze": {
+        // Only wakes up conversations that are currently snoozed.
+        // If status is something else (open, closed, etc.) this is a no-op so we don't
+        // accidentally reopen a closed conversation just because a rule fired on it.
+        const { data: convo } = await supabase.from("conversations").select("status").eq("id", conversationId).maybeSingle();
+        if (convo?.status !== "snoozed") return "Not snoozed (no-op)";
+        await supabase.from("conversations").update({ status: "open" }).eq("id", conversationId);
+        return "Snooze discarded";
+      }
       case "trash": { await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId); return "Trashed"; }
       case "add_note": {
         if (!action.value) return null;
@@ -547,6 +601,12 @@ async function executeAction(
             old_assignee_id: event?.old_assignee_id || null,
             new_status: event?.new_status || null,
             old_status: event?.old_status || null,
+            new_team_id: event?.new_team_id || null,
+            old_team_id: event?.old_team_id || null,
+            new_team_name: event?.new_team_name || null,
+            old_team_name: event?.old_team_name || null,
+            added_assignee_id: event?.added_assignee_id || null,
+            removed_assignee_id: event?.removed_assignee_id || null,
             timestamp: new Date().toISOString(),
           });
           const hdrs: Record<string, string> = { "Content-Type": "application/json" };

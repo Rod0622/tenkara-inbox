@@ -3,6 +3,7 @@ import { createServerClient } from "@/lib/supabase";
 import { notifyTaskAssigned } from "@/lib/notifications";
 import { addBusinessHours, getSupplierHoursForConversation } from "@/lib/business-hours";
 import type { Task, TaskStatus } from "@/types";
+import { runRulesForEvent } from "@/lib/rule-engine";
 
 function normalizeAssigneeIds(body: any): string[] {
   const raw =
@@ -263,6 +264,24 @@ export async function POST(req: NextRequest) {
       const actorId = body.actor_id || null;
       await notifyTaskAssigned(insert.data.id, assigneeIds, actorId, text, conversationId || undefined);
     } catch (_e) { /* best-effort */ }
+
+    // Fire event-based rules (new_comment trigger, comment_type: task)
+    // Only fire when there's a conversation context — standalone tasks don't trigger rules
+    if (conversationId) {
+      try {
+        await runRulesForEvent({
+          event_type: "new_comment",
+          conversation_id: conversationId,
+          initiator_user_id: body.actor_id || primaryAssigneeId || null,
+          event_key: `new_comment:task:${insert.data.id}`,
+          comment_id: insert.data.id,
+          comment_type: "task",
+          comment_text: text,
+        });
+      } catch (ruleErr: any) {
+        console.error("[tasks/POST] rule processing error:", ruleErr?.message || ruleErr);
+      }
+    }
 
     const task = await selectTaskById(supabase, insert.data.id);
     return NextResponse.json({ task });

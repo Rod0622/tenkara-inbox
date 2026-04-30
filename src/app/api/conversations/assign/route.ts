@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyEmailAssigned } from "@/lib/notifications";
+import { runRulesForEvent } from "@/lib/rule-engine";
 
 // PATCH /api/conversations/assign — assign or unassign a conversation
 export async function PATCH(req: NextRequest) {
@@ -64,6 +65,29 @@ export async function PATCH(req: NextRequest) {
       action: "unassigned",
       details: { previous_assignee_id: previousAssigneeId },
     });
+  }
+
+  // Fire event-based rules (assignee_changed trigger)
+  // Only fire if the assignee actually changed (skip if same value re-applied)
+  const newId = assignee_id || null;
+  const oldId = previousAssigneeId || null;
+  if (newId !== oldId) {
+    try {
+      await runRulesForEvent({
+        event_type: "assignee_changed",
+        conversation_id,
+        initiator_user_id: actor_id || null,
+        event_key: `assignee_changed:${conversation_id}:${oldId || "null"}:${newId || "null"}:${Date.now()}`,
+        new_assignee_id: newId,
+        old_assignee_id: oldId,
+        // added_assignee = the user who is now assigned (null on pure unassign)
+        added_assignee_id: newId,
+        // removed_assignee = the user who was previously assigned (null on assign-from-empty)
+        removed_assignee_id: oldId,
+      });
+    } catch (ruleErr: any) {
+      console.error("[assign/PATCH] rule processing error:", ruleErr?.message || ruleErr);
+    }
   }
 
   return NextResponse.json({ conversation: data });

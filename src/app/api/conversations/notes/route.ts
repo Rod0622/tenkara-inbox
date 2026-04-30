@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyMention } from "@/lib/notifications";
 import { getServerSession } from "next-auth";
+import { runRulesForEvent } from "@/lib/rule-engine";
 
 // POST /api/conversations/notes — create a note
 export async function POST(req: NextRequest) {
@@ -79,6 +80,21 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (_e) { /* best-effort */ }
+
+  // Fire event-based rules (new_comment trigger, comment_type: note)
+  try {
+    await runRulesForEvent({
+      event_type: "new_comment",
+      conversation_id: conversationId,
+      initiator_user_id: authorId,
+      event_key: `new_comment:note:${note?.id}`,
+      comment_id: note?.id,
+      comment_type: "note",
+      comment_text: text.trim(),
+    });
+  } catch (ruleErr: any) {
+    console.error("[notes/POST] rule processing error:", ruleErr?.message || ruleErr);
+  }
 
   return NextResponse.json({ note });
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { runRulesForEvent } from "@/lib/rule-engine";
 
 // POST — Add label to conversation
 export async function POST(req: NextRequest) {
@@ -22,6 +23,21 @@ export async function POST(req: NextRequest) {
     action: "label_added",
     details: { label_id: labelId, label_name: label?.name || "Unknown" },
   });
+
+  // Fire event-based rules (label_added trigger)
+  // Best-effort — don't fail the request if rule processing has trouble
+  try {
+    await runRulesForEvent({
+      event_type: "label_added",
+      conversation_id: conversationId,
+      initiator_user_id: actorId || null,
+      event_key: `label_added:${conversationId}:${labelId}:${Date.now()}`,
+      label_id: labelId,
+      label_name: label?.name || undefined,
+    });
+  } catch (ruleErr: any) {
+    console.error("[labels/POST] rule processing error:", ruleErr?.message || ruleErr);
+  }
 
   return NextResponse.json({ success: true }, { status: 201 });
 }
@@ -50,6 +66,20 @@ export async function DELETE(req: NextRequest) {
     action: "label_removed",
     details: { label_id: labelId, label_name: label?.name || "Unknown" },
   });
+
+  // Fire event-based rules (label_removed trigger)
+  try {
+    await runRulesForEvent({
+      event_type: "label_removed",
+      conversation_id: conversationId,
+      initiator_user_id: actorId || null,
+      event_key: `label_removed:${conversationId}:${labelId}:${Date.now()}`,
+      label_id: labelId,
+      label_name: label?.name || undefined,
+    });
+  } catch (ruleErr: any) {
+    console.error("[labels/DELETE] rule processing error:", ruleErr?.message || ruleErr);
+  }
 
   return NextResponse.json({ success: true });
 }

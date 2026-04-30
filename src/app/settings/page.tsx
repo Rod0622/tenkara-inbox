@@ -1636,6 +1636,10 @@ const CONDITION_FIELDS = [
   { value: "comment_text", label: "Comment text", group: "Event" },
   { value: "comment_type", label: "Comment type (note/task)", group: "Event" },
   { value: "action_initiator", label: "Action initiator", group: "Event" },
+  { value: "new_team", label: "New team (after team change)", group: "Event" },
+  { value: "previous_team", label: "Previous team (before team change)", group: "Event" },
+  { value: "added_assignee", label: "Added assignee", group: "Event" },
+  { value: "removed_assignee", label: "Removed assignee", group: "Event" },
 ];
 
 const CONDITION_OPERATORS = [
@@ -1668,6 +1672,7 @@ const ACTION_TYPES = [
   { value: "archive", label: "Archive (close)", group: "Organization" },
   { value: "close_conversation", label: "Close conversation", group: "Organization" },
   { value: "snooze", label: "Snooze", group: "Organization" },
+  { value: "discard_snooze", label: "Discard snooze (wake up)", group: "Organization" },
   { value: "trash", label: "Trash", group: "Organization" },
   { value: "mark_starred", label: "Star", group: "Flags" },
   { value: "unstar", label: "Unstar", group: "Flags" },
@@ -1701,11 +1706,17 @@ const USER_ACTION_SUBTYPES = [
   { value: "label_removed", label: "Label removed", icon: "❌", description: "Runs when a label is removed from a conversation" },
   { value: "new_comment", label: "New comment (note or task)", icon: "💬", description: "Runs when someone posts an internal note or task" },
   { value: "assignee_changed", label: "Assignee changed", icon: "👥", description: "Runs when a conversation's assignee changes" },
+  { value: "team_changed", label: "Team changed", icon: "🔀", description: "Runs when a conversation moves between team folders" },
   { value: "conversation_closed", label: "Conversation closed", icon: "✅", description: "Runs when a conversation is closed" },
+  { value: "conversation_reopened", label: "Conversation reopened", icon: "♻️", description: "Runs when a closed conversation is reopened" },
 ];
 
-// The 5 event-based trigger types that appear in the UI under "User Action" tab.
-const EVENT_TRIGGER_TYPES = new Set(["label_added", "label_removed", "new_comment", "assignee_changed", "conversation_closed"]);
+// The event-based trigger types that appear in the UI under "User Action" tab.
+const EVENT_TRIGGER_TYPES = new Set([
+  "label_added", "label_removed", "new_comment",
+  "assignee_changed", "conversation_closed",
+  "team_changed", "conversation_reopened",
+]);
 
 interface RuleCondition { field: string; operator: string; value: string; required?: boolean; }
 interface RuleConditionGroup { match_mode: "all" | "any" | "none"; conditions: (RuleCondition | RuleConditionGroup)[]; }
@@ -2153,6 +2164,9 @@ function RulesTab() {
     if (t === "close_conversation") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation status will be set to closed.</div>;
     }
+    if (t === "discard_snooze") {
+      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Wakes up the conversation if it's currently snoozed (no-op otherwise).</div>;
+    }
     if (t === "send_follow_up" || t === "create_draft") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
@@ -2336,6 +2350,18 @@ function RulesTab() {
                         <option value="">Any user</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
+                    ) : subItem.field === "added_assignee" || subItem.field === "removed_assignee" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Any user</option>
+                        {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    ) : subItem.field === "new_team" || subItem.field === "previous_team" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Select team / folder...</option>
+                        {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
+                      </select>
                     ) : subItem.field === "comment_type" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
@@ -2401,7 +2427,7 @@ function RulesTab() {
                 const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
                 const delayField = ["delay"];
                 const eventTextFields = ["added_label_name", "removed_label_name", "comment_text"];
-                const eventIdFields = ["action_initiator"];
+                const eventIdFields = ["action_initiator", "new_team", "previous_team", "added_assignee", "removed_assignee"];
                 const eventChoiceFields = ["comment_type"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (delayField.includes(cond.field)) return ["greater_than"].includes(o.value); // delay just needs "elapsed >= X"
@@ -2423,6 +2449,18 @@ function RulesTab() {
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                 <option value="">Any user (just checks presence)</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "added_assignee" || cond.field === "removed_assignee" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Any user (just checks presence)</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "new_team" || cond.field === "previous_team" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Select team / folder...</option>
+                {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
               </select>
             ) : cond.field === "comment_type" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
