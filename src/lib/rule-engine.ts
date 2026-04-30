@@ -323,6 +323,25 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
     const convo = await getConvo(ctx);
     return evaluateCondition(convo.assignee_id || "", c.operator, c.value === "__unassigned__" ? "" : c.value);
   }
+  if (c.field === "assignee_is_ooo") {
+    const convo = await getConvo(ctx);
+    if (!convo.assignee_id) {
+      // No assignee → not OOO (vacuously); is_true returns false, is_false returns true
+      if (c.operator === "is_true") return false;
+      if (c.operator === "is_false") return true;
+      return false;
+    }
+    try {
+      const { data, error } = await ctx.supabase.rpc("is_user_ooo", { p_user_id: convo.assignee_id });
+      if (error) return false;
+      const isOOO = data === true;
+      if (c.operator === "is_true") return isOOO;
+      if (c.operator === "is_false") return !isOOO;
+      return isOOO;
+    } catch {
+      return false;
+    }
+  }
   if (c.field === "folder") {
     const convo = await getConvo(ctx);
     return evaluateCondition(convo.folder_id || "", c.operator, c.value);
@@ -437,9 +456,23 @@ async function executeAction(
       }
       case "assign_to": {
         if (!action.value) return null;
+
+        // Helper: check if a user is OOO right now via DB function.
+        // Returns true if OOO, false otherwise. Errors fail open (treat as not OOO).
+        const isUserOOO = async (uid: string): Promise<boolean> => {
+          try {
+            const { data, error } = await supabase.rpc("is_user_ooo", { p_user_id: uid });
+            if (error) return false;
+            return data === true;
+          } catch { return false; }
+        };
+
         if (action.value === "__initiator__") {
           const initiatorId = event?.initiator_user_id;
           if (!initiatorId) return null;
+          if (await isUserOOO(initiatorId)) {
+            return "Skipped: initiator is OOO";
+          }
           await supabase.from("conversations").update({ assignee_id: initiatorId }).eq("id", conversationId);
           return "Assigned to initiator";
         }
@@ -455,6 +488,16 @@ async function executeAction(
             memberIds = (data || []).map((m: any) => m.team_member_id);
           }
           if (memberIds.length === 0) return null;
+
+          // Filter out OOO members BEFORE strategy selection.
+          // Run all OOO checks in parallel for speed, then keep only non-OOO.
+          const oooFlags = await Promise.all(memberIds.map((id) => isUserOOO(id)));
+          const availableIds = memberIds.filter((_, idx) => !oooFlags[idx]);
+          if (availableIds.length === 0) {
+            return "Skipped: all candidates are OOO";
+          }
+          memberIds = availableIds;
+
           let chosenId: string;
           if (strategy === "random") { chosenId = memberIds[Math.floor(Math.random() * memberIds.length)]; }
           else if (strategy === "round_robin") {
@@ -474,6 +517,11 @@ async function executeAction(
           await supabase.from("activity_log").insert({ conversation_id: conversationId, actor_id: null, action: "rule_executed", details: { auto_assigned_to: chosenId, strategy, pool } });
           const { data: member } = await supabase.from("team_members").select("name").eq("id", chosenId).maybeSingle();
           return `Auto-assigned to ${member?.name || chosenId} (${strategy})`;
+        }
+
+        // Direct assignment to a specific user — skip if OOO
+        if (await isUserOOO(action.value)) {
+          return `Skipped: user ${action.value} is OOO`;
         }
         await supabase.from("conversations").update({ assignee_id: action.value }).eq("id", conversationId);
         return "Assigned";

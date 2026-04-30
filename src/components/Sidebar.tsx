@@ -24,6 +24,8 @@ import {
   FileEdit,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
+import UserOOOPopover from "./UserOOOPopover";
+import SidebarTeamList from "./SidebarTeamList";
 
 function QuickCreateMenu({
   onCompose,
@@ -147,6 +149,12 @@ export default function Sidebar({
   const [notifCount, setNotifCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  // Own OOO popover (anchored to user-name button at bottom of sidebar)
+  const [showOwnOOO, setShowOwnOOO] = useState(false);
+  const [ownOOOAnchor, setOwnOOOAnchor] = useState<{ top: number; left: number } | null>(null);
+  // Track current user's OOO status to show indicator on the user-name button
+  const [meIsOOO, setMeIsOOO] = useState(false);
+  const userBtnRef = useRef<HTMLButtonElement>(null);
 
   // Fetch notifications and check due reminders
   useEffect(() => {
@@ -170,6 +178,22 @@ export default function Sidebar({
     fetchNotifs();
     const interval = setInterval(fetchNotifs, 15000);
     return () => clearInterval(interval);
+  }, [currentUser?.id]);
+
+  // Fetch own OOO status separately (lighter query than full team list)
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fetchOwnOOO = async () => {
+      try {
+        const res = await fetch(`/api/team/ooo?user_id=${currentUser.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setMeIsOOO(!!data.is_currently_ooo);
+      } catch (_e) {}
+    };
+    fetchOwnOOO();
+    const id = setInterval(fetchOwnOOO, 60000);
+    return () => clearInterval(id);
   }, [currentUser?.id]);
 
   const markAllRead = async () => {
@@ -671,20 +695,45 @@ export default function Sidebar({
         </div>
       )}
 
-      <div className="p-2 border-t border-[#161B22]">
+      {/* Team list — collapsible, shows all users with OOO status */}
+      {currentUser && <SidebarTeamList currentUser={currentUser} />}
+
+      <div className="p-2 border-t border-[#161B22] mt-auto">
         <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md">
           {currentUser && (
             <>
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-[#0B0E11] flex-shrink-0"
-                style={{ background: currentUser.color }}
+              <button
+                ref={userBtnRef}
+                onClick={() => {
+                  if (userBtnRef.current) {
+                    const rect = userBtnRef.current.getBoundingClientRect();
+                    setOwnOOOAnchor({ top: rect.top, left: rect.right + 8 });
+                  }
+                  setShowOwnOOO(!showOwnOOO);
+                }}
+                className="flex items-center gap-2 flex-1 min-w-0 text-left hover:bg-[#12161B] rounded-md px-1 py-1 transition-colors"
+                title="Click to manage your OOO status"
               >
-                {currentUser.initials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-[#E6EDF3]">{currentUser.name}</div>
-                <div className="text-[10px] text-[#484F58]">{currentUser.department}</div>
-              </div>
+                <div className="relative shrink-0">
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-[#0B0E11]"
+                    style={{ background: currentUser.color }}
+                  >
+                    {currentUser.initials}
+                  </div>
+                  <span
+                    className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#0B0E11] ${
+                      meIsOOO ? "bg-[#FCA5A5]" : "bg-[#4ADE80]"
+                    }`}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-[#E6EDF3] truncate">{currentUser.name}</div>
+                  <div className={`text-[10px] truncate ${meIsOOO ? "text-[#FCA5A5]" : "text-[#484F58]"}`}>
+                    {meIsOOO ? "🌴 OOO" : currentUser.department}
+                  </div>
+                </div>
+              </button>
             </>
           )}
           <button
@@ -696,6 +745,29 @@ export default function Sidebar({
           </button>
         </div>
       </div>
+
+      {/* Own OOO popover */}
+      {showOwnOOO && currentUser && (
+        <UserOOOPopover
+          targetUserId={currentUser.id}
+          targetUserName={currentUser.name}
+          actorId={currentUser.id}
+          canEdit={true}
+          anchorTop={ownOOOAnchor?.top}
+          anchorLeft={ownOOOAnchor?.left}
+          onClose={() => {
+            setShowOwnOOO(false);
+            setOwnOOOAnchor(null);
+          }}
+          onChange={() => {
+            // Refetch own OOO status
+            fetch(`/api/team/ooo?user_id=${currentUser.id}`)
+              .then((r) => r.json())
+              .then((d) => setMeIsOOO(!!d.is_currently_ooo))
+              .catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

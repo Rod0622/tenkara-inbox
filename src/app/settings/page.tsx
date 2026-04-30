@@ -1623,6 +1623,7 @@ const CONDITION_FIELDS = [
   { value: "email_account", label: "Email account", group: "More" },
   { value: "conversation_status", label: "Conversation state", group: "More" },
   { value: "assignee", label: "Assignee", group: "More" },
+  { value: "assignee_is_ooo", label: "Assignee is OOO", group: "More" },
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
   { value: "message_count", label: "Number of messages in conversation", group: "More" },
@@ -1828,7 +1829,7 @@ function RulesTab() {
     if (!formName.trim()) return;
     // Validate flat conditions only (groups validated separately)
     const flatConds = formConditions.filter((c) => !isGroup(c)) as RuleCondition[];
-    if (flatConds.some((c) => !["has_attachments", "has_reply", "delay"].includes(c.field) && !c.value?.trim())) return;
+    if (flatConds.some((c) => !["has_attachments", "has_reply", "delay", "assignee_is_ooo"].includes(c.field) && !c.value?.trim())) return;
     const needsVal = (t: string) => ["add_label", "remove_label", "assign_to", "set_status", "move_to_folder", "add_note", "add_task", "webhook", "send_follow_up", "create_draft"].includes(t);
     if (formActions.some((a) => needsVal(a.type) && !a.value)) return;
     setSaving(true); setError("");
@@ -2343,7 +2344,9 @@ function RulesTab() {
                       className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                       {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    {subItem.operator === "is_present" || subItem.operator === "is_absent" ? (
+                    {subItem.field === "assignee_is_ooo" || subItem.field === "has_attachments" ? (
+                      <span className="text-[10px] text-[#484F58] px-2 flex-1">(use Is true / Is false)</span>
+                    ) : subItem.operator === "is_present" || subItem.operator === "is_absent" ? (
                       <span className="text-[10px] text-[#484F58] px-2 flex-1">(no value needed)</span>
                     ) : subItem.field === "action_initiator" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
@@ -2431,7 +2434,7 @@ function RulesTab() {
               className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
               {CONDITION_OPERATORS.filter((o) => {
                 // Filter operators based on field type
-                const boolFields = ["has_attachments", "has_reply"];
+                const boolFields = ["has_attachments", "has_reply", "assignee_is_ooo"];
                 const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
                 const delayField = ["delay"];
                 const eventTextFields = ["added_label_name", "removed_label_name", "comment_text"];
@@ -2450,6 +2453,8 @@ function RulesTab() {
             {/* Smart value input based on field type */}
             {cond.field === "has_attachments" ? (
               <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+            ) : cond.field === "assignee_is_ooo" ? (
+              <span className="text-[10px] text-[#484F58] px-2">(use Is true / Is false)</span>
             ) : cond.operator === "is_present" || cond.operator === "is_absent" ? (
               <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
             ) : cond.field === "action_initiator" ? (
