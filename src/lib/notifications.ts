@@ -68,20 +68,36 @@ export async function notifyTaskAssigned(
   await createNotifications(notifications);
 }
 
-// Notify when someone is mentioned in a note
+// Notify when someone is mentioned in a team chat or note
+// Accepts optional actorName to produce a more readable title.
+// If `mentionType === "everyone"`, the title makes that clear.
 export async function notifyMention(
   mentionedUserIds: string[],
   actorId: string | null,
   noteText: string,
-  conversationId: string
+  conversationId: string,
+  opts?: { actorName?: string; mentionType?: "direct" | "everyone"; conversationSubject?: string }
 ) {
+  const actorName = opts?.actorName?.trim() || "Someone";
+  const isEveryone = opts?.mentionType === "everyone";
+  const subjectPart = opts?.conversationSubject?.trim();
+
+  const title = isEveryone
+    ? `${actorName} mentioned @everyone`
+    : `${actorName} mentioned you`;
+
+  const bodyParts: string[] = [];
+  if (subjectPart) bodyParts.push(subjectPart);
+  bodyParts.push(noteText.slice(0, 140));
+  const body = bodyParts.join(" — ");
+
   const notifications = mentionedUserIds
     .filter((id) => id && id !== actorId)
     .map((id) => ({
       user_id: id,
       type: "mention",
-      title: "You were mentioned in a note",
-      body: noteText.slice(0, 100),
+      title,
+      body,
       conversation_id: conversationId,
       actor_id: actorId,
     }));

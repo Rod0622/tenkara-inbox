@@ -29,6 +29,36 @@ export default function TeamChat({
   const [sending, setSending] = useState(false);
   const [isTeamChatOpen, setIsTeamChatOpen] = useState(false);
 
+  // If user arrived here via a mention notification, auto-open team chat.
+  // The Sidebar sets `&open_team_chat=1` in the URL hash.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const checkHash = () => {
+      const hash = window.location.hash || "";
+      if (hash.includes("open_team_chat=1")) {
+        setIsTeamChatOpen(true);
+        // Clean up hash so it doesn't re-trigger on remount
+        const cleaned = hash.replace(/&?open_team_chat=1/, "");
+        if (cleaned !== hash) {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search + cleaned);
+        }
+      }
+    };
+    checkHash();
+    window.addEventListener("hashchange", checkHash);
+    return () => window.removeEventListener("hashchange", checkHash);
+  }, [conversationId]);
+
+  // Count comments where the current user was mentioned (for the badge)
+  const myMentionCount = useMemo(() => {
+    if (!currentUser?.id) return 0;
+    return comments.filter((c: any) => {
+      const m = c.mentions || [];
+      if (!Array.isArray(m)) return false;
+      return m.includes(currentUser.id) || m.includes(EVERYONE_TOKEN);
+    }).length;
+  }, [comments, currentUser?.id]);
+
   // Mention picker state
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerFilter, setPickerFilter] = useState("");
@@ -258,10 +288,18 @@ export default function TeamChat({
         <MessageSquare size={12} />
         <span>Team Chat</span>
         <span className="text-[#484F58] normal-case">(internal — not visible to sender)</span>
-        {comments.length > 0 && (
-          <span className="ml-auto bg-[#1E242C] text-[#7D8590] text-[10px] px-1.5 py-0.5 rounded-full font-bold">{comments.length}</span>
+        {myMentionCount > 0 && (
+          <span className="ml-1 inline-flex items-center gap-1 bg-[#5C2828] text-[#FCA5A5] text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+            <AtSign size={10} />
+            {myMentionCount}
+          </span>
         )}
-        <ChevronDown size={12} className={`ml-1 transition-transform ${isTeamChatOpen ? "rotate-180" : ""}`} />
+        {comments.length > 0 && (
+          <span className={`${myMentionCount > 0 ? "" : "ml-auto"} bg-[#1E242C] text-[#7D8590] text-[10px] px-1.5 py-0.5 rounded-full font-bold`}>
+            {comments.length}
+          </span>
+        )}
+        <ChevronDown size={12} className={`${myMentionCount > 0 || comments.length > 0 ? "" : "ml-auto"} transition-transform ${isTeamChatOpen ? "rotate-180" : ""}`} />
       </button>
 
       {isTeamChatOpen && (

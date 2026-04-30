@@ -92,10 +92,19 @@ export async function POST(req: NextRequest) {
   // Don't notify the author of their own message
   notifyUserIds = notifyUserIds.filter((id) => id !== author_id);
 
-  // Fire mention notifications (best-effort)
+  // Fire mention notifications (best-effort).
+  // Fetch actor name + conversation subject so the notification has useful context.
   if (notifyUserIds.length > 0) {
     try {
-      await notifyMention(notifyUserIds, author_id, commentBody.trim(), conversation_id);
+      const [{ data: actor }, { data: convo }] = await Promise.all([
+        supabase.from("team_members").select("name").eq("id", author_id).maybeSingle(),
+        supabase.from("conversations").select("subject").eq("id", conversation_id).maybeSingle(),
+      ]);
+      await notifyMention(notifyUserIds, author_id, commentBody.trim(), conversation_id, {
+        actorName: actor?.name || undefined,
+        mentionType: hasEveryone ? "everyone" : "direct",
+        conversationSubject: convo?.subject || undefined,
+      });
     } catch (notifyErr: any) {
       console.error("[comments/POST] notify error:", notifyErr?.message || notifyErr);
     }

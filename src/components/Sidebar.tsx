@@ -168,7 +168,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 30000);
+    const interval = setInterval(fetchNotifs, 15000);
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -201,6 +201,9 @@ export default function Sidebar({
       setActiveMailbox(null);
       setActiveFolder(null);
       window.location.hash = "highlight_task=" + notif.task_id;
+    } else if (notif.type === "mention" && notif.conversation_id) {
+      // Go to conversation AND auto-open team chat (where the mention was made)
+      window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true&open_team_chat=1";
     } else if (notif.conversation_id) {
       // Go to conversation with highlight
       window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true";
