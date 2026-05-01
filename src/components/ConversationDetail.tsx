@@ -285,6 +285,7 @@ export default function ConversationDetail({
   const [forwardBody, setForwardBody] = useState("");
   const [forwardSending, setForwardSending] = useState(false);
   const [trashingConversation, setTrashingConversation] = useState(false);
+  const [markingSpam, setMarkingSpam] = useState(false);
 
   const {
     notes,
@@ -956,6 +957,77 @@ export default function ConversationDetail({
     }
   };
 
+  // Batch 6: Mark conversation as spam
+  const handleMarkAsSpam = async () => {
+    if (!convo) return;
+    if (markingSpam) return;
+    if (!confirm("Mark this conversation as spam? It will be moved to the Spam folder.")) return;
+
+    try {
+      setMarkingSpam(true);
+
+      const res = await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          status: "spam",
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to mark as spam");
+      }
+
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Mark as spam failed:", error);
+      alert("Mark as spam failed: " + (error?.message || "Unknown error"));
+    } finally {
+      setMarkingSpam(false);
+    }
+  };
+
+  // Batch 6: Restore from spam — reverts status to "open"
+  const handleNotSpam = async () => {
+    if (!convo) return;
+    if (markingSpam) return;
+
+    try {
+      setMarkingSpam(true);
+
+      const res = await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          status: "open",
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to restore from spam");
+      }
+
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Restore from spam failed:", error);
+      alert("Restore from spam failed: " + (error?.message || "Unknown error"));
+    } finally {
+      setMarkingSpam(false);
+    }
+  };
+
   const handleSetFollowUp = async (remindAt: string) => {
     if (!convo || !currentUser?.id) return;
     setSettingFollowUp(true);
@@ -1527,6 +1599,28 @@ export default function ConversationDetail({
                 </>
               )}
             </div>
+
+            {/* Mark as spam / Not spam — Batch 6 */}
+            {convo.status === "spam" ? (
+              <button
+                onClick={handleNotSpam}
+                title="Not spam (restore to inbox)"
+                disabled={markingSpam}
+                className="px-2 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[10px] font-bold text-[#4ADE80] flex items-center gap-1 hover:bg-[#181D24] disabled:opacity-50"
+              >
+                <RotateCcw size={12} />
+                Not spam
+              </button>
+            ) : (
+              <button
+                onClick={handleMarkAsSpam}
+                title="Mark as spam"
+                disabled={markingSpam}
+                className="w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] text-[#7D8590] flex items-center justify-center hover:bg-[#181D24] disabled:opacity-50"
+              >
+                <Ban size={16} />
+              </button>
+            )}
 
             <button
               onClick={handleTrashConversation}

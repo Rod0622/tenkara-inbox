@@ -1677,6 +1677,7 @@ const ACTION_TYPES = [
   { value: "snooze", label: "Snooze", group: "Organization" },
   { value: "discard_snooze", label: "Discard snooze (wake up)", group: "Organization" },
   { value: "trash", label: "Trash", group: "Organization" },
+  { value: "mark_as_spam", label: "Mark as spam (also stops rule chain)", group: "Organization" },
   { value: "add_watcher", label: "Add watcher", group: "Watchers" },
   { value: "remove_watcher", label: "Remove watcher", group: "Watchers" },
   { value: "mark_starred", label: "Star", group: "Flags" },
@@ -2168,6 +2169,9 @@ function RulesTab() {
     }
     if (t === "close_conversation") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation status will be set to closed.</div>;
+    }
+    if (t === "mark_as_spam") {
+      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Marks the conversation as spam and stops processing further rules in the chain.</div>;
     }
     if (t === "discard_snooze") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Wakes up the conversation if it's currently snoozed (no-op otherwise).</div>;

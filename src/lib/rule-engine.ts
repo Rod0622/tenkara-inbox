@@ -595,6 +595,18 @@ async function executeAction(
         return "Snooze discarded";
       }
       case "trash": { await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId); return "Trashed"; }
+      case "mark_as_spam": {
+        // Marks the conversation as spam AND short-circuits further rule processing
+        // (returns __STOP__ so subsequent actions/rules in the chain are skipped).
+        await supabase.from("conversations").update({ status: "spam" }).eq("id", conversationId);
+        await supabase.from("activity_log").insert({
+          conversation_id: conversationId,
+          actor_id: null,
+          action: "marked_as_spam",
+          details: { source: "rule" },
+        });
+        return "__STOP__";
+      }
       case "add_watcher": {
         // action.value should be a user ID. "__initiator__" supported.
         if (!action.value) return null;

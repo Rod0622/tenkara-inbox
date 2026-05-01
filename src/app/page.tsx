@@ -150,11 +150,18 @@ export default function InboxPage() {
 
     // Check if we're viewing a Trash system folder
     const isTrashFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "trash";
+    // Check if we're viewing a Spam system folder
+    const isSpamFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "spam";
 
     if (isTrashFolder) {
       // Show only trashed conversations for this account
       filtered = conversations.filter(
         (c) => c.status === "trash" && c.email_account_id === activeMailbox
+      );
+    } else if (isSpamFolder) {
+      // Show only spam conversations for this account
+      filtered = conversations.filter(
+        (c) => c.status === "spam" && c.email_account_id === activeMailbox
       );
     } else if (activeMailbox && selectedFolder) {
       const folderName = String(selectedFolder.name || "").toLowerCase();
@@ -205,6 +212,10 @@ export default function InboxPage() {
     if (!isTrashFolder) {
       filtered = filtered.filter((c) => c.status !== "trash");
     }
+    // Exclude spam conversations from all views except Spam folder
+    if (!isSpamFolder) {
+      filtered = filtered.filter((c) => c.status !== "spam");
+    }
 
     if (searchQuery.trim() && searchQuery.trim().length >= 2) {
       // When searching, show results from ALL accounts (returned by search API)
@@ -215,7 +226,7 @@ export default function InboxPage() {
         const q = searchQuery.toLowerCase();
         filtered = conversations.filter(
           (c) =>
-            c.status !== "trash" && (
+            c.status !== "trash" && c.status !== "spam" && (
             c.subject?.toLowerCase().includes(q) ||
             c.from_name?.toLowerCase().includes(q) ||
             c.from_email?.toLowerCase().includes(q) ||

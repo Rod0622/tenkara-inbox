@@ -525,7 +525,8 @@ export default function Sidebar({
 
         {mailboxes.map((mb: any) => {
           const mbConvos = conversations.filter((c) => c.email_account_id === mb.id);
-          const unassignedConvos = mbConvos.filter((c) => !c.assignee_id && !isOutbound(c));
+          // Inbox/unassigned counts must exclude spam and trash conversations
+          const unassignedConvos = mbConvos.filter((c) => !c.assignee_id && !isOutbound(c) && c.status !== "spam" && c.status !== "trash");
           const totalInbox = unassignedConvos.filter((c) => !c.folder_id).length;
           const unread = unassignedConvos.filter((c) => c.is_unread).length;
           const isExpanded = expandedAccounts.has(mb.id);
@@ -561,15 +562,28 @@ export default function Sidebar({
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
-                    const isFolderActive =
-                      folder.is_system && folder.name === "Inbox"
-                        ? activeMailbox === mb.id && !activeFolder
-                        : activeFolder === folder.id;
+                    const folderNameLower = String(folder.name || "").toLowerCase();
+                    const isSystemInbox = folder.is_system && folder.name === "Inbox";
+                    const isSystemTrash = folder.is_system && folderNameLower === "trash";
+                    const isSystemSpam = folder.is_system && folderNameLower === "spam";
 
-                    const folderConvos =
-                      folder.is_system && folder.name === "Inbox"
-                        ? unassignedConvos.filter((c) => !c.folder_id)
-                        : mbConvos.filter((c) => c.folder_id === folder.id);
+                    const isFolderActive = isSystemInbox
+                      ? activeMailbox === mb.id && !activeFolder
+                      : activeFolder === folder.id;
+
+                    let folderConvos;
+                    if (isSystemInbox) {
+                      folderConvos = unassignedConvos.filter((c) => !c.folder_id);
+                    } else if (isSystemTrash) {
+                      // Trash counts conversations with status="trash"
+                      folderConvos = mbConvos.filter((c: any) => c.status === "trash");
+                    } else if (isSystemSpam) {
+                      // Spam counts conversations with status="spam"
+                      folderConvos = mbConvos.filter((c: any) => c.status === "spam");
+                    } else {
+                      // Regular folder — exclude spam/trash from the count
+                      folderConvos = mbConvos.filter((c) => c.folder_id === folder.id && c.status !== "spam" && c.status !== "trash");
+                    }
 
                     const folderTotal = folderConvos.length;
                     const folderUnread = folderConvos.filter((c) => c.is_unread).length;
