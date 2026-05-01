@@ -629,14 +629,6 @@ async function executeAction(
           .eq("user_id", userId);
         return "Watcher removed";
       }
-      case "set_conversation_color": {
-        // action.value is one of: red, orange, yellow, green, blue, purple, pink, gray, or "" (clears)
-        const allowed = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "gray"];
-        const v = (action.value || "").trim().toLowerCase();
-        const next = v && allowed.includes(v) ? v : null;
-        await supabase.from("conversations").update({ color: next }).eq("id", conversationId);
-        return next ? `Color set to ${next}` : "Color cleared";
-      }
       case "add_note": {
         if (!action.value) return null;
         const authorId = event?.initiator_user_id || null;

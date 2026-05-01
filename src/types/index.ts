@@ -41,7 +41,6 @@ export interface Conversation {
   status: "open" | "closed" | "snoozed" | "trash";
   last_message_at: string;
   created_at: string;
-  color?: string | null;
   labels?: ConversationLabel[];
   notes?: Note[];
   tasks?: Task[];

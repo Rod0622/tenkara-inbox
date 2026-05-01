@@ -4,7 +4,6 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
-import { ColorFilterChips, getColor } from "./ColorPicker";
 
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
   return (
@@ -84,7 +83,6 @@ interface Filters {
   fromEmail: string;
   labelIds: string[];
   labelLogic: "and" | "or";
-  colors: string[];
 }
 
 const defaultFilters: Filters = {
@@ -97,7 +95,6 @@ const defaultFilters: Filters = {
   fromEmail: "",
   labelIds: [],
   labelLogic: "or",
-  colors: [],
 };
 
 function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
@@ -481,11 +478,6 @@ export default function ConversationList({
       });
     }
 
-    // Color filter (Batch 5) — selected colors are OR'd together
-    if ((filters.colors || []).length > 0) {
-      result = result.filter((c) => c.color && filters.colors.includes(c.color as string));
-    }
-
     return result;
   }, [conversations, filters]);
 
@@ -667,23 +659,6 @@ export default function ConversationList({
         </div>
       )}
 
-      {/* Color filter chips (Batch 5) — only show in conversation list mode */}
-      {(searchTab === "conversations" || searchQuery.trim().length < 2) && (
-        <ColorFilterChips
-          selectedColors={filters.colors}
-          onChange={(next) => setFilters({ ...filters, colors: next })}
-          counts={(() => {
-            // Compute color counts from conversations BEFORE the color filter is applied
-            // (so users always see all available colors, even when one is currently selected)
-            const counts: Record<string, number> = {};
-            for (const c of conversations) {
-              if (c.color) counts[c.color as string] = (counts[c.color as string] || 0) + 1;
-            }
-            return counts;
-          })()}
-        />
-      )}
-
       {/* Task search results */}
       {searchQuery.trim().length >= 2 && searchTab === "tasks" && searchTaskResults && searchTaskResults.length > 0 && (
         <div className="flex-1 overflow-y-auto px-1.5">
@@ -755,7 +730,6 @@ export default function ConversationList({
               const isSelected = selectedIds.has(c.id);
               const assignee = c.assignee || teamMembers.find((t) => t.id === c.assignee_id);
               const labels = c.labels?.map((cl) => cl.label).filter(Boolean) || [];
-              const colorMeta = c.color ? getColor(c.color as string) : null;
 
               return (
                 <div
@@ -776,13 +750,6 @@ export default function ConversationList({
                   }`}
                   onClick={() => setActiveConvo(c)}
                 >
-                  {/* Color stripe (Batch 5) */}
-                  {colorMeta && (
-                    <div
-                      className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full"
-                      style={{ background: colorMeta.stripe }}
-                    />
-                  )}
                   {/* Checkbox */}
                   <div
                     className={`flex-shrink-0 mt-1 transition-all ${isSelecting ? "w-5 opacity-100" : "w-0 opacity-0 group-hover:w-5 group-hover:opacity-100"}`}

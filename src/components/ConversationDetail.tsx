@@ -66,7 +66,6 @@ import TeamChat from "./ConversationDetail/TeamChat";
 import ThreadAttachmentBar from "./ConversationDetail/ThreadAttachmentBar";
 import MessageAttachments from "./ConversationDetail/MessageAttachments";
 import WatchToggle from "./WatchToggle";
-import ColorPicker from "./ColorPicker";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
@@ -1390,18 +1389,6 @@ export default function ConversationDetail({
                 <WatchToggle conversationId={convo.id} userId={currentUser.id} variant="header" />
               </div>
             )}
-
-            {/* Color picker (Batch 5) */}
-            <ColorPicker
-              conversationId={convo.id}
-              currentColor={convo.color || null}
-              actorId={currentUser?.id}
-              onChange={(c) => {
-                // Optimistic UI — mutate local convo so the chip updates immediately;
-                // page.tsx polling will catch up on next refresh
-                (convo as any).color = c;
-              }}
-            />
 
             <button
               onClick={handleToggleRead}
