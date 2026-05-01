@@ -1679,6 +1679,7 @@ const ACTION_TYPES = [
   { value: "trash", label: "Trash", group: "Organization" },
   { value: "add_watcher", label: "Add watcher", group: "Watchers" },
   { value: "remove_watcher", label: "Remove watcher", group: "Watchers" },
+  { value: "set_conversation_color", label: "Set conversation color", group: "Organization" },
   { value: "mark_starred", label: "Star", group: "Flags" },
   { value: "unstar", label: "Unstar", group: "Flags" },
   { value: "mark_read", label: "Mark as read", group: "Flags" },
@@ -2179,6 +2180,22 @@ function RulesTab() {
           <option value="">Select user...</option>
           <option value="__initiator__">Action initiator (event rules)</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      );
+    }
+    if (t === "set_conversation_color") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Clear color</option>
+          <option value="red">🔴 Red</option>
+          <option value="orange">🟠 Orange</option>
+          <option value="yellow">🟡 Yellow</option>
+          <option value="green">🟢 Green</option>
+          <option value="blue">🔵 Blue</option>
+          <option value="purple">🟣 Purple</option>
+          <option value="pink">🩷 Pink</option>
+          <option value="gray">⚪ Gray</option>
         </select>
       );
     }
