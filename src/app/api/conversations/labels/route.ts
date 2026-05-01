@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForEvent } from "@/lib/rule-engine";
+import { notifyWatchers } from "@/lib/notifications";
 
 // POST — Add label to conversation
 export async function POST(req: NextRequest) {
@@ -38,6 +39,14 @@ export async function POST(req: NextRequest) {
   } catch (ruleErr: any) {
     console.error("[labels/POST] rule processing error:", ruleErr?.message || ruleErr);
   }
+
+  // Notify watchers about the label change (best-effort)
+  try {
+    await notifyWatchers(conversationId, "label_change", {
+      title: `Label added: ${label?.name || "label"}`,
+      actorId: actorId || null,
+    });
+  } catch (_e) { /* best-effort */ }
 
   return NextResponse.json({ success: true }, { status: 201 });
 }
@@ -80,6 +89,14 @@ export async function DELETE(req: NextRequest) {
   } catch (ruleErr: any) {
     console.error("[labels/DELETE] rule processing error:", ruleErr?.message || ruleErr);
   }
+
+  // Notify watchers
+  try {
+    await notifyWatchers(conversationId, "label_change", {
+      title: `Label removed: ${label?.name || "label"}`,
+      actorId: actorId || null,
+    });
+  } catch (_e) { /* best-effort */ }
 
   return NextResponse.json({ success: true });
 }

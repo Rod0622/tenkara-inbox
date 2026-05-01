@@ -3,6 +3,7 @@ import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { sendGraphEmail } from "@/lib/microsoft-graph";
+import { notifyWatchers } from "@/lib/notifications";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
 
@@ -351,6 +352,16 @@ export async function POST(req: NextRequest) {
       } catch (ruleErr: any) {
         console.error("Rule engine error on send:", ruleErr.message);
       }
+
+      // Notify watchers about the outbound message (best-effort)
+      try {
+        const senderName = account.name || account.email || "Someone";
+        await notifyWatchers(conversationId, "new_message", {
+          title: `${senderName} sent a reply`,
+          body: subject || undefined,
+          actorId: body.actor_id || null,
+        });
+      } catch (_e) { /* best-effort */ }
     }
 
     return NextResponse.json({

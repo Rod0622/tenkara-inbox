@@ -111,6 +111,24 @@ export default function InboxPage() {
       });
   }, [currentUser?.id]);
 
+  // Track which conversations the current user is watching (for the "Watching" view filter)
+  const [watchingConvoIds, setWatchingConvoIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fetchWatching = async () => {
+      try {
+        const res = await fetch(`/api/conversations/watchers?user_id=${currentUser.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const ids = new Set<string>((data.watching || []).map((w: any) => w.conversation_id));
+        setWatchingConvoIds(ids);
+      } catch (_e) {}
+    };
+    fetchWatching();
+    const id = setInterval(fetchWatching, 30000);
+    return () => clearInterval(id);
+  }, [currentUser?.id]);
+
   const accountEmails = useMemo(
     () => new Set(emailAccounts.map((a) => a.email?.toLowerCase()).filter(Boolean)),
     [emailAccounts]
@@ -170,6 +188,9 @@ export default function InboxPage() {
       if (activeView === "sent") {
         // Personal sent: show conversations where I actually sent a message
         filtered = conversations.filter((c) => mySentConvoIds.has(c.id));
+      } else if (activeView === "watching") {
+        // Watching: show conversations the current user is watching
+        filtered = conversations.filter((c) => watchingConvoIds.has(c.id));
       } else if (activeView === "inbox") {
         // Personal inbox: show ALL conversations assigned to me
         filtered = conversations.filter(
@@ -214,6 +235,8 @@ export default function InboxPage() {
     searchQuery,
     searchResults,
     accountEmails,
+    mySentConvoIds,
+    watchingConvoIds,
   ]);
 
   // Handle hash-based navigation (notifications, task links, direct URLs)

@@ -65,6 +65,7 @@ import LabelPicker from "./ConversationDetail/LabelPicker";
 import TeamChat from "./ConversationDetail/TeamChat";
 import ThreadAttachmentBar from "./ConversationDetail/ThreadAttachmentBar";
 import MessageAttachments from "./ConversationDetail/MessageAttachments";
+import WatchToggle from "./WatchToggle";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
@@ -1381,6 +1382,13 @@ export default function ConversationDetail({
             >
               <Star size={16} fill={convo.is_starred ? "#F5D547" : "none"} />
             </button>
+
+            {/* Watch toggle (Batch 4) */}
+            {currentUser?.id && (
+              <div className="relative w-8 h-8 rounded-md border border-[#1E242C] bg-[#12161B] flex items-center justify-center hover:bg-[#181D24]">
+                <WatchToggle conversationId={convo.id} userId={currentUser.id} variant="header" />
+              </div>
+            )}
 
             <button
               onClick={handleToggleRead}

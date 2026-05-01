@@ -342,6 +342,29 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
       return false;
     }
   }
+  if (c.field === "watching_user") {
+    // Checks if a specific user (c.value) is watching this conversation.
+    // c.operator: is / is_not (or is_present / is_absent for "anyone watching" check)
+    if (c.operator === "is_present" || c.operator === "is_absent") {
+      const { count } = await ctx.supabase
+        .from("conversation_watchers")
+        .select("user_id", { count: "exact", head: true })
+        .eq("conversation_id", ctx.conversationId);
+      const has = (count || 0) > 0;
+      return c.operator === "is_present" ? has : !has;
+    }
+    if (!c.value) return false;
+    const { data } = await ctx.supabase
+      .from("conversation_watchers")
+      .select("user_id")
+      .eq("conversation_id", ctx.conversationId)
+      .eq("user_id", c.value)
+      .maybeSingle();
+    const isWatching = !!data;
+    if (c.operator === "is" || c.operator === "equals") return isWatching;
+    if (c.operator === "is_not" || c.operator === "not_equals") return !isWatching;
+    return isWatching;
+  }
   if (c.field === "folder") {
     const convo = await getConvo(ctx);
     return evaluateCondition(convo.folder_id || "", c.operator, c.value);
@@ -572,6 +595,40 @@ async function executeAction(
         return "Snooze discarded";
       }
       case "trash": { await supabase.from("conversations").update({ status: "trash" }).eq("id", conversationId); return "Trashed"; }
+      case "add_watcher": {
+        // action.value should be a user ID. "__initiator__" supported.
+        if (!action.value) return null;
+        let userId = action.value;
+        if (userId === "__initiator__") {
+          if (!event?.initiator_user_id) return null;
+          userId = event.initiator_user_id;
+        }
+        // Use defaults (matches batch4 watchers route DEFAULT_PREFS)
+        await supabase.from("conversation_watchers").upsert({
+          conversation_id: conversationId,
+          user_id: userId,
+          watch_source: "rule",
+          notify_on_new_message: true,
+          notify_on_status_change: true,
+          notify_on_assignee_change: true,
+          notify_on_label_change: false,
+          notify_on_comment: false,
+        }, { onConflict: "conversation_id,user_id" });
+        return "Watcher added";
+      }
+      case "remove_watcher": {
+        if (!action.value) return null;
+        let userId = action.value;
+        if (userId === "__initiator__") {
+          if (!event?.initiator_user_id) return null;
+          userId = event.initiator_user_id;
+        }
+        await supabase.from("conversation_watchers")
+          .delete()
+          .eq("conversation_id", conversationId)
+          .eq("user_id", userId);
+        return "Watcher removed";
+      }
       case "add_note": {
         if (!action.value) return null;
         const authorId = event?.initiator_user_id || null;
@@ -722,6 +779,22 @@ export async function runRulesForMessage(
 ): Promise<{ matched: number; actions: string[] }> {
   const supabase = createServerClient();
   const result = { matched: 0, actions: [] as string[] };
+
+  // Notify watchers about new inbound messages (best-effort, fire-and-forget).
+  // This is centralized here rather than in the sync libraries (imap, ms-graph, ms-oauth-sync)
+  // because all three call runRulesForMessage with triggerType="incoming" after inserting the message.
+  if (triggerType === "incoming") {
+    try {
+      const { notifyWatchers } = await import("@/lib/notifications");
+      const senderName = msg.from_name || msg.from_email || "Someone";
+      await notifyWatchers(conversationId, "new_message", {
+        title: `New message from ${senderName}`,
+        body: msg.subject || undefined,
+        actorId: null, // inbound message — actor is the external sender
+      });
+    } catch (_e) { /* best-effort */ }
+  }
+
   try {
     const { data: rules, error } = await supabase.from("rules").select("*").eq("is_active", true).eq("trigger_type", triggerType).order("sort_order");
     if (error || !rules || rules.length === 0) return result;

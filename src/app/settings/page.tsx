@@ -1624,6 +1624,7 @@ const CONDITION_FIELDS = [
   { value: "conversation_status", label: "Conversation state", group: "More" },
   { value: "assignee", label: "Assignee", group: "More" },
   { value: "assignee_is_ooo", label: "Assignee is OOO", group: "More" },
+  { value: "watching_user", label: "Watching user", group: "More" },
   { value: "folder", label: "Team / Folder", group: "More" },
   { value: "has_label", label: "Label", group: "More" },
   { value: "message_count", label: "Number of messages in conversation", group: "More" },
@@ -1676,6 +1677,8 @@ const ACTION_TYPES = [
   { value: "snooze", label: "Snooze", group: "Organization" },
   { value: "discard_snooze", label: "Discard snooze (wake up)", group: "Organization" },
   { value: "trash", label: "Trash", group: "Organization" },
+  { value: "add_watcher", label: "Add watcher", group: "Watchers" },
+  { value: "remove_watcher", label: "Remove watcher", group: "Watchers" },
   { value: "mark_starred", label: "Star", group: "Flags" },
   { value: "unstar", label: "Unstar", group: "Flags" },
   { value: "mark_read", label: "Mark as read", group: "Flags" },
@@ -2169,6 +2172,16 @@ function RulesTab() {
     if (t === "discard_snooze") {
       return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Wakes up the conversation if it's currently snoozed (no-op otherwise).</div>;
     }
+    if (t === "add_watcher" || t === "remove_watcher") {
+      return (
+        <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
+          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          <option value="">Select user...</option>
+          <option value="__initiator__">Action initiator (event rules)</option>
+          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      );
+    }
     if (t === "send_follow_up" || t === "create_draft") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
@@ -2367,6 +2380,12 @@ function RulesTab() {
                         <option value="@everyone">@everyone</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
+                    ) : subItem.field === "watching_user" ? (
+                      <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        <option value="">Any watcher</option>
+                        {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
                     ) : subItem.field === "new_team" || subItem.field === "previous_team" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
@@ -2438,7 +2457,7 @@ function RulesTab() {
                 const numFields = ["message_count", "time_since_last_outbound", "time_since_created", "follow_up_count"];
                 const delayField = ["delay"];
                 const eventTextFields = ["added_label_name", "removed_label_name", "comment_text"];
-                const eventIdFields = ["action_initiator", "new_team", "previous_team", "added_assignee", "removed_assignee", "comment_mention"];
+                const eventIdFields = ["action_initiator", "new_team", "previous_team", "added_assignee", "removed_assignee", "comment_mention", "watching_user"];
                 const eventChoiceFields = ["comment_type"];
                 if (boolFields.includes(cond.field)) return ["is_true", "is_false"].includes(o.value);
                 if (delayField.includes(cond.field)) return ["greater_than"].includes(o.value); // delay just needs "elapsed >= X"
@@ -2474,6 +2493,12 @@ function RulesTab() {
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                 <option value="">Any mention (just checks presence)</option>
                 <option value="@everyone">@everyone</option>
+                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            ) : cond.field === "watching_user" ? (
+              <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                <option value="">Any watcher (just checks presence)</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "new_team" || cond.field === "previous_team" ? (

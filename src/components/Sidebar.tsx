@@ -22,6 +22,7 @@ import {
   Bell,
   MessageSquare,
   FileEdit,
+  Eye,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -149,6 +150,7 @@ export default function Sidebar({
   const [notifCount, setNotifCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [watchingCount, setWatchingCount] = useState(0);
   // Own OOO popover (anchored to user-name button at bottom of sidebar)
   const [showOwnOOO, setShowOwnOOO] = useState(false);
   const [ownOOOAnchor, setOwnOOOAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -193,6 +195,22 @@ export default function Sidebar({
     };
     fetchOwnOOO();
     const id = setInterval(fetchOwnOOO, 60000);
+    return () => clearInterval(id);
+  }, [currentUser?.id]);
+
+  // Fetch count of conversations the user is watching
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fetchWatching = async () => {
+      try {
+        const res = await fetch(`/api/conversations/watchers?user_id=${currentUser.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setWatchingCount((data.watching || []).length);
+      } catch (_e) {}
+    };
+    fetchWatching();
+    const id = setInterval(fetchWatching, 30000);
     return () => clearInterval(id);
   }, [currentUser?.id]);
 
@@ -446,6 +464,7 @@ export default function Sidebar({
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount, unread: 0 },
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
+          { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive =

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForEvent } from "@/lib/rule-engine";
+import { notifyWatchers } from "@/lib/notifications";
 
 // PATCH /api/conversations/status — update read/star/flag status
 export async function PATCH(req: NextRequest) {
@@ -80,6 +81,15 @@ export async function PATCH(req: NextRequest) {
   if (body.status !== undefined && previousStatus !== body.status) {
     const newStatus = body.status;
     const oldStatus = previousStatus || "";
+
+    // Notify watchers about the status change (best-effort)
+    try {
+      await notifyWatchers(conversationId, "status_change", {
+        title: `Conversation ${newStatus === "closed" ? "closed" : newStatus === "open" && oldStatus === "closed" ? "reopened" : `status changed to ${newStatus}`}`,
+        body: data?.subject || undefined,
+        actorId: actorId || null,
+      });
+    } catch (_e) { /* best-effort */ }
 
     // Closed: any -> closed
     if (newStatus === "closed" && oldStatus !== "closed") {

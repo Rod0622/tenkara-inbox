@@ -103,3 +103,73 @@ export async function notifyMention(
     }));
   await createNotifications(notifications);
 }
+
+// Notify watchers of a conversation about a specific event.
+// Each watcher has per-watch boolean flags controlling which events they care about.
+// We filter to only watchers whose preference for this event is true.
+//
+// eventType maps to a flag column on conversation_watchers:
+//   - "new_message" -> notify_on_new_message
+//   - "status_change" -> notify_on_status_change
+//   - "assignee_change" -> notify_on_assignee_change
+//   - "label_change" -> notify_on_label_change
+//   - "comment" -> notify_on_comment
+//
+// Includes simple dedup: same (user, conversation, eventType) within last 60s is skipped.
+export async function notifyWatchers(
+  conversationId: string,
+  eventType: "new_message" | "status_change" | "assignee_change" | "label_change" | "comment",
+  opts: {
+    title: string;
+    body?: string;
+    actorId?: string | null;
+    excludeUserIds?: string[];
+  }
+) {
+  const supabase = createServerClient();
+
+  const flagColumn = ({
+    new_message: "notify_on_new_message",
+    status_change: "notify_on_status_change",
+    assignee_change: "notify_on_assignee_change",
+    label_change: "notify_on_label_change",
+    comment: "notify_on_comment",
+  } as const)[eventType];
+
+  // Fetch watchers who care about this event type
+  const { data: watchers } = await supabase
+    .from("conversation_watchers")
+    .select("user_id")
+    .eq("conversation_id", conversationId)
+    .eq(flagColumn, true);
+
+  if (!watchers || watchers.length === 0) return;
+
+  // Build target user list: exclude actor + any explicitly excluded users
+  const exclude = new Set<string>(opts.excludeUserIds || []);
+  if (opts.actorId) exclude.add(opts.actorId);
+  const targetUserIds = watchers.map((w: any) => w.user_id).filter((id: string) => !exclude.has(id));
+  if (targetUserIds.length === 0) return;
+
+  // Dedup: filter out users who already received this exact (conversation, eventType) in last 60s
+  const sixtyAgo = new Date(Date.now() - 60 * 1000).toISOString();
+  const { data: recent } = await supabase
+    .from("notifications")
+    .select("user_id")
+    .in("user_id", targetUserIds)
+    .eq("conversation_id", conversationId)
+    .eq("type", `watch_${eventType}`)
+    .gte("created_at", sixtyAgo);
+  const recentSet = new Set((recent || []).map((r: any) => r.user_id));
+  const finalIds = targetUserIds.filter((id: string) => !recentSet.has(id));
+  if (finalIds.length === 0) return;
+
+  await createNotifications(finalIds.map((id: string) => ({
+    user_id: id,
+    type: `watch_${eventType}`,
+    title: opts.title,
+    body: opts.body,
+    conversation_id: conversationId,
+    actor_id: opts.actorId || null,
+  })));
+}

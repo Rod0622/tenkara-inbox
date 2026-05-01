@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { notifyEmailAssigned } from "@/lib/notifications";
+import { notifyEmailAssigned, notifyWatchers } from "@/lib/notifications";
 import { runRulesForEvent } from "@/lib/rule-engine";
 
 // PATCH /api/conversations/assign — assign or unassign a conversation
@@ -72,6 +72,23 @@ export async function PATCH(req: NextRequest) {
   const newId = assignee_id || null;
   const oldId = previousAssigneeId || null;
   if (newId !== oldId) {
+    // Notify watchers about the assignee change (best-effort)
+    try {
+      // Resolve the new assignee's name for a friendlier title
+      let assigneeName = "Unassigned";
+      if (newId) {
+        const { data: m } = await supabase.from("team_members").select("name").eq("id", newId).maybeSingle();
+        assigneeName = m?.name || "Unknown";
+      }
+      await notifyWatchers(conversation_id, "assignee_change", {
+        title: newId ? `Assigned to ${assigneeName}` : "Assignee removed",
+        body: data?.subject || undefined,
+        actorId: actor_id || null,
+        // Don't double-notify the new assignee — notifyEmailAssigned already did
+        excludeUserIds: newId ? [newId] : [],
+      });
+    } catch (_e) { /* best-effort */ }
+
     try {
       await runRulesForEvent({
         event_type: "assignee_changed",

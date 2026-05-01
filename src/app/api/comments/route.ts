@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { notifyMention } from "@/lib/notifications";
+import { notifyMention, notifyWatchers } from "@/lib/notifications";
 import { runRulesForEvent } from "@/lib/rule-engine";
 
 // GET /api/comments?conversation_id=xxx
@@ -125,6 +125,17 @@ export async function POST(req: NextRequest) {
   } catch (ruleErr: any) {
     console.error("[comments/POST] rule processing error:", ruleErr?.message || ruleErr);
   }
+
+  // Notify watchers about the new comment (best-effort)
+  // Exclude users already notified via @mention to avoid duplicate notifications
+  try {
+    await notifyWatchers(conversation_id, "comment", {
+      title: "New comment in conversation",
+      body: commentBody.trim().slice(0, 140),
+      actorId: author_id || null,
+      excludeUserIds: notifyUserIds,
+    });
+  } catch (_e) { /* best-effort */ }
 
   return NextResponse.json({ comment });
 }
