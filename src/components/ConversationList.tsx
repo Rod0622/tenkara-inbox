@@ -129,6 +129,9 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
       <div className="flex flex-wrap gap-1">
         {labels.map((label) => {
           const isActive = (filters.labelIds || []).includes(label.id);
+          // Batch 8: show "Parent / Child" if this label has a parent
+          const parent = label.parent_label_id ? labels.find((l) => l.id === label.parent_label_id) : null;
+          const display = parent ? `${parent.name} / ${label.name}` : label.name;
           return (
             <button
               key={label.id}
@@ -139,7 +142,7 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
               style={{ background: isActive ? label.bg_color : label.bg_color + "60", color: label.color }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: label.color }} />
-              {label.name}
+              {display}
             </button>
           );
         })}

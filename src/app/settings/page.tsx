@@ -1392,6 +1392,8 @@ function LabelsTab() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Tracks which parent we're adding a child under (null = adding top-level)
+  const [addingChildOf, setAddingChildOf] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState({ name: "", color: "#58A6FF" });
   const [editLabel, setEditLabel] = useState({ name: "", color: "" });
   const [error, setError] = useState("");
@@ -1413,12 +1415,13 @@ function LabelsTab() {
       const res = await fetch("/api/labels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newLabel),
+        body: JSON.stringify({ ...newLabel, parent_label_id: addingChildOf || null }),
       });
       const data = await res.json();
       if (res.ok) {
         setNewLabel({ name: "", color: "#58A6FF" });
         setShowAdd(false);
+        setAddingChildOf(null);
         fetchLabels();
       } else {
         setError(data.error);
@@ -1449,7 +1452,13 @@ function LabelsTab() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete label "${name}"? It will be removed from all conversations.`)) return;
+    // Q4 (a): when deleting a parent, children get promoted to top-level
+    const childCount = labels.filter((l) => l.parent_label_id === id).length;
+    let confirmMsg = `Delete label "${name}"? It will be removed from all conversations.`;
+    if (childCount > 0) {
+      confirmMsg = `Delete label "${name}"? Its ${childCount} child label${childCount === 1 ? "" : "s"} will become top-level labels (NOT deleted). The label itself will be removed from all conversations.`;
+    }
+    if (!confirm(confirmMsg)) return;
     try {
       const res = await fetch(`/api/labels?id=${id}`, { method: "DELETE" });
       if (res.ok) fetchLabels();
@@ -1462,15 +1471,119 @@ function LabelsTab() {
     setError("");
   };
 
+  const startAddingChild = (parentId: string) => {
+    setAddingChildOf(parentId);
+    setShowAdd(true);
+    setNewLabel({ name: "", color: "#58A6FF" });
+    setError("");
+  };
+
+  const startAddingTopLevel = () => {
+    setAddingChildOf(null);
+    setShowAdd(true);
+    setNewLabel({ name: "", color: "#58A6FF" });
+    setError("");
+  };
+
+  // Group labels into top-level + children-by-parent for nested rendering
+  const topLevelLabels = labels.filter((l) => !l.parent_label_id);
+  const childrenByParent: Record<string, any[]> = {};
+  for (const l of labels) {
+    if (l.parent_label_id) {
+      if (!childrenByParent[l.parent_label_id]) childrenByParent[l.parent_label_id] = [];
+      childrenByParent[l.parent_label_id].push(l);
+    }
+  }
+
+  // Renders one label row (used for both top-level and child labels)
+  const renderLabelRow = (l: any, isChild: boolean) => (
+    <div
+      key={l.id}
+      className={`flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group ${isChild ? "ml-6" : ""}`}
+    >
+      {editingId === l.id ? (
+        /* Editing mode */
+        <div className="flex-1 space-y-2.5">
+          <div className="flex items-center gap-3">
+            <input
+              value={editLabel.name}
+              onChange={(e) => setEditLabel((p) => ({ ...p, name: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(l.id); if (e.key === "Escape") setEditingId(null); }}
+              autoFocus
+              className="flex-1 px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+            />
+            <span
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold whitespace-nowrap"
+              style={{ background: `${editLabel.color}1F`, color: editLabel.color }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: editLabel.color }} />
+              {editLabel.name || "Preview"}
+            </span>
+          </div>
+          <ColorPicker value={editLabel.color} onChange={(c) => setEditLabel((p) => ({ ...p, color: c }))} />
+          {error && <div className="text-[#F85149] text-xs">{error}</div>}
+          <div className="flex gap-2">
+            <button onClick={() => { setEditingId(null); setError(""); }} className="px-3 py-1 rounded text-xs text-[#7D8590] border border-[#1E242C]">Cancel</button>
+            <button
+              onClick={() => handleUpdate(l.id)}
+              disabled={saving || !editLabel.name.trim()}
+              className="px-3 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* Display mode */
+        <>
+          {isChild && <span className="text-[#484F58] text-xs select-none">└─</span>}
+          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: l.color }} />
+          <span className="text-sm font-medium flex-1">{l.name}</span>
+          <span
+            className="text-[11px] font-semibold px-2 py-0.5 rounded"
+            style={{ background: l.bg_color, color: l.color }}
+          >
+            {l.name}
+          </span>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {!isChild && (
+              <button
+                onClick={() => startAddingChild(l.id)}
+                className="p-1 rounded text-[#484F58] hover:text-[#4ADE80] hover:bg-[#1E242C] transition-all"
+                title="Add child label"
+              >
+                <Plus size={13} />
+              </button>
+            )}
+            <button
+              onClick={() => startEditing(l)}
+              className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+              title="Edit"
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => handleDelete(l.id, l.name)}
+              className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+              title="Delete"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Labels</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Create and manage labels to organize conversations</p>
+          <p className="text-sm text-[#7D8590] mt-1">Create and manage labels to organize conversations. Top-level labels can have child labels (one level of nesting).</p>
         </div>
         <button
-          onClick={() => { setShowAdd(true); setError(""); }}
+          onClick={startAddingTopLevel}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
         >
           <Plus size={16} /> New Label
@@ -1480,7 +1593,11 @@ function LabelsTab() {
       {/* Add new label form */}
       {showAdd && (
         <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
-          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">New Label</div>
+          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">
+            {addingChildOf
+              ? `New child label under "${labels.find((l) => l.id === addingChildOf)?.name || ""}"`
+              : "New top-level label"}
+          </div>
           <div className="flex items-start gap-3 mb-3">
             <div className="flex-1">
               <input
@@ -1506,7 +1623,7 @@ function LabelsTab() {
           </div>
           {error && <div className="text-[#F85149] text-xs mb-2">{error}</div>}
           <div className="flex gap-2">
-            <button onClick={() => { setShowAdd(false); setError(""); }} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+            <button onClick={() => { setShowAdd(false); setAddingChildOf(null); setError(""); }} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
             <button
               onClick={handleAdd}
               disabled={saving || !newLabel.name.trim()}
@@ -1522,69 +1639,10 @@ function LabelsTab() {
         <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
-          {labels.map((l) => (
-            <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group">
-              {editingId === l.id ? (
-                /* Editing mode */
-                <div className="flex-1 space-y-2.5">
-                  <div className="flex items-center gap-3">
-                    <input
-                      value={editLabel.name}
-                      onChange={(e) => setEditLabel((p) => ({ ...p, name: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(l.id); if (e.key === "Escape") setEditingId(null); }}
-                      autoFocus
-                      className="flex-1 px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
-                    />
-                    <span
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold whitespace-nowrap"
-                      style={{ background: `${editLabel.color}1F`, color: editLabel.color }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: editLabel.color }} />
-                      {editLabel.name || "Preview"}
-                    </span>
-                  </div>
-                  <ColorPicker value={editLabel.color} onChange={(c) => setEditLabel((p) => ({ ...p, color: c }))} />
-                  {error && <div className="text-[#F85149] text-xs">{error}</div>}
-                  <div className="flex gap-2">
-                    <button onClick={() => { setEditingId(null); setError(""); }} className="px-3 py-1 rounded text-xs text-[#7D8590] border border-[#1E242C]">Cancel</button>
-                    <button
-                      onClick={() => handleUpdate(l.id)}
-                      disabled={saving || !editLabel.name.trim()}
-                      className="px-3 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
-                    >
-                      {saving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Display mode */
-                <>
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: l.color }} />
-                  <span className="text-sm font-medium flex-1">{l.name}</span>
-                  <span
-                    className="text-[11px] font-semibold px-2 py-0.5 rounded"
-                    style={{ background: l.bg_color, color: l.color }}
-                  >
-                    {l.name}
-                  </span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => startEditing(l)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
-                      title="Edit"
-                    >
-                      <Edit2 size={13} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(l.id, l.name)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
-                      title="Delete"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </>
-              )}
+          {topLevelLabels.map((l) => (
+            <div key={l.id}>
+              {renderLabelRow(l, false)}
+              {(childrenByParent[l.id] || []).map((child) => renderLabelRow(child, true))}
             </div>
           ))}
 
@@ -1594,7 +1652,7 @@ function LabelsTab() {
               <h3 className="text-lg font-semibold mb-2">No labels yet</h3>
               <p className="text-sm text-[#7D8590] mb-4">Create labels to organize your conversations</p>
               <button
-                onClick={() => setShowAdd(true)}
+                onClick={startAddingTopLevel}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
               >
                 <Plus size={16} /> Create First Label
@@ -1744,6 +1802,15 @@ function RulesTab() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [activeTrigger, setActiveTrigger] = useState("incoming");
+
+  // Batch 8: helper to render a label name as "Parent / Child" when nested,
+  // or just the label's name when top-level.
+  const labelDisplay = (l: any): string => {
+    if (!l) return "";
+    if (!l.parent_label_id) return l.name || "";
+    const parent = labels.find((p) => p.id === l.parent_label_id);
+    return parent ? `${parent.name} / ${l.name}` : l.name || "";
+  };
 
   // Form state — kept at this level so nested inputs don't lose focus
   const [formName, setFormName] = useState("");
@@ -1992,7 +2059,7 @@ function RulesTab() {
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
           className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
           <option value="">Select label...</option>
-          {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
         </select>
       );
     }
@@ -2408,13 +2475,13 @@ function RulesTab() {
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                         <option value="">Select label...</option>
-                        {labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+                        {labels.map((l) => <option key={l.id} value={l.name}>{labelDisplay(l)}</option>)}
                       </select>
                     ) : subItem.field === "has_label" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
                         className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                         <option value="">Select label...</option>
-                        {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                        {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
                       </select>
                     ) : subItem.field === "assignee" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
@@ -2523,7 +2590,7 @@ function RulesTab() {
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                 <option value="">Select label (or leave empty for any)...</option>
-                {labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+                {labels.map((l) => <option key={l.id} value={l.name}>{labelDisplay(l)}</option>)}
               </select>
             ) : cond.field === "email_account" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
@@ -2548,7 +2615,7 @@ function RulesTab() {
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
                 className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
                 <option value="">Select label...</option>
-                {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
               </select>
             ) : cond.field === "conversation_status" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}

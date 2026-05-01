@@ -71,29 +71,51 @@ export default function LabelPicker({
             </div>
           </div>
 
-          {allLabels.map((label) => {
-            const active = localLabelIds.has(label.id);
-            return (
-              <button
-                key={label.id}
-                onClick={() => toggleLabel(label.id)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[#1E242C]"
-              >
-                <div
-                  className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
-                    active ? "border-transparent" : "border-[#484F58]"
-                  }`}
-                  style={active ? { background: label.color } : {}}
+          {/* Batch 8: render with two-level nesting (parent → children) */}
+          {(() => {
+            // Build top-level + children map
+            const topLevel = allLabels.filter((l: any) => !l.parent_label_id);
+            const childrenByParent = new Map<string, any[]>();
+            for (const l of allLabels as any[]) {
+              if (l.parent_label_id) {
+                const arr = childrenByParent.get(l.parent_label_id) || [];
+                arr.push(l);
+                childrenByParent.set(l.parent_label_id, arr);
+              }
+            }
+
+            const renderRow = (label: any, isChild: boolean) => {
+              const active = localLabelIds.has(label.id);
+              return (
+                <button
+                  key={label.id}
+                  onClick={() => toggleLabel(label.id)}
+                  className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[#1E242C] ${isChild ? "pl-6" : ""}`}
                 >
-                  {active && <Check size={10} className="text-[#0B0E11]" />}
-                </div>
-                <span className="w-2 h-2 rounded-full" style={{ background: label.color }} />
-                <span className={active ? "text-[#E6EDF3] font-medium" : "text-[#7D8590]"}>
-                  {label.name}
-                </span>
-              </button>
-            );
-          })}
+                  <div
+                    className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
+                      active ? "border-transparent" : "border-[#484F58]"
+                    }`}
+                    style={active ? { background: label.color } : {}}
+                  >
+                    {active && <Check size={10} className="text-[#0B0E11]" />}
+                  </div>
+                  {isChild && <span className="text-[#484F58] text-[10px] select-none">└</span>}
+                  <span className="w-2 h-2 rounded-full" style={{ background: label.color }} />
+                  <span className={active ? "text-[#E6EDF3] font-medium" : "text-[#7D8590]"}>
+                    {label.name}
+                  </span>
+                </button>
+              );
+            };
+
+            return topLevel.map((parent: any) => (
+              <div key={parent.id}>
+                {renderRow(parent, false)}
+                {(childrenByParent.get(parent.id) || []).map((child) => renderRow(child, true))}
+              </div>
+            ));
+          })()}
 
           {allLabels.length === 0 && (
             <div className="px-3 py-3 text-[11px] text-[#484F58] text-center">
@@ -105,4 +127,3 @@ export default function LabelPicker({
     </div>
   );
 }
-

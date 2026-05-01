@@ -350,6 +350,16 @@ export default function ConversationDetail({
     loading: relatedThreadsLoading,
   } = useRelatedThreads(convo?.id || null);
 
+  // Batch 8: load all labels so we can render label chips as "Parent / Child"
+  // when they have a parent. The hook returns the full labels list including parent_label_id.
+  const allLabelsForChips = useLabels();
+  const labelChipName = (label: any): string => {
+    if (!label) return "";
+    if (!label.parent_label_id) return label.name || "";
+    const parent = allLabelsForChips.find((l: any) => l.id === label.parent_label_id);
+    return parent ? `${parent.name} / ${label.name}` : label.name || "";
+  };
+
   // Merge state
   const [mergedThreads, setMergedThreads] = useState<any[]>([]);
   const [mergingThreadId, setMergingThreadId] = useState<string | null>(null);
@@ -1390,7 +1400,7 @@ export default function ConversationDetail({
                       className="w-1.5 h-1.5 rounded-full"
                       style={{ background: cl.label.color }}
                     />
-                    {cl.label.name}
+                    {labelChipName(cl.label)}
                   </span>
                 )
             )}
@@ -2733,7 +2743,7 @@ export default function ConversationDetail({
                                     className="w-1.5 h-1.5 rounded-full"
                                     style={{ background: cl.label.color }}
                                   />
-                                  {cl.label.name}
+                                  {labelChipName(cl.label)}
                                 </span>
                               ) : null
                             )}

@@ -376,9 +376,23 @@ async function evaluateSingleCondition(ctx: LazyContext, c: Condition): Promise<
       if (c.operator === "is_not" || c.operator === "not_equals") return true;
       return false;
     }
-    if (c.operator === "equals" || c.operator === "is") return lbls.includes(labelId);
-    if (c.operator === "not_equals" || c.operator === "is_not") return !lbls.includes(labelId);
-    return lbls.includes(labelId);
+
+    // Batch 8: nested label matching. If the rule's label is a parent (top-level),
+    // also match conversations tagged with any of its children.
+    // Build the set of "match" label IDs: the label itself + any children.
+    const matchIds = new Set<string>([labelId]);
+    try {
+      const { data: children } = await supabase
+        .from("labels")
+        .select("id")
+        .eq("parent_label_id", labelId);
+      for (const c2 of (children || [])) matchIds.add(c2.id);
+    } catch (_e) { /* if labels table doesn't have parent_label_id yet, fall through to flat match */ }
+
+    const has = lbls.some((id: string) => matchIds.has(id));
+    if (c.operator === "equals" || c.operator === "is") return has;
+    if (c.operator === "not_equals" || c.operator === "is_not") return !has;
+    return has;
   }
   if (c.field === "message_count") {
     const count = await getMsgCount(ctx);
