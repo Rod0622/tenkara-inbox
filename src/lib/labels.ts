@@ -52,9 +52,9 @@ export function groupLabelsByParent<T extends LabelLike>(
   }
 
   // Sort children alphabetically within each parent
-  for (const [, children] of childrenByParent) {
+  childrenByParent.forEach((children) => {
     children.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }
+  });
 
   return { topLevel, childrenByParent };
 }
