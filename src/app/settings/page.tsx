@@ -1678,6 +1678,7 @@ const ACTION_TYPES = [
   { value: "discard_snooze", label: "Discard snooze (wake up)", group: "Organization" },
   { value: "trash", label: "Trash", group: "Organization" },
   { value: "mark_as_spam", label: "Mark as spam (also stops rule chain)", group: "Organization" },
+  { value: "send_auto_reply", label: "Send auto-reply (with loop prevention)", group: "Email" },
   { value: "add_watcher", label: "Add watcher", group: "Watchers" },
   { value: "remove_watcher", label: "Remove watcher", group: "Watchers" },
   { value: "mark_starred", label: "Star", group: "Flags" },
@@ -2186,7 +2187,7 @@ function RulesTab() {
         </select>
       );
     }
-    if (t === "send_follow_up" || t === "create_draft") {
+    if (t === "send_follow_up" || t === "create_draft" || t === "send_auto_reply") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
           className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">

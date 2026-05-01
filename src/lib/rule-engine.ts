@@ -607,6 +607,261 @@ async function executeAction(
         });
         return "__STOP__";
       }
+      case "send_auto_reply": {
+        // Auto-reply to the most recent inbound message using a template.
+        // action.value = template UUID
+        //
+        // Loop prevention layered:
+        //   (i)  Per-thread cap — only 1 auto-reply per conversation, ever
+        //   (ii) Time window — don't reply to same recipient within 24h
+        //   (iii) Header detection — skip if incoming has Auto-Submitted header
+        //         or subject starts with Auto-Reply/Out of Office prefixes
+        //
+        // On failure: adds a note to the conversation AND notifies the assignee.
+        // On success: adds a note to the conversation, logs to auto_reply_log.
+        // Does NOT trigger outgoing rules for the auto-reply itself.
+
+        const templateId = action.value;
+        if (!templateId) return null;
+
+        // Helper to add a note to the conversation describing what happened
+        const addNote = async (text: string) => {
+          try {
+            await supabase.from("notes").insert({
+              conversation_id: conversationId,
+              author_id: null,
+              text,
+            });
+          } catch (_e) { /* best-effort */ }
+        };
+
+        // Helper to notify the conversation's assignee on failure (if any)
+        const notifyAssigneeOnFailure = async (failureReason: string, subject: string) => {
+          try {
+            const { data: c } = await supabase
+              .from("conversations")
+              .select("assignee_id")
+              .eq("id", conversationId)
+              .maybeSingle();
+            const assigneeId = c?.assignee_id;
+            if (!assigneeId) return;
+            await supabase.from("notifications").insert({
+              user_id: assigneeId,
+              type: "auto_reply_failed",
+              title: "Auto-reply failed",
+              body: `${subject || "Conversation"}: ${failureReason}`,
+              conversation_id: conversationId,
+              actor_id: null,
+            });
+          } catch (_e) { /* best-effort */ }
+        };
+
+        // ── Guard (i): per-thread cap (default max 1) ──
+        const { count: priorCount } = await supabase
+          .from("auto_reply_log")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", conversationId);
+        if ((priorCount || 0) >= 1) {
+          await addNote("Auto-reply skipped: this conversation has already received an auto-reply.");
+          return "Auto-reply skipped (cap reached)";
+        }
+
+        // Determine recipient + check incoming message context for guard (iii)
+        // We auto-reply to the from_email of the inbound message that triggered this rule.
+        // If we have no msg context (e.g., event-based rule), fall back to conversation.from_email.
+        let recipient = msg?.from_email || "";
+        let inboundSubject = msg?.subject || "";
+        let inboundHeaders: Record<string, string> = msg?.headers || {};
+
+        if (!recipient) {
+          const { data: c } = await supabase
+            .from("conversations")
+            .select("from_email, subject")
+            .eq("id", conversationId)
+            .maybeSingle();
+          recipient = c?.from_email || "";
+          if (!inboundSubject) inboundSubject = c?.subject || "";
+        }
+
+        if (!recipient) {
+          await addNote("Auto-reply skipped: no recipient address could be determined.");
+          return "Auto-reply skipped (no recipient)";
+        }
+
+        // ── Guard (iii): header / subject detection ──
+        const lowerHeaders: Record<string, string> = {};
+        for (const k of Object.keys(inboundHeaders)) {
+          lowerHeaders[k.toLowerCase()] = String(inboundHeaders[k] || "").toLowerCase();
+        }
+        const autoSubmitted = lowerHeaders["auto-submitted"] || "";
+        const xAutoResponse = lowerHeaders["x-auto-response-suppress"] || lowerHeaders["x-autoreply"] || "";
+        const precedence = lowerHeaders["precedence"] || "";
+        const looksAutomated =
+          autoSubmitted.includes("auto-replied") ||
+          autoSubmitted.includes("auto-generated") ||
+          xAutoResponse.length > 0 ||
+          precedence === "bulk" ||
+          precedence === "list" ||
+          precedence === "auto_reply";
+        const subjectAutoPrefix = /^(auto[\s-]?(reply|response):|out of office:|vacation:|automatic reply:)/i.test(inboundSubject || "");
+        if (looksAutomated || subjectAutoPrefix) {
+          await addNote(`Auto-reply skipped: incoming message appears to be automated${subjectAutoPrefix ? " (subject prefix)" : " (headers)"}. Looping prevention.`);
+          return "Auto-reply skipped (automated incoming)";
+        }
+
+        // ── Guard (ii): time-window check (24h to same recipient) ──
+        const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count: recentCount } = await supabase
+          .from("auto_reply_log")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient_email", recipient)
+          .gte("sent_at", dayAgo);
+        if ((recentCount || 0) > 0) {
+          await addNote(`Auto-reply skipped: another auto-reply was sent to ${recipient} within the last 24 hours.`);
+          return "Auto-reply skipped (24h window)";
+        }
+
+        // ── Load template + account ──
+        const { data: template } = await supabase
+          .from("email_templates")
+          .select("*")
+          .eq("id", templateId)
+          .maybeSingle();
+        if (!template) {
+          await addNote(`Auto-reply failed: template ${templateId} not found.`);
+          await notifyAssigneeOnFailure("template not found", inboundSubject);
+          return "Auto-reply failed (template missing)";
+        }
+
+        const { data: convoFull } = await supabase
+          .from("conversations")
+          .select("email_account_id, subject, from_email")
+          .eq("id", conversationId)
+          .maybeSingle();
+        if (!convoFull?.email_account_id) {
+          await addNote("Auto-reply failed: conversation has no email account.");
+          await notifyAssigneeOnFailure("no email account", inboundSubject);
+          return "Auto-reply failed (no account)";
+        }
+
+        const { data: account } = await supabase
+          .from("email_accounts")
+          .select("*")
+          .eq("id", convoFull.email_account_id)
+          .maybeSingle();
+        if (!account) {
+          await addNote("Auto-reply failed: email account not found.");
+          await notifyAssigneeOnFailure("account not found", inboundSubject);
+          return "Auto-reply failed (account missing)";
+        }
+
+        const replySubject = template.subject || `Re: ${convoFull.subject || ""}`;
+        const replyBodyHtml = template.body || "";
+        const replyBodyText = String(replyBodyHtml).replace(/<[^>]*>/g, "");
+
+        // ── Send via the account's configured method (matches send-route + follow-up cron) ──
+        try {
+          if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
+            const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
+            const token = await refreshMicrosoftToken(account.id);
+            await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+              method: "POST",
+              headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                message: {
+                  subject: replySubject,
+                  body: { contentType: "HTML", content: replyBodyHtml },
+                  toRecipients: [{ emailAddress: { address: recipient } }],
+                  // Mark as auto-replied so downstream systems can detect
+                  internetMessageHeaders: [
+                    { name: "Auto-Submitted", value: "auto-replied" },
+                    { name: "X-Auto-Response-Suppress", value: "All" },
+                  ],
+                },
+                saveToSentItems: true,
+              }),
+            });
+          } else if (account.smtp_host) {
+            const nodemailer = (await import("nodemailer")).default;
+            const auth: any = { user: account.smtp_user || account.email };
+            if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+              const { refreshGoogleToken } = await import("@/lib/google-oauth");
+              auth.type = "OAuth2";
+              auth.accessToken = await refreshGoogleToken(account.id);
+            } else {
+              auth.pass = account.smtp_password || account.imap_password;
+            }
+            const transport = nodemailer.createTransport({
+              host: account.smtp_host,
+              port: account.smtp_port || 587,
+              secure: account.smtp_port === 465,
+              auth,
+              tls: { rejectUnauthorized: false },
+            });
+            await transport.sendMail({
+              from: `"${account.name}" <${account.email}>`,
+              to: recipient,
+              subject: replySubject,
+              html: replyBodyHtml,
+              text: replyBodyText,
+              headers: {
+                "Auto-Submitted": "auto-replied",
+                "X-Auto-Response-Suppress": "All",
+              },
+            });
+          } else {
+            await addNote("Auto-reply failed: account has no sending method configured.");
+            await notifyAssigneeOnFailure("no sending method", inboundSubject);
+            return "Auto-reply failed (no method)";
+          }
+
+          // Insert outbound message record so it's visible in the conversation thread
+          await supabase.from("messages").insert({
+            conversation_id: conversationId,
+            provider_message_id: `auto-reply:${Date.now()}`,
+            from_name: account.name,
+            from_email: account.email,
+            to_addresses: recipient,
+            subject: replySubject,
+            body_text: replyBodyText.slice(0, 5000),
+            body_html: replyBodyHtml,
+            snippet: replyBodyText.slice(0, 200),
+            is_outbound: true,
+            has_attachments: false,
+            sent_at: new Date().toISOString(),
+          });
+
+          // Update conversation preview + last_message_at
+          await supabase.from("conversations").update({
+            preview: replyBodyText.slice(0, 200),
+            last_message_at: new Date().toISOString(),
+          }).eq("id", conversationId);
+
+          // Log to auto_reply_log for future loop prevention
+          await supabase.from("auto_reply_log").insert({
+            conversation_id: conversationId,
+            rule_id: ruleId || null,
+            template_id: templateId,
+            recipient_email: recipient,
+          });
+
+          // Add the visible note (Q5: γ — both real email AND note)
+          await addNote(`Auto-reply sent to ${recipient} using template "${template.name || "Untitled"}".`);
+
+          // NOTE: We deliberately do NOT call runRulesForMessage(...,"outgoing") for this
+          // auto-reply, so it doesn't trigger other outgoing rules and doesn't notify watchers
+          // about the outbound. The visible note above keeps watchers informed if they
+          // opted into comment notifications.
+
+          return `Auto-reply sent to ${recipient}`;
+        } catch (sendErr: any) {
+          const reason = sendErr?.message || "unknown error";
+          console.error("[send_auto_reply] send failed:", reason);
+          await addNote(`Auto-reply failed: ${reason}`);
+          await notifyAssigneeOnFailure(reason, inboundSubject);
+          return "Auto-reply failed";
+        }
+      }
       case "add_watcher": {
         // action.value should be a user ID. "__initiator__" supported.
         if (!action.value) return null;
