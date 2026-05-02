@@ -121,10 +121,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing email" }, { status: 400 });
     }
 
-    // ── Fetch supplier contact info (business hours) ──
+    // ── Fetch supplier contact info (business hours + responsiveness score) ──
     const { data: supplierContact } = await supabase
       .from("supplier_contacts")
-      .select("id, name, email, company, timezone, work_start, work_end, work_days")
+      .select("id, name, email, company, timezone, work_start, work_end, work_days, responsiveness_score, responsiveness_tier, score_updated_at, recent_median_minutes, all_time_median_minutes, weighted_median_minutes, qualifying_exchanges, last_exchange_at")
       .eq("email", email)
       .maybeSingle();
 
@@ -454,6 +454,20 @@ export async function GET(req: NextRequest) {
       }
     } catch (_rtErr) { /* non-critical */ }
 
+    // Build responsiveness summary from stored score columns (Batch 10).
+    // The hourly cron /api/cron/score-suppliers writes these. Null = below
+    // threshold or never scored. The contact page renders the tier chip from this.
+    const responsiveness_summary = supplierContact && supplierContact.responsiveness_score !== null && supplierContact.responsiveness_score !== undefined ? {
+      score: supplierContact.responsiveness_score,
+      tier: supplierContact.responsiveness_tier,
+      score_updated_at: formatIso(supplierContact.score_updated_at),
+      recent_median_minutes: supplierContact.recent_median_minutes,
+      all_time_median_minutes: supplierContact.all_time_median_minutes,
+      weighted_median_minutes: supplierContact.weighted_median_minutes,
+      qualifying_exchanges: supplierContact.qualifying_exchanges,
+      last_exchange_at: formatIso(supplierContact.last_exchange_at),
+    } : null;
+
     return NextResponse.json({
       contact: {
         email,
@@ -468,6 +482,7 @@ export async function GET(req: NextRequest) {
         work_days: supplierContact.work_days,
       } : null,
       responsiveness,
+      responsiveness_summary,
       summary: {
         total_threads: relatedThreads.length + crossAccountThreads.length,
         open_threads: openThreads,
