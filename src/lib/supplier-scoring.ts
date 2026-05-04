@@ -65,13 +65,15 @@ export function tierFromMedianMinutes(medianMinutes: number | null): { score: nu
   return { score: 1, tier: "low" };
 }
 
-/** Median of an array of numbers. Returns null for empty arrays. */
+/** Median of an array of numbers, rounded to integer (matches schema column type).
+ *  Returns null for empty arrays. */
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = values.slice().sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  // Even-length arrays: return the lower-mid (matches existing behavior in /api/response-times)
-  return sorted[mid];
+  // Even-length arrays: return the lower-mid (matches existing behavior in /api/response-times).
+  // Round to integer because response_minutes is stored as decimal but our score columns are integer.
+  return Math.round(sorted[mid]);
 }
 
 /**
