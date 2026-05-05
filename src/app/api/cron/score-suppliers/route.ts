@@ -47,9 +47,11 @@ export async function GET(req: NextRequest) {
 
   try {
     // ── 1. Load all supplier_reply response_times rows (paginated) ──
+    // NOTE: Supabase/PostgREST caps responses at 1000 rows per query (max_rows config).
+    // Requesting a wider .range() doesn't override the cap — it silently returns 1000.
     let allRecords: { supplier_email: string; response_minutes: number; response_sent_at: string }[] = [];
     let offset = 0;
-    const PAGE = 5000;
+    const PAGE = 1000;
     while (true) {
       const { data: batch, error: batchErr } = await supabase
         .from("response_times")

@@ -22,10 +22,13 @@ export async function GET(req: NextRequest) {
   const dateTo = sp.get("date_to");
   const summary = sp.get("summary") === "true";
 
-  // Paginate to get ALL matching records (Supabase default limit is 1000)
+  // Paginate to get ALL matching records.
+  // NOTE: Supabase/PostgREST caps responses at 1000 rows by default (max_rows config).
+  // Requesting a wider .range() doesn't override the cap — it silently returns 1000.
+  // So we use PAGE=1000 and exit the loop when we get a partial page.
   let allRecords: any[] = [];
   let offset = 0;
-  const PAGE = 5000;
+  const PAGE = 1000;
   while (true) {
     let q = supabase
       .from("response_times")
@@ -146,10 +149,10 @@ async function backfillAll(supabase: any) {
   // Clear existing response_times
   await supabase.from("response_times").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
-  // Fetch ALL messages in bulk with pagination (Supabase default limit is 1000)
+  // Fetch ALL messages in bulk with pagination (Supabase caps at 1000 rows per query).
   let allMessages: any[] = [];
   let msgOffset = 0;
-  const PAGE_SIZE = 5000;
+  const PAGE_SIZE = 1000;
   while (true) {
     const { data: batch, error: msgErr } = await supabase
       .from("messages")
