@@ -83,6 +83,11 @@ export default function ConversationDetail({
   globalSearchQuery,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
+  // Batch 11: cc/bcc on the main reply editor (mirrors the inline-compose pattern)
+  const [replyCc, setReplyCc] = useState("");
+  const [replyBcc, setReplyBcc] = useState("");
+  const [showReplyCc, setShowReplyCc] = useState(false);
+  const [showReplyBcc, setShowReplyBcc] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpCustomDate, setFollowUpCustomDate] = useState("");
   const [followUpCustomTime, setFollowUpCustomTime] = useState("");
@@ -276,7 +281,19 @@ export default function ConversationDetail({
   const [accountAccessMap, setAccountAccessMap] = useState<Record<string, string[]>>({});
   const [creatingSuggestedTasks, setCreatingSuggestedTasks] = useState<string[]>([]);
   const [creatingAllSuggestedTasks, setCreatingAllSuggestedTasks] = useState(false);
-  const [supplierHoursInfo, setSupplierHoursInfo] = useState<{ timezone: string; work_start: string; work_end: string; work_days: number[] } | null>(null);
+  // Batch 11: also includes responsiveness score for the header chip
+  const [supplierHoursInfo, setSupplierHoursInfo] = useState<{
+    timezone: string;
+    work_start: string;
+    work_end: string;
+    work_days: number[];
+    responsiveness_score?: number | null;
+    responsiveness_tier?: string | null;
+    qualifying_exchanges?: number | null;
+    weighted_median_minutes?: number | null;
+    all_time_median_minutes?: number | null;
+    score_updated_at?: string | null;
+  } | null>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [forwardTo, setForwardTo] = useState("");
@@ -306,15 +323,20 @@ export default function ConversationDetail({
     }
   }, [convo?.id, globalSearchQuery]);
 
-  // Fetch supplier business hours for header display
+  // Fetch supplier business hours + responsiveness score for header display
   useEffect(() => {
     setSupplierHoursInfo(null);
     if (!convo?.from_email || convo.from_email === "internal") return;
     Promise.resolve().then(() => {
       const sb = createBrowserClient();
-      sb.from("supplier_contacts").select("timezone, work_start, work_end, work_days").eq("email", convo.from_email.toLowerCase()).maybeSingle().then(({ data }: any) => {
-        if (data) setSupplierHoursInfo(data);
-      });
+      // Batch 11: extended select to also pull responsiveness score columns (Batch 10's stored values).
+      sb.from("supplier_contacts")
+        .select("timezone, work_start, work_end, work_days, responsiveness_score, responsiveness_tier, qualifying_exchanges, weighted_median_minutes, all_time_median_minutes, score_updated_at")
+        .eq("email", convo.from_email.toLowerCase())
+        .maybeSingle()
+        .then(({ data }: any) => {
+          if (data) setSupplierHoursInfo(data);
+        });
     });
   }, [convo?.id, convo?.from_email]);
 
@@ -518,10 +540,12 @@ export default function ConversationDetail({
     }
   }, [convo?.id, convo?.is_unread, currentUser?.id]);
 
-  const assignee = useMemo(
-    () => convo?.assignee || teamMembers.find((member) => member.id === convo?.assignee_id),
-    [convo, teamMembers]
-  );
+  // Batch 11: gate on assignee_id explicitly. If the conversation has no assignee_id,
+  // the assignee is unambiguously null — don't fall back to a possibly-stale embedded object.
+  const assignee = useMemo(() => {
+    if (!convo?.assignee_id) return null;
+    return convo.assignee || teamMembers.find((member) => member.id === convo.assignee_id) || null;
+  }, [convo, teamMembers]);
 
   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
@@ -812,9 +836,20 @@ export default function ConversationDetail({
 
     setSending(true);
     try {
-      await onSendReply(convo.id, replyText, replyAttachments.length > 0 ? replyAttachments : undefined);
+      // Batch 11: pass cc/bcc through. The hook → /api/send already supports them.
+      await onSendReply(
+        convo.id,
+        replyText,
+        replyAttachments.length > 0 ? replyAttachments : undefined,
+        replyCc.trim() || undefined,
+        replyBcc.trim() || undefined,
+      );
       setReplyText("");
       setReplyAttachments([]);
+      setReplyCc("");
+      setReplyBcc("");
+      setShowReplyCc(false);
+      setShowReplyBcc(false);
       // Delete draft if one was loaded
       if (loadedDraftId) {
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
@@ -1318,6 +1353,29 @@ export default function ConversationDetail({
           <div className="flex items-center gap-2 flex-wrap text-xs">
             <span className="text-[#7D8590]">{convo.from_name}</span>
             <span className="text-[#484F58]">&lt;{convo.from_email}&gt;</span>
+            {/* Batch 11: Supplier responsiveness chip — small icon-only with hover tooltip */}
+            {supplierHoursInfo && supplierHoursInfo.responsiveness_score !== null && supplierHoursInfo.responsiveness_score !== undefined && (() => {
+              const tier = supplierHoursInfo.responsiveness_tier as string;
+              const TIER_COLORS: Record<string, string> = { excellent: "#4ADE80", good: "#58A6FF", fair: "#F0883E", low: "#F85149", no_response: "#484F58" };
+              const TIER_LABELS: Record<string, string> = { excellent: "Excellent", good: "Good", fair: "Fair", low: "Low", no_response: "No response" };
+              const color = TIER_COLORS[tier] || "#484F58";
+              const label = TIER_LABELS[tier] || "—";
+              const score = supplierHoursInfo.responsiveness_score;
+              const exchanges = supplierHoursInfo.qualifying_exchanges ?? 0;
+              const median = supplierHoursInfo.weighted_median_minutes ?? supplierHoursInfo.all_time_median_minutes ?? null;
+              const fmtM = (m: number | null) => m === null ? "—" : m < 60 ? Math.round(m) + "m" : m < 1440 ? (Math.round(m / 60 * 10) / 10) + "h" : (Math.round(m / 1440 * 10) / 10) + "d";
+              const tooltip = `${label} · score ${score}/4 · ${exchanges} exchanges${median !== null ? ` · ${fmtM(median)} median` : ""}`;
+              return (
+                <span
+                  title={tooltip}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border"
+                  style={{ color, background: color + "1A", borderColor: color + "40" }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                  {label}
+                </span>
+              );
+            })()}
           </div>
 
           {/* ── Participants row ── */}
@@ -3093,6 +3151,63 @@ export default function ConversationDetail({
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
+              {/* Batch 11: Cc / Bcc toggle row */}
+              {(!showReplyCc || !showReplyBcc) && (
+                <div className="flex items-center gap-2 text-[10px]">
+                  {!showReplyCc && (
+                    <button
+                      onClick={() => setShowReplyCc(true)}
+                      className="text-[#7D8590] hover:text-[#E6EDF3] transition-colors uppercase font-semibold tracking-wider"
+                    >
+                      + Cc
+                    </button>
+                  )}
+                  {!showReplyBcc && (
+                    <button
+                      onClick={() => setShowReplyBcc(true)}
+                      className="text-[#7D8590] hover:text-[#E6EDF3] transition-colors uppercase font-semibold tracking-wider"
+                    >
+                      + Bcc
+                    </button>
+                  )}
+                </div>
+              )}
+              {showReplyCc && (
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-[#484F58] font-semibold uppercase tracking-wider w-8 shrink-0">Cc</label>
+                  <input
+                    value={replyCc}
+                    onChange={(e) => setReplyCc(e.target.value)}
+                    placeholder="cc@example.com (comma-separated for multiple)"
+                    className="flex-1 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 placeholder:text-[#484F58]"
+                  />
+                  <button
+                    onClick={() => { setReplyCc(""); setShowReplyCc(false); }}
+                    className="text-[#484F58] hover:text-[#F85149] transition-colors p-1"
+                    title="Remove Cc"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+              {showReplyBcc && (
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-[#484F58] font-semibold uppercase tracking-wider w-8 shrink-0">Bcc</label>
+                  <input
+                    value={replyBcc}
+                    onChange={(e) => setReplyBcc(e.target.value)}
+                    placeholder="bcc@example.com (comma-separated for multiple)"
+                    className="flex-1 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 placeholder:text-[#484F58]"
+                  />
+                  <button
+                    onClick={() => { setReplyBcc(""); setShowReplyBcc(false); }}
+                    className="text-[#484F58] hover:text-[#F85149] transition-colors p-1"
+                    title="Remove Bcc"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
               <RichTextEditor
                 value={replyText}
                 onChange={setReplyText}
@@ -3138,7 +3253,7 @@ export default function ConversationDetail({
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); }}
+                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); setReplyCc(""); setReplyBcc(""); setShowReplyCc(false); setShowReplyBcc(false); }}
                     className="text-[11px] text-[#484F58] hover:text-[#7D8590] transition-colors"
                   >
                     Collapse

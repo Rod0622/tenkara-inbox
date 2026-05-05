@@ -717,11 +717,19 @@ export function useActions() {
     }
   };
 
-  const sendReply = async (conversationId: string, body: string, attachments?: { name: string; type: string; data: string }[]) => {
+  // Batch 11: cc/bcc support added for the main reply editor.
+  const sendReply = async (conversationId: string, body: string, attachments?: { name: string; type: string; data: string }[], cc?: string, bcc?: string) => {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, body, attachments: attachments || undefined, actor_id: currentUserId }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        body,
+        attachments: attachments || undefined,
+        cc: cc?.trim() || undefined,
+        bcc: bcc?.trim() || undefined,
+        actor_id: currentUserId
+      }),
     });
 
     if (!res.ok) {

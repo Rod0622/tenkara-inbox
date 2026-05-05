@@ -316,12 +316,18 @@ export default function InboxPage() {
     updatedConversation?: any
   ) => {
     if (activeConvo && activeConvo.id === conversationId) {
-      const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
+      // Batch 11: deterministically clear `assignee` on unassign so the header doesn't show stale data.
+      // Previously: `updatedConversation?.assignee || newAssignee || undefined` could leave the
+      // embedded object intact in some edge cases. Now we explicitly set `null` when unassigning.
+      const isUnassigning = assigneeId === null;
+      const newAssignee = isUnassigning
+        ? null
+        : (teamMembers.find((m) => m.id === assigneeId) || null);
       setActiveConvo({
         ...activeConvo,
         assignee_id: assigneeId,
         folder_id: assigneeId ? null : activeConvo.folder_id,
-        assignee: updatedConversation?.assignee || newAssignee || undefined,
+        assignee: isUnassigning ? null : (updatedConversation?.assignee || newAssignee),
       } as Conversation);
     }
     refetch();

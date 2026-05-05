@@ -4,6 +4,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
+import DatePickerInput from "./DatePickerInput";
 
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
   return (
@@ -220,21 +221,22 @@ function FilterPanel({
           <div className="flex items-center gap-2 mt-1.5 animate-fade-in">
             <div className="flex-1">
               <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">From</label>
-              <input
-                type="date"
+              {/* Batch 11: react-day-picker for better UX (was <input type="date">) */}
+              <DatePickerInput
                 value={filters.dateFrom}
-                onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
-                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+                onChange={(v) => setFilters({ ...filters, dateFrom: v })}
+                placeholder="From date"
+                ariaLabel="From date"
               />
             </div>
             <div className="text-[#484F58] text-[10px] pt-3">→</div>
             <div className="flex-1">
               <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">To</label>
-              <input
-                type="date"
+              <DatePickerInput
                 value={filters.dateTo}
-                onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
-                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+                onChange={(v) => setFilters({ ...filters, dateTo: v })}
+                placeholder="To date"
+                ariaLabel="To date"
               />
             </div>
             {(filters.dateFrom || filters.dateTo) && (
