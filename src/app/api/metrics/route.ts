@@ -10,21 +10,45 @@ export async function GET(req: NextRequest) {
   const dateTo = req.nextUrl.searchParams.get("date_to") || null;
 
   // ── 1. Fetch all conversations with their messages ──
-  let convosQuery = supabase
-    .from("conversations")
-    .select("id, subject, from_name, from_email, assignee_id, status, email_account_id, last_message_at, created_at, supplier_contact_id")
-    .neq("status", "trash")
-    .neq("from_email", "internal"); // Exclude internal conversations
-
-  const { data: conversations } = await convosQuery;
+  // NOTE: Supabase/PostgREST caps responses at 1000 rows per query (max_rows config).
+  // We must paginate to get all conversations — there are 7K+ in production.
+  const PAGE = 1000;
+  let conversations: any[] = [];
+  {
+    let offset = 0;
+    while (true) {
+      const { data: batch, error } = await supabase
+        .from("conversations")
+        .select("id, subject, from_name, from_email, assignee_id, status, email_account_id, last_message_at, created_at, supplier_contact_id")
+        .neq("status", "trash")
+        .neq("from_email", "internal")
+        .range(offset, offset + PAGE - 1);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (!batch || batch.length === 0) break;
+      conversations = conversations.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
 
   // ── 2. Fetch all messages with timestamps ──
-  let msgsQuery = supabase
-    .from("messages")
-    .select("id, conversation_id, is_outbound, sent_at, from_email, sent_by_user_id")
-    .order("sent_at", { ascending: true });
-
-  const { data: allMessages } = await msgsQuery;
+  // Same pagination cap applies — there are 30K+ messages in production.
+  let allMessages: any[] = [];
+  {
+    let offset = 0;
+    while (true) {
+      const { data: batch, error } = await supabase
+        .from("messages")
+        .select("id, conversation_id, is_outbound, sent_at, from_email, sent_by_user_id")
+        .order("sent_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (!batch || batch.length === 0) break;
+      allMessages = allMessages.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
 
   // Group messages by conversation
   const msgsByConvo: Record<string, any[]> = {};
