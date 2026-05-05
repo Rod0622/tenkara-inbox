@@ -46,17 +46,19 @@ export async function GET(req: NextRequest) {
   };
 
   try {
-    // ── 1. Load all supplier_reply response_times rows (paginated) ──
+    // ── 1. Load all response_times rows (both directions, paginated) ──
     // NOTE: Supabase/PostgREST caps responses at 1000 rows per query (max_rows config).
     // Requesting a wider .range() doesn't override the cap — it silently returns 1000.
-    let allRecords: { supplier_email: string; response_minutes: number; response_sent_at: string }[] = [];
+    //
+    // We load BOTH directions (supplier_reply + team_reply) because the threshold
+    // counts total messages exchanged, not just supplier replies (spec-literal interpretation).
+    let allRecords: { supplier_email: string; response_minutes: number; response_sent_at: string; direction: "supplier_reply" | "team_reply" }[] = [];
     let offset = 0;
     const PAGE = 1000;
     while (true) {
       const { data: batch, error: batchErr } = await supabase
         .from("response_times")
-        .select("supplier_email, response_minutes, response_sent_at")
-        .eq("direction", "supplier_reply")
+        .select("supplier_email, response_minutes, response_sent_at, direction")
         .not("supplier_email", "is", null)
         .range(offset, offset + PAGE - 1);
 
@@ -100,7 +102,11 @@ export async function GET(req: NextRequest) {
       const email = (r.supplier_email || "").toLowerCase();
       if (!email) continue;
       if (!bySupplier[email]) bySupplier[email] = [];
-      bySupplier[email].push({ response_minutes: r.response_minutes, response_sent_at: r.response_sent_at });
+      bySupplier[email].push({
+        response_minutes: r.response_minutes,
+        response_sent_at: r.response_sent_at,
+        direction: r.direction,
+      });
     }
 
     result.total_suppliers_seen = Object.keys(bySupplier).length;
