@@ -56,7 +56,7 @@ import RichTextEditor from "@/components/RichTextEditor";
 import Avatar from "./ConversationDetail/Avatar";
 import HighlightedText from "./ConversationDetail/HighlightedText";
 import MessageHeader from "./ConversationDetail/MessageHeader";
-import ActivityItem from "./ConversationDetail/ActivityItem";
+import ActivityList from "./ConversationDetail/ActivityList";
 import MoveToFolderDropdown from "./ConversationDetail/MoveToFolderDropdown";
 import AssignDropdown from "./ConversationDetail/AssignDropdown";
 import CallAssignment from "./ConversationDetail/CallAssignment";
@@ -2617,16 +2617,11 @@ export default function ConversationDetail({
         )}
 
         {activeTab === "activity" && (
-          <div className="h-full overflow-y-auto pr-2 space-y-0.5">
-            {activities.length === 0 && (
-              <div className="text-center py-10 text-[#484F58] text-sm">
-                No activity recorded yet
-              </div>
-            )}
-            {activities.map((activity: any) => (
-              <ActivityItem key={activity.id} activity={activity} teamMembers={teamMembers} />
-            ))}
-          </div>
+          <ActivityList
+            activities={activities}
+            teamMembers={teamMembers}
+            conversationLabels={convo.labels || []}
+          />
         )}
 
         {activeTab === "related" && (
