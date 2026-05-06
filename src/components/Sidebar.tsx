@@ -383,8 +383,10 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      <div className="text-sm font-bold text-[var(--text-primary)] tracking-tight">Tenkara</div>
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Shared Inbox</div>
+      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-none">
+        Ten<span className="italic">kara</span>
+      </div>
+      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Shared Inbox</div>
     </div>
 
     <button

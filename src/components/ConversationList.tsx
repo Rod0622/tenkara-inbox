@@ -723,11 +723,24 @@ export default function ConversationList({
       {/* Conversation list — hide when showing task search results */}
       {(searchTab === "conversations" || searchQuery.trim().length < 2 || !searchTaskResults || searchTaskResults.length === 0) && (
       <div className="flex-1 overflow-y-auto px-1.5">
-        {Object.entries(grouped).map(([date, convos]) => (
+        {Object.entries(grouped).map(([date, convos]) => {
+          // Phase 4d: distinguish "month + year" labels (e.g. "April 2026")
+          // from relative labels ("Today", "Yesterday", "This Week").
+          // Months get the magazine treatment: italic serif month + mono year + hairline rule.
+          const monthMatch = date.match(/^([A-Z][a-z]+)\s+(\d{4})$/);
+          return (
           <div key={date}>
-            <div className="text-[11px] font-semibold text-[var(--text-muted)] px-2.5 pt-3 pb-1.5 tracking-wide">
-              {date}
-            </div>
+            {monthMatch ? (
+              <div className="flex items-baseline gap-3 px-2.5 pt-5 pb-2">
+                <span className="font-serif italic text-[var(--text-secondary)] text-[14px] leading-none">{monthMatch[1]}</span>
+                <span className="font-mono text-[10px] tracking-widest text-[var(--text-muted)] leading-none">{monthMatch[2]}</span>
+                <div className="flex-1 border-t border-[var(--border)]" />
+              </div>
+            ) : (
+              <div className="text-[10px] font-semibold uppercase text-[var(--text-muted)] px-2.5 pt-3 pb-1.5 tracking-widest">
+                {date}
+              </div>
+            )}
             {convos.map((c) => {
               const isActive = activeConvo?.id === c.id;
               const isSelected = selectedIds.has(c.id);
@@ -787,7 +800,7 @@ export default function ConversationList({
                           <AlarmClock size={12} />
                         </span>
                       )}
-                      <span className="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+                      <span className="text-[11px] text-[var(--text-muted)] tabular-nums font-mono whitespace-nowrap">
                         {formatTime(c.last_message_at)}
                       </span>
                     </div>
@@ -820,7 +833,8 @@ export default function ConversationList({
               );
             })}
           </div>
-        ))}
+          );
+        })}
 
         {filteredConversations.length === 0 && (
           <div className="text-center py-16 text-[var(--text-muted)] text-sm">
