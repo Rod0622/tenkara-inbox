@@ -1048,21 +1048,21 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-4 gap-3 mb-4">
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                     <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Avg Response Time</div>
-                    <div className="text-2xl font-bold text-[var(--accent)]">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
+                    <div className="text-2xl font-bold text-[var(--accent)] font-mono tabular-nums">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-1">business hours</div>
                   </div>
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                     <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Total Responses</div>
-                    <div className="text-2xl font-bold text-[var(--text-primary)]">{slaData.overall.total_responses}</div>
+                    <div className="text-2xl font-bold text-[var(--text-primary)] font-mono tabular-nums">{slaData.overall.total_responses}</div>
                   </div>
                   <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 p-4">
                     <div className="text-[10px] text-[var(--danger)] uppercase font-semibold mb-1">Awaiting Our Reply</div>
-                    <div className="text-2xl font-bold text-[var(--danger)]">{slaData.overall.awaiting_our_reply}</div>
+                    <div className="text-2xl font-bold text-[var(--danger)] font-mono tabular-nums">{slaData.overall.awaiting_our_reply}</div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-1">supplier waiting on us</div>
                   </div>
                   <div className="rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4">
                     <div className="text-[10px] text-[var(--warning)] uppercase font-semibold mb-1">Awaiting Supplier Reply</div>
-                    <div className="text-2xl font-bold text-[var(--warning)]">{slaData.overall.awaiting_supplier_reply}</div>
+                    <div className="text-2xl font-bold text-[var(--warning)] font-mono tabular-nums">{slaData.overall.awaiting_supplier_reply}</div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-1">we sent last message</div>
                   </div>
                 </div>

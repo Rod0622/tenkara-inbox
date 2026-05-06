@@ -45,9 +45,15 @@ const config: Config = {
           dim: "rgba(57,210,192,0.12)",
         },
       },
+      // ─── Phase 4a typography ───────────────────────────────
+      // Reads from CSS variables set by next/font in layout.tsx.
+      // sans  = DM Sans (existing body UI)
+      // mono  = Geist Mono (was JetBrains Mono — Phase 4a swap)
+      // serif = Instrument Serif (Atelier headlines — applied in 4b+)
       fontFamily: {
-        sans: ["DM Sans", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "Consolas", "monospace"],
+        sans: ["var(--font-sans)", "DM Sans", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "Geist Mono", "Consolas", "monospace"],
+        serif: ["var(--font-serif)", "Instrument Serif", "Georgia", "serif"],
       },
       animation: {
         "fade-in": "fadeIn 0.2s ease-out",

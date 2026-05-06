@@ -2,7 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Phase 4a: fonts now loaded via next/font/google in layout.tsx
+   (was: @import url(...) for DM Sans + JetBrains Mono)
+   Adds Geist Mono (replaces JetBrains Mono) and Instrument Serif. */
 
 /* ═══════════════════════════════════════════════════════════════
    Theme System (Batch 14, Phase 1)
@@ -96,7 +98,7 @@
 }
 
 body {
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-sans), 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text-primary);
   overflow: hidden;

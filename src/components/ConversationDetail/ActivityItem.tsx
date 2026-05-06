@@ -256,7 +256,7 @@ export default function ActivityItem({
               <span className="text-[var(--text-muted)]">·</span>
             </>
           )}
-          <span title={ts.tooltip}>{ts.display}</span>
+          <span title={ts.tooltip} className="font-mono">{ts.display}</span>
         </div>
       </div>
     </div>

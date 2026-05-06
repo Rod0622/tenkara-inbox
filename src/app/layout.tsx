@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DM_Sans, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 
@@ -7,6 +8,42 @@ export const metadata: Metadata = {
   description: "Shared inbox for Tenkara Labs",
   icons: { icon: "/favicon.ico" },
 };
+
+// ─── Phase 4a: typography infrastructure ──────────────────────
+// Three font families loaded via next/font (build-time bundled, no
+// flash of unstyled text, no third-party request from the browser).
+//
+// CSS variables (--font-sans / --font-mono / --font-serif) are wired
+// through tailwind.config.ts so utility classes `font-sans`,
+// `font-mono`, `font-serif` resolve to these.
+//
+// DM Sans: existing body UI font (kept).
+// Geist Mono: replaces JetBrains Mono. Thinner, more modern, matches
+//   Option B's editorial aesthetic.
+// Instrument Serif: Atelier headlines. Will be applied to specific
+//   page titles and conversation subjects in subsequent sub-phases (4b+).
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+  weight: ["400", "500", "600"],
+});
+
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
+  weight: ["400"],
+  style: ["normal", "italic"],
+});
 
 /**
  * Inline script — runs before React hydrates, sets [data-theme] on <html>
@@ -42,12 +79,15 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Compose the three font CSS-variable classes onto <body>
+  const fontClasses = `${dmSans.variable} ${geistMono.variable} ${instrumentSerif.variable}`;
+
   return (
     <html lang="en">
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
-      <body>
+      <body className={fontClasses}>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
