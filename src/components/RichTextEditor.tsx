@@ -5,6 +5,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Link2, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Type, Palette, Smile, ChevronDown,
   Undo2, Redo2, X, Check, Paperclip, FolderOpen, FileSignature, Table2,
+  Sparkles,
 } from "lucide-react";
 
 // ── Font options ────────────────────────────────────
@@ -96,12 +97,13 @@ interface RichTextEditorProps {
   onAttach?: () => void;
   onDrive?: () => void;
   onTemplate?: () => void;
+  onAIDraft?: () => void;
 }
 
 export default function RichTextEditor({
   value, onChange, placeholder = "Write your message...",
   minHeight = 200, compact = false, signature, autoFocus = false,
-  onAttach, onDrive, onTemplate,
+  onAttach, onDrive, onTemplate, onAIDraft,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFontFamily, setShowFontFamily] = useState(false);
@@ -486,8 +488,8 @@ export default function RichTextEditor({
           </div>
         </ToolbarDropdown>
 
-        {/* Attach file + Drive + Template buttons */}
-        {(onAttach || onDrive || onTemplate) && (
+        {/* Attach file + Drive + Template + AI Draft buttons */}
+        {(onAttach || onDrive || onTemplate || onAIDraft) && (
           <>
             <div className="w-px h-4 bg-[var(--border)] mx-1" />
             {onAttach && (
@@ -503,6 +505,11 @@ export default function RichTextEditor({
             {onTemplate && (
               <ToolbarBtn onClick={onTemplate} title="Insert template">
                 <FileSignature size={13} />
+              </ToolbarBtn>
+            )}
+            {onAIDraft && (
+              <ToolbarBtn onClick={onAIDraft} title="Draft with AI (Tenkara workflow)">
+                <Sparkles size={13} />
               </ToolbarBtn>
             )}
           </>

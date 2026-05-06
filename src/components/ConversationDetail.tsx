@@ -53,6 +53,7 @@ import { createBrowserClient } from "@/lib/supabase";
 import { addBusinessHours, type SupplierHours } from "@/lib/business-hours";
 import TaskCountdown from "@/components/TaskCountdown";
 import RichTextEditor from "@/components/RichTextEditor";
+import AIDraftModal from "@/components/AIDraftModal";
 import Avatar from "./ConversationDetail/Avatar";
 import HighlightedText from "./ConversationDetail/HighlightedText";
 import MessageHeader from "./ConversationDetail/MessageHeader";
@@ -171,6 +172,7 @@ export default function ConversationDetail({
   const [replyDriveDefaultFolder, setReplyDriveDefaultFolder] = useState<string | null>(null);
   const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
+  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [showFormModal, setShowFormModal] = useState<{ taskId?: string; categoryId?: string } | null>(null);
   const [replySignature, setReplySignature] = useState("");
@@ -3234,6 +3236,7 @@ export default function ConversationDetail({
                 onAttach={() => replyFileInputRef.current?.click()}
                 onDrive={() => openReplyDrivePicker()}
                 onTemplate={() => openReplyTemplatePicker()}
+                onAIDraft={() => setShowAIDraftModal(true)}
               />
               {/* Reply attachments */}
               <input ref={replyFileInputRef} type="file" multiple onChange={async (e) => {
@@ -3530,6 +3533,49 @@ export default function ConversationDetail({
           }}
         />
       )}
+
+      {/* AI Draft Modal — Tenkara workflow assistant.
+          Auto-fills from the latest inbound message + conversation metadata. */}
+      <AIDraftModal
+        open={showAIDraftModal}
+        onClose={() => setShowAIDraftModal(false)}
+        initialSupplierCompany={(() => {
+          // Try to derive a supplier company name from the from_email domain
+          const email = convo.from_email || "";
+          const domain = email.split("@")[1] || "";
+          if (!domain) return convo.from_name || "";
+          // Drop common TLDs and prettify (e.g. "acme-corp.com" -> "Acme Corp")
+          const root = domain.split(".")[0];
+          return root
+            .replace(/[-_]+/g, " ")
+            .replace(/\b\w/g, (m) => m.toUpperCase());
+        })()}
+        initialContactName={convo.from_name || ""}
+        initialEmailSubject={convo.subject || ""}
+        initialIncomingMessage={(() => {
+          const latestInbound =
+            [...messages].reverse().find((msg: any) => !msg.is_outbound) ||
+            messages[messages.length - 1];
+          if (!latestInbound) return "";
+          // Strip HTML tags if there's no plain-text body
+          const raw = latestInbound.body_text ||
+            (latestInbound.body_html
+              ? latestInbound.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")
+              : "") ||
+            latestInbound.snippet || "";
+          return String(raw).trim();
+        })()}
+        organizationName="Tenkara"
+        onInsert={(text) => {
+          // Insert into the reply editor — preserve any existing draft text by appending
+          if (replyText && replyText.trim()) {
+            setReplyText(replyText + "\n\n" + text);
+          } else {
+            setReplyText(text);
+          }
+          setShowReplyEditor(true);
+        }}
+      />
 
     </div>
   );
