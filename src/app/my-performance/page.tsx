@@ -231,7 +231,7 @@ export default function MyPerformancePage() {
           <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><ArrowLeft size={20} /></Link>
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-[var(--bg)]" style={{ background: user.color }}>{user.initials}</div>
           <div>
-            <h1 className="text-xl font-bold">My Performance</h1>
+            <h1 className="text-2xl font-normal font-serif tracking-tight">My Performance</h1>
             <div className="text-sm text-[var(--text-secondary)]">{user.name} · {user.department || "Team Member"}</div>
           </div>
         </div>

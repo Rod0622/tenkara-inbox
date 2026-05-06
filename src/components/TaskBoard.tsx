@@ -322,7 +322,7 @@ export default function TaskBoard({
       <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-6 gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">My Tasks</h1>
+            <h1 className="text-3xl font-normal font-serif text-[var(--text-primary)] tracking-tight">My Tasks</h1>
             <p className="text-sm text-[var(--text-secondary)] mt-1">Tasks assigned to you across threads and standalone work.</p>
           </div>
           <div className="flex items-center gap-2">

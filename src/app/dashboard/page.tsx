@@ -710,7 +710,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-4">
           <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><ArrowLeft size={18} /></Link>
           <div>
-            <h1 className="text-lg font-bold tracking-tight">Team Dashboard</h1>
+            <h1 className="text-2xl font-normal font-serif tracking-tight">Team Dashboard</h1>
             <p className="text-[10px] text-[var(--text-muted)]">Performance overview &amp; task monitoring</p>
           </div>
         </div>

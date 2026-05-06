@@ -107,7 +107,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] border border-[var(--border)]"><Mail size={20} className="text-[var(--info)]" /></div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">{contact.name || contact.email}</h1>
+              <h1 className="text-3xl font-normal font-serif tracking-tight">{contact.name || contact.email}</h1>
               {contact.company && contact.company !== contact.name && <div className="text-sm text-[var(--info)]">{contact.company}</div>}
               <div className="text-sm text-[var(--text-secondary)]">{contact.email}</div>
             </div>

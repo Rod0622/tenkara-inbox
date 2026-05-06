@@ -415,7 +415,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Email Accounts</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Email Accounts</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Connect shared email accounts your team can access</p>
         </div>
         <button
@@ -1094,7 +1094,7 @@ function TeamTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Team Members</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Team Members</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Manage who has access to the shared inbox</p>
         </div>
         <button
@@ -1579,7 +1579,7 @@ function LabelsTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Labels</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Labels</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Create and manage labels to organize conversations. Top-level labels can have child labels (one level of nesting).</p>
         </div>
         <button
@@ -2811,7 +2811,7 @@ function RulesTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Rules</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Rules</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Automate actions based on email events</p>
         </div>
         <button
@@ -3105,7 +3105,7 @@ function UserGroupsTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">User Groups</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">User Groups</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Create groups to quickly assign tasks to teams</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
@@ -3328,7 +3328,7 @@ function TaskCategoriesTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Task Categories</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Task Categories</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Define categories to organize and classify tasks</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
@@ -3853,7 +3853,7 @@ function FormsTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Form Templates</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Form Templates</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Create forms for call logs, meeting notes, and other structured data collection</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
@@ -4026,7 +4026,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
             <ChevronLeft size={16} />
           </button>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight truncate">{form.name}</h1>
+            <h1 className="text-3xl font-normal font-serif tracking-tight truncate">{form.name}</h1>
             <p className="text-sm text-[var(--text-secondary)] mt-1">
               {submissions.length} submission{submissions.length === 1 ? "" : "s"}
             </p>
@@ -4342,7 +4342,7 @@ function EmailTemplatesTab() {
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Email Templates</h1>
+          <h1 className="text-3xl font-normal font-serif tracking-tight">Email Templates</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Create reusable templates for common emails</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
