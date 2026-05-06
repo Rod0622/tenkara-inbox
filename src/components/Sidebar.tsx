@@ -370,15 +370,17 @@ export default function Sidebar({
     <div className="w-[240px] min-w-[240px] h-full bg-[var(--bg)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       <div className="p-4 pb-3 border-b border-[var(--surface-2)]">
   <div className="flex items-center gap-2.5">
-    {/* TODO: replace "T" with the Tenkara loop icon once a usable asset exists.
-        The icon JPEG provided was black-on-black and had no transparency, so it
-        can't render visibly on this gradient button. Need a PNG/SVG with alpha
-        channel where the loop is the visible shape and the background is transparent. */}
     <button
       onClick={() => setShowNotifications(!showNotifications)}
-      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[var(--bg)] hover:opacity-90 transition-opacity"
+      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center hover:opacity-90 transition-opacity"
     >
-      T
+      {/* Tenkara loop icon — white version sits on the gradient button regardless of theme. */}
+      <img
+        src="/logo-icon-white.png"
+        alt="Tenkara"
+        className="w-5 h-5"
+        draggable={false}
+      />
       {notifCount > 0 && (
         <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[var(--danger)] text-[9px] font-bold text-white flex items-center justify-center">
           {notifCount > 99 ? "99+" : notifCount}
@@ -387,15 +389,21 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      {/* Logo wordmark — image must be saved at /public/logo-wordmark.webp.
-          In dark mode, CSS filter inverts black ink to white so it stays visible. */}
+      {/* Theme-aware wordmark — black version for light mode, white for dark.
+          Both files must exist at /public/logo-wordmark-black.png and
+          /public/logo-wordmark-white.png. */}
       <img
-        src="/logo-wordmark.webp"
+        src="/logo-wordmark-black.png"
         alt="Tenkara"
-        className="h-5 w-auto block dark:invert"
+        className="h-8 w-auto block dark:hidden"
         draggable={false}
       />
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Shared Inbox</div>
+      <img
+        src="/logo-wordmark-white.png"
+        alt="Tenkara"
+        className="h-8 w-auto hidden dark:block"
+        draggable={false}
+      />
     </div>
 
     <button

@@ -64,8 +64,9 @@ export default function AssignDropdown({
           disabled={assigning}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-medium hover:bg-[var(--surface-2)] transition-all"
         >
-          <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
-          <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
+          {/* Per-user color removed here for uniform header look. Other places (avatar lists, list rows, member dropdowns) keep per-user colors. */}
+          <Avatar initials={currentAssignee.initials} color="var(--accent)" size={18} />
+          <span className="text-[var(--text-primary)]">{currentAssignee.name}</span>
           <ChevronDown size={12} className="text-[var(--text-muted)]" />
         </button>
       ) : (
