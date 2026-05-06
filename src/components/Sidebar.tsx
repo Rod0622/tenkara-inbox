@@ -23,10 +23,13 @@ import {
   MessageSquare,
   FileEdit,
   Eye,
+  Sun,
+  Moon,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
 import SidebarTeamList from "./SidebarTeamList";
+import { useTheme } from "@/lib/theme";
 
 function QuickCreateMenu({
   onCompose,
@@ -157,6 +160,9 @@ export default function Sidebar({
   // Track current user's OOO status to show indicator on the user-name button
   const [meIsOOO, setMeIsOOO] = useState(false);
   const userBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Batch 14 / Phase 1: theme toggle (dark / light)
+  const { theme, toggle: toggleTheme } = useTheme();
 
   // Fetch notifications and check due reminders
   useEffect(() => {
@@ -769,6 +775,14 @@ export default function Sidebar({
               </button>
             </>
           )}
+          <button
+            onClick={toggleTheme}
+            className="text-[#484F58] hover:text-[#E6EDF3] transition-colors"
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
           <button
             onClick={() => signOut()}
             className="text-[#484F58] hover:text-[#F85149] transition-colors"

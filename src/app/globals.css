@@ -4,7 +4,26 @@
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-:root {
+/* ═══════════════════════════════════════════════════════════════
+   Theme System (Batch 14, Phase 1)
+
+   Two palettes:
+   - Dark (default, matches current app exactly)
+   - Light (Option B "Atelier" — warm cream/ink/gold)
+
+   Switched via [data-theme="..."] on <html>, set by the useTheme hook.
+   The .dark class is also toggled for any future Tailwind dark: variants.
+
+   The original variable names (--ink, --ink-50, --mint, etc.) are
+   preserved for backward compatibility with existing usage. Two new
+   semantic-name aliases are added (--bg, --surface, --text-primary,
+   etc.) for newer code to use.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- Default / Dark palette --- */
+:root,
+[data-theme="dark"] {
+  /* Original token names — preserved exactly */
   --ink: #0B0E11;
   --ink-50: #12161B;
   --ink-100: #181D24;
@@ -15,8 +34,61 @@
   --ink-600: #E6EDF3;
   --mint: #4ADE80;
   --mint-dim: rgba(74,222,128,0.12);
+
+  /* New semantic aliases — for future use as we migrate hex literals */
+  --bg: #0B0E11;
+  --surface: #12161B;
+  --surface-2: #181D24;
+  --surface-hover: #1E242C;
+  --border: #1E242C;
+  --border-strong: #262D37;
+  --text-muted: #484F58;
+  --text-secondary: #7D8590;
+  --text-primary: #E6EDF3;
+  --accent: #4ADE80;
+  --accent-dim: rgba(74,222,128,0.12);
+  --accent-strong: #3BC96E;
+  --info: #58A6FF;
+  --warning: #F0883E;
+  --danger: #F85149;
+  --highlight: #F5D547;
 }
 
+/* --- Light palette (Option B "Atelier" — warm cream + ink + gold) --- */
+[data-theme="light"] {
+  /* Map original token names to the cream palette so existing code Just Works
+     when components opt into theme-aware var() usage (Phase 1.5+). */
+  --ink: #f6f3ec;            /* page background — warm cream */
+  --ink-50: #fbf8f1;         /* surface (cards) — paper */
+  --ink-100: #efeadd;        /* surface hover */
+  --ink-200: #e3ddd0;        /* borders */
+  --ink-300: #d6cebe;        /* stronger rule */
+  --ink-400: #8a8478;        /* muted text */
+  --ink-500: #5a544a;        /* secondary text */
+  --ink-600: #15140f;        /* primary text */
+  --mint: #a07c2e;           /* accent — editorial gold (was neon green) */
+  --mint-dim: rgba(160,124,46,0.10);
+
+  /* New semantic aliases */
+  --bg: #f6f3ec;
+  --surface: #fbf8f1;
+  --surface-2: #ecebe3;
+  --surface-hover: #efeadd;
+  --border: #e3ddd0;
+  --border-strong: #d6cebe;
+  --text-muted: #8a8478;
+  --text-secondary: #5a544a;
+  --text-primary: #15140f;
+  --accent: #a07c2e;
+  --accent-dim: rgba(160,124,46,0.10);
+  --accent-strong: #8c6c25;
+  --info: #2563eb;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --highlight: #fff7d6;
+}
+
+/* Base reset */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -25,19 +97,21 @@
 
 body {
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--ink);
-  color: var(--ink-600);
+  background: var(--bg);
+  color: var(--text-primary);
   overflow: hidden;
+  /* Smooth the theme transition so toggling doesn't flash */
+  transition: background-color 0.2s ease-out, color 0.2s ease-out;
 }
 
-/* Scrollbar */
+/* Scrollbar — uses theme vars */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--ink-200); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--ink-400); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* Selection */
 ::selection {
-  background: rgba(74, 222, 128, 0.25);
-  color: white;
+  background: var(--accent-dim);
+  color: var(--text-primary);
 }
