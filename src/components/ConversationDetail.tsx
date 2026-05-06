@@ -1347,7 +1347,7 @@ export default function ConversationDetail({
     <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
       <div className="px-5 py-3 border-b border-[var(--border)] flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <div className="text-base font-bold text-[var(--text-primary)] truncate tracking-tight mb-1">
+          <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
             {convo.subject}
           </div>
           <div className="flex items-center gap-2 flex-wrap text-xs">
