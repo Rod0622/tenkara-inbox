@@ -1347,6 +1347,18 @@ export default function ConversationDetail({
     <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
       <div className="px-5 py-3 border-b border-[var(--border)] flex items-start gap-3">
         <div className="flex-1 min-w-0">
+          {/* Phase 4f: editorial eyebrow — real metadata, not filler */}
+          <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-1 truncate">
+            THREAD
+            <span className="mx-1.5">·</span>
+            <span className="tabular-nums">{messages.length}</span> {messages.length === 1 ? "MESSAGE" : "MESSAGES"}
+            <span className="mx-1.5">·</span>
+            {assignee ? (
+              <>ASSIGNED TO <span className="text-[var(--text-secondary)]">{assignee.name.toUpperCase()}</span></>
+            ) : (
+              "UNASSIGNED"
+            )}
+          </div>
           <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
             {convo.subject}
           </div>

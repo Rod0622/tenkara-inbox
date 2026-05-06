@@ -107,6 +107,27 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] border border-[var(--border)]"><Mail size={20} className="text-[var(--info)]" /></div>
             <div>
+              {/* Phase 4f: editorial eyebrow — surfaces real responsiveness/thread metadata */}
+              <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-1.5">
+                SUPPLIER
+                {responsiveness_summary && responsiveness_summary.tier && responsiveness_summary.tier !== "no_response" ? (
+                  <>
+                    <span className="mx-1.5">·</span>
+                    TIER <span className="text-[var(--text-secondary)]">{String(responsiveness_summary.tier).toUpperCase()}</span>
+                    {typeof responsiveness_summary.qualifying_exchanges === "number" && responsiveness_summary.qualifying_exchanges > 0 && (
+                      <>
+                        <span className="mx-1.5">·</span>
+                        <span className="tabular-nums">{responsiveness_summary.qualifying_exchanges}</span> EXCHANGES
+                      </>
+                    )}
+                  </>
+                ) : summary && typeof summary.total_threads === "number" && summary.total_threads > 0 ? (
+                  <>
+                    <span className="mx-1.5">·</span>
+                    <span className="tabular-nums">{summary.total_threads}</span> {summary.total_threads === 1 ? "THREAD" : "THREADS"}
+                  </>
+                ) : null}
+              </div>
               <h1 className="text-3xl font-normal font-serif tracking-tight">{contact.name || contact.email}</h1>
               {contact.company && contact.company !== contact.name && <div className="text-sm text-[var(--info)]">{contact.company}</div>}
               <div className="text-sm text-[var(--text-secondary)]">{contact.email}</div>
