@@ -370,6 +370,10 @@ export default function Sidebar({
     <div className="w-[240px] min-w-[240px] h-full bg-[var(--bg)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       <div className="p-4 pb-3 border-b border-[var(--surface-2)]">
   <div className="flex items-center gap-2.5">
+    {/* TODO: replace "T" with the Tenkara loop icon once a usable asset exists.
+        The icon JPEG provided was black-on-black and had no transparency, so it
+        can't render visibly on this gradient button. Need a PNG/SVG with alpha
+        channel where the loop is the visible shape and the background is transparent. */}
     <button
       onClick={() => setShowNotifications(!showNotifications)}
       className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[var(--bg)] hover:opacity-90 transition-opacity"
@@ -383,9 +387,14 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-none">
-        Ten<span className="italic">kara</span>
-      </div>
+      {/* Logo wordmark — image must be saved at /public/logo-wordmark.webp.
+          In dark mode, CSS filter inverts black ink to white so it stays visible. */}
+      <img
+        src="/logo-wordmark.webp"
+        alt="Tenkara"
+        className="h-5 w-auto block dark:invert"
+        draggable={false}
+      />
       <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Shared Inbox</div>
     </div>
 
@@ -557,8 +566,7 @@ export default function Sidebar({
                 <span className="flex items-center gap-1.5 shrink-0">
                   {unread > 0 && (
                     <span
-                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[var(--bg)] text-[11px] font-bold flex items-center justify-center"
-                      style={{ background: mb.color || "var(--accent)" }}
+                      className="min-w-[18px] h-[18px] rounded-full px-1 bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold flex items-center justify-center"
                     >
                       {unread}
                     </span>
@@ -616,13 +624,12 @@ export default function Sidebar({
                                 : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
                           }`}
                         >
-                          <span className="text-[13px] shrink-0">{folder.icon}</span>
+                          {/* Folder icon removed per user request — too informal */}
                           <span className="flex-1 truncate">{folder.name}</span>
                           <span className="flex items-center gap-1 shrink-0">
                             {folderUnread > 0 && (
                               <span
-                                className="min-w-[16px] h-[16px] rounded-full px-1 text-[var(--bg)] text-[10px] font-bold flex items-center justify-center"
-                                style={{ background: mb.color || "var(--accent)" }}
+                                className="min-w-[16px] h-[16px] rounded-full px-1 bg-[var(--accent)] text-[var(--bg)] text-[10px] font-bold flex items-center justify-center"
                               >
                                 {folderUnread}
                               </span>

@@ -744,7 +744,6 @@ export default function ConversationList({
             {convos.map((c) => {
               const isActive = activeConvo?.id === c.id;
               const isSelected = selectedIds.has(c.id);
-              const assignee = c.assignee || teamMembers.find((t) => t.id === c.assignee_id);
               const labels = c.labels?.map((cl) => cl.label).filter(Boolean) || [];
 
               return (
@@ -788,9 +787,6 @@ export default function ConversationList({
                   <div className="flex-1 min-w-0">
                     {/* Header row */}
                     <div className="flex items-center gap-1.5 mb-0.5">
-                      {assignee && (
-                        <Avatar initials={assignee.initials} color={assignee.color} size={18} />
-                      )}
                       <span className={`text-[13px] truncate flex-1 ${c.is_unread ? "font-bold text-[var(--text-primary)]" : "font-medium text-[var(--text-secondary)]"}`}>
                         {c.from_name}
                       </span>
