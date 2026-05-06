@@ -372,9 +372,9 @@ export default function Sidebar({
   <div className="flex items-center gap-2.5">
     <button
       onClick={() => setShowNotifications(!showNotifications)}
-      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center hover:opacity-90 transition-opacity"
+      className="relative w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center hover:bg-[var(--accent-strong)] transition-colors"
     >
-      {/* Tenkara loop icon — white version sits on the gradient button regardless of theme. */}
+      {/* Tenkara loop icon — white version sits on the gold/green button regardless of theme. */}
       <img
         src="/logo-icon-white.png"
         alt="Tenkara"
@@ -389,21 +389,11 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      {/* Theme-aware wordmark — black version for light mode, white for dark.
-          Both files must exist at /public/logo-wordmark-black.png and
-          /public/logo-wordmark-white.png. */}
-      <img
-        src="/logo-wordmark-black.png"
-        alt="Tenkara"
-        className="h-8 w-auto block dark:hidden"
-        draggable={false}
-      />
-      <img
-        src="/logo-wordmark-white.png"
-        alt="Tenkara"
-        className="h-8 w-auto hidden dark:block"
-        draggable={false}
-      />
+      {/* Wordmark as text — Instrument Serif (same as page headlines) since the logo
+          assets were giving rendering trouble. Single line: "Tenkara Shared Inbox". */}
+      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-tight truncate">
+        Tenkara <span className="italic">Shared Inbox</span>
+      </div>
     </div>
 
     <button
