@@ -389,10 +389,13 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      {/* Wordmark as text — Instrument Serif (same as page headlines) since the logo
-          assets were giving rendering trouble. Single line: "Tenkara Shared Inbox". */}
-      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-tight truncate">
-        Tenkara <span className="italic">Shared Inbox</span>
+      {/* Wordmark — two lines: "Tenkara" on top, "Shared Inbox" italic below.
+          Both in Instrument Serif (same as page headlines). */}
+      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-none truncate">
+        Tenkara
+      </div>
+      <div className="text-[12px] font-normal font-serif italic text-[var(--text-secondary)] tracking-tight leading-tight mt-0.5 truncate">
+        Shared Inbox
       </div>
     </div>
 
