@@ -63,7 +63,7 @@ function QuickCreateMenu({
     <div className="flex items-center gap-1.5" ref={ref}>
       <button
         onClick={onCompose}
-        className="w-7 h-7 rounded-md flex items-center justify-center bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73] active:scale-[0.98] transition-all"
+        className="w-7 h-7 rounded-md flex items-center justify-center bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent)] active:scale-[0.98] transition-all"
         title="Compose email"
       >
         <Plus size={14} />
@@ -72,22 +72,22 @@ function QuickCreateMenu({
       <div className="relative">
         <button
           onClick={() => setOpen((value) => !value)}
-          className="w-7 h-7 rounded-md flex items-center justify-center text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#12161B] transition-all"
+          className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] transition-all"
           title="More quick actions"
         >
           <ChevronDown size={14} />
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-[#1E242C] bg-[#161B22] shadow-2xl shadow-black/40 py-1 z-50">
+          <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] shadow-2xl shadow-black/40 py-1 z-50">
             <button
               onClick={() => {
                 onCompose();
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+              className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
             >
-              <PenSquare size={14} className="text-[#4ADE80]" />
+              <PenSquare size={14} className="text-[var(--accent)]" />
               Compose email
             </button>
 
@@ -96,9 +96,9 @@ function QuickCreateMenu({
                 onNewTask();
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+              className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
             >
-              <CheckSquare size={14} className="text-[#58A6FF]" />
+              <CheckSquare size={14} className="text-[var(--info)]" />
               New task
             </button>
 
@@ -107,18 +107,18 @@ function QuickCreateMenu({
                 onNewConversation();
                 setOpen(false);
               }}
-              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+              className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
             >
-              <MessageSquare size={14} className="text-[#F0883E]" />
+              <MessageSquare size={14} className="text-[var(--warning)]" />
               Create conversation
             </button>
 
             <Link
               href="/settings"
-              className="w-full px-3 py-2 text-left text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] flex items-center gap-2"
+              className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
               onClick={() => setOpen(false)}
             >
-              <MailPlus size={14} className="text-[#F5D547]" />
+              <MailPlus size={14} className="text-[var(--highlight)]" />
               Add shared account
             </Link>
           </div>
@@ -367,31 +367,31 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-[240px] min-w-[240px] h-full bg-[#0B0E11] border-r border-[#1E242C] flex flex-col overflow-hidden">
-      <div className="p-4 pb-3 border-b border-[#161B22]">
+    <div className="w-[240px] min-w-[240px] h-full bg-[var(--bg)] border-r border-[var(--border)] flex flex-col overflow-hidden">
+      <div className="p-4 pb-3 border-b border-[var(--surface-2)]">
   <div className="flex items-center gap-2.5">
     <button
       onClick={() => setShowNotifications(!showNotifications)}
-      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#4ADE80] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[#0B0E11] hover:opacity-90 transition-opacity"
+      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[var(--bg)] hover:opacity-90 transition-opacity"
     >
       T
       {notifCount > 0 && (
-        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#F85149] text-[9px] font-bold text-white flex items-center justify-center">
+        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[var(--danger)] text-[9px] font-bold text-white flex items-center justify-center">
           {notifCount > 99 ? "99+" : notifCount}
         </span>
       )}
     </button>
 
     <div className="flex-1 min-w-0">
-      <div className="text-sm font-bold text-[#E6EDF3] tracking-tight">Tenkara</div>
-      <div className="text-[10px] text-[#484F58] uppercase tracking-widest">Shared Inbox</div>
+      <div className="text-sm font-bold text-[var(--text-primary)] tracking-tight">Tenkara</div>
+      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Shared Inbox</div>
     </div>
 
     <button
       onClick={handleSync}
       disabled={syncing}
       className={`w-7 h-7 rounded-md flex items-center justify-center transition-all ${
-        syncing ? "text-[#4ADE80]" : "text-[#484F58] hover:text-[#4ADE80] hover:bg-[#12161B]"
+        syncing ? "text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)]"
       }`}
       title="Sync emails"
     >
@@ -418,37 +418,37 @@ export default function Sidebar({
       {showNotifications && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
-          <div className="absolute left-0 top-14 z-50 w-[300px] max-h-[400px] bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden flex flex-col ml-2">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-[#1E242C]">
-              <span className="text-xs font-bold text-[#E6EDF3]">Notifications</span>
+          <div className="absolute left-0 top-14 z-50 w-[300px] max-h-[400px] bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden flex flex-col ml-2">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+              <span className="text-xs font-bold text-[var(--text-primary)]">Notifications</span>
               {notifCount > 0 && (
-                <button onClick={markAllRead} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Mark all read</button>
+                <button onClick={markAllRead} className="text-[10px] text-[var(--info)] hover:text-[var(--info)]">Mark all read</button>
               )}
             </div>
             <div className="flex-1 overflow-y-auto">
               {notifications.length === 0 ? (
-                <div className="text-center py-8 text-[#484F58] text-xs">No notifications</div>
+                <div className="text-center py-8 text-[var(--text-muted)] text-xs">No notifications</div>
               ) : (
                 notifications.slice(0, 30).map((notif) => (
                   <button
                     key={notif.id}
                     onClick={() => handleNotifClick(notif)}
-                    className={"w-full text-left px-3 py-2.5 border-b border-[#1E242C]/50 hover:bg-[#12161B] transition-colors " + (notif.is_read ? "opacity-60" : "")}
+                    className={"w-full text-left px-3 py-2.5 border-b border-[var(--border)]/50 hover:bg-[var(--surface)] transition-colors " + (notif.is_read ? "opacity-60" : "")}
                   >
                     <div className="flex items-start gap-2">
                       {notif.actor && (
-                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11] flex-shrink-0 mt-0.5"
-                          style={{ background: notif.actor.color || "#4ADE80" }}>
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)] flex-shrink-0 mt-0.5"
+                          style={{ background: notif.actor.color || "var(--accent)" }}>
                           {notif.actor.initials || "?"}
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="text-[11px] font-semibold text-[#E6EDF3]">{notif.title}</div>
-                        {notif.body && <div className="text-[10px] text-[#7D8590] truncate">{notif.body}</div>}
-                        {notif.conversation?.subject && <div className="text-[10px] text-[#484F58] truncate">{notif.conversation.subject}</div>}
-                        <div className="text-[9px] text-[#484F58] mt-0.5">{new Date(notif.created_at).toLocaleString()}</div>
+                        <div className="text-[11px] font-semibold text-[var(--text-primary)]">{notif.title}</div>
+                        {notif.body && <div className="text-[10px] text-[var(--text-secondary)] truncate">{notif.body}</div>}
+                        {notif.conversation?.subject && <div className="text-[10px] text-[var(--text-muted)] truncate">{notif.conversation.subject}</div>}
+                        <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{new Date(notif.created_at).toLocaleString()}</div>
                       </div>
-                      {!notif.is_read && <div className="w-2 h-2 rounded-full bg-[#58A6FF] flex-shrink-0 mt-1" />}
+                      {!notif.is_read && <div className="w-2 h-2 rounded-full bg-[var(--info)] flex-shrink-0 mt-1" />}
                     </div>
                   </button>
                 ))
@@ -460,7 +460,7 @@ export default function Sidebar({
 
       <div className="px-2 pt-2 flex flex-col gap-0.5">
         <div className="px-2.5 pb-1">
-          <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
             My Workspace
           </span>
         </div>
@@ -488,19 +488,19 @@ export default function Sidebar({
                 setActiveFolder(null);
               }}
               className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left ${
-                isActive ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
+                isActive ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
               }`}
             >
               <Icon size={18} />
               <span className="flex-1">{item.label}</span>
               <span className="flex items-center gap-1.5">
                 {item.unread > 0 && (
-                  <span className="min-w-[18px] h-[18px] rounded-full px-1 bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold flex items-center justify-center">
+                  <span className="min-w-[18px] h-[18px] rounded-full px-1 bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold flex items-center justify-center">
                     {item.unread > 99 ? "99+" : item.unread}
                   </span>
                 )}
                 {item.count > 0 && (
-                  <span className="text-[11px] text-[#484F58]">
+                  <span className="text-[11px] text-[var(--text-muted)]">
                     {item.count}
                   </span>
                 )}
@@ -512,10 +512,10 @@ export default function Sidebar({
 
       <div className="px-2 pt-3 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-2.5 pb-1.5">
-          <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest">
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
             Team Spaces
           </span>
-          <Link href="/settings" className="text-[#484F58] hover:text-[#4ADE80] transition-colors">
+          <Link href="/settings" className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors">
             <Plus size={12} />
           </Link>
         </div>
@@ -523,7 +523,7 @@ export default function Sidebar({
         {mailboxes.length === 0 && (
           <Link
             href="/settings"
-            className="flex items-center gap-2 px-2.5 py-2 mx-1 rounded-md border border-dashed border-[#1E242C] text-[11px] text-[#484F58] hover:border-[#4ADE80] hover:text-[#4ADE80] transition-all"
+            className="flex items-center gap-2 px-2.5 py-2 mx-1 rounded-md border border-dashed border-[var(--border)] text-[11px] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all"
           >
             <Plus size={12} /> Connect an email account
           </Link>
@@ -542,11 +542,11 @@ export default function Sidebar({
             <div key={mb.id} className="mb-0.5">
               <button
                 onClick={() => toggleAccount(mb.id)}
-                className="flex items-center gap-1 px-1 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left text-[#7D8590] hover:bg-[#12161B] group"
+                className="flex items-center gap-1 px-1 py-1.5 rounded-md text-[13px] font-medium transition-all w-full text-left text-[var(--text-secondary)] hover:bg-[var(--surface)] group"
               >
                 <ChevronRight
                   size={12}
-                  className={`transition-transform text-[#484F58] shrink-0 ${
+                  className={`transition-transform text-[var(--text-muted)] shrink-0 ${
                     isExpanded ? "rotate-90" : ""
                   }`}
                 />
@@ -555,18 +555,18 @@ export default function Sidebar({
                 <span className="flex items-center gap-1.5 shrink-0">
                   {unread > 0 && (
                     <span
-                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[#0B0E11] text-[11px] font-bold flex items-center justify-center"
-                      style={{ background: mb.color || "#4ADE80" }}
+                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[var(--bg)] text-[11px] font-bold flex items-center justify-center"
+                      style={{ background: mb.color || "var(--accent)" }}
                     >
                       {unread}
                     </span>
                   )}
-                  <span className="text-[11px] text-[#484F58]">{totalInbox}</span>
+                  <span className="text-[11px] text-[var(--text-muted)]">{totalInbox}</span>
                 </span>
               </button>
 
               {isExpanded && (
-                <div className="ml-5 pl-2 border-l border-[#1E242C] mt-0.5 mb-1">
+                <div className="ml-5 pl-2 border-l border-[var(--border)] mt-0.5 mb-1">
                   {accountFolders.map((folder) => {
                     const folderNameLower = String(folder.name || "").toLowerCase();
                     const isSystemInbox = folder.is_system && folder.name === "Inbox";
@@ -608,10 +608,10 @@ export default function Sidebar({
                           onDrop={(e) => handleDrop(e, folder.id)}
                           className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all flex-1 min-w-0 text-left ${
                             dragOverFolder === folder.id
-                              ? "bg-[rgba(74,222,128,0.15)] border border-[#4ADE80] border-dashed"
+                              ? "bg-[rgba(74,222,128,0.15)] border border-[var(--accent)] border-dashed"
                               : isFolderActive
-                                ? "bg-[#1E242C] text-[#E6EDF3]"
-                                : "text-[#7D8590] hover:bg-[#12161B]"
+                                ? "bg-[var(--border)] text-[var(--text-primary)]"
+                                : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
                           }`}
                         >
                           <span className="text-[13px] shrink-0">{folder.icon}</span>
@@ -619,14 +619,14 @@ export default function Sidebar({
                           <span className="flex items-center gap-1 shrink-0">
                             {folderUnread > 0 && (
                               <span
-                                className="min-w-[16px] h-[16px] rounded-full px-1 text-[#0B0E11] text-[10px] font-bold flex items-center justify-center"
-                                style={{ background: mb.color || "#4ADE80" }}
+                                className="min-w-[16px] h-[16px] rounded-full px-1 text-[var(--bg)] text-[10px] font-bold flex items-center justify-center"
+                                style={{ background: mb.color || "var(--accent)" }}
                               >
                                 {folderUnread}
                               </span>
                             )}
                             {folderTotal > 0 && (
-                              <span className="text-[10px] text-[#484F58]">{folderTotal}</span>
+                              <span className="text-[10px] text-[var(--text-muted)]">{folderTotal}</span>
                             )}
                           </span>
                         </button>
@@ -637,7 +637,7 @@ export default function Sidebar({
                               onClick={() =>
                                 setFolderMenuOpen(folderMenuOpen === folder.id ? null : folder.id)
                               }
-                              className="w-5 h-5 flex items-center justify-center text-[#484F58] hover:text-[#7D8590] opacity-0 group-hover/folder:opacity-100 transition-opacity"
+                              className="w-5 h-5 flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] opacity-0 group-hover/folder:opacity-100 transition-opacity"
                             >
                               <MoreHorizontal size={12} />
                             </button>
@@ -648,10 +648,10 @@ export default function Sidebar({
                                   className="fixed inset-0 z-40"
                                   onClick={() => setFolderMenuOpen(null)}
                                 />
-                                <div className="absolute right-0 top-5 z-50 w-32 bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1">
+                                <div className="absolute right-0 top-5 z-50 w-32 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg shadow-xl py-1">
                                   <button
                                     onClick={() => handleDeleteFolder(folder.id)}
-                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-[#F85149] hover:bg-[#1E242C] transition-colors"
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-[var(--danger)] hover:bg-[var(--border)] transition-colors"
                                   >
                                     <Trash2 size={11} />
                                     Delete folder
@@ -685,13 +685,13 @@ export default function Sidebar({
                           }
                         }}
                         placeholder="Folder name..."
-                        className="flex-1 bg-[#0B0E11] border border-[#1E242C] rounded px-1.5 py-0.5 text-[11px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]/40 min-w-0"
+                        className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]/40 min-w-0"
                       />
                     </div>
                   ) : (
                     <button
                       onClick={() => setAddingFolder(mb.id)}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-[#484F58] hover:text-[#4ADE80] transition-colors w-full text-left mt-0.5"
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors w-full text-left mt-0.5"
                     >
                       <FolderPlus size={11} />
                       <span>New folder</span>
@@ -708,7 +708,7 @@ export default function Sidebar({
         <div className="px-2 pb-1 space-y-0.5">
           <Link
             href="/my-performance"
-            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
+            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
           >
             <BarChart3 size={16} />
             <span>My Performance</span>
@@ -717,14 +717,14 @@ export default function Sidebar({
             <>
               <Link
                 href="/dashboard"
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
               >
                 <BarChart3 size={16} />
                 <span>Dashboard</span>
               </Link>
               <Link
                 href="/settings"
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[#7D8590] hover:bg-[#12161B] transition-all w-full"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
               >
                 <Settings size={16} />
                 <span>Settings</span>
@@ -737,7 +737,7 @@ export default function Sidebar({
       {/* Team list — collapsible, shows all users with OOO status */}
       {currentUser && <SidebarTeamList currentUser={currentUser} />}
 
-      <div className="p-2 border-t border-[#161B22] mt-auto">
+      <div className="p-2 border-t border-[var(--surface-2)] mt-auto">
         <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md">
           {currentUser && (
             <>
@@ -750,25 +750,25 @@ export default function Sidebar({
                   }
                   setShowOwnOOO(!showOwnOOO);
                 }}
-                className="flex items-center gap-2 flex-1 min-w-0 text-left hover:bg-[#12161B] rounded-md px-1 py-1 transition-colors"
+                className="flex items-center gap-2 flex-1 min-w-0 text-left hover:bg-[var(--surface)] rounded-md px-1 py-1 transition-colors"
                 title="Click to manage your OOO status"
               >
                 <div className="relative shrink-0">
                   <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-[#0B0E11]"
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-[var(--bg)]"
                     style={{ background: currentUser.color }}
                   >
                     {currentUser.initials}
                   </div>
                   <span
-                    className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#0B0E11] ${
-                      meIsOOO ? "bg-[#FCA5A5]" : "bg-[#4ADE80]"
+                    className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[var(--bg)] ${
+                      meIsOOO ? "bg-[#FCA5A5]" : "bg-[var(--accent)]"
                     }`}
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-[#E6EDF3] truncate">{currentUser.name}</div>
-                  <div className={`text-[10px] truncate ${meIsOOO ? "text-[#FCA5A5]" : "text-[#484F58]"}`}>
+                  <div className="text-xs font-semibold text-[var(--text-primary)] truncate">{currentUser.name}</div>
+                  <div className={`text-[10px] truncate ${meIsOOO ? "text-[#FCA5A5]" : "text-[var(--text-muted)]"}`}>
                     {meIsOOO ? "🌴 OOO" : currentUser.department}
                   </div>
                 </div>
@@ -777,7 +777,7 @@ export default function Sidebar({
           )}
           <button
             onClick={toggleTheme}
-            className="text-[#484F58] hover:text-[#E6EDF3] transition-colors"
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           >
@@ -785,7 +785,7 @@ export default function Sidebar({
           </button>
           <button
             onClick={() => signOut()}
-            className="text-[#484F58] hover:text-[#F85149] transition-colors"
+            className="text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"
             title="Sign out"
           >
             <LogOut size={14} />
