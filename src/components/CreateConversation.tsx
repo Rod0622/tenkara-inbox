@@ -136,17 +136,17 @@ export default function CreateConversation({
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
+    <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+      <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <MessageSquare size={18} className="text-[#4ADE80]" />
+          <MessageSquare size={18} className="text-[var(--accent)]" />
           <div>
-            <h2 className="text-sm font-bold text-[#E6EDF3]">Create Conversation</h2>
-            <p className="text-[10px] text-[#484F58]">Set up a team workspace before emailing the supplier</p>
+            <h2 className="text-sm font-bold text-[var(--text-primary)]">Create Conversation</h2>
+            <p className="text-[10px] text-[var(--text-muted)]">Set up a team workspace before emailing the supplier</p>
           </div>
         </div>
-        <button onClick={onClose} className="w-8 h-8 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#12161B] flex items-center justify-center">
+        <button onClick={onClose} className="w-8 h-8 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] flex items-center justify-center">
           <X size={16} />
         </button>
       </div>
@@ -154,65 +154,65 @@ export default function CreateConversation({
       {/* Form */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {error && (
-          <div className="px-3 py-2 rounded-lg bg-[#F85149]/10 border border-[#F85149]/20 text-[#F85149] text-xs">{error}</div>
+          <div className="px-3 py-2 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/20 text-[var(--danger)] text-xs">{error}</div>
         )}
 
         {/* Subject */}
         <div>
-          <label className="block text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider mb-1.5">Subject *</label>
+          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">Subject *</label>
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="e.g. Supplier quote follow-up — ChemCorp"
             autoFocus
-            className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+            className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
           />
         </div>
 
         {/* Email Account */}
         <div>
-          <label className="block text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider mb-1.5">Email Account *</label>
+          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">Email Account *</label>
           <select
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] cursor-pointer"
+            className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
           >
             {emailAccounts.map((acc) => (
               <option key={acc.id} value={acc.id}>{acc.name} ({acc.email})</option>
             ))}
           </select>
-          <p className="text-[10px] text-[#484F58] mt-1">Emails sent from this conversation will use this account</p>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1">Emails sent from this conversation will use this account</p>
         </div>
 
         {/* Assign To */}
         <div>
-          <label className="block text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider mb-1.5">
+          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">
             <User size={11} className="inline mr-1" />
             Assign to
           </label>
           <select
             value={assigneeId}
             onChange={(e) => setAssigneeId(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] cursor-pointer"
+            className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
           >
             <option value="">Unassigned</option>
             {activeMembers.map((m) => (
               <option key={m.id} value={m.id}>{m.name} — {m.department}</option>
             ))}
           </select>
-          <p className="text-[10px] text-[#484F58] mt-1">This conversation will appear in their personal inbox</p>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1">This conversation will appear in their personal inbox</p>
         </div>
 
         {/* Call Assignment */}
         <div>
-          <label className="block text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider mb-1.5">
+          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">
             <Phone size={11} className="inline mr-1" />
             Assign Caller (optional)
           </label>
           <select
             value={callerId}
             onChange={(e) => setCallerId(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] cursor-pointer"
+            className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
           >
             <option value="">No caller assigned</option>
             {(callers.length > 0 ? callers : activeMembers).map((m) => (
@@ -224,47 +224,47 @@ export default function CreateConversation({
               <div
                 onClick={() => setCreateCallTask(!createCallTask)}
                 className={`w-8 h-[18px] rounded-full flex items-center px-0.5 transition-colors cursor-pointer ${
-                  createCallTask ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
+                  createCallTask ? "bg-[var(--accent)] justify-end" : "bg-[var(--border)] justify-start"
                 }`}
               >
                 <div className="w-3.5 h-3.5 rounded-full bg-white shadow" />
               </div>
-              <span className="text-[11px] text-[#7D8590]">Create call task</span>
+              <span className="text-[11px] text-[var(--text-secondary)]">Create call task</span>
             </label>
           )}
         </div>
 
         {/* Supplier Contact Info */}
-        <div className="rounded-xl border border-[#1E242C] bg-[#12161B] p-4 space-y-3">
-          <div className="text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider">Supplier Contact</div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+          <div className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Supplier Contact</div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Email</label>
+              <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Email</label>
               <input value={supplierEmail} onChange={(e) => setSupplierEmail(e.target.value)}
                 placeholder="supplier@company.com"
-                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
             </div>
             <div>
-              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Contact Name</label>
+              <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Contact Name</label>
               <input value={supplierName} onChange={(e) => setSupplierName(e.target.value)}
                 placeholder="John Smith"
-                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
             </div>
           </div>
 
           <div>
-            <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Company</label>
+            <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Company</label>
             <input value={supplierCompany} onChange={(e) => setSupplierCompany(e.target.value)}
               placeholder="ChemCorp Inc."
-              className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+              className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Timezone</label>
+              <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Timezone</label>
               <select value={supplierTimezone} onChange={(e) => setSupplierTimezone(e.target.value)}
-                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[11px] text-[#E6EDF3] outline-none">
+                className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 text-[11px] text-[var(--text-primary)] outline-none">
                 <optgroup label="Americas">
                   <option value="America/New_York">Eastern (ET)</option>
                   <option value="America/Chicago">Central (CT)</option>
@@ -298,19 +298,19 @@ export default function CreateConversation({
               </select>
             </div>
             <div>
-              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Work Start</label>
+              <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Work Start</label>
               <input type="time" value={supplierWorkStart} onChange={(e) => setSupplierWorkStart(e.target.value)}
-                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]" />
+                className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 text-[12px] text-[var(--text-primary)] outline-none [color-scheme:dark]" />
             </div>
             <div>
-              <label className="block text-[10px] text-[#484F58] font-semibold mb-1">Work End</label>
+              <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1">Work End</label>
               <input type="time" value={supplierWorkEnd} onChange={(e) => setSupplierWorkEnd(e.target.value)}
-                className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none [color-scheme:dark]" />
+                className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 text-[12px] text-[var(--text-primary)] outline-none [color-scheme:dark]" />
             </div>
           </div>
 
           <div>
-            <label className="block text-[10px] text-[#484F58] font-semibold mb-1.5">Work Days</label>
+            <label className="block text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Work Days</label>
             <div className="flex gap-1">
               {[
                 { day: 0, label: "Sun" }, { day: 1, label: "Mon" }, { day: 2, label: "Tue" },
@@ -320,19 +320,19 @@ export default function CreateConversation({
                   setSupplierWorkDays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort());
                 }}
                   className={`w-10 h-8 rounded-lg text-[10px] font-semibold transition-all ${
-                    supplierWorkDays.includes(day) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C]"
+                    supplierWorkDays.includes(day) ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30" : "bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)]"
                   }`}
                 >{label}</button>
               ))}
             </div>
           </div>
 
-          <div className="text-[9px] text-[#484F58]">Task timers will only count down during the supplier&apos;s working hours in their timezone.</div>
+          <div className="text-[9px] text-[var(--text-muted)]">Task timers will only count down during the supplier&apos;s working hours in their timezone.</div>
         </div>
 
         {/* Initial Notes */}
         <div>
-          <label className="block text-[11px] font-semibold text-[#7D8590] uppercase tracking-wider mb-1.5">
+          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">
             <FileText size={11} className="inline mr-1" />
             Notes (optional)
           </label>
@@ -341,25 +341,25 @@ export default function CreateConversation({
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Add context for the team — what is this about, what needs to happen..."
             rows={4}
-            className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] resize-none"
+            className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] resize-none"
           />
         </div>
       </div>
 
       {/* Footer */}
-      <div className="px-5 py-3 border-t border-[#1E242C] flex items-center justify-between">
-        <p className="text-[10px] text-[#484F58]">You can compose an email from within the conversation after creating it</p>
+      <div className="px-5 py-3 border-t border-[var(--border)] flex items-center justify-between">
+        <p className="text-[10px] text-[var(--text-muted)]">You can compose an email from within the conversation after creating it</p>
         <div className="flex items-center gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-[#1E242C] text-xs font-medium text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#12161B] transition-colors"
+            className="px-4 py-2 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleCreate}
             disabled={creating || !subject.trim() || !accountId}
-            className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors flex items-center gap-2"
+            className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold hover:bg-[var(--accent)] disabled:opacity-50 transition-colors flex items-center gap-2"
           >
             {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             {creating ? "Creating..." : "Create Conversation"}

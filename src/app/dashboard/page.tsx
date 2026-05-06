@@ -119,13 +119,13 @@ function formatDueDate(date: string | null): string {
 }
 
 function getDueColor(date: string | null): string {
-  if (!date) return "#484F58";
+  if (!date) return "var(--text-muted)";
   const d = new Date(date);
-  if (d < new Date()) return "#F85149"; // overdue
+  if (d < new Date()) return "var(--danger)"; // overdue
   const bh = getBusinessHoursRemaining(date);
-  if (bh <= 11) return "#F85149"; // less than 1 business day
-  if (bh <= 22) return "#F0883E"; // less than 2 business days
-  return "#58A6FF";
+  if (bh <= 11) return "var(--danger)"; // less than 1 business day
+  if (bh <= 22) return "var(--warning)"; // less than 2 business days
+  return "var(--info)";
 }
 
 function getPresetDates(preset: string): { from: string; to: string } {
@@ -246,34 +246,6 @@ export default function DashboardPage() {
         }
       }
 
-      // Batch 10: fetch stored responsiveness scores from supplier_contacts.
-      // Cron /api/cron/score-suppliers populates these every 6h.
-      const scoreByEmail: Record<string, { score: number; tier: string; qualifying_exchanges: number; weighted_median_minutes: number | null; recent_median_minutes: number | null; all_time_median_minutes: number | null }> = {};
-      try {
-        const { data: scoredContacts } = await getSupabase()
-          .from("supplier_contacts")
-          .select("email, responsiveness_score, responsiveness_tier, qualifying_exchanges, weighted_median_minutes, recent_median_minutes, all_time_median_minutes")
-          .not("responsiveness_score", "is", null);
-        for (const sc of (scoredContacts || [])) {
-          if (!sc.email) continue;
-          scoreByEmail[String(sc.email).toLowerCase()] = {
-            score: sc.responsiveness_score,
-            tier: sc.responsiveness_tier,
-            qualifying_exchanges: sc.qualifying_exchanges ?? 0,
-            weighted_median_minutes: sc.weighted_median_minutes,
-            recent_median_minutes: sc.recent_median_minutes,
-            all_time_median_minutes: sc.all_time_median_minutes,
-          };
-        }
-      } catch (_e) { /* non-critical — chip just won't show */ }
-
-      // Helper: median of a number array (lower-mid, matches scoring lib)
-      const medianMins = (arr: number[]): number | null => {
-        if (arr.length === 0) return null;
-        const s = arr.slice().sort((a, b) => a - b);
-        return s[Math.floor(s.length / 2)];
-      };
-
       // Aggregate suppliers (with assignee tracking and subjects)
       const suppMap: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; accounts: Set<string>; assignees: Set<string>; subjects: Set<string> }> = {};
       for (const r of records) {
@@ -287,35 +259,15 @@ export default function DashboardPage() {
         if (cm?.assignee_id) suppMap[r.supplier_email].assignees.add(cm.assignee_id);
         if (cm?.subject) suppMap[r.supplier_email].subjects.add(cm.subject);
       }
-      const suppList = Object.values(suppMap).map(s => {
-        const stored = scoreByEmail[s.email.toLowerCase()] || null;
-        // Prefer stored weighted_median (from cron) when present and date filters are not narrowing the data;
-        // otherwise compute median from records currently loaded.
-        const recordsMedian = medianMins(s.supplier_replies);
-        const supplier_median = stored && stored.weighted_median_minutes !== null && !effectiveDateFrom && !effectiveDateTo
-          ? stored.weighted_median_minutes
-          : recordsMedian;
-        return {
-          ...s,
-          accounts: Array.from(s.accounts),
-          assignee_ids: Array.from(s.assignees),
-          subjects: Array.from(s.subjects),
-          supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
-          team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
-          supplier_median,
-          team_median: medianMins(s.team_replies),
-          total: s.supplier_replies.length + s.team_replies.length,
-          tier_score: stored?.score ?? null,
-          tier: stored?.tier ?? null,
-          tier_qualifying_exchanges: stored?.qualifying_exchanges ?? null,
-        };
-      }).sort((a, b) => {
-        // Sort: tier desc (excellent first), then total desc
-        const aScore = a.tier_score ?? -1;
-        const bScore = b.tier_score ?? -1;
-        if (bScore !== aScore) return bScore - aScore;
-        return b.total - a.total;
-      });
+      const suppList = Object.values(suppMap).map(s => ({
+        ...s,
+        accounts: Array.from(s.accounts),
+        assignee_ids: Array.from(s.assignees),
+        subjects: Array.from(s.subjects),
+        supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
+        team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
+        total: s.supplier_replies.length + s.team_replies.length,
+      })).sort((a, b) => b.total - a.total);
       setSupplierRtData(suppList);
 
       // Aggregate user response times (with per-supplier breakdown)
@@ -489,7 +441,7 @@ export default function DashboardPage() {
       return {
         id: member.id, name: member.name, email: member.email,
         initials: member.initials || member.name?.slice(0, 2).toUpperCase(),
-        color: member.color || "#4ADE80", role: member.role,
+        color: member.color || "var(--accent)", role: member.role,
         department: member.department || "Uncategorized",
         tasks: { total: memberTasks.length, todo, in_progress: inProgress, completed, dismissed, overdue, dueSoon },
         conversations: { assigned: assignedConvos.length, unread: assignedConvos.filter((c: any) => c.is_unread).length },
@@ -504,7 +456,7 @@ export default function DashboardPage() {
       conversation_id: t.conversation?.id || t.conversation_id,
       assignees: (t.task_assignees || []).map((a: any) => ({
         name: a.team_member?.name || "Unknown", initials: a.team_member?.initials || "?",
-        color: a.team_member?.color || "#7D8590", is_done: a.is_done,
+        color: a.team_member?.color || "var(--text-secondary)", is_done: a.is_done,
         status: a.status || (a.is_done ? "completed" : "todo"),
       })),
       category_name: t.category?.name || null, category_color: t.category?.color || null,
@@ -553,7 +505,7 @@ export default function DashboardPage() {
           conversation_id: t.conversation?.id || t.conversation_id,
           assignees: (t.task_assignees || []).map((a: any) => ({
             name: a.team_member?.name || "Unknown", initials: a.team_member?.initials || "?",
-            color: a.team_member?.color || "#7D8590", is_done: a.is_done,
+            color: a.team_member?.color || "var(--text-secondary)", is_done: a.is_done,
             status: a.status || (a.is_done ? "completed" : "todo"),
           })),
           category_name: t.category?.name || null, category_color: t.category?.color || null,
@@ -689,7 +641,7 @@ export default function DashboardPage() {
   const selectedUser = userStats.find((u) => u.id === selectedUserId);
 
   if (status === "loading" || loading) {
-    return <div className="h-screen w-screen flex items-center justify-center bg-[#0B0E11]"><Loader2 className="w-8 h-8 animate-spin text-[#4ADE80]" /></div>;
+    return <div className="h-screen w-screen flex items-center justify-center bg-[var(--bg)]"><Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" /></div>;
   }
   if (!session) redirect("/login");
   if ((session as any)?.teamMember?.role !== "admin") redirect("/");
@@ -704,24 +656,24 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#0B0E11] text-[#E6EDF3]">
+    <div className="h-screen w-screen flex flex-col bg-[var(--bg)] text-[var(--text-primary)]">
       {/* Header */}
-      <div className="border-b border-[#1E242C] px-6 py-3 flex items-center justify-between flex-shrink-0">
+      <div className="border-b border-[var(--border)] px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-4">
-          <Link href="/" className="text-[#484F58] hover:text-[#E6EDF3] transition-colors"><ArrowLeft size={18} /></Link>
+          <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><ArrowLeft size={18} /></Link>
           <div>
             <h1 className="text-lg font-bold tracking-tight">Team Dashboard</h1>
-            <p className="text-[10px] text-[#484F58]">Performance overview &amp; task monitoring</p>
+            <p className="text-[10px] text-[var(--text-muted)]">Performance overview &amp; task monitoring</p>
           </div>
         </div>
 
         {/* Date Filter — Dropdown */}
         <div className="flex items-center gap-2">
-          <CalendarClock size={14} className="text-[#484F58]" />
+          <CalendarClock size={14} className="text-[var(--text-muted)]" />
           <select
             value={datePreset}
             onChange={(e) => handleDatePreset(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] cursor-pointer"
           >
             <option value="all">All Time</option>
             <option value="today">Today</option>
@@ -735,17 +687,17 @@ export default function DashboardPage() {
           {datePreset === "custom" && (
             <div className="flex items-center gap-1.5">
               <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                className="px-2 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
-              <span className="text-[#484F58] text-[10px]">to</span>
+                className="px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+              <span className="text-[var(--text-muted)] text-[10px]">to</span>
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                className="px-2 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]" />
+                className="px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
             </div>
           )}
         </div>
       </div>
 
       {/* View Tabs */}
-      <div className="border-b border-[#1E242C] px-6 py-1.5 flex items-center gap-1 flex-shrink-0">
+      <div className="border-b border-[var(--border)] px-6 py-1.5 flex items-center gap-1 flex-shrink-0">
         {([
           { id: "overview", label: "Team Overview" },
           { id: "critical", label: "Critical Tasks (" + criticalTasks.length + ")" },
@@ -755,27 +707,27 @@ export default function DashboardPage() {
         ] as { id: ViewMode; label: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => { setViewMode(tab.id); setSelectedUserId(null); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              viewMode === tab.id ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"
+              viewMode === tab.id ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
           >{tab.label}</button>
         ))}
         {viewMode === "user-detail" && selectedUser && (
-          <div className="flex items-center gap-2 ml-2 px-3 py-1.5 rounded-lg bg-[#1E242C]">
-            <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[#0B0E11]" style={{ background: selectedUser.color }}>{selectedUser.initials}</div>
+          <div className="flex items-center gap-2 ml-2 px-3 py-1.5 rounded-lg bg-[var(--border)]">
+            <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[var(--bg)]" style={{ background: selectedUser.color }}>{selectedUser.initials}</div>
             <span className="text-xs font-medium">{selectedUser.name}</span>
-            <button onClick={() => setViewMode("overview")} className="text-[#484F58] hover:text-[#E6EDF3]"><X size={12} /></button>
+            <button onClick={() => setViewMode("overview")} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X size={12} /></button>
           </div>
         )}
       </div>
 
       {/* Summary Cards */}
       <div className="px-6 py-3 grid grid-cols-6 gap-3 flex-shrink-0">
-        <SummaryCard icon={<Users size={14} />} label="Team Members" value={userStats.length} color="#484F58" />
-        <SummaryCard icon={<ListTodo size={14} />} label="Open Tasks" value={totals.todo + totals.inProgress} sub={totals.completed + " completed"} color="#484F58" />
-        <SummaryCard icon={<AlertTriangle size={14} />} label="Overdue" value={totals.overdue} sub={totals.dueSoon + " due within 48h"} color="#F85149" />
-        <SummaryCard icon={<Mail size={14} />} label="Assigned Emails" value={totals.totalConvos} sub={totals.unreadConvos + " unread"} color="#484F58" />
-        <SummaryCard icon={<Eye size={14} />} label="Total Unread" value={totals.unreadConvos} color="#F0883E" />
-        <SummaryCard icon={<Send size={14} />} label="Emails Sent" value={totals.totalSent} color="#4ADE80" />
+        <SummaryCard icon={<Users size={14} />} label="Team Members" value={userStats.length} color="var(--text-muted)" />
+        <SummaryCard icon={<ListTodo size={14} />} label="Open Tasks" value={totals.todo + totals.inProgress} sub={totals.completed + " completed"} color="var(--text-muted)" />
+        <SummaryCard icon={<AlertTriangle size={14} />} label="Overdue" value={totals.overdue} sub={totals.dueSoon + " due within 48h"} color="var(--danger)" />
+        <SummaryCard icon={<Mail size={14} />} label="Assigned Emails" value={totals.totalConvos} sub={totals.unreadConvos + " unread"} color="var(--text-muted)" />
+        <SummaryCard icon={<Eye size={14} />} label="Total Unread" value={totals.unreadConvos} color="var(--warning)" />
+        <SummaryCard icon={<Send size={14} />} label="Emails Sent" value={totals.totalSent} color="var(--accent)" />
       </div>
 
       {/* Content */}
@@ -784,40 +736,40 @@ export default function DashboardPage() {
         {/* ── TEAM OVERVIEW ─── */}
         {viewMode === "overview" && (
           <div className="space-y-1">
-            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
               <span>Team Member</span><span className="text-center">To Do</span><span className="text-center">In Progress</span>
               <span className="text-center">Completed</span><span className="text-center">Dismissed</span><span className="text-center">Overdue</span>
               <span className="text-center">Due Soon</span><span className="text-center">Emails</span><span className="text-center">Sent</span>
             </div>
             {userStats.map((user) => (
               <button key={user.id} onClick={() => loadUserDetail(user.id)}
-                className={`w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all items-center text-left ${
-                  user.conversations.unread >= 5 ? "border-[#F85149]/30" : "border-[#1E242C]"
+                className={`w-full grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border bg-[var(--surface)] hover:border-[var(--accent)]/30 transition-all items-center text-left ${
+                  user.conversations.unread >= 5 ? "border-[var(--danger)]/30" : "border-[var(--border)]"
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11] flex-shrink-0" style={{ background: user.color }}>{user.initials}</div>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[var(--bg)] flex-shrink-0" style={{ background: user.color }}>{user.initials}</div>
                     {user.conversations.unread >= 5 && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#F85149] text-[7px] font-bold text-white flex items-center justify-center border border-[#0F1318]">{user.conversations.unread > 99 ? "99" : user.conversations.unread}</span>
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[var(--danger)] text-[7px] font-bold text-white flex items-center justify-center border border-[var(--surface)]">{user.conversations.unread > 99 ? "99" : user.conversations.unread}</span>
                     )}
                   </div>
                   <div>
                     <div className="text-[13px] font-semibold">{user.name}</div>
-                    <div className="text-[10px] text-[#484F58]">{user.department}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{user.department}</div>
                     {user.conversations.unread >= 5 && (
-                      <div className="text-[9px] font-semibold text-[#F85149] mt-0.5">{user.conversations.unread} unread emails need attention</div>
+                      <div className="text-[9px] font-semibold text-[var(--danger)] mt-0.5">{user.conversations.unread} unread emails need attention</div>
                     )}
                   </div>
                 </div>
-                <div className="text-center text-sm font-semibold text-[#58A6FF]">{user.tasks.todo}</div>
-                <div className="text-center text-sm font-semibold text-[#F5D547]">{user.tasks.in_progress}</div>
-                <div className="text-center text-sm font-semibold text-[#4ADE80]">{user.tasks.completed}</div>
-                <div className="text-center text-sm font-semibold text-[#F0883E]">{user.tasks.dismissed}</div>
-                <div className="text-center text-sm font-semibold" style={{ color: user.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{user.tasks.overdue}</div>
-                <div className="text-center text-sm font-semibold" style={{ color: user.tasks.dueSoon > 0 ? "#F0883E" : "#484F58" }}>{user.tasks.dueSoon}</div>
-                <div className="text-center"><span className="text-sm font-semibold">{user.conversations.assigned}</span>{user.conversations.unread > 0 && <span className="ml-1 text-[10px] text-[#F0883E]">({user.conversations.unread})</span>}</div>
-                <div className="text-center text-sm font-semibold text-[#4ADE80]">{user.sentEmails}</div>
+                <div className="text-center text-sm font-semibold text-[var(--info)]">{user.tasks.todo}</div>
+                <div className="text-center text-sm font-semibold text-[var(--highlight)]">{user.tasks.in_progress}</div>
+                <div className="text-center text-sm font-semibold text-[var(--accent)]">{user.tasks.completed}</div>
+                <div className="text-center text-sm font-semibold text-[var(--warning)]">{user.tasks.dismissed}</div>
+                <div className="text-center text-sm font-semibold" style={{ color: user.tasks.overdue > 0 ? "var(--danger)" : "var(--text-muted)" }}>{user.tasks.overdue}</div>
+                <div className="text-center text-sm font-semibold" style={{ color: user.tasks.dueSoon > 0 ? "var(--warning)" : "var(--text-muted)" }}>{user.tasks.dueSoon}</div>
+                <div className="text-center"><span className="text-sm font-semibold">{user.conversations.assigned}</span>{user.conversations.unread > 0 && <span className="ml-1 text-[10px] text-[var(--warning)]">({user.conversations.unread})</span>}</div>
+                <div className="text-center text-sm font-semibold text-[var(--accent)]">{user.sentEmails}</div>
               </button>
             ))}
           </div>
@@ -826,7 +778,7 @@ export default function DashboardPage() {
         {/* ── CRITICAL TASKS ─── */}
         {viewMode === "critical" && (
           <div className="space-y-2">
-            <div className="text-sm text-[#F85149] font-semibold mb-3 flex items-center gap-2"><AlertTriangle size={16} /> Overdue or due within 48 hours</div>
+            <div className="text-sm text-[var(--danger)] font-semibold mb-3 flex items-center gap-2"><AlertTriangle size={16} /> Overdue or due within 48 hours</div>
             {criticalTasks.length === 0 ? <Empty text="No critical tasks" /> : criticalTasks.map((t) => <TaskRow key={t.id} task={t} />)}
           </div>
         )}
@@ -835,7 +787,7 @@ export default function DashboardPage() {
         {viewMode === "all-tasks" && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <span className="text-xs text-[#484F58]">Filter:</span>
+              <span className="text-xs text-[var(--text-muted)]">Filter:</span>
               <FilterPill active={!taskFilterUser} onClick={() => setTaskFilterUser(null)} label={"All (" + allTasks.length + ")"} />
               {userStats.map((u) => (
                 <FilterPill key={u.id} active={taskFilterUser === u.id} onClick={() => setTaskFilterUser(taskFilterUser === u.id ? null : u.id)}
@@ -846,7 +798,7 @@ export default function DashboardPage() {
                   value={dashTaskSearch}
                   onChange={(e) => setDashTaskSearch(e.target.value)}
                   placeholder="Search tasks..."
-                  className="w-56 pl-3 pr-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-56 pl-3 pr-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
               </div>
             </div>
@@ -858,21 +810,21 @@ export default function DashboardPage() {
         {viewMode === "user-detail" && selectedUser && (
           <div>
             {/* User header */}
-            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
-              <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-[#0B0E11]" style={{ background: selectedUser.color }}>{selectedUser.initials}</div>
+            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-[var(--bg)]" style={{ background: selectedUser.color }}>{selectedUser.initials}</div>
               <div className="flex-1">
                 <div className="text-lg font-bold">{selectedUser.name}</div>
-                <div className="text-xs text-[#484F58]">{selectedUser.email} · {selectedUser.department} · {selectedUser.role}</div>
+                <div className="text-xs text-[var(--text-muted)]">{selectedUser.email} · {selectedUser.department} · {selectedUser.role}</div>
               </div>
               <div className="grid grid-cols-7 gap-4 text-center">
-                <div><div className="text-xl font-bold text-[#58A6FF]">{selectedUser.tasks.todo + selectedUser.tasks.in_progress}</div><div className="text-[10px] text-[#484F58]">Open Tasks</div></div>
-                <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.tasks.completed}</div><div className="text-[10px] text-[#484F58]">Completed</div></div>
-                <div><div className="text-xl font-bold text-[#F0883E]">{selectedUser.tasks.dismissed}</div><div className="text-[10px] text-[#484F58]">Dismissed</div></div>
-                <div><div className="text-xl font-bold" style={{ color: selectedUser.tasks.overdue > 0 ? "#F85149" : "#484F58" }}>{selectedUser.tasks.overdue}</div><div className="text-[10px] text-[#484F58]">Overdue</div></div>
-                <div><div className="text-xl font-bold text-[#4ADE80]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[#484F58]">Sent</div></div>
-                <div><div className="text-xl font-bold text-[#F0883E]">{selectedUser.conversations.unread}</div><div className="text-[10px] text-[#484F58]">Unread</div></div>
-                <div><div className="text-xl font-bold text-[#F85149]">{userConversations.filter((c) => c.reply_status === "awaiting_our_reply").length}</div><div className="text-[10px] text-[#484F58]">Need Reply</div></div>
-                <div><div className="text-xl font-bold text-[#F0883E]">{userConversations.filter((c) => c.reply_status === "awaiting_supplier_reply").length}</div><div className="text-[10px] text-[#484F58]">Waiting Supplier</div></div>
+                <div><div className="text-xl font-bold text-[var(--info)]">{selectedUser.tasks.todo + selectedUser.tasks.in_progress}</div><div className="text-[10px] text-[var(--text-muted)]">Open Tasks</div></div>
+                <div><div className="text-xl font-bold text-[var(--accent)]">{selectedUser.tasks.completed}</div><div className="text-[10px] text-[var(--text-muted)]">Completed</div></div>
+                <div><div className="text-xl font-bold text-[var(--warning)]">{selectedUser.tasks.dismissed}</div><div className="text-[10px] text-[var(--text-muted)]">Dismissed</div></div>
+                <div><div className="text-xl font-bold" style={{ color: selectedUser.tasks.overdue > 0 ? "var(--danger)" : "var(--text-muted)" }}>{selectedUser.tasks.overdue}</div><div className="text-[10px] text-[var(--text-muted)]">Overdue</div></div>
+                <div><div className="text-xl font-bold text-[var(--accent)]">{selectedUser.sentEmails}</div><div className="text-[10px] text-[var(--text-muted)]">Sent</div></div>
+                <div><div className="text-xl font-bold text-[var(--warning)]">{selectedUser.conversations.unread}</div><div className="text-[10px] text-[var(--text-muted)]">Unread</div></div>
+                <div><div className="text-xl font-bold text-[var(--danger)]">{userConversations.filter((c) => c.reply_status === "awaiting_our_reply").length}</div><div className="text-[10px] text-[var(--text-muted)]">Need Reply</div></div>
+                <div><div className="text-xl font-bold text-[var(--warning)]">{userConversations.filter((c) => c.reply_status === "awaiting_supplier_reply").length}</div><div className="text-[10px] text-[var(--text-muted)]">Waiting Supplier</div></div>
               </div>
             </div>
 
@@ -883,27 +835,27 @@ export default function DashboardPage() {
               const byCategory: Record<string, { count: number; color: string }> = {};
               for (const t of completedTasks) {
                 const cat = t.category_name || "Uncategorized";
-                if (!byCategory[cat]) byCategory[cat] = { count: 0, color: t.category_color || "#7D8590" };
+                if (!byCategory[cat]) byCategory[cat] = { count: 0, color: t.category_color || "var(--text-secondary)" };
                 byCategory[cat].count++;
               }
               const sorted = Object.entries(byCategory).sort((a, b) => b[1].count - a[1].count);
               return (
-                <div className="mb-4 p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
-                  <div className="text-xs font-semibold text-[#7D8590] mb-3 flex items-center gap-2">
-                    <CheckCircle2 size={13} className="text-[#4ADE80]" />
+                <div className="mb-4 p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+                  <div className="text-xs font-semibold text-[var(--text-secondary)] mb-3 flex items-center gap-2">
+                    <CheckCircle2 size={13} className="text-[var(--accent)]" />
                     Completed Tasks by Category ({completedTasks.length} total)
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {sorted.map(([cat, data]) => (
-                      <div key={cat} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+                      <div key={cat} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ background: data.color }} />
-                        <span className="text-xs text-[#E6EDF3] font-medium">{cat}</span>
+                        <span className="text-xs text-[var(--text-primary)] font-medium">{cat}</span>
                         <span className="text-sm font-bold" style={{ color: data.color }}>{data.count}</span>
                       </div>
                     ))}
                   </div>
                   {/* Progress bar */}
-                  <div className="mt-3 flex h-2 rounded-full overflow-hidden bg-[#1E242C]">
+                  <div className="mt-3 flex h-2 rounded-full overflow-hidden bg-[var(--border)]">
                     {sorted.map(([cat, data]) => (
                       <div key={cat} title={`${cat}: ${data.count}`} style={{ width: `${(data.count / completedTasks.length) * 100}%`, background: data.color }} />
                     ))}
@@ -922,14 +874,14 @@ export default function DashboardPage() {
               ]).map((tab) => (
                 <button key={tab.id} onClick={() => setUserDetailTab(tab.id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    userDetailTab === tab.id ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"
+                    userDetailTab === tab.id ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                   }`}
                 >{tab.icon} {tab.label}</button>
               ))}
             </div>
 
             {userDetailLoading ? (
-              <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+              <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
             ) : (
               <>
                 {userDetailTab === "tasks" && (
@@ -942,18 +894,18 @@ export default function DashboardPage() {
                   <div className="space-y-1">
                     {userConversations.length === 0 ? <Empty text="No assigned conversations" /> : userConversations.map((c) => (
                       <Link key={c.id} href={"/#conversation=" + c.id}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border bg-[#0F1318] hover:border-[#58A6FF]/30 transition-all ${
-                          c.reply_status === "awaiting_our_reply" && c.waiting_hours > 24 ? "border-[#F85149]/30" : "border-[#1E242C]"
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border bg-[var(--surface)] hover:border-[var(--info)]/30 transition-all ${
+                          c.reply_status === "awaiting_our_reply" && c.waiting_hours > 24 ? "border-[var(--danger)]/30" : "border-[var(--border)]"
                         }`}
                       >
                         {/* Status indicator */}
                         <div className="flex-shrink-0 w-2.5">
                           {c.is_unread ? (
-                            <div className="w-2 h-2 rounded-full bg-[#58A6FF]" />
+                            <div className="w-2 h-2 rounded-full bg-[var(--info)]" />
                           ) : c.reply_status === "awaiting_our_reply" ? (
-                            <div className="w-2 h-2 rounded-full bg-[#F85149]" title="Awaiting our reply" />
+                            <div className="w-2 h-2 rounded-full bg-[var(--danger)]" title="Awaiting our reply" />
                           ) : c.reply_status === "awaiting_supplier_reply" ? (
-                            <div className="w-2 h-2 rounded-full bg-[#F0883E]" title="Awaiting supplier reply" />
+                            <div className="w-2 h-2 rounded-full bg-[var(--warning)]" title="Awaiting supplier reply" />
                           ) : (
                             <div className="w-2 h-2 rounded-full bg-transparent" />
                           )}
@@ -961,27 +913,27 @@ export default function DashboardPage() {
 
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-medium truncate">{c.subject}</div>
-                          <div className="text-[11px] text-[#484F58] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
                         </div>
 
                         {/* Reply status badge */}
                         <div className="flex-shrink-0">
                           {c.reply_status === "awaiting_our_reply" ? (
                             <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              c.waiting_hours > 24 ? "bg-[#F85149]/15 text-[#F85149]" : "bg-[#F85149]/10 text-[#F85149]"
+                              c.waiting_hours > 24 ? "bg-[var(--danger)]/15 text-[var(--danger)]" : "bg-[var(--danger)]/10 text-[var(--danger)]"
                             }`}>
                               Needs reply · {formatBusinessTime(c.waiting_hours)}
                             </span>
                           ) : c.reply_status === "awaiting_supplier_reply" ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F0883E]/10 text-[#F0883E]">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[var(--warning)]/10 text-[var(--warning)]">
                               Waiting supplier · {formatBusinessTime(c.waiting_hours)}
                             </span>
                           ) : null}
                         </div>
 
-                        <div className="text-[10px] text-[#484F58] flex-shrink-0">{c.email_account_name}</div>
-                        <div className="text-[10px] text-[#484F58] flex-shrink-0">{new Date(c.last_message_at).toLocaleDateString()}</div>
-                        <ExternalLink size={12} className="text-[#484F58]" />
+                        <div className="text-[10px] text-[var(--text-muted)] flex-shrink-0">{c.email_account_name}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] flex-shrink-0">{new Date(c.last_message_at).toLocaleDateString()}</div>
+                        <ExternalLink size={12} className="text-[var(--text-muted)]" />
                       </Link>
                     ))}
                   </div>
@@ -991,24 +943,24 @@ export default function DashboardPage() {
                   <div className="space-y-1">
                     {userConversations.filter((c) => c.is_unread).length === 0 ? <Empty text="No unread emails" /> : userConversations.filter((c) => c.is_unread).map((c) => (
                       <Link key={c.id} href={"/#conversation=" + c.id}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#F0883E]/20 bg-[#0F1318] hover:border-[#F0883E]/40 transition-all"
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--warning)]/20 bg-[var(--surface)] hover:border-[var(--warning)]/40 transition-all"
                       >
                         <div className="flex-shrink-0 w-2.5">
-                          <div className="w-2.5 h-2.5 rounded-full bg-[#F0883E]" />
+                          <div className="w-2.5 h-2.5 rounded-full bg-[var(--warning)]" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-semibold truncate">{c.subject}</div>
-                          <div className="text-[11px] text-[#7D8590] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
-                          <div className="text-[10px] text-[#484F58] truncate mt-0.5">{c.preview}</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] truncate">{c.from_name} &lt;{c.from_email}&gt;</div>
+                          <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{c.preview}</div>
                         </div>
                         <div className="flex flex-col items-end flex-shrink-0 gap-1">
-                          <div className="text-[10px] text-[#484F58]">{c.email_account_name}</div>
-                          <div className="text-[10px] text-[#484F58]">{new Date(c.last_message_at).toLocaleDateString()} {new Date(c.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                          <div className="text-[10px] text-[var(--text-muted)]">{c.email_account_name}</div>
+                          <div className="text-[10px] text-[var(--text-muted)]">{new Date(c.last_message_at).toLocaleDateString()} {new Date(c.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                           {c.reply_status === "awaiting_our_reply" && (
-                            <span className="text-[9px] font-semibold text-[#F85149] bg-[#F85149]/10 px-1.5 py-0.5 rounded">Needs reply · {c.waiting_hours < 24 ? Math.round(c.waiting_hours) + "h" : Math.round(c.waiting_hours / 24) + "d"}</span>
+                            <span className="text-[9px] font-semibold text-[var(--danger)] bg-[var(--danger)]/10 px-1.5 py-0.5 rounded">Needs reply · {c.waiting_hours < 24 ? Math.round(c.waiting_hours) + "h" : Math.round(c.waiting_hours / 24) + "d"}</span>
                           )}
                         </div>
-                        <ExternalLink size={12} className="text-[#484F58] flex-shrink-0" />
+                        <ExternalLink size={12} className="text-[var(--text-muted)] flex-shrink-0" />
                       </Link>
                     ))}
                   </div>
@@ -1018,16 +970,16 @@ export default function DashboardPage() {
                   <div className="space-y-1">
                     {userSentEmails.length === 0 ? <Empty text="No sent emails in this period" /> : userSentEmails.map((s) => (
                       <Link key={s.id} href={"/#conversation=" + s.conversation_id}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/30 transition-all"
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/30 transition-all"
                       >
-                        <Send size={14} className="text-[#4ADE80] flex-shrink-0" />
+                        <Send size={14} className="text-[var(--accent)] flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-medium truncate">{s.subject}</div>
-                          <div className="text-[11px] text-[#484F58] truncate">To: {s.to_addresses}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">To: {s.to_addresses}</div>
                         </div>
-                        <div className="text-[10px] text-[#484F58] flex-shrink-0">{s.from_email}</div>
-                        <div className="text-[10px] text-[#484F58] flex-shrink-0">{new Date(s.sent_at).toLocaleDateString()} {new Date(s.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                        <ExternalLink size={12} className="text-[#484F58]" />
+                        <div className="text-[10px] text-[var(--text-muted)] flex-shrink-0">{s.from_email}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] flex-shrink-0">{new Date(s.sent_at).toLocaleDateString()} {new Date(s.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                        <ExternalLink size={12} className="text-[var(--text-muted)]" />
                       </Link>
                     ))}
                   </div>
@@ -1041,29 +993,29 @@ export default function DashboardPage() {
         {viewMode === "sla" && (
           <div>
             {slaLoading ? (
-              <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+              <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
             ) : slaData ? (
               <>
                 {/* KPI Summary Cards */}
                 <div className="grid grid-cols-4 gap-3 mb-4">
-                  <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
-                    <div className="text-[10px] text-[#484F58] uppercase font-semibold mb-1">Avg Response Time</div>
-                    <div className="text-2xl font-bold text-[#4ADE80]">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
-                    <div className="text-[10px] text-[#484F58] mt-1">business hours</div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Avg Response Time</div>
+                    <div className="text-2xl font-bold text-[var(--accent)]">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1">business hours</div>
                   </div>
-                  <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
-                    <div className="text-[10px] text-[#484F58] uppercase font-semibold mb-1">Total Responses</div>
-                    <div className="text-2xl font-bold text-[#E6EDF3]">{slaData.overall.total_responses}</div>
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Total Responses</div>
+                    <div className="text-2xl font-bold text-[var(--text-primary)]">{slaData.overall.total_responses}</div>
                   </div>
-                  <div className="rounded-xl border border-[#F85149]/20 bg-[#F85149]/5 p-4">
-                    <div className="text-[10px] text-[#F85149] uppercase font-semibold mb-1">Awaiting Our Reply</div>
-                    <div className="text-2xl font-bold text-[#F85149]">{slaData.overall.awaiting_our_reply}</div>
-                    <div className="text-[10px] text-[#484F58] mt-1">supplier waiting on us</div>
+                  <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 p-4">
+                    <div className="text-[10px] text-[var(--danger)] uppercase font-semibold mb-1">Awaiting Our Reply</div>
+                    <div className="text-2xl font-bold text-[var(--danger)]">{slaData.overall.awaiting_our_reply}</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1">supplier waiting on us</div>
                   </div>
-                  <div className="rounded-xl border border-[#F0883E]/20 bg-[#F0883E]/5 p-4">
-                    <div className="text-[10px] text-[#F0883E] uppercase font-semibold mb-1">Awaiting Supplier Reply</div>
-                    <div className="text-2xl font-bold text-[#F0883E]">{slaData.overall.awaiting_supplier_reply}</div>
-                    <div className="text-[10px] text-[#484F58] mt-1">we sent last message</div>
+                  <div className="rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4">
+                    <div className="text-[10px] text-[var(--warning)] uppercase font-semibold mb-1">Awaiting Supplier Reply</div>
+                    <div className="text-2xl font-bold text-[var(--warning)]">{slaData.overall.awaiting_supplier_reply}</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1">we sent last message</div>
                   </div>
                 </div>
 
@@ -1077,7 +1029,7 @@ export default function DashboardPage() {
                   ]).map((t) => (
                     <button key={t.id} onClick={() => setSlaSubTab(t.id)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                        slaSubTab === t.id ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"
+                        slaSubTab === t.id ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                       }`}
                     >{t.label}</button>
                   ))}
@@ -1086,7 +1038,7 @@ export default function DashboardPage() {
                 {/* Response Times by User (from response_times table) */}
                 {slaSubTab === "response-times" && (
                   <div className="space-y-1">
-                    <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
+                    <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
                       <span>Team Member</span><span className="text-center">Avg Response</span><span className="text-center">Fastest</span><span className="text-center">Slowest</span><span className="text-center">Responses</span>
                     </div>
                     {userRtData.map((stat: any) => {
@@ -1096,39 +1048,39 @@ export default function DashboardPage() {
                       return (
                         <div key={stat.user_id}>
                           <div onClick={() => setExpandedUserId(isExpanded ? null : stat.user_id)}
-                            className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border items-center cursor-pointer transition-colors ${isExpanded ? "border-[#58A6FF]/30 bg-[#12161B]" : "border-[#1E242C] bg-[#0F1318] hover:border-[#58A6FF]/20"}`}>
+                            className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border items-center cursor-pointer transition-colors ${isExpanded ? "border-[var(--info)]/30 bg-[var(--surface)]" : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--info)]/20"}`}>
                             <div className="flex items-center gap-3">
                               {user ? (
                                 <>
-                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[#0B0E11]" style={{ background: user.color }}>{user.initials}</div>
-                                  <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[#484F58]">{user.department} · {stat.suppliers?.length || 0} suppliers</div></div>
+                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[var(--bg)]" style={{ background: user.color }}>{user.initials}</div>
+                                  <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[var(--text-muted)]">{user.department} · {stat.suppliers?.length || 0} suppliers</div></div>
                                 </>
                               ) : (
-                                <div className="text-[13px] text-[#484F58]">Unassigned</div>
+                                <div className="text-[13px] text-[var(--text-muted)]">Unassigned</div>
                               )}
                             </div>
-                            <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "#4ADE80" : stat.avg_minutes <= 660 ? "#F0883E" : "#F85149" }}>
+                            <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "var(--accent)" : stat.avg_minutes <= 660 ? "var(--warning)" : "var(--danger)" }}>
                               {fmtM(stat.avg_minutes)}
                             </div>
-                            <div className="text-center text-sm text-[#4ADE80]">{fmtM(stat.fastest_minutes)}</div>
-                            <div className="text-center text-sm text-[#F0883E]">{fmtM(stat.slowest_minutes)}</div>
-                            <div className="text-center text-sm text-[#E6EDF3]">{stat.total}</div>
+                            <div className="text-center text-sm text-[var(--accent)]">{fmtM(stat.fastest_minutes)}</div>
+                            <div className="text-center text-sm text-[var(--warning)]">{fmtM(stat.slowest_minutes)}</div>
+                            <div className="text-center text-sm text-[var(--text-primary)]">{stat.total}</div>
                           </div>
                           {/* Expanded: per-supplier breakdown */}
                           {isExpanded && stat.suppliers && stat.suppliers.length > 0 && (
                             <div className="ml-11 mt-1 mb-2 space-y-1">
-                              <div className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-1.5 text-[9px] text-[#484F58] uppercase tracking-wider font-semibold">
+                              <div className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-1.5 text-[9px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
                                 <span>Supplier</span><span className="text-center">Avg Response</span><span className="text-center">Replies</span><span>Materials / Subjects</span>
                               </div>
                               {stat.suppliers.map((sup: any) => {
-                                const sc = sup.avg_minutes <= 240 ? "#4ADE80" : sup.avg_minutes <= 660 ? "#F0883E" : "#F85149";
+                                const sc = sup.avg_minutes <= 240 ? "var(--accent)" : sup.avg_minutes <= 660 ? "var(--warning)" : "var(--danger)";
                                 return (
                                   <a key={sup.email} href={"/contacts/" + encodeURIComponent(sup.email)}
-                                    className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-2 rounded-lg border border-[#1E242C]/50 bg-[#0B0E11] items-center hover:border-[#58A6FF]/20 transition-colors">
+                                    className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-2 rounded-lg border border-[var(--border)]/50 bg-[var(--bg)] items-center hover:border-[var(--info)]/20 transition-colors">
                                     <div className="text-[11px] text-[#C9D1D9] truncate">{sup.email}</div>
                                     <div className="text-center text-[11px] font-semibold" style={{ color: sc }}>{fmtM(sup.avg_minutes)}</div>
-                                    <div className="text-center text-[11px] text-[#7D8590]">{sup.total}</div>
-                                    <div className="text-[10px] text-[#484F58] truncate">{sup.subjects?.slice(0, 2).join("; ") || "—"}{sup.subjects?.length > 2 ? " +" + (sup.subjects.length - 2) + " more" : ""}</div>
+                                    <div className="text-center text-[11px] text-[var(--text-secondary)]">{sup.total}</div>
+                                    <div className="text-[10px] text-[var(--text-muted)] truncate">{sup.subjects?.slice(0, 2).join("; ") || "—"}{sup.subjects?.length > 2 ? " +" + (sup.subjects.length - 2) + " more" : ""}</div>
                                   </a>
                                 );
                               })}
@@ -1146,67 +1098,49 @@ export default function DashboardPage() {
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <select value={rtAccountFilter} onChange={(e) => setRtAccountFilter(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none">
+                        className="px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none">
                         <option value="all">All Accounts</option>
                         {emailAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </select>
                       <input type="text" placeholder="Search suppliers..." value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none flex-1 max-w-xs" />
-                      <span className="text-[10px] text-[#484F58] ml-auto">
+                        className="px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none flex-1 max-w-xs" />
+                      <span className="text-[10px] text-[var(--text-muted)] ml-auto">
                         {supplierRtData.filter((s: any) => (rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter)) && (!supplierSearch || s.email.toLowerCase().includes(supplierSearch.toLowerCase()) || s.domain.toLowerCase().includes(supplierSearch.toLowerCase()))).length} suppliers
                       </span>
                     </div>
                     <div className="space-y-1">
-                      <div className="grid grid-cols-[1fr_2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[#484F58] uppercase tracking-wider font-semibold">
-                        <span>Tier</span><span>Supplier</span><span className="text-center">Their Median</span><span className="text-center">Our Median</span><span className="text-center">Exchanges</span><span className="text-center">Assigned To</span><span className="text-center">Domain</span>
+                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
+                        <span>Supplier</span><span className="text-center">Their Avg Response</span><span className="text-center">Our Avg Response</span><span className="text-center">Exchanges</span><span className="text-center">Assigned To</span><span className="text-center">Domain</span>
                       </div>
                       {supplierRtData
                         .filter((s: any) => rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter))
                         .filter((s: any) => !supplierSearch || s.email.toLowerCase().includes(supplierSearch.toLowerCase()) || s.domain.toLowerCase().includes(supplierSearch.toLowerCase()))
                         .map((s: any) => {
                           const fmtM = (m: number | null) => m === null ? "—" : m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
-                          const sColor = s.supplier_median === null ? "#484F58" : s.supplier_median <= 240 ? "#4ADE80" : s.supplier_median <= 720 ? "#F5D547" : s.supplier_median <= 1440 ? "#F0883E" : "#F85149";
-                          const tColor = s.team_median === null ? "#484F58" : s.team_median <= 240 ? "#4ADE80" : s.team_median <= 720 ? "#F5D547" : s.team_median <= 1440 ? "#F0883E" : "#F85149";
+                          const sColor = s.supplier_avg === null ? "var(--text-muted)" : s.supplier_avg <= 240 ? "var(--accent)" : s.supplier_avg <= 720 ? "var(--highlight)" : s.supplier_avg <= 1440 ? "var(--warning)" : "var(--danger)";
+                          const tColor = s.team_avg === null ? "var(--text-muted)" : s.team_avg <= 240 ? "var(--accent)" : s.team_avg <= 720 ? "var(--highlight)" : s.team_avg <= 1440 ? "var(--warning)" : "var(--danger)";
                           const assignees = (s.assignee_ids || []).map((id: string) => userStats.find(u => u.id === id)).filter(Boolean);
-                          // Tier chip — Batch 10
-                          const tier = s.tier as string | null;
-                          const tierColors: Record<string, string> = { excellent: "#4ADE80", good: "#58A6FF", fair: "#F0883E", low: "#F85149", no_response: "#484F58" };
-                          const tierBg: Record<string, string> = { excellent: "rgba(74,222,128,0.10)", good: "rgba(88,166,255,0.10)", fair: "rgba(240,136,62,0.10)", low: "rgba(248,81,73,0.10)", no_response: "rgba(72,79,88,0.10)" };
-                          const tierLabels: Record<string, string> = { excellent: "Excellent", good: "Good", fair: "Fair", low: "Low", no_response: "No response" };
-                          const tColorChip = tier ? tierColors[tier] || "#484F58" : "#484F58";
-                          const tBgChip = tier ? tierBg[tier] || "rgba(72,79,88,0.10)" : "rgba(72,79,88,0.10)";
-                          const tLabelChip = tier ? tierLabels[tier] || "—" : "—";
                           return (
                             <a key={s.email} href={"/contacts/" + encodeURIComponent(s.email)}
-                              className="grid grid-cols-[1fr_2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0F1318] items-center hover:border-[#58A6FF]/30 transition-colors cursor-pointer">
-                              <div>
-                                {tier ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border" style={{ color: tColorChip, background: tBgChip, borderColor: tColorChip + "40" }} title={`Score ${s.tier_score}/4 · ${s.tier_qualifying_exchanges ?? 0} exchanges`}>
-                                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: tColorChip }} />
-                                    {tLabelChip}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-[#484F58]">—</span>
-                                )}
-                              </div>
+                              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] items-center hover:border-[var(--info)]/30 transition-colors cursor-pointer">
                               <div className="truncate">
                                 <div className="text-[13px] font-medium truncate">{s.email}</div>
-                                {s.subjects && s.subjects.length > 0 && <div className="text-[10px] text-[#484F58] truncate mt-0.5">{s.subjects[0]}{s.subjects.length > 1 ? ` +${s.subjects.length - 1} more` : ""}</div>}
+                                {s.subjects && s.subjects.length > 0 && <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{s.subjects[0]}{s.subjects.length > 1 ? ` +${s.subjects.length - 1} more` : ""}</div>}
                               </div>
-                              <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_median)}</div>
-                              <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_median)}</div>
-                              <div className="text-center text-sm text-[#E6EDF3]">{s.total}</div>
+                              <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_avg)}</div>
+                              <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_avg)}</div>
+                              <div className="text-center text-sm text-[var(--text-primary)]">{s.total}</div>
                               <div className="text-center">
                                 {assignees.length > 0 ? (
                                   <div className="flex items-center justify-center gap-1 flex-wrap">
                                     {assignees.slice(0, 2).map((u: any) => (
-                                      <div key={u.id} className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: u.color }} title={u.name}>{u.initials}</div>
+                                      <div key={u.id} className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]" style={{ background: u.color }} title={u.name}>{u.initials}</div>
                                     ))}
-                                    {assignees.length > 2 && <span className="text-[9px] text-[#484F58]">+{assignees.length - 2}</span>}
+                                    {assignees.length > 2 && <span className="text-[9px] text-[var(--text-muted)]">+{assignees.length - 2}</span>}
                                   </div>
-                                ) : <span className="text-[10px] text-[#484F58]">—</span>}
+                                ) : <span className="text-[10px] text-[var(--text-muted)]">—</span>}
                               </div>
-                              <div className="text-center text-[11px] text-[#484F58]">{s.domain}</div>
+                              <div className="text-center text-[11px] text-[var(--text-muted)]">{s.domain}</div>
                             </a>
                           );
                         })}
@@ -1223,24 +1157,24 @@ export default function DashboardPage() {
                         const assignee = userStats.find((u) => u.id === item.assignee_id);
                         return (
                           <a key={item.conversation_id} href={"/#conversation=" + item.conversation_id}
-                            className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#F85149]/30 transition-all ${item.waiting_business_hours > 11 ? "border-[#F85149]/30" : "border-[#1E242C]"}`}>
+                            className={`block rounded-xl border bg-[var(--surface)] p-4 hover:border-[var(--danger)]/30 transition-all ${item.waiting_business_hours > 11 ? "border-[var(--danger)]/30" : "border-[var(--border)]"}`}>
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <div className="text-[13px] font-medium mb-1">{item.subject}</div>
-                                <div className="text-[11px] text-[#484F58]">{item.from_name} &lt;{item.from_email}&gt;</div>
+                                <div className="text-[11px] text-[var(--text-muted)]">{item.from_name} &lt;{item.from_email}&gt;</div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
                                 {assignee && (
                                   <div className="flex items-center gap-1.5">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: assignee.color }}>{assignee.initials}</div>
-                                    <span className="text-[10px] text-[#484F58]">{assignee.name.split(" ")[0]}</span>
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]" style={{ background: assignee.color }}>{assignee.initials}</div>
+                                    <span className="text-[10px] text-[var(--text-muted)]">{assignee.name.split(" ")[0]}</span>
                                   </div>
                                 )}
                                 <div className="text-right">
-                                  <div className="text-xs font-semibold" style={{ color: item.waiting_business_hours > 11 ? "#F85149" : item.waiting_business_hours > 4 ? "#F0883E" : "#58A6FF" }}>
+                                  <div className="text-xs font-semibold" style={{ color: item.waiting_business_hours > 11 ? "var(--danger)" : item.waiting_business_hours > 4 ? "var(--warning)" : "var(--info)" }}>
                                     {formatBusinessTime(item.waiting_business_hours)} waiting
                                   </div>
-                                  <div className="text-[10px] text-[#484F58]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                                  <div className="text-[10px] text-[var(--text-muted)]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
                                 </div>
                               </div>
                             </div>
@@ -1259,24 +1193,24 @@ export default function DashboardPage() {
                         const assignee = userStats.find((u) => u.id === item.assignee_id);
                         return (
                           <a key={item.conversation_id} href={"/#conversation=" + item.conversation_id}
-                            className="block rounded-xl border border-[#1E242C] bg-[#0F1318] p-4 hover:border-[#F0883E]/30 transition-all">
+                            className="block rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 hover:border-[var(--warning)]/30 transition-all">
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <div className="text-[13px] font-medium mb-1">{item.subject}</div>
-                                <div className="text-[11px] text-[#484F58]">{item.from_name} &lt;{item.from_email}&gt;</div>
+                                <div className="text-[11px] text-[var(--text-muted)]">{item.from_name} &lt;{item.from_email}&gt;</div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
                                 {assignee && (
                                   <div className="flex items-center gap-1.5">
-                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: assignee.color }}>{assignee.initials}</div>
-                                    <span className="text-[10px] text-[#484F58]">{assignee.name.split(" ")[0]}</span>
+                                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]" style={{ background: assignee.color }}>{assignee.initials}</div>
+                                    <span className="text-[10px] text-[var(--text-muted)]">{assignee.name.split(" ")[0]}</span>
                                   </div>
                                 )}
                                 <div className="text-right">
-                                  <div className="text-xs font-semibold text-[#F0883E]">
+                                  <div className="text-xs font-semibold text-[var(--warning)]">
                                     {formatBusinessTime(item.waiting_business_hours)} waiting
                                   </div>
-                                  <div className="text-[10px] text-[#484F58]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                                  <div className="text-[10px] text-[var(--text-muted)]">since {new Date(item.last_message_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
                                 </div>
                               </div>
                             </div>
@@ -1306,10 +1240,10 @@ export default function DashboardPage() {
 
 function SummaryCard({ icon, label, value, sub, color }: { icon: React.ReactNode; label: string; value: number; sub?: string; color: string }) {
   return (
-    <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex items-center gap-2 text-xs mb-2" style={{ color }}>{icon} {label}</div>
-      <div className="text-2xl font-bold" style={{ color: color === "#484F58" ? "#E6EDF3" : color }}>{value}</div>
-      {sub && <div className="text-[10px] text-[#484F58] mt-1">{sub}</div>}
+      <div className="text-2xl font-bold" style={{ color: color === "var(--text-muted)" ? "var(--text-primary)" : color }}>{value}</div>
+      {sub && <div className="text-[10px] text-[var(--text-muted)] mt-1">{sub}</div>}
     </div>
   );
 }
@@ -1318,10 +1252,10 @@ function FilterPill({ active, onClick, label, avatar }: { active: boolean; onCli
   return (
     <button onClick={onClick}
       className={`px-2.5 py-1 rounded-lg text-xs transition-colors flex items-center gap-1.5 ${
-        active ? "bg-[#4ADE80] text-[#0B0E11] font-semibold" : "bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"
+        active ? "bg-[var(--accent)] text-[var(--bg)] font-semibold" : "bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
       }`}
     >
-      {avatar && <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: avatar.color }}>{avatar.initials}</div>}
+      {avatar && <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]" style={{ background: avatar.color }}>{avatar.initials}</div>}
       {label}
     </button>
   );
@@ -1336,40 +1270,40 @@ function TaskRow({ task }: { task: TaskDetail }) {
 
   return (
     <Link href={"/#conversation=" + task.conversation_id}
-      className={`block rounded-xl border bg-[#0F1318] p-4 hover:border-[#58A6FF]/30 transition-all cursor-pointer ${
-        isDismissed ? "border-[#F0883E]/20 opacity-70" : isCompleted ? "border-[#4ADE80]/20 opacity-80" : isOverdue ? "border-[#F85149]/30" : "border-[#1E242C]"
+      className={`block rounded-xl border bg-[var(--surface)] p-4 hover:border-[var(--info)]/30 transition-all cursor-pointer ${
+        isDismissed ? "border-[var(--warning)]/20 opacity-70" : isCompleted ? "border-[var(--accent)]/20 opacity-80" : isOverdue ? "border-[var(--danger)]/30" : "border-[var(--border)]"
       }`}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             {isDismissed && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(240,136,62,0.12)] text-[#F0883E]"
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(240,136,62,0.12)] text-[var(--warning)]"
                 title={task.dismiss_reason ? "Reason: " + task.dismiss_reason : "No reason provided"}>
                 Dismissed
               </span>
             )}
             {isCompleted && !isDismissed && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[#4ADE80]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--accent)]">
                 Completed
               </span>
             )}
-            <div className={`text-[13px] font-medium ${isDismissed ? "italic text-[#7D8590]" : isCompleted ? "line-through text-[#7D8590]" : ""}`}>{task.text}</div>
+            <div className={`text-[13px] font-medium ${isDismissed ? "italic text-[var(--text-secondary)]" : isCompleted ? "line-through text-[var(--text-secondary)]" : ""}`}>{task.text}</div>
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-[#484F58]">
+          <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
             <span className="truncate max-w-[300px]">{task.conversation_subject}</span>
             {task.category_name && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: (task.category_color || "#1E242C") + "20", color: task.category_color || "#7D8590" }}>{task.category_name}</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: (task.category_color || "var(--border)") + "20", color: task.category_color || "var(--text-secondary)" }}>{task.category_name}</span>
             )}
           </div>
           {isDismissed && task.dismiss_reason && (
-            <div className="mt-1 text-[11px] text-[#F0883E] italic">
+            <div className="mt-1 text-[11px] text-[var(--warning)] italic">
               Reason: {task.dismiss_reason}
             </div>
           )}
         </div>
         {task.due_date && !isDismissed && (
-          <div className="flex items-center gap-1 text-[11px] font-medium flex-shrink-0" style={{ color: isCompleted ? "#4ADE80" : getDueColor(task.due_date) }}>
+          <div className="flex items-center gap-1 text-[11px] font-medium flex-shrink-0" style={{ color: isCompleted ? "var(--accent)" : getDueColor(task.due_date) }}>
             <CalendarClock size={12} /> {isCompleted ? "Done" : formatDueDate(task.due_date)}
           </div>
         )}
@@ -1377,18 +1311,18 @@ function TaskRow({ task }: { task: TaskDetail }) {
       <div className="flex items-center gap-2 mt-3">
         <div className="flex items-center gap-1">
           {task.assignees.map((a, i) => (
-            <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-[#0B0E11] relative ${a.is_done ? "opacity-50" : ""}`}
+            <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-[var(--bg)] relative ${a.is_done ? "opacity-50" : ""}`}
               style={{ background: a.color }} title={a.name + (a.is_done ? " (done)" : "")}>
               {a.initials}
-              {a.is_done && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-[#4ADE80] rounded-full flex items-center justify-center"><CheckCircle2 size={8} className="text-[#0B0E11]" /></div>}
+              {a.is_done && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-[var(--accent)] rounded-full flex items-center justify-center"><CheckCircle2 size={8} className="text-[var(--bg)]" /></div>}
             </div>
           ))}
         </div>
         {!isDismissed && (
           <>
-            <span className="text-[10px] text-[#484F58]">{completedCount}/{totalCount} done</span>
-            <div className="w-16 h-1.5 rounded-full bg-[#1E242C] overflow-hidden">
-              <div className="h-full rounded-full bg-[#4ADE80] transition-all" style={{ width: totalCount > 0 ? (completedCount / totalCount * 100) + "%" : "0%" }} />
+            <span className="text-[10px] text-[var(--text-muted)]">{completedCount}/{totalCount} done</span>
+            <div className="w-16 h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
+              <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: totalCount > 0 ? (completedCount / totalCount * 100) + "%" : "0%" }} />
             </div>
           </>
         )}
@@ -1398,7 +1332,7 @@ function TaskRow({ task }: { task: TaskDetail }) {
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="text-center py-16 text-[#484F58] text-sm">{text}</div>;
+  return <div className="text-center py-16 text-[var(--text-muted)] text-sm">{text}</div>;
 }
 
 // ── Export Panel ──────────────────────────────────────
@@ -1664,10 +1598,10 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
       {/* Mode switcher */}
       <div className="flex items-center gap-2">
         <button onClick={() => setExportMode("single")}
-          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "single" ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"}`}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "single" ? "bg-[var(--accent)] text-[var(--bg)]" : "bg-[var(--surface)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"}`}
         >Single Dataset</button>
         <button onClick={() => setExportMode("unified")}
-          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "unified" ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"}`}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${exportMode === "unified" ? "bg-[var(--accent)] text-[var(--bg)]" : "bg-[var(--surface)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"}`}
         >Unified Report (All Data Joined)</button>
       </div>
 
@@ -1677,10 +1611,10 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
         <div className="grid grid-cols-3 gap-2">
           {DATASETS.map((ds) => (
             <button key={ds.id} onClick={() => setSelectedDataset(ds.id)}
-              className={`p-3 rounded-xl border text-left transition-all ${selectedDataset === ds.id ? "border-[#4ADE80]/40 bg-[#4ADE80]/5" : "border-[#1E242C] bg-[#0F1318] hover:border-[#4ADE80]/20"}`}
+              className={`p-3 rounded-xl border text-left transition-all ${selectedDataset === ds.id ? "border-[var(--accent)]/40 bg-[var(--accent)]/5" : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/20"}`}
             >
-              <div className="text-xs font-semibold text-[#E6EDF3]">{ds.label}</div>
-              <div className="text-[10px] text-[#484F58] mt-0.5">{ds.desc}</div>
+              <div className="text-xs font-semibold text-[var(--text-primary)]">{ds.label}</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{ds.desc}</div>
             </button>
           ))}
         </div>
@@ -1688,7 +1622,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
         {/* Sub-sheet selector for User Performance */}
         {selectedDataset === "user_performance" && (
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-[10px] text-[#484F58]">View:</span>
+            <span className="text-[10px] text-[var(--text-muted)]">View:</span>
             {([
               { id: "all_details" as const, label: "All Details (Combined)" },
               { id: "task_summary" as const, label: "Task Summary" },
@@ -1697,7 +1631,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             ]).map((sheet) => (
               <button key={sheet.id} onClick={() => { setPerfSubSheet(sheet.id); }}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
-                  perfSubSheet === sheet.id ? "bg-[#4ADE80]/10 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                  perfSubSheet === sheet.id ? "bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]"
                 }`}
               >{sheet.label}</button>
             ))}
@@ -1708,31 +1642,31 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
 
       {/* Unified mode description */}
       {exportMode === "unified" && !previewLoading && (
-        <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-3">
-          <div className="text-xs text-[#7D8590]">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+          <div className="text-xs text-[var(--text-secondary)]">
             All data joined through conversations. {exportRows ? exportRows.length + " rows" : previewData ? previewData.length + " rows loaded." : "Loading..."} {exportRows && previewData && exportRows.length !== previewData.length ? `(filtered from ${previewData.length} total)` : ""}
           </div>
           {previewData && previewData.length === 0 && allColumns.length > 0 && (
-            <div className="text-[11px] text-[#F0883E] mt-1">No data found for the selected date range. Columns are still available — try changing the date filter or select "All Time".</div>
+            <div className="text-[11px] text-[var(--warning)] mt-1">No data found for the selected date range. Columns are still available — try changing the date filter or select "All Time".</div>
           )}
         </div>
       )}
 
       {previewLoading ? (
-        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <>
           {/* Column picker */}
-          <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-xs font-bold text-[#E6EDF3]">Select Columns</div>
-                <div className="text-[10px] text-[#484F58]">{selectedColumns.size} of {allColumns.length} selected · {exportMode === "unified" ? (exportRows?.length || 0) : (previewData?.length || 0)} rows</div>
+                <div className="text-xs font-bold text-[var(--text-primary)]">Select Columns</div>
+                <div className="text-[10px] text-[var(--text-muted)]">{selectedColumns.size} of {allColumns.length} selected · {exportMode === "unified" ? (exportRows?.length || 0) : (previewData?.length || 0)} rows</div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setSelectedColumns(new Set(allColumns))} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Select all</button>
-                <span className="text-[#1E242C]">|</span>
-                <button onClick={() => setSelectedColumns(new Set())} className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff]">Deselect all</button>
+                <button onClick={() => setSelectedColumns(new Set(allColumns))} className="text-[10px] text-[var(--info)] hover:text-[var(--info)]">Select all</button>
+                <span className="text-[var(--border)]">|</span>
+                <button onClick={() => setSelectedColumns(new Set())} className="text-[10px] text-[var(--info)] hover:text-[var(--info)]">Deselect all</button>
               </div>
             </div>
 
@@ -1742,16 +1676,16 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
                 {Object.entries(columnGroups).map(([group, cols]) => (
                   <div key={group}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold text-[#7D8590] uppercase">{group}</span>
+                      <span className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase">{group}</span>
                       <div className="flex gap-2">
-                        <button onClick={() => { const n = new Set(selectedColumns); cols.forEach((c) => n.add(c)); setSelectedColumns(n); }} className="text-[9px] text-[#58A6FF]">all</button>
-                        <button onClick={() => { const n = new Set(selectedColumns); cols.forEach((c) => n.delete(c)); setSelectedColumns(n); }} className="text-[9px] text-[#58A6FF]">none</button>
+                        <button onClick={() => { const n = new Set(selectedColumns); cols.forEach((c) => n.add(c)); setSelectedColumns(n); }} className="text-[9px] text-[var(--info)]">all</button>
+                        <button onClick={() => { const n = new Set(selectedColumns); cols.forEach((c) => n.delete(c)); setSelectedColumns(n); }} className="text-[9px] text-[var(--info)]">none</button>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {cols.map((col) => (
                         <button key={col} onClick={() => toggleColumn(col)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${selectedColumns.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}
+                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${selectedColumns.has(col) ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30" : "bg-[var(--surface)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"}`}
                         >{col.replace(/_/g, " ")}</button>
                       ))}
                     </div>
@@ -1762,7 +1696,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
               <div className="flex flex-wrap gap-1.5">
                 {allColumns.map((col) => (
                   <button key={col} onClick={() => toggleColumn(col)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${selectedColumns.has(col) ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${selectedColumns.has(col) ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30" : "bg-[var(--surface)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"}`}
                   >{col.replace(/_/g, " ")}</button>
                 ))}
               </div>
@@ -1773,22 +1707,22 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
           {(() => {
             const previewSource = exportMode === "unified" ? exportRows : previewData;
             return previewSource && previewSource.length > 0 && selectedColumns.size > 0 && (
-            <div className="rounded-xl border border-[#1E242C] bg-[#0F1318] overflow-hidden">
-              <div className="px-4 py-2 border-b border-[#1E242C] text-[10px] text-[#484F58]">Preview (first 5 rows)</div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[var(--border)] text-[10px] text-[var(--text-muted)]">Preview (first 5 rows)</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
-                  <thead><tr className="border-b border-[#1E242C]">
+                  <thead><tr className="border-b border-[var(--border)]">
                     {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
-                      <th key={col} className="px-3 py-2 text-left text-[10px] text-[#484F58] font-semibold uppercase whitespace-nowrap">{col.replace(/_/g, " ")}</th>
+                      <th key={col} className="px-3 py-2 text-left text-[10px] text-[var(--text-muted)] font-semibold uppercase whitespace-nowrap">{col.replace(/_/g, " ")}</th>
                     ))}
                   </tr></thead>
                   <tbody>
                     {previewSource.slice(0, 5).map((row: any, i: number) => (
-                      <tr key={i} className="border-b border-[#1E242C]/50">
+                      <tr key={i} className="border-b border-[var(--border)]/50">
                         {allColumns.filter((c) => selectedColumns.has(c)).map((col) => (
-                          <td key={col} className="px-3 py-2 text-[#7D8590] whitespace-nowrap max-w-[200px] truncate">
+                          <td key={col} className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap max-w-[200px] truncate">
                             {col === "link" && row[col] ? (
-                              <a href={String(row[col])} target="_blank" rel="noopener noreferrer" className="text-[#58A6FF] hover:underline">Open →</a>
+                              <a href={String(row[col])} target="_blank" rel="noopener noreferrer" className="text-[var(--info)] hover:underline">Open →</a>
                             ) : String(row[col] ?? "")}
                           </td>
                         ))}
@@ -1802,9 +1736,9 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
           })()}
 
           {/* Export format + button */}
-          <div className="flex items-center justify-between p-4 rounded-xl border border-[#1E242C] bg-[#0F1318]">
+          <div className="flex items-center justify-between p-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[#484F58]">Format:</span>
+              <span className="text-xs text-[var(--text-muted)]">Format:</span>
               {([
                 { id: "xlsx" as const, label: "Excel (.xlsx)", icon: <FileSpreadsheet size={14} /> },
                 { id: "csv" as const, label: "CSV", icon: <FileText size={14} /> },
@@ -1813,7 +1747,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
               ]).map((fmt) => (
                 <button key={fmt.id} onClick={() => setExportFormat(fmt.id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    exportFormat === fmt.id ? "bg-[#4ADE80]/15 text-[#4ADE80] border border-[#4ADE80]/30" : "bg-[#12161B] text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+                    exportFormat === fmt.id ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30" : "bg-[var(--surface)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"
                   }`}
                 >{fmt.icon} {fmt.label}</button>
               ))}
@@ -1821,7 +1755,7 @@ function ExportPanel({ dateFrom, dateTo }: { dateFrom: string | null; dateTo: st
             <button
               onClick={handleExport}
               disabled={loading || selectedColumns.size === 0 || !(exportMode === "unified" ? exportRows?.length : previewData?.length)}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold hover:bg-[#3FCF73] disabled:opacity-50 transition-colors"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold hover:bg-[var(--accent)] disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               {loading ? "Exporting..." : `Export ${exportMode === "unified" ? (exportRows?.length || 0) : (previewData?.length || 0)} rows`}

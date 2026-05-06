@@ -113,7 +113,7 @@ export default function FormModal({
 
   const renderField = (field: any) => {
     const value = responses[field.id] ?? "";
-    const cls = "w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]";
+    const cls = "w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]";
 
     switch (field.field_type) {
       case "text":
@@ -146,8 +146,8 @@ export default function FormModal({
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={!!value}
               onChange={(e) => setResponses((p) => ({ ...p, [field.id]: e.target.checked }))}
-              className="w-4 h-4 rounded border-[#1E242C] bg-[#0B0E11] accent-[#4ADE80]" />
-            <span className="text-sm text-[#E6EDF3]">{field.placeholder || "Yes"}</span>
+              className="w-4 h-4 rounded border-[var(--border)] bg-[var(--bg)] accent-[var(--accent)]" />
+            <span className="text-sm text-[var(--text-primary)]">{field.placeholder || "Yes"}</span>
           </label>
         );
 
@@ -175,8 +175,8 @@ export default function FormModal({
               }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
                   selected.includes(o)
-                    ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30"
-                    : "text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+                    ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30"
+                    : "text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"
                 }`}>{o}</button>
             ))}
           </div>
@@ -193,44 +193,44 @@ export default function FormModal({
   // ── Render ──
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#12161B] border border-[#1E242C] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#1E242C]">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
-            <ClipboardCheck size={18} className="text-[#4ADE80]" />
-            <span className="text-sm font-semibold text-[#E6EDF3]">
+            <ClipboardCheck size={18} className="text-[var(--accent)]" />
+            <span className="text-sm font-semibold text-[var(--text-primary)]">
               {submitted ? "Form Submitted" : selectedTemplate ? selectedTemplate.name : "Select Form"}
             </span>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-[#1E242C] text-[#7D8590]"><X size={18} /></button>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-[var(--border)] text-[var(--text-secondary)]"><X size={18} /></button>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {loading && <div className="flex justify-center py-12"><Loader2 className="animate-spin text-[#4ADE80]" size={24} /></div>}
+          {loading && <div className="flex justify-center py-12"><Loader2 className="animate-spin text-[var(--accent)]" size={24} /></div>}
 
           {/* Success state */}
           {submitted && (
             <div className="flex flex-col items-center py-12">
-              <CheckCircle size={48} className="text-[#4ADE80] mb-3" />
-              <div className="text-sm font-semibold text-[#E6EDF3]">Form submitted successfully!</div>
-              <div className="text-xs text-[#7D8590] mt-1">Saved to conversation notes</div>
+              <CheckCircle size={48} className="text-[var(--accent)] mb-3" />
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Form submitted successfully!</div>
+              <div className="text-xs text-[var(--text-secondary)] mt-1">Saved to conversation notes</div>
             </div>
           )}
 
           {/* Ask complete task */}
           {askComplete && !submitted && (
             <div className="flex flex-col items-center py-8">
-              <div className="text-sm font-semibold text-[#E6EDF3] mb-4">Would you like to complete the task?</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)] mb-4">Would you like to complete the task?</div>
               <div className="flex gap-3">
                 <button onClick={() => handleSubmit(true)} disabled={saving}
-                  className="px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] disabled:opacity-50">
+                  className="px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] disabled:opacity-50">
                   {saving ? "Saving..." : "Yes, complete task"}
                 </button>
                 <button onClick={() => handleSubmit(false)} disabled={saving}
-                  className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:text-[#E6EDF3] disabled:opacity-50">
+                  className="px-4 py-2.5 rounded-lg border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
                   {saving ? "Saving..." : "No, keep it open"}
                 </button>
               </div>
@@ -241,17 +241,17 @@ export default function FormModal({
           {!loading && !submitted && !askComplete && !selectedTemplate && (
             <div className="space-y-2">
               {templates.length === 0 ? (
-                <div className="text-center py-8 text-[#484F58]">
+                <div className="text-center py-8 text-[var(--text-muted)]">
                   <div className="text-sm">No form templates available</div>
                   <div className="text-xs mt-1">Create one in Settings → Forms</div>
                 </div>
               ) : (
                 templates.map((t) => (
                   <button key={t.id} onClick={() => selectTemplate(t)}
-                    className="w-full text-left p-3 rounded-lg border border-[#1E242C] hover:border-[#4ADE80]/30 hover:bg-[#0B0E11] transition-all">
-                    <div className="text-sm font-medium text-[#E6EDF3]">{t.name}</div>
-                    {t.description && <div className="text-[11px] text-[#7D8590] mt-0.5">{t.description}</div>}
-                    <div className="text-[10px] text-[#484F58] mt-1">{t.fields?.length || 0} fields</div>
+                    className="w-full text-left p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)]/30 hover:bg-[var(--bg)] transition-all">
+                    <div className="text-sm font-medium text-[var(--text-primary)]">{t.name}</div>
+                    {t.description && <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{t.description}</div>}
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1">{t.fields?.length || 0} fields</div>
                   </button>
                 ))
               )}
@@ -262,33 +262,33 @@ export default function FormModal({
           {!loading && !submitted && !askComplete && selectedTemplate && (
             <div className="space-y-4">
               {selectedTemplate.description && (
-                <div className="text-xs text-[#7D8590] mb-2">{selectedTemplate.description}</div>
+                <div className="text-xs text-[var(--text-secondary)] mb-2">{selectedTemplate.description}</div>
               )}
               {(selectedTemplate.fields || []).map((field: any) => (
                 <div key={field.id}>
-                  <label className="block text-xs font-semibold text-[#7D8590] mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     {field.label}
-                    {field.is_required && <span className="text-[#F85149] ml-0.5">*</span>}
+                    {field.is_required && <span className="text-[var(--danger)] ml-0.5">*</span>}
                   </label>
                   {renderField(field)}
                 </div>
               ))}
-              {error && <div className="text-xs text-[#F85149]">{error}</div>}
+              {error && <div className="text-xs text-[var(--danger)]">{error}</div>}
             </div>
           )}
         </div>
 
         {/* Footer */}
         {!loading && !submitted && !askComplete && selectedTemplate && (
-          <div className="px-5 py-3.5 border-t border-[#1E242C] flex items-center gap-2">
+          <div className="px-5 py-3.5 border-t border-[var(--border)] flex items-center gap-2">
             {templates.length > 1 && (
               <button onClick={() => { setSelectedTemplate(null); setError(""); }}
-                className="text-xs text-[#7D8590] hover:text-[#E6EDF3]">← Change form</button>
+                className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]">← Change form</button>
             )}
             <div className="flex-1" />
-            <button onClick={onClose} className="px-3 py-2 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+            <button onClick={onClose} className="px-3 py-2 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
             <button onClick={() => { taskId ? setAskComplete(true) : handleSubmit(false); }} disabled={saving}
-              className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-bold hover:bg-[#3BC96E] disabled:opacity-50">
+              className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-bold hover:bg-[var(--accent-strong)] disabled:opacity-50">
               {saving ? "Submitting..." : "Submit"}
             </button>
           </div>

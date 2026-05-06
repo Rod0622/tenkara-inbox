@@ -30,16 +30,16 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 ];
 
 const SECTION_META = {
-  todo: { label: "To do", icon: ListTodo, color: "#58A6FF" },
-  in_progress: { label: "In progress", icon: Clock3, color: "#F5D547" },
-  completed: { label: "Completed", icon: CheckCircle2, color: "#4ADE80" },
-  dismissed: { label: "Dismissed", icon: Ban, color: "#F0883E" },
+  todo: { label: "To do", icon: ListTodo, color: "var(--info)" },
+  in_progress: { label: "In progress", icon: Clock3, color: "var(--highlight)" },
+  completed: { label: "Completed", icon: CheckCircle2, color: "var(--accent)" },
+  dismissed: { label: "Dismissed", icon: Ban, color: "var(--warning)" },
 } as const;
 
 function Avatar({ initials, color, size = 18 }: { initials: string; color: string; size?: number }) {
   return (
     <div
-      className="rounded-full flex items-center justify-center font-semibold text-[#0B0E11] flex-shrink-0"
+      className="rounded-full flex items-center justify-center font-semibold text-[var(--bg)] flex-shrink-0"
       style={{ width: size, height: size, fontSize: size * 0.4, background: color }}
     >
       {initials}
@@ -149,7 +149,7 @@ export default function TaskBoard({
                 id: `account:${acc.id}`,
                 name: acc.name,
                 icon: acc.icon || "📬",
-                color: acc.color || "#58A6FF",
+                color: acc.color || "var(--info)",
                 is_active: true,
                 _isAccountGroup: true,
                 user_group_members: memberIds.map((id: string) => ({ team_member_id: id })),
@@ -311,35 +311,35 @@ export default function TaskBoard({
 
   if (!currentUser) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[#484F58] bg-[#0B0E11]">
+      <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] bg-[var(--bg)]">
         Sign in to view your tasks.
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0B0E11]">
+    <div className="flex-1 overflow-y-auto bg-[var(--bg)]">
       <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-6 gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-[#E6EDF3] tracking-tight">My Tasks</h1>
-            <p className="text-sm text-[#7D8590] mt-1">Tasks assigned to you across threads and standalone work.</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">My Tasks</h1>
+            <p className="text-sm text-[var(--text-secondary)] mt-1">Tasks assigned to you across threads and standalone work.</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#484F58]" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
               <input
                 value={taskSearch}
                 onChange={(e) => setTaskSearch(e.target.value)}
                 placeholder="Search tasks..."
-                className="w-56 pl-9 pr-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                className="w-56 pl-9 pr-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
               />
             </div>
             {selectedTaskIds.length > 0 && currentUser?.role === "admin" && (
               <button
                 onClick={() => deleteTasks(selectedTaskIds)}
                 disabled={deleting}
-                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[rgba(248,81,73,0.35)] bg-[rgba(248,81,73,0.08)] text-[#F85149] text-sm font-semibold hover:bg-[rgba(248,81,73,0.14)] disabled:opacity-60"
+                className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[rgba(248,81,73,0.35)] bg-[rgba(248,81,73,0.08)] text-[var(--danger)] text-sm font-semibold hover:bg-[rgba(248,81,73,0.14)] disabled:opacity-60"
               >
                 <Trash2 size={15} />
                 {deleting ? "Deleting..." : `Delete selected (${selectedTaskIds.length})`}
@@ -347,7 +347,7 @@ export default function TaskBoard({
             )}
             <button
               onClick={() => setShowComposer((value) => !value)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3BC96E] transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--accent-strong)] transition-colors"
             >
               <Plus size={16} />
               {showComposer ? "Close" : "New Task"}
@@ -362,30 +362,30 @@ export default function TaskBoard({
         )}
 
         {showComposer && (
-          <div className="mb-6 p-4 rounded-2xl border border-[rgba(74,222,128,0.25)] bg-[#12161B]">
-            <div className="text-sm font-semibold text-[#E6EDF3] mb-3">Create Task</div>
+          <div className="mb-6 p-4 rounded-2xl border border-[rgba(74,222,128,0.25)] bg-[var(--surface)]">
+            <div className="text-sm font-semibold text-[var(--text-primary)] mb-3">Create Task</div>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="What needs to get done?"
               rows={3}
-              className="w-full rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-sm text-[#E6EDF3] placeholder:text-[#484F58] outline-none resize-none focus:border-[#4ADE80]"
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none resize-none focus:border-[var(--accent)]"
             />
 
             {/* Category picker */}
             {taskCategories.length > 0 && (
               <div className="mt-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Category</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">Category</div>
                 <div className="flex flex-wrap gap-1.5">
                   <button onClick={() => setCategoryId("")}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                      !categoryId ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"}`}>
+                      !categoryId ? "bg-[var(--border)] text-[var(--text-primary)] ring-1 ring-[var(--accent)]" : "bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"}`}>
                     None
                   </button>
                   {taskCategories.map((cat: any) => (
                     <button key={cat.id} onClick={() => setCategoryId(cat.id)}
                       className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                        categoryId === cat.id ? "ring-1 ring-[#4ADE80] bg-[#1E242C]" : "bg-[#0B0E11] border border-[#1E242C] hover:bg-[#1E242C]"}`}>
+                        categoryId === cat.id ? "ring-1 ring-[var(--accent)] bg-[var(--border)]" : "bg-[var(--bg)] border border-[var(--border)] hover:bg-[var(--border)]"}`}>
                       <span className="text-[13px]">{cat.icon}</span>
                       <span style={{ color: cat.color }}>{cat.name}</span>
                     </button>
@@ -397,18 +397,18 @@ export default function TaskBoard({
             <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4 mt-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590]">Assignees</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">Assignees</div>
                   <button onClick={() => {
                     const active = teamMembers.filter((m) => m.is_active !== false);
                     setAssigneeIds(assigneeIds.length === active.length ? [] : active.map((m) => m.id));
-                  }} className="text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold">
+                  }} className="text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold">
                     {assigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
                   </button>
                 </div>
-                <div className="rounded-xl border border-[#1E242C] bg-[#0B0E11] p-3 space-y-2 max-h-40 overflow-y-auto">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 space-y-2 max-h-40 overflow-y-auto">
                   {/* Group quick-select */}
                   {userGroups.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pb-2 mb-2 border-b border-[#1E242C]">
+                    <div className="flex flex-wrap gap-1 pb-2 mb-2 border-b border-[var(--border)]">
                       {userGroups.map((g: any) => {
                         const memberIds = (g.user_group_members || []).map((m: any) => m.team_member_id);
                         const isSelected = memberIds.length > 0 && memberIds.every((id: string) => assigneeIds.includes(id));
@@ -421,10 +421,10 @@ export default function TaskBoard({
                             }
                           }}
                             className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
-                              isSelected ? "ring-1 ring-[#4ADE80] bg-[rgba(74,222,128,0.1)]" : "bg-[#12161B] border border-[#1E242C] hover:border-[#484F58]"
+                              isSelected ? "ring-1 ring-[var(--accent)] bg-[rgba(74,222,128,0.1)]" : "bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--text-muted)]"
                             }`}>
                             <span className="text-[11px]">{g.icon}</span>
-                            <span style={{ color: isSelected ? "#4ADE80" : g.color }}>{g.name}</span>
+                            <span style={{ color: isSelected ? "var(--accent)" : g.color }}>{g.name}</span>
                           </button>
                         );
                       })}
@@ -435,7 +435,7 @@ export default function TaskBoard({
                     .map((member) => {
                       const checked = assigneeIds.includes(member.id);
                       return (
-                        <label key={member.id} className="flex items-center gap-2 text-sm text-[#E6EDF3] cursor-pointer">
+                        <label key={member.id} className="flex items-center gap-2 text-sm text-[var(--text-primary)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -444,7 +444,7 @@ export default function TaskBoard({
                                 e.target.checked ? [...prev, member.id] : prev.filter((id) => id !== member.id)
                               );
                             }}
-                            className="accent-[#4ADE80]"
+                            className="accent-[var(--accent)]"
                           />
                           <Avatar initials={member.initials} color={member.color} size={18} />
                           <span>{member.name}</span>
@@ -456,18 +456,18 @@ export default function TaskBoard({
 
               <div className="space-y-3">
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Due date</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">Due date</div>
                   <button type="button" onClick={openDatePicker}
-                    className="w-full flex items-center gap-3 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-4 py-3 text-left text-sm text-[#E6EDF3] hover:border-[#4ADE80] transition-colors">
-                    <CalendarDays size={16} className="text-[#F5D547]" />
-                    <span className={dueDate ? "text-[#E6EDF3]" : "text-[#484F58]"}>{dueDate || "Pick a due date"}</span>
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-left text-sm text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors">
+                    <CalendarDays size={16} className="text-[var(--highlight)]" />
+                    <span className={dueDate ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}>{dueDate || "Pick a due date"}</span>
                   </button>
                   <input ref={dateInputRef} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="sr-only" />
                 </div>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[#7D8590] mb-2">Hours to complete</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">Hours to complete</div>
                   <select value={dueHours} onChange={(e) => setDueHours(e.target.value)}
-                    className="w-full h-10 rounded-xl border border-[#1E242C] bg-[#0B0E11] px-3 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                    className="w-full h-10 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                     <option value="">No limit</option>
                     <option value="1">1 hour</option>
                     <option value="2">2 hours</option>
@@ -494,14 +494,14 @@ export default function TaskBoard({
                   setAssigneeIds([]);
                   setError(null);
                 }}
-                className="px-3.5 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#181D24]"
+                className="px-3.5 py-2 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-2)]"
               >
                 Cancel
               </button>
               <button
                 onClick={createTask}
                 disabled={saving || !text.trim()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-semibold hover:bg-[#3BC96E] disabled:opacity-60"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--accent-strong)] disabled:opacity-60"
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
                 {saving ? "Saving..." : "Create Task"}
@@ -512,7 +512,7 @@ export default function TaskBoard({
 
         {loading ? (
           <div className="py-20 flex justify-center">
-            <Loader2 size={28} className="animate-spin text-[#4ADE80]" />
+            <Loader2 size={28} className="animate-spin text-[var(--accent)]" />
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -526,32 +526,32 @@ export default function TaskBoard({
               return (
                 <div
                   key={status}
-                  className="rounded-2xl border border-[#1E242C] bg-[#12161B] overflow-hidden min-h-[420px]"
+                  className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden min-h-[420px]"
                 >
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-[#1E242C]">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
                     <div className="flex items-center gap-2">
                       <Icon size={16} style={{ color: meta.color }} />
-                      <div className="text-sm font-semibold text-[#E6EDF3]">{meta.label}</div>
+                      <div className="text-sm font-semibold text-[var(--text-primary)]">{meta.label}</div>
                     </div>
                     <div className="flex items-center gap-3">
                       {sectionTasks.length > 0 && (
-                        <label className="flex items-center gap-1 text-[11px] text-[#7D8590] cursor-pointer">
+                        <label className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={allSelected}
                             onChange={(e) => toggleSectionSelection(sectionTasks, e.target.checked)}
-                            className="accent-[#4ADE80]"
+                            className="accent-[var(--accent)]"
                           />
                           Select all
                         </label>
                       )}
-                      <span className="text-xs text-[#7D8590]">{sectionTasks.length}</span>
+                      <span className="text-xs text-[var(--text-secondary)]">{sectionTasks.length}</span>
                     </div>
                   </div>
 
                   <div className="p-3 space-y-3">
                     {sectionTasks.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-[#1E242C] px-4 py-8 text-center text-sm text-[#484F58]">
+                      <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
                         No {meta.label.toLowerCase()} tasks
                       </div>
                     )}
@@ -657,10 +657,10 @@ function TaskCard({
   return (
     <div
       ref={highlightRef as any}
-      className={`rounded-xl border bg-[#0B0E11] p-3 transition-all duration-500 ${
+      className={`rounded-xl border bg-[var(--bg)] p-3 transition-all duration-500 ${
         isHighlighted
-          ? "border-[#4ADE80] ring-2 ring-[#4ADE80]/30 bg-[#4ADE80]/5"
-          : "border-[#1E242C]"
+          ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30 bg-[var(--accent)]/5"
+          : "border-[var(--border)]"
       }`}
     >
       <div className="flex items-start gap-2 mb-2">
@@ -668,7 +668,7 @@ function TaskCard({
           type="checkbox"
           checked={selected}
           onChange={(e) => onSelectedChange(e.target.checked)}
-          className="mt-1 accent-[#4ADE80]"
+          className="mt-1 accent-[var(--accent)]"
         />
 
         <button
@@ -677,21 +677,21 @@ function TaskCard({
           className="mt-0.5"
         >
           {(() => {
-            if (task.status === "dismissed") return <Ban size={16} className="text-[#F0883E] opacity-60" />;
+            if (task.status === "dismissed") return <Ban size={16} className="text-[var(--warning)] opacity-60" />;
             if (isMulti && currentUser) {
               const myEntry = assignees.find((a: any) => a.id === currentUser.id);
-              if (doneCount === assignees.length) return <CheckCircle2 size={16} className="text-[#4ADE80]" />;
-              if (myEntry?.is_done) return <CheckCircle2 size={16} className="text-[#58A6FF]" />;
-              return <Circle size={16} className="text-[#484F58]" />;
+              if (doneCount === assignees.length) return <CheckCircle2 size={16} className="text-[var(--accent)]" />;
+              if (myEntry?.is_done) return <CheckCircle2 size={16} className="text-[var(--info)]" />;
+              return <Circle size={16} className="text-[var(--text-muted)]" />;
             }
             return task.status === "completed"
-              ? <CheckCircle2 size={16} className="text-[#4ADE80]" />
-              : <Circle size={16} className="text-[#484F58]" />;
+              ? <CheckCircle2 size={16} className="text-[var(--accent)]" />
+              : <Circle size={16} className="text-[var(--text-muted)]" />;
           })()}
         </button>
 
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-medium ${task.status === "dismissed" ? "text-[#F0883E] italic opacity-70" : task.status === "completed" ? "text-[#7D8590] line-through" : "text-[#E6EDF3]"}`}>
+          <div className={`text-sm font-medium ${task.status === "dismissed" ? "text-[var(--warning)] italic opacity-70" : task.status === "completed" ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>
             {task.status === "dismissed" && <Ban size={12} className="inline mr-1 -mt-0.5" />}
             {task.text}
           </div>
@@ -699,10 +699,10 @@ function TaskCard({
           {/* Dismiss reason */}
           {task.status === "dismissed" && task.dismiss_reason && (
             <div className="mt-1 px-2 py-1 rounded bg-[rgba(240,136,62,0.08)] border border-[rgba(240,136,62,0.15)]">
-              <span className="text-[10px] text-[#F0883E] font-semibold">Dismissed: </span>
-              <span className="text-[10px] text-[#7D8590]">{task.dismiss_reason}</span>
+              <span className="text-[10px] text-[var(--warning)] font-semibold">Dismissed: </span>
+              <span className="text-[10px] text-[var(--text-secondary)]">{task.dismiss_reason}</span>
               {task.dismissed_at && (
-                <span className="text-[10px] text-[#484F58] ml-2">
+                <span className="text-[10px] text-[var(--text-muted)] ml-2">
                   {new Date(task.dismissed_at).toLocaleDateString()}
                 </span>
               )}
@@ -712,13 +712,13 @@ function TaskCard({
           {/* Progress for multi-assignee */}
           {isMulti && (
             <div className="flex items-center gap-2 mt-1">
-              <div className="flex-1 h-1.5 rounded-full bg-[#1E242C] max-w-[100px]">
+              <div className="flex-1 h-1.5 rounded-full bg-[var(--border)] max-w-[100px]">
                 <div className="h-full rounded-full transition-all" style={{
                   width: `${(doneCount / assignees.length) * 100}%`,
-                  background: doneCount === assignees.length ? "#4ADE80" : "#58A6FF",
+                  background: doneCount === assignees.length ? "var(--accent)" : "var(--info)",
                 }} />
               </div>
-              <span className="text-[10px] text-[#484F58]">{doneCount}/{assignees.length}</span>
+              <span className="text-[10px] text-[var(--text-muted)]">{doneCount}/{assignees.length}</span>
             </div>
           )}
 
@@ -726,7 +726,7 @@ function TaskCard({
             <button
               type="button"
               onClick={() => task.conversation?.id && onOpenConversation?.(task.conversation.id)}
-              className="mt-1 flex items-center gap-1 text-xs text-[#58A6FF] hover:text-[#7cc0ff] max-w-full overflow-hidden"
+              className="mt-1 flex items-center gap-1 text-xs text-[var(--info)] hover:text-[var(--info)] max-w-full overflow-hidden"
             >
               <ExternalLink size={12} className="shrink-0" />
               <span className="truncate">
@@ -741,7 +741,7 @@ function TaskCard({
           <button
             type="button"
             onClick={() => onOpenForm?.(task)}
-            className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
+            className="text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
             title="Fill out form"
           >
             <ClipboardCheck size={14} />
@@ -751,33 +751,33 @@ function TaskCard({
               <button
                 type="button"
                 onClick={() => setShowReopenPanel(!showReopenPanel)}
-                className="text-[#7D8590] hover:text-[#4ADE80] transition-colors"
+                className="text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
                 title="Reopen this task"
               >
                 <RotateCcw size={14} />
               </button>
               {showReopenPanel && (
-                <div className="absolute right-0 top-7 z-50 w-64 rounded-xl border border-[#1E242C] bg-[#12161B] p-3 shadow-xl">
-                  <div className="text-[11px] font-semibold text-[#E6EDF3] mb-2">Reopen Task</div>
+                <div className="absolute right-0 top-7 z-50 w-64 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl">
+                  <div className="text-[11px] font-semibold text-[var(--text-primary)] mb-2">Reopen Task</div>
                   <div className="space-y-1.5 mb-3">
                     <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
                       <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "keep"} onChange={() => setReopenDeadlineChoice("keep")}
-                        className="accent-[#4ADE80]" />
+                        className="accent-[var(--accent)]" />
                       Keep deadline{task.due_date ? ` (${task.due_date})` : " (none)"}
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
                       <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "reset"} onChange={() => setReopenDeadlineChoice("reset")}
-                        className="accent-[#4ADE80]" />
+                        className="accent-[var(--accent)]" />
                       Reset to 24hrs from now
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer text-[11px] text-[#C9D1D9]">
                       <input type="radio" name={`reopen-${task.id}`} checked={reopenDeadlineChoice === "custom"} onChange={() => setReopenDeadlineChoice("custom")}
-                        className="accent-[#4ADE80]" />
+                        className="accent-[var(--accent)]" />
                       Set new date
                     </label>
                     {reopenDeadlineChoice === "custom" && (
                       <input type="date" value={reopenCustomDate} onChange={(e) => setReopenCustomDate(e.target.value)}
-                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]" />
+                        className="w-full mt-1 px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] [color-scheme:dark]" />
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -800,12 +800,12 @@ function TaskCard({
                         } catch (e) { console.error(e); }
                         setReopening(false);
                       }}
-                      className="flex-1 px-2 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[10px] font-semibold disabled:opacity-50"
+                      className="flex-1 px-2 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[10px] font-semibold disabled:opacity-50"
                     >
                       {reopening ? "Reopening..." : "Reopen"}
                     </button>
                     <button onClick={() => setShowReopenPanel(false)}
-                      className="px-2 py-1.5 rounded-lg border border-[#1E242C] text-[10px] text-[#7D8590] hover:text-[#E6EDF3]">
+                      className="px-2 py-1.5 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
                       Cancel
                     </button>
                   </div>
@@ -833,7 +833,7 @@ function TaskCard({
                     onRefetch?.();
                   } catch (e) { console.error(e); }
                 }}
-                className="text-[#7D8590] hover:text-[#F0883E] transition-colors"
+                className="text-[var(--text-secondary)] hover:text-[var(--warning)] transition-colors"
                 title="Dismiss — no longer needed"
               >
                 <Ban size={14} />
@@ -845,7 +845,7 @@ function TaskCard({
               type="button"
               onClick={onDelete}
               disabled={deleting}
-              className="text-[#7D8590] hover:text-[#F85149] transition-colors disabled:opacity-50"
+              className="text-[var(--text-secondary)] hover:text-[var(--danger)] transition-colors disabled:opacity-50"
               title="Delete task"
             >
               <Trash2 size={15} />
@@ -872,17 +872,17 @@ function TaskCard({
             }`}
             style={{
               background: member.is_done ? "rgba(74,222,128,0.15)" : "rgba(88,166,255,0.12)",
-              color: member.is_done ? "#4ADE80" : member.color,
+              color: member.is_done ? "var(--accent)" : member.color,
             }}
           >
-            {member.is_done ? <CheckCircle2 size={11} className="text-[#4ADE80]" /> : <User2 size={11} />}
+            {member.is_done ? <CheckCircle2 size={11} className="text-[var(--accent)]" /> : <User2 size={11} />}
             {member.name}
           </button>
         ))}
 
         {task.due_date && (
           <>
-            <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,213,71,0.12)] px-2 py-1 text-[11px] text-[#F5D547]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,213,71,0.12)] px-2 py-1 text-[11px] text-[var(--highlight)]">
               <CalendarDays size={12} />
               {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
             </span>
@@ -895,7 +895,7 @@ function TaskCard({
         )}
 
         {!task.conversation_id && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(74,222,128,0.12)] px-2 py-1 text-[11px] text-[#4ADE80]">
+          <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(74,222,128,0.12)] px-2 py-1 text-[11px] text-[var(--accent)]">
             Standalone
           </span>
         )}
@@ -923,7 +923,7 @@ function TaskCard({
               await onRefetch?.();
             } catch (err) { console.error(err); }
           }}
-          className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
         >
           <option value="todo">📋 To do (my part)</option>
           <option value="in_progress">🔄 In progress (my part)</option>
@@ -933,7 +933,7 @@ function TaskCard({
         <select
           value={task.status}
           onChange={(e) => onStatusChange(task.id, e.target.value as TaskStatus)}
-          className="w-full rounded-lg border border-[#1E242C] bg-[#12161B] px-3 py-2 text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
         >
           {STATUS_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>

@@ -24,7 +24,7 @@ const PROVIDERS = [
   { id: "microsoft_consent", name: "Microsoft 365 / GoDaddy / Outlook", icon: "🟠", color: "#D83B01",
     imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
     help: "Sign in with your Microsoft account. Works with any Microsoft 365, GoDaddy, or Outlook email." },
-  { id: "microsoft_oauth", name: "Microsoft 365 (Azure AD - Admin)", icon: "🟡", color: "#F0883E",
+  { id: "microsoft_oauth", name: "Microsoft 365 (Azure AD - Admin)", icon: "🟡", color: "var(--warning)",
     imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
     help: "Connect via Azure AD app credentials. For accounts where you have admin access." },
   { id: "google_oauth", name: "Gmail / Google Workspace", icon: "🔵", color: "#4285F4",
@@ -39,7 +39,7 @@ const PROVIDERS = [
   { id: "icloud", name: "iCloud", icon: "⚪", color: "#A2AAAD",
     imap_host: "imap.mail.me.com", imap_port: 993, smtp_host: "smtp.mail.me.com", smtp_port: 587,
     help: "Requires an App-Specific Password. Go to appleid.apple.com → Sign-In and Security → App-Specific Passwords." },
-  { id: "imap", name: "IMAP (Other)", icon: "⚙️", color: "#7D8590",
+  { id: "imap", name: "IMAP (Other)", icon: "⚙️", color: "var(--text-secondary)",
     imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 587,
     help: "Enter your email provider's IMAP and SMTP server details manually." },
 ];
@@ -65,8 +65,8 @@ export default function SettingsPage() {
 
   if (status === "loading") {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#0B0E11]">
-        <Loader2 className="w-8 h-8 animate-spin text-[#4ADE80]" />
+      <div className="h-screen w-screen flex items-center justify-center bg-[var(--bg)]">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
       </div>
     );
   }
@@ -80,16 +80,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-screen w-screen flex bg-[#0B0E11] text-[#E6EDF3]">
+    <div className="h-screen w-screen flex bg-[var(--bg)] text-[var(--text-primary)]">
       {/* Sidebar */}
-      <div className="w-[220px] min-w-[220px] border-r border-[#1E242C] flex flex-col">
-        <div className="p-4 border-b border-[#1E242C]">
-          <Link href="/" className="flex items-center gap-2 text-[#7D8590] hover:text-[#E6EDF3] transition-colors text-sm">
+      <div className="w-[220px] min-w-[220px] border-r border-[var(--border)] flex flex-col">
+        <div className="p-4 border-b border-[var(--border)]">
+          <Link href="/" className="flex items-center gap-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-sm">
             <ArrowLeft size={16} /> Back to Inbox
           </Link>
         </div>
         <div className="p-3 flex flex-col gap-0.5">
-          <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest px-3 pb-2">Settings</div>
+          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest px-3 pb-2">Settings</div>
           {TABS.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -97,7 +97,7 @@ export default function SettingsPage() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-all w-full text-left ${
-                  activeTab === tab.id ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#7D8590] hover:bg-[#12161B]"
+                  activeTab === tab.id ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
                 }`}
               >
                 <Icon size={16} />
@@ -165,15 +165,15 @@ function SignatureEditor({
   };
 
   return (
-    <div className="px-4 pb-4 border-t border-[#1E242C]">
+    <div className="px-4 pb-4 border-t border-[var(--border)]">
       <div className="flex items-center justify-between py-3">
-        <div className="text-[12px] font-semibold text-[#7D8590]">Email Signature</div>
+        <div className="text-[12px] font-semibold text-[var(--text-secondary)]">Email Signature</div>
         <label className="flex items-center gap-2 cursor-pointer">
-          <span className="text-[11px] text-[#484F58]">{enabled ? "Enabled" : "Disabled"}</span>
+          <span className="text-[11px] text-[var(--text-muted)]">{enabled ? "Enabled" : "Disabled"}</span>
           <button
             onClick={() => setEnabled(!enabled)}
             className={`w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
-              enabled ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"
+              enabled ? "bg-[var(--accent)] justify-end" : "bg-[var(--border)] justify-start"
             }`}
           >
             <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
@@ -181,24 +181,24 @@ function SignatureEditor({
         </label>
       </div>
 
-      <div className="text-[10px] text-[#484F58] mb-2">
+      <div className="text-[10px] text-[var(--text-muted)] mb-2">
         Write your signature below or paste a rich HTML signature. It will be auto-appended to all outgoing emails from this account.
       </div>
 
-      <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] overflow-hidden">
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
         {/* Mini toolbar */}
-        <div className="flex items-center gap-0.5 px-2 py-1 border-b border-[#161B22] bg-[#0D1117]">
+        <div className="flex items-center gap-0.5 px-2 py-1 border-b border-[var(--surface-2)] bg-[var(--surface)]">
           <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("bold"); }}
-            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] font-bold">B</button>
+            className="w-6 h-6 rounded flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] text-[11px] font-bold">B</button>
           <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("italic"); }}
-            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] italic">I</button>
+            className="w-6 h-6 rounded flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] text-[11px] italic">I</button>
           <button onMouseDown={(e) => { e.preventDefault(); document.execCommand("underline"); }}
-            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[11px] underline">U</button>
-          <div className="w-px h-3 bg-[#1E242C] mx-0.5" />
+            className="w-6 h-6 rounded flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] text-[11px] underline">U</button>
+          <div className="w-px h-3 bg-[var(--border)] mx-0.5" />
           <button onMouseDown={(e) => { e.preventDefault(); const url = prompt("Link URL:"); if (url) document.execCommand("createLink", false, url); }}
-            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[10px]">🔗</button>
+            className="w-6 h-6 rounded flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] text-[10px]">🔗</button>
           <button onMouseDown={(e) => { e.preventDefault(); const url = prompt("Image URL:"); if (url) document.execCommand("insertImage", false, url); }}
-            className="w-6 h-6 rounded flex items-center justify-center text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#1E242C] text-[10px]">🖼</button>
+            className="w-6 h-6 rounded flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] text-[10px]">🖼</button>
         </div>
 
         <div
@@ -214,7 +214,7 @@ function SignatureEditor({
               setImgWidth(String(img.width || img.naturalWidth || 100));
               // Add visual selection
               editorRef.current?.querySelectorAll("img").forEach((i) => i.style.outline = "none");
-              img.style.outline = "2px solid #4ADE80";
+              img.style.outline = "2px solid var(--accent)";
             } else {
               setSelectedImg(null);
               editorRef.current?.querySelectorAll("img").forEach((i) => i.style.outline = "none");
@@ -249,15 +249,15 @@ function SignatureEditor({
             }
           }}
           data-placeholder="Your email signature... (paste images here)"
-          className="px-3 py-2 text-[12px] text-[#E6EDF3] leading-relaxed outline-none min-h-[80px] max-h-[250px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[#484F58] empty:before:pointer-events-none [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:cursor-pointer"
+          className="px-3 py-2 text-[12px] text-[var(--text-primary)] leading-relaxed outline-none min-h-[80px] max-h-[250px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--text-muted)] empty:before:pointer-events-none [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:cursor-pointer"
           style={{ fontFamily: "Arial, sans-serif" }}
         />
       </div>
 
       {/* Image resize controls */}
       {selectedImg && (
-        <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-[#161B22] border border-[#1E242C]">
-          <span className="text-[10px] text-[#484F58] font-semibold">Image size:</span>
+        <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+          <span className="text-[10px] text-[var(--text-muted)] font-semibold">Image size:</span>
           <div className="flex gap-1">
             {[50, 80, 100, 150, 200, 300].map((w) => (
               <button
@@ -271,8 +271,8 @@ function SignatureEditor({
                 }}
                 className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
                   imgWidth === String(w)
-                    ? "bg-[#4ADE80] text-[#0B0E11] font-bold"
-                    : "bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"
+                    ? "bg-[var(--accent)] text-[var(--bg)] font-bold"
+                    : "bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 }`}
               >
                 {w}px
@@ -292,9 +292,9 @@ function SignatureEditor({
                   setSignature(editorRef.current?.innerHTML || "");
                 }
               }}
-              className="w-16 px-1.5 py-0.5 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+              className="w-16 px-1.5 py-0.5 rounded bg-[var(--bg)] border border-[var(--border)] text-[10px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
-            <span className="text-[10px] text-[#484F58]">px</span>
+            <span className="text-[10px] text-[var(--text-muted)]">px</span>
           </div>
           <button
             onMouseDown={(e) => {
@@ -303,7 +303,7 @@ function SignatureEditor({
               setSelectedImg(null);
               setSignature(editorRef.current?.innerHTML || "");
             }}
-            className="ml-auto px-2 py-0.5 rounded text-[10px] text-[#F85149] hover:bg-[rgba(248,81,73,0.1)] transition-colors"
+            className="ml-auto px-2 py-0.5 rounded text-[10px] text-[var(--danger)] hover:bg-[rgba(248,81,73,0.1)] transition-colors"
           >
             Remove
           </button>
@@ -313,20 +313,20 @@ function SignatureEditor({
       {/* Preview */}
       {signature && (
         <div className="mt-2">
-          <div className="text-[10px] text-[#484F58] mb-1">Preview:</div>
+          <div className="text-[10px] text-[var(--text-muted)] mb-1">Preview:</div>
           <div
-            className="px-3 py-2 rounded-lg bg-[#0D1117] border border-[#1E242C] text-[12px] text-[#7D8590]"
+            className="px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[12px] text-[var(--text-secondary)]"
             dangerouslySetInnerHTML={{ __html: signature }}
           />
         </div>
       )}
 
       <div className="flex justify-end gap-2 mt-3">
-        <button onClick={onSaved} className="px-3 py-1.5 rounded-lg text-[11px] text-[#7D8590] border border-[#1E242C] hover:bg-[#1E242C]">Cancel</button>
+        <button onClick={onSaved} className="px-3 py-1.5 rounded-lg text-[11px] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--border)]">Cancel</button>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-semibold disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold disabled:opacity-50"
         >
           {saved ? <><Check size={12} /> Saved!</> : saving ? "Saving..." : "Save Signature"}
         </button>
@@ -416,26 +416,26 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Email Accounts</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Connect shared email accounts your team can access</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Connect shared email accounts your team can access</p>
         </div>
         <button
           onClick={onConnect}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors"
         >
           <Plus size={16} /> Connect Account
         </button>
       </div>
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : accounts.length === 0 ? (
-        <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
-          <Mail className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
+        <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
+          <Mail className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">No email accounts connected</h3>
-          <p className="text-sm text-[#7D8590] mb-6">Connect your first shared email to start receiving messages</p>
+          <p className="text-sm text-[var(--text-secondary)] mb-6">Connect your first shared email to start receiving messages</p>
           <button
             onClick={onConnect}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm"
           >
             <Plus size={16} /> Connect Account
           </button>
@@ -446,7 +446,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
             const provider = PROVIDERS.find((p) => p.id === account.provider);
             const isEditingSig = editingSignatureId === account.id;
             return (
-              <div key={account.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden">
+              <div key={account.id} className="rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
                 <div className="flex items-center gap-4 p-4">
                   <div
                     className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
@@ -458,20 +458,20 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm">{account.name}</span>
                       {account.is_active && !account.sync_error && (
-                        <CheckCircle size={14} className="text-[#4ADE80]" />
+                        <CheckCircle size={14} className="text-[var(--accent)]" />
                       )}
                       {account.sync_error && (
-                        <AlertCircle size={14} className="text-[#F85149]" />
+                        <AlertCircle size={14} className="text-[var(--danger)]" />
                       )}
                     </div>
-                    <div className="text-xs text-[#7D8590]">{account.email}</div>
+                    <div className="text-xs text-[var(--text-secondary)]">{account.email}</div>
                     {account.last_sync_at && (
-                      <div className="text-[10px] text-[#484F58] mt-0.5">
+                      <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
                         Last synced: {new Date(account.last_sync_at).toLocaleString()}
                       </div>
                     )}
                     {account.sync_error && (
-                      <div className="text-[10px] text-[#F85149] mt-0.5">{account.sync_error}</div>
+                      <div className="text-[10px] text-[var(--danger)] mt-0.5">{account.sync_error}</div>
                     )}
                   </div>
                   <div className="flex gap-1">
@@ -479,17 +479,17 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                       onClick={() => setEditingSignatureId(isEditingSig ? null : account.id)}
                       title="Edit signature"
                       className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
-                        isEditingSig ? "text-[#4ADE80] bg-[#1E242C]" : "text-[#7D8590] hover:bg-[#1E242C]"
+                        isEditingSig ? "text-[var(--accent)] bg-[var(--border)]" : "text-[var(--text-secondary)] hover:bg-[var(--border)]"
                       }`}
                     >
                       <FileSignature size={14} />
                     </button>
-                    <button className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:bg-[#1E242C] transition-colors">
+                    <button className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors">
                       <RefreshCw size={14} />
                     </button>
                     <button
                       onClick={() => handleDelete(account.id)}
-                      className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:text-[#F85149] hover:bg-[#1E242C] transition-colors"
+                      className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--border)] transition-colors"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -656,7 +656,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
         smtp_tls: true,
         is_active: true,
         icon: selectedProvider?.icon || "📧",
-        color: selectedProvider?.color || "#4ADE80",
+        color: selectedProvider?.color || "var(--accent)",
       }).select().single();
 
       if (dbError) throw dbError;
@@ -675,18 +675,18 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1E242C]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
           <div>
             <h2 className="text-lg font-bold">
               {step === "provider" ? "Connect Email Account" : `Connect ${selectedProvider?.name}`}
             </h2>
-            <p className="text-xs text-[#7D8590]">
+            <p className="text-xs text-[var(--text-secondary)]">
               {step === "provider" ? "Choose your email provider" : "Enter your account credentials"}
             </p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-md flex items-center justify-center text-[#7D8590] hover:bg-[#1E242C]">
+          <button onClick={onClose} className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--border)]">
             <X size={18} />
           </button>
         </div>
@@ -699,7 +699,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
                 <button
                   key={provider.id}
                   onClick={() => handleSelectProvider(provider)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1E242C] bg-[#0B0E11] hover:border-[#4ADE80] hover:bg-[#0B0E11]/80 transition-all text-left"
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] hover:border-[var(--accent)] hover:bg-[var(--bg)]/80 transition-all text-left"
                 >
                   <span className="text-xl">{provider.icon}</span>
                   <span className="font-medium text-sm">{provider.name}</span>
@@ -712,71 +712,71 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
         {/* Microsoft OAuth - email + optional credentials form */}
         {step === "credentials" && selectedProvider?.id === "microsoft_oauth" && (
           <div className="p-6 space-y-4">
-            <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[#58A6FF] leading-relaxed">
+            <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[var(--info)] leading-relaxed">
               {selectedProvider.help}
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Display Name</label>
+              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Display Name</label>
               <input
                 value={formData.name}
                 onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. Bobber Labs, Support"
-                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Email Address</label>
+              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Email Address</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
                 placeholder="info@yourcompany.com"
-                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)]"
               />
             </div>
 
             {/* Azure AD Credentials - for different tenants */}
-            <div className="border border-[#1E242C] rounded-lg overflow-hidden">
+            <div className="border border-[var(--border)] rounded-lg overflow-hidden">
               <button
                 onClick={() => setFormData((p) => ({ ...p, showAzureCreds: !p.showAzureCreds }))}
-                className="w-full flex items-center justify-between px-3 py-2.5 text-xs text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#12161B] transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] transition-colors"
               >
                 <span>Azure AD Credentials (for different tenant)</span>
                 <ChevronDown size={12} className={formData.showAzureCreds ? "rotate-180 transition-transform" : "transition-transform"} />
               </button>
               {formData.showAzureCreds && (
-                <div className="px-3 pb-3 space-y-3 border-t border-[#1E242C]">
-                  <div className="pt-2 text-[10px] text-[#484F58] leading-relaxed">
+                <div className="px-3 pb-3 space-y-3 border-t border-[var(--border)]">
+                  <div className="pt-2 text-[10px] text-[var(--text-muted)] leading-relaxed">
                     Leave blank to use the default Bobber Labs credentials. Fill in if connecting a mailbox from a different Microsoft 365 tenant.
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Client ID</label>
+                    <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Client ID</label>
                     <input
                       value={formData.ms_client_id || ""}
                       onChange={(e) => setFormData((p) => ({ ...p, ms_client_id: e.target.value }))}
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Tenant ID</label>
+                    <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Tenant ID</label>
                     <input
                       value={formData.ms_tenant_id || ""}
                       onChange={(e) => setFormData((p) => ({ ...p, ms_tenant_id: e.target.value }))}
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-medium text-[#484F58] mb-1">Client Secret</label>
+                    <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Client Secret</label>
                     <input
                       type="password"
                       value={formData.ms_client_secret || ""}
                       onChange={(e) => setFormData((p) => ({ ...p, ms_client_secret: e.target.value }))}
                       placeholder="Secret value from Azure AD"
-                      className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] font-mono"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] font-mono"
                     />
                   </div>
                 </div>
@@ -784,13 +784,13 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {error && (
-              <div className="px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[#F85149]">
+              <div className="px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[var(--danger)]">
                 {error}
               </div>
             )}
 
             {success && (
-              <div className="px-3 py-2 rounded-lg bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-xs text-[#4ADE80] flex items-center gap-2">
+              <div className="px-3 py-2 rounded-lg bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-xs text-[var(--accent)] flex items-center gap-2">
                 <CheckCircle size={14} /> Connected successfully! Syncing emails...
               </div>
             )}
@@ -798,7 +798,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setStep("provider")}
-                className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:bg-[#1E242C] transition-colors"
+                className="px-4 py-2.5 rounded-lg border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors"
               >
                 Back
               </button>
@@ -807,8 +807,8 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
                 disabled={testing || !formData.email}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
                   testing || !formData.email
-                    ? "bg-[#1E242C] text-[#484F58]"
-                    : "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3BC96E]"
+                    ? "bg-[var(--border)] text-[var(--text-muted)]"
+                    : "bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent-strong)]"
                 }`}
               >
                 {testing ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
@@ -822,36 +822,36 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
         {step === "credentials" && selectedProvider && selectedProvider.id !== "microsoft_oauth" && (
           <div className="p-6 space-y-4">
             {/* Provider help text */}
-            <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[#58A6FF] leading-relaxed">
+            <div className="px-3 py-2.5 rounded-lg bg-[rgba(88,166,255,0.08)] border border-[rgba(88,166,255,0.15)] text-xs text-[var(--info)] leading-relaxed">
               {selectedProvider.help}
             </div>
 
             {/* Display Name */}
             <div>
-              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Display Name</label>
+              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Display Name</label>
               <input
                 value={formData.name}
                 onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. Bobber Labs, General Inquiries"
-                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)]"
               />
             </div>
 
             {/* Email */}
             <div>
-              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">Email Address</label>
+              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Email Address</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
                 placeholder="info@bobberlabs.com"
-                className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+                className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)]"
               />
             </div>
 
             {/* Password */}
             <div>
-              <label className="block text-xs font-medium text-[#7D8590] mb-1.5">
+              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
                 {selectedProvider.id === "gmail" || selectedProvider.id === "icloud" ? "App Password" : "Password"}
               </label>
               <div className="relative">
@@ -860,11 +860,11 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
                   value={formData.password}
                   onChange={(e) => setFormData((p) => ({ ...p, password: e.target.value }))}
                   placeholder={selectedProvider.id === "gmail" ? "xxxx xxxx xxxx xxxx" : "••••••••"}
-                  className="w-full px-3 py-2.5 pr-10 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] transition-colors placeholder:text-[#484F58]"
+                  className="w-full px-3 py-2.5 pr-10 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)]"
                 />
                 <button
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#484F58] hover:text-[#7D8590]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                 >
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -873,45 +873,45 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
             {/* IMAP/SMTP for custom provider */}
             {selectedProvider.id === "imap" && (
-              <div className="space-y-3 pt-2 border-t border-[#1E242C]">
-                <div className="text-xs font-medium text-[#7D8590]">Server Settings</div>
+              <div className="space-y-3 pt-2 border-t border-[var(--border)]">
+                <div className="text-xs font-medium text-[var(--text-secondary)]">Server Settings</div>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2">
-                    <label className="block text-[10px] text-[#484F58] mb-1">IMAP Host</label>
+                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">IMAP Host</label>
                     <input
                       value={formData.imap_host}
                       onChange={(e) => setFormData((p) => ({ ...p, imap_host: e.target.value }))}
                       placeholder="imap.example.com"
-                      className="w-full px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                      className="w-full px-2.5 py-2 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-[#484F58] mb-1">Port</label>
+                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">Port</label>
                     <input
                       type="number"
                       value={formData.imap_port}
                       onChange={(e) => setFormData((p) => ({ ...p, imap_port: parseInt(e.target.value) }))}
-                      className="w-full px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                      className="w-full px-2.5 py-2 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2">
-                    <label className="block text-[10px] text-[#484F58] mb-1">SMTP Host</label>
+                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">SMTP Host</label>
                     <input
                       value={formData.smtp_host}
                       onChange={(e) => setFormData((p) => ({ ...p, smtp_host: e.target.value }))}
                       placeholder="smtp.example.com"
-                      className="w-full px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                      className="w-full px-2.5 py-2 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-[#484F58] mb-1">Port</label>
+                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">Port</label>
                     <input
                       type="number"
                       value={formData.smtp_port}
                       onChange={(e) => setFormData((p) => ({ ...p, smtp_port: parseInt(e.target.value) }))}
-                      className="w-full px-2.5 py-2 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                      className="w-full px-2.5 py-2 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                     />
                   </div>
                 </div>
@@ -920,14 +920,14 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
             {/* Error */}
             {error && (
-              <div className="px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[#F85149]">
+              <div className="px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[var(--danger)]">
                 {error}
               </div>
             )}
 
             {/* Success */}
             {success && (
-              <div className="px-3 py-2 rounded-lg bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-xs text-[#4ADE80] flex items-center gap-2">
+              <div className="px-3 py-2 rounded-lg bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-xs text-[var(--accent)] flex items-center gap-2">
                 <CheckCircle size={14} /> Account connected successfully! Redirecting...
               </div>
             )}
@@ -936,7 +936,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setStep("provider")}
-                className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:bg-[#1E242C] transition-colors"
+                className="px-4 py-2.5 rounded-lg border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors"
               >
                 Back
               </button>
@@ -945,8 +945,8 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
                 disabled={testing || !formData.email || !formData.password}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
                   testing || !formData.email || !formData.password
-                    ? "bg-[#1E242C] text-[#484F58]"
-                    : "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3BC96E]"
+                    ? "bg-[var(--border)] text-[var(--text-muted)]"
+                    : "bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent-strong)]"
                 }`}
               >
                 {testing ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
@@ -1095,11 +1095,11 @@ function TeamTab() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Team Members</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Manage who has access to the shared inbox</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Manage who has access to the shared inbox</p>
         </div>
         <button
           onClick={() => { setShowInvite(true); setInviteResult(null); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors"
         >
           <Plus size={16} /> Invite Member
         </button>
@@ -1108,52 +1108,52 @@ function TeamTab() {
       {/* Invite Modal */}
       {showInvite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl p-6">
+          <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold">Invite Team Member</h2>
-              <button onClick={() => setShowInvite(false)} className="text-[#484F58] hover:text-[#7D8590]">
+              <button onClick={() => setShowInvite(false)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                 <X size={18} />
               </button>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Email Address</label>
+                <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1 uppercase tracking-wider">Email Address</label>
                 <input
                   type="email"
                   value={inviteData.email}
                   onChange={(e) => setInviteData((p) => ({ ...p, email: e.target.value }))}
                   placeholder="teammate@trytenkara.com"
-                  className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Full Name</label>
+                <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1 uppercase tracking-wider">Full Name</label>
                 <input
                   value={inviteData.name}
                   onChange={(e) => setInviteData((p) => ({ ...p, name: e.target.value }))}
                   placeholder="Jane Doe"
-                  className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Role</label>
+                  <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1 uppercase tracking-wider">Role</label>
                   <select
                     value={inviteData.role}
                     onChange={(e) => setInviteData((p) => ({ ...p, role: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                    className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                   >
                     <option value="member">Member</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#484F58] mb-1 uppercase tracking-wider">Department</label>
+                  <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1 uppercase tracking-wider">Department</label>
                   <select
                     value={inviteData.department}
                     onChange={(e) => setInviteData((p) => ({ ...p, department: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                    className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                   >
                     {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                   </select>
@@ -1163,8 +1163,8 @@ function TeamTab() {
               {inviteResult && (
                 <div className={`px-3 py-2.5 rounded-lg text-xs flex items-center gap-2 ${
                   inviteResult.success
-                    ? "bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-[#4ADE80]"
-                    : "bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-[#F85149]"
+                    ? "bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-[var(--accent)]"
+                    : "bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-[var(--danger)]"
                 }`}>
                   {inviteResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
                   {inviteResult.message}
@@ -1174,7 +1174,7 @@ function TeamTab() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setShowInvite(false)}
-                  className="px-4 py-2.5 rounded-lg border border-[#1E242C] text-sm text-[#7D8590] hover:bg-[#1E242C] transition-colors"
+                  className="px-4 py-2.5 rounded-lg border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors"
                 >
                   Cancel
                 </button>
@@ -1183,8 +1183,8 @@ function TeamTab() {
                   disabled={inviting || !inviteData.email.trim() || !inviteData.name.trim()}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
                     inviting || !inviteData.email.trim() || !inviteData.name.trim()
-                      ? "bg-[#1E242C] text-[#484F58]"
-                      : "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3BC96E]"
+                      ? "bg-[var(--border)] text-[var(--text-muted)]"
+                      : "bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent-strong)]"
                   }`}
                 >
                   {inviting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
@@ -1192,7 +1192,7 @@ function TeamTab() {
                 </button>
               </div>
 
-              <p className="text-[10px] text-[#484F58] text-center leading-relaxed">
+              <p className="text-[10px] text-[var(--text-muted)] text-center leading-relaxed">
                 An email invitation will be sent. On first sign-in, they choose their own password.
               </p>
             </div>
@@ -1201,14 +1201,14 @@ function TeamTab() {
       )}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
           {/* Active members */}
           {members.filter((m) => m.is_active !== false).map((m) => (
-            <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group">
+            <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] group">
               <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[#0B0E11] flex-shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[var(--bg)] flex-shrink-0"
                 style={{ background: m.color }}
               >
                 {m.initials}
@@ -1217,12 +1217,12 @@ function TeamTab() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{m.name}</span>
                   {!m.password_hash && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(245,213,71,0.12)] text-[#F5D547] uppercase tracking-wider">
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(245,213,71,0.12)] text-[var(--highlight)] uppercase tracking-wider">
                       Pending
                     </span>
                   )}
                 </div>
-                <div className="text-xs text-[#7D8590]">{m.email}</div>
+                <div className="text-xs text-[var(--text-secondary)]">{m.email}</div>
               </div>
 
               {editingId === m.id ? (
@@ -1230,57 +1230,57 @@ function TeamTab() {
                   <select
                     defaultValue={m.department}
                     onChange={(e) => handleUpdateMember(m.id, { department: e.target.value })}
-                    className="px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none"
+                    className="px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[10px] text-[var(--text-primary)] outline-none"
                   >
                     {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                   </select>
                   <select
                     defaultValue={m.role}
                     onChange={(e) => handleUpdateMember(m.id, { role: e.target.value })}
-                    className="px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#E6EDF3] outline-none"
+                    className="px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[10px] text-[var(--text-primary)] outline-none"
                   >
                     <option value="member">Member</option>
                     <option value="admin">Admin</option>
                   </select>
-                  <label className="flex items-center gap-1 text-[10px] text-[#7D8590] cursor-pointer">
+                  <label className="flex items-center gap-1 text-[10px] text-[var(--text-secondary)] cursor-pointer">
                     <input type="checkbox" defaultChecked={m.has_call_skillset}
                       onChange={(e) => handleUpdateMember(m.id, { has_call_skillset: e.target.checked })}
-                      className="accent-[#4ADE80]" />
+                      className="accent-[var(--accent)]" />
                     📞 Caller
                   </label>
-                  <button onClick={() => setEditingId(null)} className="text-[#484F58] hover:text-[#7D8590]">
+                  <button onClick={() => setEditingId(null)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                     <X size={14} />
                   </button>
                 </div>
               ) : (
                 <>
-                  <span className="text-[10px] font-medium text-[#484F58] bg-[#1E242C] px-2 py-1 rounded">{m.department}</span>
+                  <span className="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--border)] px-2 py-1 rounded">{m.department}</span>
                   <span className={`text-[10px] font-bold px-2 py-1 rounded ${
-                    m.role === "admin" ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]" : "bg-[#1E242C] text-[#7D8590]"
+                    m.role === "admin" ? "bg-[rgba(74,222,128,0.12)] text-[var(--accent)]" : "bg-[var(--border)] text-[var(--text-secondary)]"
                   }`}>{m.role}</span>
                   {m.has_call_skillset && (
-                    <span className="text-[10px] font-bold px-2 py-1 rounded bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">📞 Caller</span>
+                    <span className="text-[10px] font-bold px-2 py-1 rounded bg-[rgba(88,166,255,0.12)] text-[var(--info)]">📞 Caller</span>
                   )}
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => setManagingAccessId(managingAccessId === m.id ? null : m.id)}
                       title="Manage account access"
                       className={`px-1.5 py-1 rounded text-[10px] font-semibold transition-all ${
-                        managingAccessId === m.id ? "text-[#58A6FF] bg-[#1E242C]" : "text-[#484F58] hover:text-[#58A6FF] hover:bg-[#1E242C]"
+                        managingAccessId === m.id ? "text-[var(--info)] bg-[var(--border)]" : "text-[var(--text-muted)] hover:text-[var(--info)] hover:bg-[var(--border)]"
                       }`}
                     >
                       <Mail size={13} />
                     </button>
                     <button
                       onClick={() => setEditingId(m.id)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)] transition-all"
                       title="Edit"
                     >
                       <Edit2 size={13} />
                     </button>
                     <button
                       onClick={() => handleDeactivate(m.id, m.name)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)] transition-all"
                       title="Deactivate"
                     >
                       <Trash2 size={13} />
@@ -1291,19 +1291,19 @@ function TeamTab() {
 
               {/* Account Access Panel */}
               {managingAccessId === m.id && (
-                <div className="col-span-full mt-2 pt-2 border-t border-[#1E242C]">
+                <div className="col-span-full mt-2 pt-2 border-t border-[var(--border)]">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                       Email Account Access
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => grantAllAccounts(m.id)}
-                        className="text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold">Grant all</button>
+                        className="text-[10px] text-[var(--accent)] hover:text-[var(--accent-strong)] font-semibold">Grant all</button>
                       <button onClick={() => revokeAllAccounts(m.id)}
-                        className="text-[10px] text-[#F85149] hover:text-[#FF6B6B] font-semibold">Revoke all</button>
+                        className="text-[10px] text-[var(--danger)] hover:text-[#FF6B6B] font-semibold">Revoke all</button>
                     </div>
                   </div>
-                  <div className="text-[10px] text-[#484F58] mb-2">
+                  <div className="text-[10px] text-[var(--text-muted)] mb-2">
                     {(accessMap[m.id] || []).length === 0
                       ? "No restrictions — sees all accounts. Add access to restrict."
                       : `Has access to ${(accessMap[m.id] || []).length} of ${emailAccounts.length} account${emailAccounts.length !== 1 ? "s" : ""}`}
@@ -1314,11 +1314,11 @@ function TeamTab() {
                       return (
                         <button key={acc.id} onClick={() => toggleAccountAccess(m.id, acc.id)}
                           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] text-left transition-all ${
-                            hasAccess ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
+                            hasAccess ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--text-muted)]"
                           }`}>
                           <span className="text-[13px]">{acc.icon || "📬"}</span>
-                          <span style={{ color: hasAccess ? "#4ADE80" : "#7D8590" }}>{acc.name}</span>
-                          {hasAccess && <Check size={11} className="text-[#4ADE80]" />}
+                          <span style={{ color: hasAccess ? "var(--accent)" : "var(--text-secondary)" }}>{acc.name}</span>
+                          {hasAccess && <Check size={11} className="text-[var(--accent)]" />}
                         </button>
                       );
                     })}
@@ -1331,24 +1331,24 @@ function TeamTab() {
           {/* Deactivated members */}
           {members.filter((m) => m.is_active === false).length > 0 && (
             <>
-              <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest pt-4 pb-1 px-1">
+              <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest pt-4 pb-1 px-1">
                 Deactivated
               </div>
               {members.filter((m) => m.is_active === false).map((m) => (
-                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] opacity-50">
+                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] opacity-50">
                   <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[#0B0E11] flex-shrink-0"
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[var(--bg)] flex-shrink-0"
                     style={{ background: m.color }}
                   >
                     {m.initials}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{m.name}</div>
-                    <div className="text-xs text-[#7D8590]">{m.email}</div>
+                    <div className="text-xs text-[var(--text-secondary)]">{m.email}</div>
                   </div>
                   <button
                     onClick={() => handleReactivate(m.id)}
-                    className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-[#1E242C] text-[#7D8590] hover:text-[#4ADE80] hover:bg-[rgba(74,222,128,0.08)] transition-all"
+                    className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[rgba(74,222,128,0.08)] transition-all"
                   >
                     Reactivate
                   </button>
@@ -1364,8 +1364,8 @@ function TeamTab() {
 
 // ── Color Picker Palette ────────────────────────────
 const LABEL_COLORS = [
-  "#4ADE80", "#39D2C0", "#58A6FF", "#BC8CFF", "#F5D547",
-  "#F0883E", "#F85149", "#7D8590", "#FF6B6B", "#48BFE3",
+  "var(--accent)", "#39D2C0", "var(--info)", "#BC8CFF", "var(--highlight)",
+  "var(--warning)", "var(--danger)", "var(--text-secondary)", "#FF6B6B", "#48BFE3",
   "#64DFDF", "#6930C3", "#E0AAFF", "#FFD166", "#06D6A0",
 ];
 
@@ -1377,9 +1377,9 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
           key={c}
           onClick={() => onChange(c)}
           className="w-6 h-6 rounded-md transition-all hover:scale-110 flex items-center justify-center"
-          style={{ background: c, outline: value === c ? "2px solid #E6EDF3" : "none", outlineOffset: "2px" }}
+          style={{ background: c, outline: value === c ? "2px solid var(--text-primary)" : "none", outlineOffset: "2px" }}
         >
-          {value === c && <CheckCircle size={12} className="text-[#0B0E11]" />}
+          {value === c && <CheckCircle size={12} className="text-[var(--bg)]" />}
         </button>
       ))}
     </div>
@@ -1394,7 +1394,7 @@ function LabelsTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   // Tracks which parent we're adding a child under (null = adding top-level)
   const [addingChildOf, setAddingChildOf] = useState<string | null>(null);
-  const [newLabel, setNewLabel] = useState({ name: "", color: "#58A6FF" });
+  const [newLabel, setNewLabel] = useState({ name: "", color: "var(--info)" });
   const [editLabel, setEditLabel] = useState({ name: "", color: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1419,7 +1419,7 @@ function LabelsTab() {
       });
       const data = await res.json();
       if (res.ok) {
-        setNewLabel({ name: "", color: "#58A6FF" });
+        setNewLabel({ name: "", color: "var(--info)" });
         setShowAdd(false);
         setAddingChildOf(null);
         fetchLabels();
@@ -1474,14 +1474,14 @@ function LabelsTab() {
   const startAddingChild = (parentId: string) => {
     setAddingChildOf(parentId);
     setShowAdd(true);
-    setNewLabel({ name: "", color: "#58A6FF" });
+    setNewLabel({ name: "", color: "var(--info)" });
     setError("");
   };
 
   const startAddingTopLevel = () => {
     setAddingChildOf(null);
     setShowAdd(true);
-    setNewLabel({ name: "", color: "#58A6FF" });
+    setNewLabel({ name: "", color: "var(--info)" });
     setError("");
   };
 
@@ -1499,7 +1499,7 @@ function LabelsTab() {
   const renderLabelRow = (l: any, isChild: boolean) => (
     <div
       key={l.id}
-      className={`flex items-center gap-3 p-3 rounded-xl bg-[#12161B] border border-[#1E242C] group ${isChild ? "ml-6" : ""}`}
+      className={`flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] group ${isChild ? "ml-6" : ""}`}
     >
       {editingId === l.id ? (
         /* Editing mode */
@@ -1510,7 +1510,7 @@ function LabelsTab() {
               onChange={(e) => setEditLabel((p) => ({ ...p, name: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(l.id); if (e.key === "Escape") setEditingId(null); }}
               autoFocus
-              className="flex-1 px-3 py-1.5 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+              className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
             <span
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold whitespace-nowrap"
@@ -1521,13 +1521,13 @@ function LabelsTab() {
             </span>
           </div>
           <ColorPicker value={editLabel.color} onChange={(c) => setEditLabel((p) => ({ ...p, color: c }))} />
-          {error && <div className="text-[#F85149] text-xs">{error}</div>}
+          {error && <div className="text-[var(--danger)] text-xs">{error}</div>}
           <div className="flex gap-2">
-            <button onClick={() => { setEditingId(null); setError(""); }} className="px-3 py-1 rounded text-xs text-[#7D8590] border border-[#1E242C]">Cancel</button>
+            <button onClick={() => { setEditingId(null); setError(""); }} className="px-3 py-1 rounded text-xs text-[var(--text-secondary)] border border-[var(--border)]">Cancel</button>
             <button
               onClick={() => handleUpdate(l.id)}
               disabled={saving || !editLabel.name.trim()}
-              className="px-3 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
+              className="px-3 py-1 rounded bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -1536,7 +1536,7 @@ function LabelsTab() {
       ) : (
         /* Display mode */
         <>
-          {isChild && <span className="text-[#484F58] text-xs select-none">└─</span>}
+          {isChild && <span className="text-[var(--text-muted)] text-xs select-none">└─</span>}
           <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: l.color }} />
           <span className="text-sm font-medium flex-1">{l.name}</span>
           <span
@@ -1549,7 +1549,7 @@ function LabelsTab() {
             {!isChild && (
               <button
                 onClick={() => startAddingChild(l.id)}
-                className="p-1 rounded text-[#484F58] hover:text-[#4ADE80] hover:bg-[#1E242C] transition-all"
+                className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--border)] transition-all"
                 title="Add child label"
               >
                 <Plus size={13} />
@@ -1557,14 +1557,14 @@ function LabelsTab() {
             )}
             <button
               onClick={() => startEditing(l)}
-              className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all"
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)] transition-all"
               title="Edit"
             >
               <Edit2 size={13} />
             </button>
             <button
               onClick={() => handleDelete(l.id, l.name)}
-              className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all"
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)] transition-all"
               title="Delete"
             >
               <Trash2 size={13} />
@@ -1580,11 +1580,11 @@ function LabelsTab() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Labels</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Create and manage labels to organize conversations. Top-level labels can have child labels (one level of nesting).</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Create and manage labels to organize conversations. Top-level labels can have child labels (one level of nesting).</p>
         </div>
         <button
           onClick={startAddingTopLevel}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors"
         >
           <Plus size={16} /> New Label
         </button>
@@ -1592,8 +1592,8 @@ function LabelsTab() {
 
       {/* Add new label form */}
       {showAdd && (
-        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
-          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">
+        <div className="mb-6 p-4 rounded-xl bg-[var(--surface)] border border-[var(--accent)]/30 animate-fade-in">
+          <div className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-3">
             {addingChildOf
               ? `New child label under "${labels.find((l) => l.id === addingChildOf)?.name || ""}"`
               : "New top-level label"}
@@ -1606,7 +1606,7 @@ function LabelsTab() {
                 placeholder="Label name..."
                 autoFocus
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
               />
             </div>
             <span
@@ -1618,16 +1618,16 @@ function LabelsTab() {
             </span>
           </div>
           <div className="mb-3">
-            <div className="text-[10px] text-[#484F58] mb-1.5">Color</div>
+            <div className="text-[10px] text-[var(--text-muted)] mb-1.5">Color</div>
             <ColorPicker value={newLabel.color} onChange={(c) => setNewLabel((p) => ({ ...p, color: c }))} />
           </div>
-          {error && <div className="text-[#F85149] text-xs mb-2">{error}</div>}
+          {error && <div className="text-[var(--danger)] text-xs mb-2">{error}</div>}
           <div className="flex gap-2">
-            <button onClick={() => { setShowAdd(false); setAddingChildOf(null); setError(""); }} className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+            <button onClick={() => { setShowAdd(false); setAddingChildOf(null); setError(""); }} className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
             <button
               onClick={handleAdd}
               disabled={saving || !newLabel.name.trim()}
-              className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40"
+              className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40"
             >
               {saving ? "Creating..." : "Create Label"}
             </button>
@@ -1636,7 +1636,7 @@ function LabelsTab() {
       )}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
           {topLevelLabels.map((l) => (
@@ -1647,13 +1647,13 @@ function LabelsTab() {
           ))}
 
           {labels.length === 0 && !showAdd && (
-            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
-              <Tag className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
+            <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
+              <Tag className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No labels yet</h3>
-              <p className="text-sm text-[#7D8590] mb-4">Create labels to organize your conversations</p>
+              <p className="text-sm text-[var(--text-secondary)] mb-4">Create labels to organize your conversations</p>
               <button
                 onClick={startAddingTopLevel}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm"
               >
                 <Plus size={16} /> Create First Label
               </button>
@@ -2057,7 +2057,7 @@ function RulesTab() {
     if (t === "add_label" || t === "remove_label") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">Select label...</option>
           {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
         </select>
@@ -2082,23 +2082,23 @@ function RulesTab() {
           {/* Mode selector */}
           <div className="flex gap-1 flex-wrap">
             <button onClick={() => updateAction(idx, { value: "" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${!isAuto && !isInitiator ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              className={`px-2 py-1 rounded text-[10px] font-medium ${!isAuto && !isInitiator ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-secondary)] border border-[var(--border)]"}`}>
               Specific person</button>
             <button onClick={() => updateAction(idx, { value: "auto:random:all" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${isAuto ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              className={`px-2 py-1 rounded text-[10px] font-medium ${isAuto ? "bg-[var(--info)]/12 text-[var(--info)] border border-[var(--info)]/30" : "text-[var(--text-secondary)] border border-[var(--border)]"}`}>
               Auto-assign</button>
             <button onClick={() => updateAction(idx, { value: "__initiator__" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${isInitiator ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30" : "text-[#7D8590] border border-[#1E242C]"}`}
+              className={`px-2 py-1 rounded text-[10px] font-medium ${isInitiator ? "bg-[var(--warning)]/12 text-[var(--warning)] border border-[var(--warning)]/30" : "text-[var(--text-secondary)] border border-[var(--border)]"}`}
               title="Assign to the user who triggered the event (only works for event-based rules)">
               Action initiator</button>
           </div>
           {isInitiator ? (
-            <div className="text-[10px] text-[#7D8590] italic py-1">
+            <div className="text-[10px] text-[var(--text-secondary)] italic py-1">
               Conversation will be assigned to whoever triggered the rule (only fires for event-based triggers: label changes, comments, assignment changes, etc.).
             </div>
           ) : !isAuto ? (
             <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
               <option value="">Select member...</option>
               {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
@@ -2106,7 +2106,7 @@ function RulesTab() {
             <div className="flex flex-col gap-1.5">
               {/* Strategy */}
               <select value={autoStrategy} onChange={(e) => updateAction(idx, { value: buildAutoValue(e.target.value, autoPool, autoExtra) })}
-                className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="random">Random</option>
                 <option value="round_robin">Round Robin</option>
                 <option value="least_conversations">Least Open Conversations</option>
@@ -2114,14 +2114,14 @@ function RulesTab() {
               </select>
               {/* Pool: all or group */}
               <select value={autoPool} onChange={(e) => updateAction(idx, { value: buildAutoValue(autoStrategy, e.target.value, autoExtra) })}
-                className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="all">From: All members</option>
                 {userGroups.map((g) => <option key={g.id} value={g.id}>From: {g.name}</option>)}
               </select>
               {/* Extra: task category (only for least_tasks) */}
               {autoStrategy === "least_tasks" && (
                 <select value={autoExtra} onChange={(e) => updateAction(idx, { value: buildAutoValue(autoStrategy, autoPool, e.target.value) })}
-                  className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                  className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                   <option value="all">Count: All task categories</option>
                   {taskCategories.map((c) => <option key={c.id} value={c.id}>Count: {c.name} tasks only</option>)}
                 </select>
@@ -2134,7 +2134,7 @@ function RulesTab() {
     if (t === "move_to_folder") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">Select folder...</option>
           {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
         </select>
@@ -2143,7 +2143,7 @@ function RulesTab() {
     if (t === "set_status") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="open">Open</option>
           <option value="closed">Closed</option>
           <option value="snoozed">Snoozed</option>
@@ -2154,7 +2154,7 @@ function RulesTab() {
       return (
         <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
           placeholder="Note text..."
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       );
     }
     if (t === "add_task") {
@@ -2162,13 +2162,13 @@ function RulesTab() {
         <div className="flex-1 space-y-1.5">
           <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
             placeholder="Task description..."
-            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            className="w-full px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
           <input value={(action as any).task_description || ""} onChange={(e) => updateAction(idx, { task_description: e.target.value } as any)}
             placeholder="Description (optional)"
-            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            className="w-full px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
           <div className="flex items-center gap-2">
             <select value={(action as any).task_assignee_mode || ""} onChange={(e) => updateAction(idx, { task_assignee_mode: e.target.value } as any)}
-              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
               <option value="">No assignees</option>
               <option value="assigned_users">Assigned users</option>
               <option value="all">Everyone</option>
@@ -2177,19 +2177,19 @@ function RulesTab() {
             </select>
             {(action as any).task_assignee_mode === "specific" && (
               <select multiple value={(action as any).task_assignee_ids || []} onChange={(e) => updateAction(idx, { task_assignee_ids: Array.from(e.target.selectedOptions, o => o.value) } as any)}
-                className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] max-h-20">
+                className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] max-h-20">
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#7D8590]">Due in</span>
+            <span className="text-[10px] text-[var(--text-secondary)]">Due in</span>
             <input type="number" min="0" value={(action as any).task_due_days || ""} onChange={(e) => updateAction(idx, { task_due_days: parseInt(e.target.value) || 0 } as any)}
-              placeholder="Days" className="w-16 px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
-            <span className="text-[10px] text-[#7D8590]">days</span>
+              placeholder="Days" className="w-16 px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
+            <span className="text-[10px] text-[var(--text-secondary)]">days</span>
             <input type="number" min="0" value={(action as any).task_due_hours || ""} onChange={(e) => updateAction(idx, { task_due_hours: parseInt(e.target.value) || 0 } as any)}
-              placeholder="Hours" className="w-16 px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
-            <span className="text-[10px] text-[#7D8590]">hours</span>
+              placeholder="Hours" className="w-16 px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
+            <span className="text-[10px] text-[var(--text-secondary)]">hours</span>
           </div>
         </div>
       );
@@ -2199,21 +2199,21 @@ function RulesTab() {
         <div className="flex-1 space-y-1.5">
           <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
             placeholder="https://example.com/webhook"
-            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+            className="w-full px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
           <input value={(action as any).webhook_secret || ""} onChange={(e) => updateAction(idx, { webhook_secret: e.target.value } as any)}
             placeholder="Signature secret (optional)"
-            className="w-full px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
-          <label className="flex items-center gap-1.5 text-[10px] text-[#7D8590] cursor-pointer">
+            className="w-full px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
+          <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-secondary)] cursor-pointer">
             <input type="checkbox" checked={(action as any).webhook_run_once || false} onChange={(e) => updateAction(idx, { webhook_run_once: e.target.checked } as any)}
-              className="rounded border-[#1E242C]" />
+              className="rounded border-[var(--border)]" />
             Run only once per message
           </label>
-          <div className="text-[9px] text-[#484F58]">URL will receive POST requests with JSON payloads.</div>
+          <div className="text-[9px] text-[var(--text-muted)]">URL will receive POST requests with JSON payloads.</div>
         </div>
       );
     }
     if (t === "assign_sender") {
-      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation will be assigned to the message sender.</div>;
+      return <div className="flex-1 text-[10px] text-[var(--text-secondary)] italic py-1">Conversation will be assigned to the message sender.</div>;
     }
     if (t === "unassign_all") {
       const exceptInitiator = action.value === "__except_initiator__";
@@ -2221,13 +2221,13 @@ function RulesTab() {
         <div className="flex-1 flex flex-col gap-1.5">
           <div className="flex gap-1">
             <button onClick={() => updateAction(idx, { value: "" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${!exceptInitiator ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              className={`px-2 py-1 rounded text-[10px] font-medium ${!exceptInitiator ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-secondary)] border border-[var(--border)]"}`}>
               Always unassign</button>
             <button onClick={() => updateAction(idx, { value: "__except_initiator__" })}
-              className={`px-2 py-1 rounded text-[10px] font-medium ${exceptInitiator ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30" : "text-[#7D8590] border border-[#1E242C]"}`}>
+              className={`px-2 py-1 rounded text-[10px] font-medium ${exceptInitiator ? "bg-[var(--warning)]/12 text-[var(--warning)] border border-[var(--warning)]/30" : "text-[var(--text-secondary)] border border-[var(--border)]"}`}>
               Keep initiator</button>
           </div>
-          <div className="text-[10px] text-[#7D8590] italic">
+          <div className="text-[10px] text-[var(--text-secondary)] italic">
             {exceptInitiator
               ? "Unassign unless the current assignee is the user who triggered the rule."
               : "Clear the conversation's assignee."}
@@ -2236,18 +2236,18 @@ function RulesTab() {
       );
     }
     if (t === "close_conversation") {
-      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Conversation status will be set to closed.</div>;
+      return <div className="flex-1 text-[10px] text-[var(--text-secondary)] italic py-1">Conversation status will be set to closed.</div>;
     }
     if (t === "mark_as_spam") {
-      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Marks the conversation as spam and stops processing further rules in the chain.</div>;
+      return <div className="flex-1 text-[10px] text-[var(--text-secondary)] italic py-1">Marks the conversation as spam and stops processing further rules in the chain.</div>;
     }
     if (t === "discard_snooze") {
-      return <div className="flex-1 text-[10px] text-[#7D8590] italic py-1">Wakes up the conversation if it's currently snoozed (no-op otherwise).</div>;
+      return <div className="flex-1 text-[10px] text-[var(--text-secondary)] italic py-1">Wakes up the conversation if it's currently snoozed (no-op otherwise).</div>;
     }
     if (t === "add_watcher" || t === "remove_watcher") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">Select user...</option>
           <option value="__initiator__">Action initiator (event rules)</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2257,7 +2257,7 @@ function RulesTab() {
     if (t === "send_follow_up" || t === "create_draft" || t === "send_auto_reply") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">Select email template...</option>
           {emailTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` — ${t.subject}` : ""}</option>)}
         </select>
@@ -2266,7 +2266,7 @@ function RulesTab() {
     if (t === "notify_assignee") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="assignee">Notify assignee</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
@@ -2275,7 +2275,7 @@ function RulesTab() {
     if (t === "create_task_template") {
       return (
         <select value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">Select task template...</option>
           {taskTemplates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
@@ -2285,14 +2285,14 @@ function RulesTab() {
       return (
         <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
           placeholder="forward-to@example.com"
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       );
     }
     if (t === "slack_notify") {
       return (
         <input value={action.value} onChange={(e) => updateAction(idx, { value: e.target.value })}
           placeholder="Slack webhook URL (leave empty for default)"
-          className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       );
     }
     return null;
@@ -2318,13 +2318,13 @@ function RulesTab() {
         value={formName}
         onChange={(e) => setFormName(e.target.value)}
         placeholder="Rule name (e.g. 'Auto-label RFQ emails')"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
       />
 
       {/* Triggers on — only visible under User Action tab */}
       {activeTrigger === "user_action" && (
-        <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-          <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Triggers on</div>
+        <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Triggers on</div>
           <div className="flex flex-wrap gap-1.5">
             {USER_ACTION_SUBTYPES.map((sub) => (
               <button
@@ -2333,30 +2333,30 @@ function RulesTab() {
                 title={sub.description}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
                   formSubTrigger === sub.value
-                    ? "bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30"
-                    : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                    ? "bg-[var(--warning)]/12 text-[var(--warning)] border border-[var(--warning)]/30"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]"
                 }`}
               >
                 <span className="mr-1">{sub.icon}</span>{sub.label}
               </button>
             ))}
           </div>
-          <div className="text-[10px] text-[#484F58] mt-1.5">
+          <div className="text-[10px] text-[var(--text-muted)] mt-1.5">
             {USER_ACTION_SUBTYPES.find((s) => s.value === formSubTrigger)?.description}
           </div>
         </div>
       )}
 
       {/* Account scope */}
-      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Applies to</div>
+      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+        <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Applies to</div>
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => setFormAccountIds([])}
             className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
               formAccountIds.length === 0
-                ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30"
-                : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]"
             }`}
           >All Accounts</button>
           {emailAccounts.map((acc) => (
@@ -2371,28 +2371,28 @@ function RulesTab() {
               }}
               className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
                 formAccountIds.includes(acc.id)
-                  ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30"
-                  : "text-[#7D8590] hover:text-[#E6EDF3] border border-[#1E242C]"
+                  ? "bg-[var(--info)]/12 text-[var(--info)] border border-[var(--info)]/30"
+                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]"
               }`}
             >{acc.name || acc.email}</button>
           ))}
         </div>
         {formAccountIds.length > 0 && (
-          <div className="text-[10px] text-[#484F58] mt-1.5">
+          <div className="text-[10px] text-[var(--text-muted)] mt-1.5">
             This rule will only apply to conversations from {formAccountIds.length} selected account{formAccountIds.length > 1 ? "s" : ""}
           </div>
         )}
       </div>
 
       {/* Conditions */}
-      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
         <div className="flex items-center gap-2 mb-2">
-          <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Conditions</div>
+          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Conditions</div>
           <div className="flex-1" />
           <select
             value={formMatchMode}
             onChange={(e) => setFormMatchMode(e.target.value as any)}
-            className="px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-[10px] font-semibold text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+            className="px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[10px] font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           >
             <option value="all">All must match</option>
             <option value="any">At least one matches</option>
@@ -2403,18 +2403,18 @@ function RulesTab() {
         {formConditions.map((item, idx) => (
           isGroup(item) ? (
             /* ── Nested Condition Group ── */
-            <div key={idx} className="mb-2 ml-4 p-2.5 rounded-lg border border-[#1E242C] bg-[#12161B]/50 relative">
+            <div key={idx} className="mb-2 ml-4 p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)]/50 relative">
               <div className="flex items-center gap-2 mb-2">
                 <select value={item.match_mode} onChange={(e) => updateGroupMatchMode(idx, e.target.value as any)}
-                  className="px-2 py-1 rounded-md bg-[#12161B] border border-[#1E242C] text-[10px] font-semibold text-[#58A6FF] outline-none focus:border-[#4ADE80]">
+                  className="px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[10px] font-semibold text-[var(--info)] outline-none focus:border-[var(--accent)]">
                   <option value="all">All must match</option>
                   <option value="any">At least one matches</option>
                   <option value="none">None must match</option>
                 </select>
-                <span className="text-[9px] text-[#484F58]">of these {item.conditions.length} conditions</span>
+                <span className="text-[9px] text-[var(--text-muted)]">of these {item.conditions.length} conditions</span>
                 <div className="flex-1" />
                 <button onClick={() => removeCondition(idx)}
-                  className="p-1 rounded text-[#484F58] hover:text-[#F85149] transition-colors" title="Remove group">
+                  className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors" title="Remove group">
                   <Trash2 size={12} />
                 </button>
               </div>
@@ -2422,93 +2422,93 @@ function RulesTab() {
                 !isGroup(subItem) ? (
                   <div key={subIdx} className="flex gap-1.5 mb-1.5 items-center">
                     <select value={subItem.field} onChange={(e) => updateConditionInGroup(idx, subIdx, { field: e.target.value })}
-                      className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                      className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                       {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                     </select>
                     <select value={subItem.operator} onChange={(e) => updateConditionInGroup(idx, subIdx, { operator: e.target.value })}
-                      className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                      className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                       {CONDITION_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                     {subItem.field === "assignee_is_ooo" || subItem.field === "has_attachments" ? (
-                      <span className="text-[10px] text-[#484F58] px-2 flex-1">(use Is true / Is false)</span>
+                      <span className="text-[10px] text-[var(--text-muted)] px-2 flex-1">(use Is true / Is false)</span>
                     ) : subItem.operator === "is_present" || subItem.operator === "is_absent" ? (
-                      <span className="text-[10px] text-[#484F58] px-2 flex-1">(no value needed)</span>
+                      <span className="text-[10px] text-[var(--text-muted)] px-2 flex-1">(no value needed)</span>
                     ) : subItem.field === "action_initiator" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Any user</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     ) : subItem.field === "added_assignee" || subItem.field === "removed_assignee" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Any user</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     ) : subItem.field === "comment_mention" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Any mention</option>
                         <option value="@everyone">@everyone</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     ) : subItem.field === "watching_user" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Any watcher</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     ) : subItem.field === "new_team" || subItem.field === "previous_team" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select team / folder...</option>
                         {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
                       </select>
                     ) : subItem.field === "comment_type" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select...</option>
                         <option value="note">Note</option>
                         <option value="task">Task</option>
                       </select>
                     ) : subItem.field === "added_label_name" || subItem.field === "removed_label_name" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select label...</option>
                         {labels.map((l) => <option key={l.id} value={l.name}>{labelDisplay(l)}</option>)}
                       </select>
                     ) : subItem.field === "has_label" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select label...</option>
                         {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
                       </select>
                     ) : subItem.field === "assignee" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select...</option>
                         <option value="__unassigned__">Unassigned</option>
                         {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                     ) : subItem.field === "email_account" ? (
                       <select value={subItem.value} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                        className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                         <option value="">Select...</option>
                         {emailAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.email})</option>)}
                       </select>
                     ) : (
                       <input value={subItem.value || ""} onChange={(e) => updateConditionInGroup(idx, subIdx, { value: e.target.value })}
-                        placeholder="Value..." className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                        placeholder="Value..." className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
                     )}
                     <button onClick={() => removeConditionFromGroup(idx, subIdx)} disabled={item.conditions.length <= 1}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove"><Trash2 size={12} /></button>
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-30 transition-colors" title="Remove"><Trash2 size={12} /></button>
                   </div>
                 ) : (
-                  <div key={subIdx} className="text-[9px] text-[#484F58] italic py-1">Deeply nested groups must be edited via API</div>
+                  <div key={subIdx} className="text-[9px] text-[var(--text-muted)] italic py-1">Deeply nested groups must be edited via API</div>
                 )
               ))}
               <button onClick={() => addConditionToGroup(idx)}
-                className="flex items-center gap-1 text-[9px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold mt-1 transition-colors">
+                className="flex items-center gap-1 text-[9px] text-[var(--info)] hover:text-[var(--info)] font-semibold mt-1 transition-colors">
                 <Plus size={10} /> Add condition to group
               </button>
             </div>
@@ -2518,11 +2518,11 @@ function RulesTab() {
             /* ── Flat Condition Row ── */
             <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
             <select value={cond.field} onChange={(e) => updateCondition(idx, { field: e.target.value })}
-              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
               {CONDITION_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
             <select value={cond.operator} onChange={(e) => updateCondition(idx, { operator: e.target.value })}
-              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
               {CONDITION_OPERATORS.filter((o) => {
                 // Filter operators based on field type
                 const boolFields = ["has_attachments", "has_reply", "assignee_is_ooo"];
@@ -2543,83 +2543,83 @@ function RulesTab() {
             </select>
             {/* Smart value input based on field type */}
             {cond.field === "has_attachments" ? (
-              <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+              <span className="text-[10px] text-[var(--text-muted)] px-2">(no value needed)</span>
             ) : cond.field === "assignee_is_ooo" ? (
-              <span className="text-[10px] text-[#484F58] px-2">(use Is true / Is false)</span>
+              <span className="text-[10px] text-[var(--text-muted)] px-2">(use Is true / Is false)</span>
             ) : cond.operator === "is_present" || cond.operator === "is_absent" ? (
-              <span className="text-[10px] text-[#484F58] px-2">(no value needed)</span>
+              <span className="text-[10px] text-[var(--text-muted)] px-2">(no value needed)</span>
             ) : cond.field === "action_initiator" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Any user (just checks presence)</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "added_assignee" || cond.field === "removed_assignee" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Any user (just checks presence)</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "comment_mention" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Any mention (just checks presence)</option>
                 <option value="@everyone">@everyone</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "watching_user" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Any watcher (just checks presence)</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "new_team" || cond.field === "previous_team" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select team / folder...</option>
                 {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
               </select>
             ) : cond.field === "comment_type" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select type...</option>
                 <option value="note">Note</option>
                 <option value="task">Task</option>
               </select>
             ) : cond.field === "added_label_name" || cond.field === "removed_label_name" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select label (or leave empty for any)...</option>
                 {labels.map((l) => <option key={l.id} value={l.name}>{labelDisplay(l)}</option>)}
               </select>
             ) : cond.field === "email_account" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select account...</option>
                 {emailAccounts.map((a) => <option key={a.id} value={a.id}>{a.name || a.email}</option>)}
               </select>
             ) : cond.field === "assignee" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select member...</option>
                 <option value="__unassigned__">Unassigned</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             ) : cond.field === "folder" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select folder...</option>
                 {allFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
               </select>
             ) : cond.field === "has_label" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="">Select label...</option>
                 {labels.map((l) => <option key={l.id} value={l.id}>{labelDisplay(l)}</option>)}
               </select>
             ) : cond.field === "conversation_status" ? (
               <select value={cond.value} onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                 <option value="open">Open</option>
                 <option value="closed">Closed</option>
                 <option value="snoozed">Snoozed</option>
@@ -2636,7 +2636,7 @@ function RulesTab() {
                   type="number"
                   min="0"
                   step="any"
-                  className="flex-1 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="flex-1 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
                 <select
                   value={(cond.value || "").split(":")[1] || "days"}
@@ -2644,7 +2644,7 @@ function RulesTab() {
                     const num = (cond.value || "").split(":")[0] || "0";
                     updateCondition(idx, { value: `${num}:${e.target.value}` });
                   }}
-                  className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                  className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                 >
                   <option value="minutes">Minutes</option>
                   <option value="hours">Hours</option>
@@ -2653,7 +2653,7 @@ function RulesTab() {
               </div>
             ) : cond.field === "delay" ? (
               <div className="flex-1 flex gap-1.5 items-center min-w-[150px]">
-                <span className="text-[10px] text-[#7D8590]">Days:</span>
+                <span className="text-[10px] text-[var(--text-secondary)]">Days:</span>
                 <input
                   value={(() => { const m = (cond.value || "").match(/(\d+)\s*d/); return m ? m[1] : (cond.value || "").match(/^\d+$/) ? cond.value : ""; })()}
                   onChange={(e) => {
@@ -2663,9 +2663,9 @@ function RulesTab() {
                     updateCondition(idx, { value: `${d}d${hm ? ` ${hm[1]}h` : ""}${mm ? ` ${mm[1]}m` : ""}`.trim() });
                   }}
                   type="number" min="0" placeholder="7"
-                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
-                <span className="text-[10px] text-[#7D8590]">Hours:</span>
+                <span className="text-[10px] text-[var(--text-secondary)]">Hours:</span>
                 <input
                   value={(() => { const m = (cond.value || "").match(/(\d+)\s*h/); return m ? m[1] : ""; })()}
                   onChange={(e) => {
@@ -2675,9 +2675,9 @@ function RulesTab() {
                     updateCondition(idx, { value: `${d}d${e.target.value ? ` ${e.target.value}h` : ""}${mm ? ` ${mm[1]}m` : ""}`.trim() });
                   }}
                   type="number" min="0" placeholder="0"
-                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
-                <span className="text-[10px] text-[#7D8590]">Minutes:</span>
+                <span className="text-[10px] text-[var(--text-secondary)]">Minutes:</span>
                 <input
                   value={(() => { const m = (cond.value || "").match(/(\d+)\s*m/); return m ? m[1] : ""; })()}
                   onChange={(e) => {
@@ -2687,7 +2687,7 @@ function RulesTab() {
                     updateCondition(idx, { value: `${d}d${hm ? ` ${hm[1]}h` : ""}${e.target.value ? ` ${e.target.value}m` : ""}`.trim() });
                   }}
                   type="number" min="0" placeholder="0"
-                  className="w-14 px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-14 px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
               </div>
             ) : (
@@ -2696,7 +2696,7 @@ function RulesTab() {
                 onChange={(e) => updateCondition(idx, { value: e.target.value })}
                 placeholder={["message_count", "follow_up_count"].includes(cond.field) ? "Number..." : "Value..."}
                 type={["message_count", "follow_up_count"].includes(cond.field) ? "number" : "text"}
-                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                className="flex-1 min-w-[100px] px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
               />
             )}
             <button
@@ -2704,14 +2704,14 @@ function RulesTab() {
               title={cond.required ? "Required — must match" : "Optional — click to make required"}
               className={`px-1.5 py-1 rounded-md text-[9px] font-bold transition-all shrink-0 ${
                 cond.required
-                  ? "bg-[rgba(248,81,73,0.12)] text-[#F85149] border border-[rgba(248,81,73,0.3)]"
-                  : "bg-[#12161B] text-[#484F58] border border-[#1E242C] hover:text-[#7D8590]"
+                  ? "bg-[rgba(248,81,73,0.12)] text-[var(--danger)] border border-[rgba(248,81,73,0.3)]"
+                  : "bg-[var(--surface)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
               }`}
             >
               {cond.required ? "REQ" : "OPT"}
             </button>
             <button onClick={() => removeCondition(idx)} disabled={formConditions.length <= 1}
-              className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove">
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-30 transition-colors" title="Remove">
               <Trash2 size={12} />
             </button>
           </div>
@@ -2720,47 +2720,47 @@ function RulesTab() {
         ))}
         <div className="flex items-center gap-3 mt-1">
           <button onClick={addCondition}
-            className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors">
+            className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[var(--accent-strong)] font-semibold transition-colors">
             <Plus size={11} /> Condition
           </button>
           <button onClick={addConditionGroup}
-            className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#7cc0ff] font-semibold transition-colors">
+            className="flex items-center gap-1 text-[10px] text-[var(--info)] hover:text-[var(--info)] font-semibold transition-colors">
             <Plus size={11} /> Condition group
           </button>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider mb-2">Actions</div>
+      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+        <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">Actions</div>
 
         {formActions.map((act, idx) => (
           <div key={idx} className="flex gap-1.5 mb-1.5 items-center">
             <select value={act.type} onChange={(e) => updateAction(idx, { type: e.target.value, value: "" })}
-              className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+              className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
               {ACTION_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
             </select>
             {renderActionValue(act, idx)}
             <button onClick={() => removeAction(idx)} disabled={formActions.length <= 1}
-              className="p-1 rounded text-[#484F58] hover:text-[#F85149] disabled:opacity-30 transition-colors" title="Remove">
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-30 transition-colors" title="Remove">
               <Trash2 size={12} />
             </button>
           </div>
         ))}
         <button onClick={addAction}
-          className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold mt-1 transition-colors">
+          className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[var(--accent-strong)] font-semibold mt-1 transition-colors">
           <Plus size={11} /> Add action
         </button>
       </div>
 
-      {error && <div className="text-[#F85149] text-xs">{error}</div>}
+      {error && <div className="text-[var(--danger)] text-xs">{error}</div>}
 
       <div className="flex gap-2">
         <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
-          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+          className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
         <button onClick={() => isEdit && ruleId ? handleUpdate(ruleId) : handleAdd()}
           disabled={saving || !formName.trim()}
-          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40">
           {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Rule"}
         </button>
       </div>
@@ -2812,18 +2812,18 @@ function RulesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Rules</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Automate actions based on email events</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Automate actions based on email events</p>
         </div>
         <button
           onClick={() => { resetForm(); setShowAdd(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors"
         >
           <Plus size={16} /> New Rule
         </button>
       </div>
 
       {/* Trigger type tabs */}
-      <div className="flex gap-1 mb-6 p-1 rounded-lg bg-[#12161B] border border-[#1E242C]">
+      <div className="flex gap-1 mb-6 p-1 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
         {TRIGGER_TYPES.map((t) => {
           const count = rules.filter((r) => {
             const rt = r.trigger_type || "incoming";
@@ -2833,33 +2833,33 @@ function RulesTab() {
           return (
             <button key={t.value} onClick={() => setActiveTrigger(t.value)}
               className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-[12px] font-semibold transition-all ${
-                activeTrigger === t.value ? "bg-[#1E242C] text-[#E6EDF3] shadow-sm" : "text-[#7D8590] hover:text-[#E6EDF3]"
+                activeTrigger === t.value ? "bg-[var(--border)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}>
               <span>{t.icon}</span><span>{t.label}</span>
-              {count > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${activeTrigger === t.value ? "bg-[#4ADE80] text-[#0B0E11]" : "bg-[#1E242C] text-[#484F58]"}`}>{count}</span>}
+              {count > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${activeTrigger === t.value ? "bg-[var(--accent)] text-[var(--bg)]" : "bg-[var(--border)] text-[var(--text-muted)]"}`}>{count}</span>}
             </button>
           );
         })}
       </div>
 
-      <div className="text-[11px] text-[#484F58] mb-4">
+      <div className="text-[11px] text-[var(--text-muted)] mb-4">
         {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.description}
       </div>
 
       {/* Account filter */}
-      <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-[#12161B] border border-[#1E242C]">
-        <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider shrink-0">Filter by account:</span>
+      <div className="flex items-center gap-2 mb-4 p-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
+        <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider shrink-0">Filter by account:</span>
         <div className="flex flex-wrap gap-1">
           <button onClick={() => setFilterAccountId("")}
             className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
-              !filterAccountId ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+              !filterAccountId ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"
             }`}>All ({rules.length})</button>
           {emailAccounts.map((acc) => {
             const accRuleCount = rules.filter((r) => r.account_ids?.includes(acc.id)).length;
             return (
               <button key={acc.id} onClick={() => setFilterAccountId(filterAccountId === acc.id ? "" : acc.id)}
                 className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
-                  filterAccountId === acc.id ? "bg-[#58A6FF]/12 text-[#58A6FF] border border-[#58A6FF]/30" : "text-[#7D8590] border border-[#1E242C] hover:text-[#E6EDF3]"
+                  filterAccountId === acc.id ? "bg-[var(--info)]/12 text-[var(--info)] border border-[var(--info)]/30" : "text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]"
                 }`}>{acc.name || acc.email} ({accRuleCount})</button>
             );
           })}
@@ -2868,23 +2868,23 @@ function RulesTab() {
 
       {/* Account summary */}
       {filterAccountId && (
-        <div className="mb-4 p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-          <div className="text-xs font-semibold text-[#E6EDF3] mb-2">
+        <div className="mb-4 p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+          <div className="text-xs font-semibold text-[var(--text-primary)] mb-2">
             Rules for {emailAccounts.find((a) => a.id === filterAccountId)?.name || "this account"}
           </div>
           <div className="flex gap-4 text-[11px]">
-            <div><span className="text-[#58A6FF] font-bold">{scopedCount}</span> <span className="text-[#484F58]">scoped to this account</span></div>
-            <div><span className="text-[#7D8590] font-bold">{globalCount}</span> <span className="text-[#484F58]">global (all accounts)</span></div>
-            <div><span className="text-[#4ADE80] font-bold">{filteredRules.filter((r) => r.is_active).length}</span> <span className="text-[#484F58]">active</span></div>
-            <div><span className="text-[#F85149] font-bold">{filteredRules.filter((r) => !r.is_active).length}</span> <span className="text-[#484F58]">disabled</span></div>
+            <div><span className="text-[var(--info)] font-bold">{scopedCount}</span> <span className="text-[var(--text-muted)]">scoped to this account</span></div>
+            <div><span className="text-[var(--text-secondary)] font-bold">{globalCount}</span> <span className="text-[var(--text-muted)]">global (all accounts)</span></div>
+            <div><span className="text-[var(--accent)] font-bold">{filteredRules.filter((r) => r.is_active).length}</span> <span className="text-[var(--text-muted)]">active</span></div>
+            <div><span className="text-[var(--danger)] font-bold">{filteredRules.filter((r) => !r.is_active).length}</span> <span className="text-[var(--text-muted)]">disabled</span></div>
           </div>
         </div>
       )}
 
       {/* Add form */}
       {showAdd && (
-        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30 animate-fade-in">
-          <div className="text-xs font-bold text-[#484F58] uppercase tracking-wider mb-3">
+        <div className="mb-6 p-4 rounded-xl bg-[var(--surface)] border border-[var(--accent)]/30 animate-fade-in">
+          <div className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-3">
             New {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label} Rule
           </div>
           {renderForm(false)}
@@ -2892,58 +2892,58 @@ function RulesTab() {
       )}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
           {filteredRules.map((r) => {
             const { conds, acts, modeLabel } = getRuleSummary(r);
 
             return (
-              <div key={r.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
+              <div key={r.id} className={`p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] group transition-opacity ${r.is_active ? "" : "opacity-50"}`}>
                 {editingId === r.id ? (
                   renderForm(true, r.id)
                 ) : (
                   <div className="flex items-start gap-3">
                     {/* Toggle */}
                     <button onClick={() => handleToggle(r.id, r.is_active)}
-                      className={`mt-0.5 w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${r.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"}`}>
+                      className={`mt-0.5 w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${r.is_active ? "bg-[var(--accent)] justify-end" : "bg-[var(--border)] justify-start"}`}>
                       <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
                     </button>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <div className="text-sm font-medium text-[#E6EDF3]">{r.name}</div>
+                        <div className="text-sm font-medium text-[var(--text-primary)]">{r.name}</div>
                         {EVENT_TRIGGER_TYPES.has(r.trigger_type) && (() => {
                           const sub = USER_ACTION_SUBTYPES.find((s) => s.value === r.trigger_type);
                           return sub ? (
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#D9822B]/12 text-[#D9822B] border border-[#D9822B]/30">
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--warning)]/12 text-[var(--warning)] border border-[var(--warning)]/30">
                               {sub.icon} {sub.label}
                             </span>
                           ) : null;
                         })()}
                         {r.account_ids && r.account_ids.length > 0 ? (
-                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--info)]/10 text-[var(--info)] border border-[var(--info)]/20">
                             {r.account_ids.map((id: string) => emailAccounts.find((a) => a.id === id)?.name || "?").join(", ")}
                           </span>
                         ) : (
-                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#1E242C] text-[#484F58]">All accounts</span>
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--border)] text-[var(--text-muted)]">All accounts</span>
                         )}
                       </div>
 
                       {/* Conditions summary */}
-                      <div className="text-[11px] text-[#7D8590] leading-relaxed mb-0.5">
-                        <span className="text-[10px] font-bold text-[#484F58] bg-[#1E242C] px-1.5 py-0.5 rounded mr-1">{modeLabel}</span>
+                      <div className="text-[11px] text-[var(--text-secondary)] leading-relaxed mb-0.5">
+                        <span className="text-[10px] font-bold text-[var(--text-muted)] bg-[var(--border)] px-1.5 py-0.5 rounded mr-1">{modeLabel}</span>
                         {conds.map((c: any, i: number) => (
                           <span key={i}>
-                            {i > 0 && <span className="text-[#484F58]"> · </span>}
+                            {i > 0 && <span className="text-[var(--text-muted)]"> · </span>}
                             {isGroup(c) ? (
-                              <span className="text-[#F5D547]">[{c.match_mode === "any" ? "Any" : c.match_mode === "none" ? "None" : "All"} of {c.conditions?.length || 0}]</span>
+                              <span className="text-[var(--highlight)]">[{c.match_mode === "any" ? "Any" : c.match_mode === "none" ? "None" : "All"} of {c.conditions?.length || 0}]</span>
                             ) : (
                               <>
-                                {c.required && <span className="text-[8px] font-bold text-[#F85149] bg-[rgba(248,81,73,0.12)] px-1 py-0.5 rounded mr-0.5">REQ</span>}
-                                <span className="text-[#58A6FF]">{CONDITION_FIELDS.find((f: any) => f.value === c.field)?.label}</span>{" "}
-                                <span className="text-[#484F58]">{CONDITION_OPERATORS.find((o: any) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
-                                <span className="text-[#E6EDF3]">"{c.value}"</span>
+                                {c.required && <span className="text-[8px] font-bold text-[var(--danger)] bg-[rgba(248,81,73,0.12)] px-1 py-0.5 rounded mr-0.5">REQ</span>}
+                                <span className="text-[var(--info)]">{CONDITION_FIELDS.find((f: any) => f.value === c.field)?.label}</span>{" "}
+                                <span className="text-[var(--text-muted)]">{CONDITION_OPERATORS.find((o: any) => o.value === c.operator)?.label?.toLowerCase()}</span>{" "}
+                                <span className="text-[var(--text-primary)]">"{c.value}"</span>
                               </>
                             )}
                           </span>
@@ -2952,11 +2952,11 @@ function RulesTab() {
 
                       {/* Actions summary */}
                       <div className="text-[11px]">
-                        <span className="text-[#484F58]">→ </span>
+                        <span className="text-[var(--text-muted)]">→ </span>
                         {acts.map((a, i) => (
                           <span key={i}>
-                            {i > 0 && <span className="text-[#484F58]">, </span>}
-                            <span className="text-[#4ADE80]">{ACTION_TYPES.find((at) => at.value === a.type)?.label}</span>
+                            {i > 0 && <span className="text-[var(--text-muted)]">, </span>}
+                            <span className="text-[var(--accent)]">{ACTION_TYPES.find((at) => at.value === a.type)?.label}</span>
                             {a.value && <span className="text-[#BC8CFF]"> {getActionLabel(a.type, a.value)}</span>}
                           </span>
                         ))}
@@ -2965,11 +2965,11 @@ function RulesTab() {
 
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => { setEditingId(r.id); loadRuleIntoForm(r); }}
-                        className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] transition-all">
+                        className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)] transition-all">
                         <Edit2 size={13} />
                       </button>
                       <button onClick={() => handleDelete(r.id, r.name)}
-                        className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-all">
+                        className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)] transition-all">
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -2980,12 +2980,12 @@ function RulesTab() {
           })}
 
           {filteredRules.length === 0 && !showAdd && (
-            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
-              <Zap className="w-12 h-12 text-[#484F58] mx-auto mb-4" />
+            <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
+              <Zap className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No {TRIGGER_TYPES.find((t) => t.value === activeTrigger)?.label?.toLowerCase()} rules yet</h3>
-              <p className="text-sm text-[#7D8590] mb-4">Create rules to auto-label, assign, or organize emails</p>
+              <p className="text-sm text-[var(--text-secondary)] mb-4">Create rules to auto-label, assign, or organize emails</p>
               <button onClick={() => { resetForm(); setShowAdd(true); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
                 <Plus size={16} /> Create First Rule
               </button>
             </div>
@@ -2996,7 +2996,7 @@ function RulesTab() {
   );
 }
 // ── User Groups Tab ─────────────────────────────────
-const GROUP_COLORS = ["#58A6FF", "#4ADE80", "#F0883E", "#BC8CFF", "#F5D547", "#F85149", "#39D2C0", "#E6EDF3"];
+const GROUP_COLORS = ["var(--info)", "var(--accent)", "var(--warning)", "#BC8CFF", "var(--highlight)", "var(--danger)", "#39D2C0", "var(--text-primary)"];
 const GROUP_ICONS = ["👥", "🏢", "🔧", "📦", "💼", "🎯", "⚡", "🌐"];
 
 function UserGroupsTab() {
@@ -3008,7 +3008,7 @@ function UserGroupsTab() {
   const [managingId, setManagingId] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formDesc, setFormDesc] = useState("");
-  const [formColor, setFormColor] = useState("#58A6FF");
+  const [formColor, setFormColor] = useState("var(--info)");
   const [formIcon, setFormIcon] = useState("👥");
 
   const fetchGroups = async () => {
@@ -3023,7 +3023,7 @@ function UserGroupsTab() {
 
   useEffect(() => { fetchGroups(); }, []);
 
-  const resetForm = () => { setFormName(""); setFormDesc(""); setFormColor("#58A6FF"); setFormIcon("👥"); };
+  const resetForm = () => { setFormName(""); setFormDesc(""); setFormColor("var(--info)"); setFormIcon("👥"); };
 
   const handleAdd = async () => {
     if (!formName.trim()) return;
@@ -3058,25 +3058,25 @@ function UserGroupsTab() {
   const getGroupMembers = (group: any) => (group.user_group_members || []).map((m: any) => m.team_member).filter(Boolean);
 
   const renderForm = (isEdit: boolean, groupId?: string) => (
-    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+    <div className="space-y-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
       <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Group name (e.g. Operations Team, Sales Team)"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Description (optional)"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       <div className="flex gap-4">
         <div>
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Icon</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Icon</div>
           <div className="flex flex-wrap gap-1">
             {GROUP_ICONS.map((icon) => (
               <button key={icon} onClick={() => setFormIcon(icon)}
-                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[16px] transition-all ${formIcon === icon ? "bg-[#1E242C] ring-2 ring-[#4ADE80]" : "hover:bg-[#1E242C]"}`}>
+                className={`w-8 h-8 rounded-lg flex items-center justify-center text-[16px] transition-all ${formIcon === icon ? "bg-[var(--border)] ring-2 ring-[var(--accent)]" : "hover:bg-[var(--border)]"}`}>
                 {icon}
               </button>
             ))}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Color</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Color</div>
           <div className="flex flex-wrap gap-1">
             {GROUP_COLORS.map((c) => (
               <button key={c} onClick={() => setFormColor(c)}
@@ -3086,15 +3086,15 @@ function UserGroupsTab() {
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
           <span className="text-[16px]">{formIcon}</span>
           <span className="text-[12px] font-semibold" style={{ color: formColor }}>{formName || "Preview"}</span>
         </div>
         <div className="flex-1" />
         <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
-          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+          className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
         <button onClick={() => isEdit && groupId ? handleUpdate(groupId) : handleAdd()} disabled={!formName.trim()}
-          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40">
           {isEdit ? "Save" : "Create"}
         </button>
       </div>
@@ -3106,10 +3106,10 @@ function UserGroupsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">User Groups</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Create groups to quickly assign tasks to teams</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Create groups to quickly assign tasks to teams</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)]">
           <Plus size={16} /> New Group
         </button>
       </div>
@@ -3117,7 +3117,7 @@ function UserGroupsTab() {
       {showAdd && <div className="mb-4">{renderForm(false)}</div>}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <div className="space-y-3">
           {groups.map((group) => {
@@ -3125,25 +3125,25 @@ function UserGroupsTab() {
             if (editingId === group.id) return <div key={group.id}>{renderForm(true, group.id)}</div>;
 
             return (
-              <div key={group.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden">
+              <div key={group.id} className="rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
                 <div className="flex items-center gap-3 p-4 group">
                   <span className="text-[20px]">{group.icon}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold" style={{ color: group.color }}>{group.name}</div>
-                    {group.description && <div className="text-[11px] text-[#484F58]">{group.description}</div>}
+                    {group.description && <div className="text-[11px] text-[var(--text-muted)]">{group.description}</div>}
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className="text-[11px] text-[#484F58] mr-2">{members.length} member{members.length !== 1 ? "s" : ""}</span>
+                    <span className="text-[11px] text-[var(--text-muted)] mr-2">{members.length} member{members.length !== 1 ? "s" : ""}</span>
                     <button onClick={() => setManagingId(managingId === group.id ? null : group.id)}
-                      className="px-2 py-1 rounded text-[11px] text-[#58A6FF] hover:bg-[#1E242C] font-semibold">
+                      className="px-2 py-1 rounded text-[11px] text-[var(--info)] hover:bg-[var(--border)] font-semibold">
                       {managingId === group.id ? "Done" : "Manage"}
                     </button>
                     <button onClick={() => startEdit(group)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C] opacity-0 group-hover:opacity-100 transition-opacity">
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)] opacity-0 group-hover:opacity-100 transition-opacity">
                       <Edit2 size={13} />
                     </button>
                     <button onClick={() => handleDelete(group.id, group.name)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover:opacity-100 transition-opacity">
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)] opacity-0 group-hover:opacity-100 transition-opacity">
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -3155,7 +3155,7 @@ function UserGroupsTab() {
                     {members.map((m: any) => (
                       <span key={m.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]"
                         style={{ background: `${m.color}20`, color: m.color }}>
-                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
+                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]" style={{ background: m.color }}>{m.initials}</span>
                         {m.name}
                       </span>
                     ))}
@@ -3164,8 +3164,8 @@ function UserGroupsTab() {
 
                 {/* Manage members panel */}
                 {managingId === group.id && (
-                  <div className="px-4 pb-4 border-t border-[#1E242C] pt-3">
-                    <div className="text-[10px] text-[#484F58] font-semibold mb-2">
+                  <div className="px-4 pb-4 border-t border-[var(--border)] pt-3">
+                    <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-2">
                       Toggle members:
                       <button onClick={async () => {
                         const currentIds = new Set(members.map((m: any) => m.id));
@@ -3181,7 +3181,7 @@ function UserGroupsTab() {
                           }
                         }
                         fetchGroups();
-                      }} className="ml-2 text-[#58A6FF] hover:text-[#79B8FF]">
+                      }} className="ml-2 text-[var(--info)] hover:text-[#79B8FF]">
                         {members.length === teamMembers.length ? "Remove all" : "Add all"}
                       </button>
                     </div>
@@ -3191,11 +3191,11 @@ function UserGroupsTab() {
                         return (
                           <button key={m.id} onClick={() => toggleMember(group.id, m.id, isMember)}
                             className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] text-left transition-all ${
-                              isMember ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[#0B0E11] border border-[#1E242C] hover:border-[#484F58]"
+                              isMember ? "bg-[rgba(74,222,128,0.1)] border border-[rgba(74,222,128,0.3)]" : "bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--text-muted)]"
                             }`}>
-                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[#0B0E11] shrink-0" style={{ background: m.color }}>{m.initials}</span>
-                            <span className="flex-1 truncate" style={{ color: isMember ? "#4ADE80" : "#7D8590" }}>{m.name}</span>
-                            {isMember && <Check size={12} className="text-[#4ADE80] shrink-0" />}
+                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-[var(--bg)] shrink-0" style={{ background: m.color }}>{m.initials}</span>
+                            <span className="flex-1 truncate" style={{ color: isMember ? "var(--accent)" : "var(--text-secondary)" }}>{m.name}</span>
+                            {isMember && <Check size={12} className="text-[var(--accent)] shrink-0" />}
                           </button>
                         );
                       })}
@@ -3206,11 +3206,11 @@ function UserGroupsTab() {
             );
           })}
           {groups.length === 0 && !showAdd && (
-            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+            <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
               <h3 className="text-lg font-semibold mb-2">No user groups yet</h3>
-              <p className="text-sm text-[#7D8590] mb-4">Create groups like &quot;Operations Team&quot; or &quot;Sales Team&quot; to assign tasks faster</p>
+              <p className="text-sm text-[var(--text-secondary)] mb-4">Create groups like &quot;Operations Team&quot; or &quot;Sales Team&quot; to assign tasks faster</p>
               <button onClick={() => { resetForm(); setShowAdd(true); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
                 <Plus size={16} /> Create First Group
               </button>
             </div>
@@ -3223,8 +3223,8 @@ function UserGroupsTab() {
 
 // ── Task Categories Tab ─────────────────────────────
 const CATEGORY_COLORS = [
-  "#4ADE80", "#58A6FF", "#F0883E", "#BC8CFF", "#F5D547",
-  "#F85149", "#39D2C0", "#7D8590", "#E6EDF3", "#D83B01",
+  "var(--accent)", "var(--info)", "var(--warning)", "#BC8CFF", "var(--highlight)",
+  "var(--danger)", "#39D2C0", "var(--text-secondary)", "var(--text-primary)", "#D83B01",
 ];
 const CATEGORY_ICONS = ["📋", "📞", "🔍", "↩️", "📄", "✅", "⚡", "🎯", "💼", "🔔", "📊", "🛠️"];
 
@@ -3234,7 +3234,7 @@ function TaskCategoriesTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
-  const [formColor, setFormColor] = useState("#58A6FF");
+  const [formColor, setFormColor] = useState("var(--info)");
   const [formIcon, setFormIcon] = useState("📋");
 
   const fetchCategories = () => {
@@ -3244,7 +3244,7 @@ function TaskCategoriesTab() {
 
   useEffect(() => { fetchCategories(); }, []);
 
-  const resetForm = () => { setFormName(""); setFormColor("#58A6FF"); setFormIcon("📋"); };
+  const resetForm = () => { setFormName(""); setFormColor("var(--info)"); setFormIcon("📋"); };
 
   const handleAdd = async () => {
     if (!formName.trim()) return;
@@ -3278,25 +3278,25 @@ function TaskCategoriesTab() {
   };
 
   const renderForm = (isEdit: boolean, catId?: string) => (
-    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+    <div className="space-y-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
       <input value={formName} onChange={(e) => setFormName(e.target.value)}
         placeholder="Category name (e.g. Call Task, Research Task)"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       <div className="flex gap-4">
         <div>
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Icon</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Icon</div>
           <div className="flex flex-wrap gap-1">
             {CATEGORY_ICONS.map((icon) => (
               <button key={icon} onClick={() => setFormIcon(icon)}
                 className={`w-8 h-8 rounded-lg flex items-center justify-center text-[16px] transition-all ${
-                  formIcon === icon ? "bg-[#1E242C] ring-2 ring-[#4ADE80]" : "hover:bg-[#1E242C]"}`}>
+                  formIcon === icon ? "bg-[var(--border)] ring-2 ring-[var(--accent)]" : "hover:bg-[var(--border)]"}`}>
                 {icon}
               </button>
             ))}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Color</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Color</div>
           <div className="flex flex-wrap gap-1">
             {CATEGORY_COLORS.map((c) => (
               <button key={c} onClick={() => setFormColor(c)}
@@ -3308,16 +3308,16 @@ function TaskCategoriesTab() {
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#0B0E11]">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
           <span className="text-[16px]">{formIcon}</span>
           <span className="text-[12px] font-semibold" style={{ color: formColor }}>{formName || "Preview"}</span>
         </div>
         <div className="flex-1" />
         <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
-          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+          className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
         <button onClick={() => isEdit && catId ? handleUpdate(catId) : handleAdd()}
           disabled={!formName.trim()}
-          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40">
           {isEdit ? "Save" : "Create"}
         </button>
       </div>
@@ -3329,10 +3329,10 @@ function TaskCategoriesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Task Categories</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Define categories to organize and classify tasks</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Define categories to organize and classify tasks</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)]">
           <Plus size={16} /> New Category
         </button>
       </div>
@@ -3340,28 +3340,28 @@ function TaskCategoriesTab() {
       {showAdd && <div className="mb-4">{renderForm(false)}</div>}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <div className="space-y-2">
           {categories.map((cat) => (
             editingId === cat.id ? (
               <div key={cat.id}>{renderForm(true, cat.id)}</div>
             ) : (
-              <div key={cat.id} className={`flex items-center gap-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C] group transition-opacity ${cat.is_active ? "" : "opacity-50"}`}>
+              <div key={cat.id} className={`flex items-center gap-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] group transition-opacity ${cat.is_active ? "" : "opacity-50"}`}>
                 <button onClick={() => handleToggle(cat.id, cat.is_active)}
                   className={`w-8 h-[18px] rounded-full flex items-center transition-all flex-shrink-0 ${
-                    cat.is_active ? "bg-[#4ADE80] justify-end" : "bg-[#1E242C] justify-start"}`}>
+                    cat.is_active ? "bg-[var(--accent)] justify-end" : "bg-[var(--border)] justify-start"}`}>
                   <div className="w-3.5 h-3.5 rounded-full bg-white mx-0.5 shadow-sm" />
                 </button>
                 <span className="text-[18px]">{cat.icon}</span>
                 <span className="text-sm font-semibold flex-1" style={{ color: cat.color }}>{cat.name}</span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={() => startEdit(cat)}
-                    className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C]">
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)]">
                     <Edit2 size={13} />
                   </button>
                   <button onClick={() => handleDelete(cat.id, cat.name)}
-                    className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)]">
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)]">
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -3369,11 +3369,11 @@ function TaskCategoriesTab() {
             )
           ))}
           {categories.length === 0 && !showAdd && (
-            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+            <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
               <h3 className="text-lg font-semibold mb-2">No task categories yet</h3>
-              <p className="text-sm text-[#7D8590] mb-4">Create categories to organize tasks</p>
+              <p className="text-sm text-[var(--text-secondary)] mb-4">Create categories to organize tasks</p>
               <button onClick={() => { resetForm(); setShowAdd(true); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
                 <Plus size={16} /> Create First Category
               </button>
             </div>
@@ -3460,30 +3460,30 @@ function TaskTemplatesTab() {
   };
 
   const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name || "";
-  const getCategoryColor = (id: string) => categories.find((c) => c.id === id)?.color || "#484F58";
+  const getCategoryColor = (id: string) => categories.find((c) => c.id === id)?.color || "var(--text-muted)";
   const getCategoryIcon = (id: string) => categories.find((c) => c.id === id)?.icon || "";
   const getMemberName = (id: string) => teamMembers.find((m) => m.id === id)?.name || "Unknown";
 
   const renderForm = (isEdit: boolean, tplId?: string) => (
-    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+    <div className="space-y-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
       <div>
-        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Template Name</div>
+        <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Template Name</div>
         <input value={formName} onChange={(e) => setFormName(e.target.value)}
           placeholder="e.g., Call Supplier, Follow Up Quote"
-          className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       </div>
       <div>
-        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Task Text (pre-filled when used)</div>
+        <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Task Text (pre-filled when used)</div>
         <textarea value={formText} onChange={(e) => setFormText(e.target.value)}
           placeholder="What needs to be done?"
           rows={2}
-          className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       </div>
       <div className="flex gap-3">
         <div className="flex-1">
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Category</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Category</div>
           <select value={formCategoryId} onChange={(e) => setFormCategoryId(e.target.value)}
-            className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 text-[12px] text-[var(--text-primary)] outline-none">
             <option value="">None</option>
             {categories.map((cat) => (
               <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
@@ -3491,9 +3491,9 @@ function TaskTemplatesTab() {
           </select>
         </div>
         <div className="w-40">
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Start Within (hours)</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Start Within (hours)</div>
           <select value={formDeadlineHours} onChange={(e) => setFormDeadlineHours(e.target.value)}
-            className="w-full h-9 rounded-lg border border-[#1E242C] bg-[#0B0E11] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 text-[12px] text-[var(--text-primary)] outline-none">
             <option value="">No limit</option>
             <option value="1">1 hour</option>
             <option value="2">2 hours</option>
@@ -3508,36 +3508,36 @@ function TaskTemplatesTab() {
         </div>
       </div>
       <div>
-        <div className="text-[10px] text-[#484F58] font-semibold mb-1.5">Default Assignees</div>
-        <div className="rounded-lg border border-[#1E242C] bg-[#0B0E11] p-2 space-y-1 max-h-32 overflow-y-auto">
+        <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Default Assignees</div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2 space-y-1 max-h-32 overflow-y-auto">
           {teamMembers.map((member) => {
             const checked = formAssigneeIds.includes(member.id);
             return (
-              <label key={member.id} className="flex items-center gap-2 text-[12px] text-[#E6EDF3] px-1 py-0.5 rounded hover:bg-[#1E242C] cursor-pointer">
+              <label key={member.id} className="flex items-center gap-2 text-[12px] text-[var(--text-primary)] px-1 py-0.5 rounded hover:bg-[var(--border)] cursor-pointer">
                 <input type="checkbox" checked={checked}
                   onChange={(e) => {
                     setFormAssigneeIds((prev) =>
                       e.target.checked ? [...prev, member.id] : prev.filter((id) => id !== member.id)
                     );
                   }}
-                  className="accent-[#4ADE80]" />
-                <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[#0B0E11]"
+                  className="accent-[var(--accent)]" />
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)]"
                   style={{ background: member.color }}>{member.initials}</div>
                 {member.name}
               </label>
             );
           })}
         </div>
-        <div className="text-[9px] text-[#484F58] mt-1">Assignees will be filtered by account access when the template is used.</div>
+        <div className="text-[9px] text-[var(--text-muted)] mt-1">Assignees will be filtered by account access when the template is used.</div>
       </div>
       <div className="flex gap-2">
         <button onClick={() => handleSave(isEdit ? tplId : undefined)}
           disabled={!formName.trim()}
-          className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm disabled:opacity-50">
+          className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm disabled:opacity-50">
           {isEdit ? "Save Changes" : "Create Template"}
         </button>
         <button onClick={() => { resetForm(); setShowAdd(false); setEditingId(null); }}
-          className="px-4 py-2 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:text-[#E6EDF3]">
+          className="px-4 py-2 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:text-[var(--text-primary)]">
           Cancel
         </button>
       </div>
@@ -3549,18 +3549,18 @@ function TaskTemplatesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold">Task Templates</h2>
-          <p className="text-sm text-[#484F58]">Create reusable task templates with pre-filled text, category, deadline, and assignees</p>
+          <p className="text-sm text-[var(--text-muted)]">Create reusable task templates with pre-filled text, category, deadline, and assignees</p>
         </div>
         {!showAdd && (
           <button onClick={() => { resetForm(); setShowAdd(true); }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
             <Plus size={16} /> New Template
           </button>
         )}
       </div>
 
       {loading ? (
-        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <>
           {showAdd && renderForm(false)}
@@ -3572,11 +3572,11 @@ function TaskTemplatesTab() {
                   <div key={tpl.id}>{renderForm(true, tpl.id)}</div>
                 ) : (
                   <div key={tpl.id} className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${
-                    tpl.is_active !== false ? "border-[#1E242C] bg-[#0F1318]" : "border-[#1E242C]/50 bg-[#0B0E11] opacity-60"
+                    tpl.is_active !== false ? "border-[var(--border)] bg-[var(--surface)]" : "border-[var(--border)]/50 bg-[var(--bg)] opacity-60"
                   }`}>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[14px] font-semibold text-[#E6EDF3]">{tpl.name}</div>
-                      {tpl.text && <div className="text-[12px] text-[#7D8590] mt-0.5 truncate">{tpl.text}</div>}
+                      <div className="text-[14px] font-semibold text-[var(--text-primary)]">{tpl.name}</div>
+                      {tpl.text && <div className="text-[12px] text-[var(--text-secondary)] mt-0.5 truncate">{tpl.text}</div>}
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         {tpl.category_id && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
@@ -3585,12 +3585,12 @@ function TaskTemplatesTab() {
                           </span>
                         )}
                         {tpl.deadline_hours && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[rgba(245,213,71,0.12)] text-[#F5D547]">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[rgba(245,213,71,0.12)] text-[var(--highlight)]">
                             Start within {tpl.deadline_hours}h
                           </span>
                         )}
                         {(tpl.assignee_ids || []).length > 0 && (
-                          <span className="text-[10px] text-[#484F58]">
+                          <span className="text-[10px] text-[var(--text-muted)]">
                             Assignees: {(tpl.assignee_ids || []).map((id: string) => getMemberName(id)).join(", ")}
                           </span>
                         )}
@@ -3599,16 +3599,16 @@ function TaskTemplatesTab() {
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button onClick={() => handleToggle(tpl.id, tpl.is_active !== false)}
                         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                          tpl.is_active !== false ? "text-[#4ADE80] hover:bg-[#4ADE80]/10" : "text-[#484F58] hover:bg-[#1E242C]"
+                          tpl.is_active !== false ? "text-[var(--accent)] hover:bg-[var(--accent)]/10" : "text-[var(--text-muted)] hover:bg-[var(--border)]"
                         }`} title={tpl.is_active !== false ? "Disable" : "Enable"}>
                         {tpl.is_active !== false ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                       <button onClick={() => startEdit(tpl)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#484F58] hover:text-[#58A6FF] hover:bg-[#58A6FF]/10">
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--info)] hover:bg-[var(--info)]/10">
                         <Edit2 size={14} />
                       </button>
                       <button onClick={() => handleDelete(tpl.id, tpl.name)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#484F58] hover:text-[#F85149] hover:bg-[#F85149]/10">
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10">
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -3617,11 +3617,11 @@ function TaskTemplatesTab() {
               ))}
             </div>
           ) : !showAdd && (
-            <div className="text-center py-16 border border-dashed border-[#1E242C] rounded-xl">
-              <ClipboardList size={40} className="mx-auto text-[#484F58] mb-3" />
-              <p className="text-[#484F58] text-sm mb-4">No task templates yet</p>
+            <div className="text-center py-16 border border-dashed border-[var(--border)] rounded-xl">
+              <ClipboardList size={40} className="mx-auto text-[var(--text-muted)] mb-3" />
+              <p className="text-[var(--text-muted)] text-sm mb-4">No task templates yet</p>
               <button onClick={() => { resetForm(); setShowAdd(true); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
                 <Plus size={16} /> Create First Template
               </button>
             </div>
@@ -3765,44 +3765,44 @@ function FormsTab() {
     <div className="space-y-3">
       <input value={formName} onChange={(e) => setFormName(e.target.value)}
         placeholder="Form name (e.g. 'Call Log Form')"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       <input value={formDesc} onChange={(e) => setFormDesc(e.target.value)}
         placeholder="Description (optional)"
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold text-[#484F58] uppercase">Linked to task category:</span>
+        <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">Linked to task category:</span>
         <select value={formCategoryId} onChange={(e) => setFormCategoryId(e.target.value)}
-          className="px-2 py-1.5 rounded-md bg-[#12161B] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+          className="px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
           <option value="">None (available everywhere)</option>
           {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
 
       {/* Fields */}
-      <div className="p-3 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
+      <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">Form Fields</span>
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Form Fields</span>
           <div className="flex-1" />
-          <button onClick={addField} className="text-[10px] text-[#4ADE80] hover:underline font-semibold">+ Add Field</button>
+          <button onClick={addField} className="text-[10px] text-[var(--accent)] hover:underline font-semibold">+ Add Field</button>
         </div>
         <div className="space-y-2">
           {formFields.map((field, idx) => (
-            <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-[#12161B] border border-[#1E242C]">
+            <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
               <div className="flex flex-col gap-0.5 mt-1">
-                <button onClick={() => moveField(idx, -1)} className="text-[#484F58] hover:text-[#E6EDF3]" title="Move up">▲</button>
-                <button onClick={() => moveField(idx, 1)} className="text-[#484F58] hover:text-[#E6EDF3]" title="Move down">▼</button>
+                <button onClick={() => moveField(idx, -1)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="Move up">▲</button>
+                <button onClick={() => moveField(idx, 1)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="Move down">▼</button>
               </div>
               <div className="flex-1 space-y-1.5">
                 <div className="flex gap-2">
                   <input value={field.label} onChange={(e) => updateField(idx, { label: e.target.value })}
                     placeholder="Field label..."
-                    className="flex-1 px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                    className="flex-1 px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
                   <select value={field.field_type} onChange={(e) => updateField(idx, { field_type: e.target.value })}
-                    className="px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80]">
+                    className="px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                     {FIELD_TYPES.map((ft) => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
                   </select>
                   <button onClick={() => updateField(idx, { is_required: !field.is_required })}
-                    className={`px-2 py-1 rounded text-[9px] font-bold shrink-0 ${field.is_required ? "bg-[rgba(248,81,73,0.12)] text-[#F85149] border border-[rgba(248,81,73,0.3)]" : "text-[#484F58] border border-[#1E242C]"}`}>
+                    className={`px-2 py-1 rounded text-[9px] font-bold shrink-0 ${field.is_required ? "bg-[rgba(248,81,73,0.12)] text-[var(--danger)] border border-[rgba(248,81,73,0.3)]" : "text-[var(--text-muted)] border border-[var(--border)]"}`}>
                     {field.is_required ? "Required" : "Optional"}
                   </button>
                 </div>
@@ -3811,13 +3811,13 @@ function FormsTab() {
                     value={Array.isArray(field.options) ? field.options.join(", ") : field.options || ""}
                     onChange={(e) => updateField(idx, { options: e.target.value })}
                     placeholder="Options (comma-separated): Option 1, Option 2, Option 3"
-                    className="w-full px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-xs text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                    className="w-full px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
                 )}
                 <input value={field.placeholder || ""} onChange={(e) => updateField(idx, { placeholder: e.target.value })}
                   placeholder="Placeholder text (optional)"
-                  className="w-full px-2 py-1.5 rounded-md bg-[#0B0E11] border border-[#1E242C] text-[10px] text-[#7D8590] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+                  className="w-full px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[10px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
               </div>
-              <button onClick={() => removeField(idx)} className="text-[#F85149] hover:text-[#FF8E88] mt-1" title="Remove">
+              <button onClick={() => removeField(idx)} className="text-[var(--danger)] hover:text-[#FF8E88] mt-1" title="Remove">
                 <Trash2 size={14} />
               </button>
             </div>
@@ -3825,19 +3825,19 @@ function FormsTab() {
         </div>
       </div>
 
-      {error && <div className="text-xs text-[#F85149]">{error}</div>}
+      {error && <div className="text-xs text-[var(--danger)]">{error}</div>}
       <div className="flex gap-2">
         <button onClick={() => handleSave(formId)} disabled={saving || !formName.trim()}
-          className="px-4 py-2 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-bold hover:bg-[#3BC96E] disabled:opacity-50">
+          className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-bold hover:bg-[var(--accent-strong)] disabled:opacity-50">
           {saving ? "Saving..." : isEdit ? "Update" : "Create Form"}
         </button>
         <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
-          className="px-3 py-2 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+          className="px-3 py-2 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
       </div>
     </div>
   );
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#4ADE80]" size={24} /></div>;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[var(--accent)]" size={24} /></div>;
 
   // Batch 13: when viewing submissions for a specific form, show that view instead of the regular forms list
   if (viewingSubmissionsFor) {
@@ -3854,46 +3854,46 @@ function FormsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Form Templates</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Create forms for call logs, meeting notes, and other structured data collection</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Create forms for call logs, meeting notes, and other structured data collection</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors">
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors">
           <Plus size={16} /> New Form
         </button>
       </div>
 
       {showAdd && (
-        <div className="mb-6 p-4 rounded-xl bg-[#12161B] border border-[#4ADE80]/30">
-          <div className="text-sm font-semibold text-[#E6EDF3] mb-3">New Form Template</div>
+        <div className="mb-6 p-4 rounded-xl bg-[var(--surface)] border border-[var(--accent)]/30">
+          <div className="text-sm font-semibold text-[var(--text-primary)] mb-3">New Form Template</div>
           {renderEditor(false)}
         </div>
       )}
 
       <div className="space-y-3">
         {forms.map((f) => (
-          <div key={f.id} className={`p-4 rounded-xl bg-[#12161B] border border-[#1E242C] ${!f.is_active ? "opacity-50" : ""}`}>
+          <div key={f.id} className={`p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] ${!f.is_active ? "opacity-50" : ""}`}>
             {editingId === f.id ? (
               renderEditor(true, f.id)
             ) : (
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="text-sm font-medium text-[#E6EDF3]">{f.name}</div>
+                    <div className="text-sm font-medium text-[var(--text-primary)]">{f.name}</div>
                     {f.task_category?.name && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--info)]/10 text-[var(--info)] border border-[var(--info)]/20">
                         {f.task_category.name}
                       </span>
                     )}
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#1E242C] text-[#484F58]">
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--border)] text-[var(--text-muted)]">
                       {f.fields?.length || 0} fields
                     </span>
                   </div>
-                  {f.description && <div className="text-[11px] text-[#7D8590] mb-2">{f.description}</div>}
+                  {f.description && <div className="text-[11px] text-[var(--text-secondary)] mb-2">{f.description}</div>}
                   <div className="flex flex-wrap gap-1">
                     {(f.fields || []).map((fld: any) => (
-                      <span key={fld.id} className="text-[10px] px-1.5 py-0.5 rounded bg-[#0B0E11] border border-[#1E242C] text-[#7D8590]">
-                        {fld.label} <span className="text-[#484F58]">({fld.field_type})</span>
-                        {fld.is_required && <span className="text-[#F85149] ml-0.5">*</span>}
+                      <span key={fld.id} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg)] border border-[var(--border)] text-[var(--text-secondary)]">
+                        {fld.label} <span className="text-[var(--text-muted)]">({fld.field_type})</span>
+                        {fld.is_required && <span className="text-[var(--danger)] ml-0.5">*</span>}
                       </span>
                     ))}
                   </div>
@@ -3901,20 +3901,20 @@ function FormsTab() {
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => setViewingSubmissionsFor(f)}
                     title="View submissions"
-                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#58A6FF]"><Eye size={14} /></button>
+                    className="p-1.5 rounded-md hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--info)]"><Eye size={14} /></button>
                   <button onClick={() => { setEditingId(f.id); loadFormIntoEditor(f); }}
                     title="Edit form"
-                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"><Edit2 size={14} /></button>
+                    className="p-1.5 rounded-md hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><Edit2 size={14} /></button>
                   <button onClick={() => handleDelete(f.id)}
                     title="Delete form"
-                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149]"><Trash2 size={14} /></button>
+                    className="p-1.5 rounded-md hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
                 </div>
               </div>
             )}
           </div>
         ))}
         {forms.length === 0 && !showAdd && (
-          <div className="text-center py-12 text-[#484F58]">
+          <div className="text-center py-12 text-[var(--text-muted)]">
             <ClipboardCheck size={32} className="mx-auto mb-3 opacity-50" />
             <div className="text-sm">No form templates yet</div>
             <div className="text-xs mt-1">Create a form for call logs, meeting notes, or any structured data</div>
@@ -3997,7 +3997,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
   };
 
   const renderResponseValue = (field: any, raw: any) => {
-    if (raw === undefined || raw === null || raw === "") return <span className="text-[#484F58] italic">empty</span>;
+    if (raw === undefined || raw === null || raw === "") return <span className="text-[var(--text-muted)] italic">empty</span>;
     if (Array.isArray(raw)) return <span>{raw.join(", ")}</span>;
     if (typeof raw === "boolean") return <span>{raw ? "Yes" : "No"}</span>;
     return <span className="whitespace-pre-wrap">{String(raw)}</span>;
@@ -4007,7 +4007,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
     return (
       <div className="max-w-3xl mx-auto p-8">
         <div className="flex justify-center py-20">
-          <Loader2 className="animate-spin text-[#4ADE80]" size={24} />
+          <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
         </div>
       </div>
     );
@@ -4020,14 +4020,14 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
-            className="p-2 rounded-lg border border-[#1E242C] hover:bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3] transition-colors shrink-0"
+            className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0"
             title="Back to forms"
           >
             <ChevronLeft size={16} />
           </button>
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight truncate">{form.name}</h1>
-            <p className="text-sm text-[#7D8590] mt-1">
+            <p className="text-sm text-[var(--text-secondary)] mt-1">
               {submissions.length} submission{submissions.length === 1 ? "" : "s"}
             </p>
           </div>
@@ -4036,7 +4036,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
           <a
             href={`/api/forms/submissions?form_template_id=${form.id}&format=csv`}
             download
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors shrink-0"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] transition-colors shrink-0"
             title="Download all submissions as CSV"
           >
             <Download size={16} /> Export CSV
@@ -4045,7 +4045,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
       </div>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-[#F85149]/10 border border-[#F85149]/30 text-sm text-[#F85149]">
+        <div className="mb-4 p-3 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-sm text-[var(--danger)]">
           {error}
         </div>
       )}
@@ -4058,12 +4058,12 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by submitter, conversation, or response content..."
-            className="w-full pl-3 pr-8 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+            className="w-full pl-3 pr-8 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#484F58] hover:text-[#F85149]"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--danger)]"
               title="Clear search"
             >
               <X size={14} />
@@ -4074,14 +4074,14 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
 
       {/* Empty states */}
       {submissions.length === 0 && (
-        <div className="text-center py-12 text-[#484F58]">
+        <div className="text-center py-12 text-[var(--text-muted)]">
           <ClipboardCheck size={32} className="mx-auto mb-3 opacity-50" />
           <div className="text-sm">No submissions yet</div>
           <div className="text-xs mt-1">Submissions will appear here once team members fill out this form</div>
         </div>
       )}
       {submissions.length > 0 && filtered.length === 0 && search && (
-        <div className="text-center py-8 text-[#484F58] text-sm">
+        <div className="text-center py-8 text-[var(--text-muted)] text-sm">
           No submissions match "{search}"
         </div>
       )}
@@ -4095,8 +4095,8 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
           return (
             <div
               key={sub.id}
-              className={`rounded-xl bg-[#12161B] border transition-colors ${
-                isExpanded ? "border-[#4ADE80]/30" : "border-[#1E242C] hover:border-[#1E242C]/80"
+              className={`rounded-xl bg-[var(--surface)] border transition-colors ${
+                isExpanded ? "border-[var(--accent)]/30" : "border-[var(--border)] hover:border-[var(--border)]/80"
               }`}
             >
               {/* Row header — clickable to expand */}
@@ -4107,56 +4107,56 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
                 {/* Avatar */}
                 <div
                   className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5"
-                  style={{ background: submitter?.color || "#7D8590" }}
+                  style={{ background: submitter?.color || "var(--text-secondary)" }}
                 >
                   {submitter?.initials || (submitter?.name || "?").slice(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-[#E6EDF3]">
+                    <span className="text-sm font-semibold text-[var(--text-primary)]">
                       {submitter?.name || "Unknown user"}
                     </span>
-                    <span className="text-[11px] text-[#484F58]">
+                    <span className="text-[11px] text-[var(--text-muted)]">
                       {fmtTimestamp(sub.created_at)}
                     </span>
                   </div>
                   {convo && (
-                    <div className="text-[11px] text-[#7D8590] mt-1 truncate">
-                      <span className="text-[#484F58]">on</span>{" "}
-                      <span className="text-[#58A6FF]">{convo.subject || "(no subject)"}</span>
+                    <div className="text-[11px] text-[var(--text-secondary)] mt-1 truncate">
+                      <span className="text-[var(--text-muted)]">on</span>{" "}
+                      <span className="text-[var(--info)]">{convo.subject || "(no subject)"}</span>
                       {convo.from_email && (
-                        <span className="text-[#484F58]"> · {convo.from_email}</span>
+                        <span className="text-[var(--text-muted)]"> · {convo.from_email}</span>
                       )}
                     </div>
                   )}
                 </div>
                 <ChevronDown
                   size={16}
-                  className={`text-[#484F58] shrink-0 mt-2 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                  className={`text-[var(--text-muted)] shrink-0 mt-2 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                 />
               </button>
 
               {/* Expanded responses */}
               {isExpanded && (
-                <div className="border-t border-[#1E242C] p-4 space-y-2.5">
+                <div className="border-t border-[var(--border)] p-4 space-y-2.5">
                   {fields.map((field: any) => {
                     const raw = (sub.responses || {})[field.id] ?? (sub.responses || {})[field.label];
                     return (
                       <div key={field.id} className="grid grid-cols-[140px_1fr] gap-3 items-start">
-                        <div className="text-[11px] font-semibold uppercase tracking-wider text-[#484F58] pt-0.5">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] pt-0.5">
                           {field.label}
                         </div>
-                        <div className="text-[13px] text-[#E6EDF3]">
+                        <div className="text-[13px] text-[var(--text-primary)]">
                           {renderResponseValue(field, raw)}
                         </div>
                       </div>
                     );
                   })}
                   {convo && (
-                    <div className="pt-2 border-t border-[#1E242C]">
+                    <div className="pt-2 border-t border-[var(--border)]">
                       <a
                         href={`/#conversation=${convo.id}`}
-                        className="text-[11px] text-[#58A6FF] hover:underline inline-flex items-center gap-1"
+                        className="text-[11px] text-[var(--info)] hover:underline inline-flex items-center gap-1"
                       >
                         Open conversation →
                       </a>
@@ -4232,24 +4232,24 @@ function EmailTemplatesTab() {
   };
 
   const renderForm = (isEdit: boolean, tplId?: string) => (
-    <div className="space-y-3 p-4 rounded-xl bg-[#12161B] border border-[#1E242C]">
+    <div className="space-y-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
       <div className="grid grid-cols-2 gap-3">
         <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Template name"
-          className="px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
         <input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} placeholder="Subject line (optional)"
-          className="px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]" />
+          className="px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]" />
       </div>
       <textarea value={formBody} onChange={(e) => setFormBody(e.target.value)} placeholder="Template body (supports HTML)"
         rows={8}
-        className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58] resize-none" />
+        className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] resize-none" />
       <div className="flex items-center gap-3">
         <div>
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1">Scope</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1">Scope</div>
           <div className="flex gap-1">
             {(["organization", "personal"] as const).map((s) => (
               <button key={s} onClick={() => setFormScope(s)}
                 className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                  formScope === s ? "bg-[#1E242C] text-[#E6EDF3] ring-1 ring-[#4ADE80]" : "bg-[#0B0E11] text-[#484F58] border border-[#1E242C]"
+                  formScope === s ? "bg-[var(--border)] text-[var(--text-primary)] ring-1 ring-[var(--accent)]" : "bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)]"
                 }`}>
                 {s === "organization" ? "🏢 Organization" : "👤 Personal"}
               </button>
@@ -4257,9 +4257,9 @@ function EmailTemplatesTab() {
           </div>
         </div>
         <div className="flex-1">
-          <div className="text-[10px] text-[#484F58] font-semibold mb-1">Category</div>
+          <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1">Category</div>
           <select value={formCategory} onChange={(e) => setFormCategory(e.target.value)}
-            className="h-8 rounded-lg bg-[#0B0E11] border border-[#1E242C] px-2 text-[12px] text-[#E6EDF3] outline-none">
+            className="h-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] px-2 text-[12px] text-[var(--text-primary)] outline-none">
             <option value="">None</option>
             {TEMPLATE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
@@ -4267,10 +4267,10 @@ function EmailTemplatesTab() {
       </div>
       <div className="flex justify-end gap-2 pt-1">
         <button onClick={() => { isEdit ? setEditingId(null) : setShowAdd(false); resetForm(); }}
-          className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-xs text-[#7D8590]">Cancel</button>
+          className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)]">Cancel</button>
         <button onClick={() => isEdit && tplId ? handleUpdate(tplId) : handleAdd()}
           disabled={!formName.trim() || !formBody.trim()}
-          className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-xs font-semibold disabled:opacity-40">
+          className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-xs font-semibold disabled:opacity-40">
           {isEdit ? "Save" : "Create"}
         </button>
       </div>
@@ -4282,11 +4282,11 @@ function EmailTemplatesTab() {
 
   const renderSection = (title: string, icon: string, list: any[]) => (
     <div className="mb-6">
-      <div className="text-[11px] font-bold text-[#484F58] uppercase tracking-widest mb-2 flex items-center gap-1.5">
+      <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2 flex items-center gap-1.5">
         <span>{icon}</span> {title}
       </div>
       {list.length === 0 ? (
-        <div className="text-[12px] text-[#484F58] py-3 px-4 border border-dashed border-[#1E242C] rounded-lg text-center">
+        <div className="text-[12px] text-[var(--text-muted)] py-3 px-4 border border-dashed border-[var(--border)] rounded-lg text-center">
           No {title.toLowerCase()} yet
         </div>
       ) : (
@@ -4295,38 +4295,38 @@ function EmailTemplatesTab() {
             editingId === tpl.id ? (
               <div key={tpl.id}>{renderForm(true, tpl.id)}</div>
             ) : (
-              <div key={tpl.id} className="rounded-xl bg-[#12161B] border border-[#1E242C] overflow-hidden group">
+              <div key={tpl.id} className="rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden group">
                 <div className="flex items-center gap-3 p-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-[#E6EDF3]">{tpl.name}</span>
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">{tpl.name}</span>
                       {tpl.category && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[#58A6FF]">{tpl.category}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[var(--info)]">{tpl.category}</span>
                       )}
                     </div>
-                    {tpl.subject && <div className="text-[11px] text-[#484F58] mt-0.5">Subject: {tpl.subject}</div>}
+                    {tpl.subject && <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Subject: {tpl.subject}</div>}
                     {tpl.owner?.name && tpl.scope === "personal" && (
-                      <div className="text-[10px] text-[#484F58]">By {tpl.owner.name}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">By {tpl.owner.name}</div>
                     )}
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => setPreviewId(previewId === tpl.id ? null : tpl.id)}
-                      className="px-2 py-1 rounded text-[10px] text-[#58A6FF] hover:bg-[#1E242C] font-semibold">
+                      className="px-2 py-1 rounded text-[10px] text-[var(--info)] hover:bg-[var(--border)] font-semibold">
                       {previewId === tpl.id ? "Hide" : "Preview"}
                     </button>
                     <button onClick={() => startEdit(tpl)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#7D8590] hover:bg-[#1E242C]">
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--border)]">
                       <Edit2 size={13} />
                     </button>
                     <button onClick={() => handleDelete(tpl.id, tpl.name)}
-                      className="p-1 rounded text-[#484F58] hover:text-[#F85149] hover:bg-[rgba(248,81,73,0.08)]">
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)]">
                       <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
                 {previewId === tpl.id && (
-                  <div className="px-4 pb-3 border-t border-[#1E242C] pt-2">
-                    <div className="text-[12px] text-[#7D8590] bg-[#0B0E11] rounded-lg p-3 whitespace-pre-wrap max-h-[200px] overflow-y-auto"
+                  <div className="px-4 pb-3 border-t border-[var(--border)] pt-2">
+                    <div className="text-[12px] text-[var(--text-secondary)] bg-[var(--bg)] rounded-lg p-3 whitespace-pre-wrap max-h-[200px] overflow-y-auto"
                       dangerouslySetInnerHTML={{ __html: tpl.body }} />
                   </div>
                 )}
@@ -4343,10 +4343,10 @@ function EmailTemplatesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Email Templates</h1>
-          <p className="text-sm text-[#7D8590] mt-1">Create reusable templates for common emails</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">Create reusable templates for common emails</p>
         </div>
         <button onClick={() => { resetForm(); setShowAdd(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E]">
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)]">
           <Plus size={16} /> New Template
         </button>
       </div>
@@ -4354,17 +4354,17 @@ function EmailTemplatesTab() {
       {showAdd && <div className="mb-4">{renderForm(false)}</div>}
 
       {loading ? (
-        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#4ADE80] mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" /></div>
       ) : (
         <>
           {renderSection("Organization Templates", "🏢", orgTemplates)}
           {renderSection("Personal Templates", "👤", personalTemplates)}
           {templates.length === 0 && !showAdd && (
-            <div className="text-center py-16 border-2 border-dashed border-[#1E242C] rounded-xl">
+            <div className="text-center py-16 border-2 border-dashed border-[var(--border)] rounded-xl">
               <h3 className="text-lg font-semibold mb-2">No email templates yet</h3>
-              <p className="text-sm text-[#7D8590] mb-4">Create templates for common replies like pricing requests, follow-ups, and introductions</p>
+              <p className="text-sm text-[var(--text-secondary)] mb-4">Create templates for common replies like pricing requests, follow-ups, and introductions</p>
               <button onClick={() => { resetForm(); setShowAdd(true); }}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm">
                 <Plus size={16} /> Create First Template
               </button>
             </div>
