@@ -21,7 +21,7 @@ export default function HighlightedText({ text, query, matchRefs, startIndex }: 
               key={i}
               ref={(el) => { matchRefs.current[idx] = el; }}
               data-match-idx={idx}
-              className="bg-[#F5D547]/40 text-[#E6EDF3] rounded px-0.5"
+              className="bg-[var(--highlight)]/40 text-[var(--text-primary)] rounded px-0.5"
             >
               {part}
             </mark>
@@ -32,4 +32,3 @@ export default function HighlightedText({ text, query, matchRefs, startIndex }: 
     </>
   );
 }
-

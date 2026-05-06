@@ -158,20 +158,20 @@ export default function ActivityList({
   return (
     <div className="h-full overflow-y-auto pr-2">
       {/* Search box */}
-      <div className="sticky top-0 z-10 bg-[#0B0E11] pb-2 -mt-1 pt-1">
+      <div className="sticky top-0 z-10 bg-[var(--bg)] pb-2 -mt-1 pt-1">
         <div className="relative">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#484F58] pointer-events-none" />
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search activity..."
-            className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[#0F1318] border border-[#1E242C] text-[12px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 placeholder:text-[#484F58]"
+            className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40 placeholder:text-[var(--text-muted)]"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#484F58] hover:text-[#F85149]"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--danger)]"
               title="Clear search"
             >
               <X size={12} />
@@ -179,20 +179,20 @@ export default function ActivityList({
           )}
         </div>
         {searchTerm && (
-          <div className="text-[10px] text-[#7D8590] mt-1 px-1">
+          <div className="text-[10px] text-[var(--text-secondary)] mt-1 px-1">
             {filtered.length} of {activities.length} activities match
           </div>
         )}
       </div>
 
       {activities.length === 0 && (
-        <div className="text-center py-10 text-[#484F58] text-sm">
+        <div className="text-center py-10 text-[var(--text-muted)] text-sm">
           No activity recorded yet
         </div>
       )}
 
       {activities.length > 0 && filtered.length === 0 && searchTerm && (
-        <div className="text-center py-8 text-[#484F58] text-sm">
+        <div className="text-center py-8 text-[var(--text-muted)] text-sm">
           No activities match "{searchTerm}"
         </div>
       )}
@@ -200,8 +200,8 @@ export default function ActivityList({
       {grouped.map((group) => (
         <div key={group.key} className="mb-2">
           {/* Day header */}
-          <div className="sticky top-[42px] z-[5] bg-[#0B0E11]/95 backdrop-blur-sm py-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[#484F58] px-1">
+          <div className="sticky top-[42px] z-[5] bg-[var(--bg)]/95 backdrop-blur-sm py-1.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] px-1">
               {group.key}
             </div>
           </div>

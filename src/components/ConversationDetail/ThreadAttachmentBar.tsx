@@ -66,10 +66,10 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const getIcon = (name: string) => {
     const ext = name.split(".").pop()?.toLowerCase() || "";
     if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) return <Image size={12} className="text-[#BC8CFF]" />;
-    if (ext === "pdf") return <FileText size={12} className="text-[#F85149]" />;
-    if (["doc","docx","txt","rtf"].includes(ext)) return <FileText size={12} className="text-[#58A6FF]" />;
-    if (["xls","xlsx","csv"].includes(ext)) return <FileText size={12} className="text-[#4ADE80]" />;
-    return <File size={12} className="text-[#7D8590]" />;
+    if (ext === "pdf") return <FileText size={12} className="text-[var(--danger)]" />;
+    if (["doc","docx","txt","rtf"].includes(ext)) return <FileText size={12} className="text-[var(--info)]" />;
+    if (["xls","xlsx","csv"].includes(ext)) return <FileText size={12} className="text-[var(--accent)]" />;
+    return <File size={12} className="text-[var(--text-secondary)]" />;
   };
 
   const downloadAllThread = async () => {
@@ -161,33 +161,33 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   };
 
   return (
-    <div className="mb-3 rounded-xl border border-[#1E242C] bg-[#12161B] overflow-hidden">
+    <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
       <button
         onClick={loadAll}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[#161B22] transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[var(--surface-2)] transition-colors"
       >
-        <Paperclip size={14} className="text-[#58A6FF]" />
-        <span className="text-[12px] font-semibold text-[#E6EDF3]">
+        <Paperclip size={14} className="text-[var(--info)]" />
+        <span className="text-[12px] font-semibold text-[var(--text-primary)]">
           {loaded ? `${totalCount} attachment${totalCount !== 1 ? "s" : ""}` : `${messagesWithAttachments.length} message${messagesWithAttachments.length !== 1 ? "s" : ""} with attachments`}
         </span>
-        {loading && <span className="text-[10px] text-[#484F58]">Loading...</span>}
+        {loading && <span className="text-[10px] text-[var(--text-muted)]">Loading...</span>}
         {driveResult && (
-          <span className={`text-[10px] ml-1 ${driveResult.startsWith("Error") ? "text-[#F85149]" : "text-[#4ADE80]"}`}>
+          <span className={`text-[10px] ml-1 ${driveResult.startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}>
             {driveResult}
           </span>
         )}
-        <ChevronDown size={12} className={`ml-auto text-[#484F58] transition-transform ${expanded ? "rotate-180" : ""}`} />
+        <ChevronDown size={12} className={`ml-auto text-[var(--text-muted)] transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
 
       {expanded && loaded && (
-        <div className="px-4 pb-3 border-t border-[#1E242C]">
+        <div className="px-4 pb-3 border-t border-[var(--border)]">
           {/* Action buttons */}
           {totalCount > 0 && (
-            <div className="flex items-center gap-3 py-2 border-b border-[#1E242C] mb-2">
+            <div className="flex items-center gap-3 py-2 border-b border-[var(--border)] mb-2">
               <button
                 onClick={downloadAllThread}
                 disabled={downloadingAllThread}
-                className="flex items-center gap-1 text-[10px] text-[#4ADE80] hover:text-[#3BC96E] font-semibold transition-colors"
+                className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[#3BC96E] font-semibold transition-colors"
               >
                 <Download size={10} />
                 {downloadingAllThread ? "Downloading..." : "Download All"}
@@ -195,7 +195,7 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               <button
                 onClick={openThreadDrivePicker}
                 disabled={savingToDrive}
-                className="flex items-center gap-1 text-[10px] text-[#58A6FF] hover:text-[#79B8FF] font-semibold transition-colors"
+                className="flex items-center gap-1 text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold transition-colors"
               >
                 <ExternalLink size={10} />
                 {savingToDrive ? "Uploading..." : "Save All to Drive"}
@@ -207,17 +207,17 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
           <div className="space-y-2">
           {allAttachments.map((group) => (
             <div key={group.messageId}>
-              <div className="text-[10px] text-[#484F58] mt-2 mb-1">From {group.fromName}:</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-2 mb-1">From {group.fromName}:</div>
               <div className="flex flex-wrap gap-1.5">
                 {group.attachments.map((att: any) => (
                   <button
                     key={att.id}
                     onClick={() => downloadAtt(group.messageId, att.id, att.name)}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[#0B0E11] border border-[#1E242C] hover:border-[#4ADE80]/30 transition-all text-left"
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--accent)]/30 transition-all text-left"
                   >
                     {getIcon(att.name)}
-                    <span className="text-[10px] text-[#E6EDF3] max-w-[140px] truncate">{att.name}</span>
-                    <Download size={9} className="text-[#484F58]" />
+                    <span className="text-[10px] text-[var(--text-primary)] max-w-[140px] truncate">{att.name}</span>
+                    <Download size={9} className="text-[var(--text-muted)]" />
                   </button>
                 ))}
               </div>
@@ -230,13 +230,13 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
       {/* Thread Drive Picker Modal */}
       {showThreadDrivePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowThreadDrivePicker(false)}>
-          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+          <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
               <div>
-                <div className="text-sm font-bold text-[#E6EDF3]">Save All Attachments to Drive</div>
-                <div className="text-[10px] text-[#484F58]">{totalCount} file{totalCount !== 1 ? "s" : ""} — choose a folder</div>
+                <div className="text-sm font-bold text-[var(--text-primary)]">Save All Attachments to Drive</div>
+                <div className="text-[10px] text-[var(--text-muted)]">{totalCount} file{totalCount !== 1 ? "s" : ""} — choose a folder</div>
               </div>
-              <button onClick={() => setShowThreadDrivePicker(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
+              <button onClick={() => setShowThreadDrivePicker(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
                 <X size={16} />
               </button>
             </div>
@@ -245,21 +245,21 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                 <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
                   {threadFolderPath.map((fp, i) => (
                     <span key={fp.id} className="flex items-center gap-1">
-                      {i > 0 && <span className="text-[#484F58]">/</span>}
-                      <button onClick={() => navigateThreadPath(i)} className="text-[#58A6FF] hover:underline">{fp.name}</button>
+                      {i > 0 && <span className="text-[var(--text-muted)]">/</span>}
+                      <button onClick={() => navigateThreadPath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
                     </span>
                   ))}
                 </div>
               )}
               {threadLoadingFolders ? (
-                <div className="text-center py-4 text-[#484F58] text-[12px]">Loading...</div>
+                <div className="text-center py-4 text-[var(--text-muted)] text-[12px]">Loading...</div>
               ) : (
                 <div className="space-y-0.5">
                   {threadFolders.map((f) => (
                     <button key={f.id} onClick={() => openThreadFolder(f)}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
-                      <FolderOpen size={14} className="text-[#F0883E]" />
-                      <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
+                      <FolderOpen size={14} className="text-[var(--warning)]" />
+                      <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
                     </button>
                   ))}
                   <button onClick={async () => {
@@ -273,20 +273,20 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                       const data = await res.json();
                       if (data.success) setThreadFolders((prev) => [...prev, { id: data.folder.id, name: data.folder.name }]);
                     } catch (e) { console.error(e); }
-                  }} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] border border-dashed border-[#1E242C] mt-1">
-                    <Plus size={14} className="text-[#4ADE80]" />
-                    <span className="text-[12px] text-[#4ADE80] font-medium">New Folder</span>
+                  }} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] border border-dashed border-[var(--border)] mt-1">
+                    <Plus size={14} className="text-[var(--accent)]" />
+                    <span className="text-[12px] text-[var(--accent)] font-medium">New Folder</span>
                   </button>
                 </div>
               )}
             </div>
             {driveResult && (
-              <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-[11px] ${driveResult.startsWith("Error") ? "bg-[rgba(248,81,73,0.1)] text-[#F85149]" : "bg-[rgba(74,222,128,0.1)] text-[#4ADE80]"}`}>{driveResult}</div>
+              <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-[11px] ${driveResult.startsWith("Error") ? "bg-[rgba(248,81,73,0.1)] text-[var(--danger)]" : "bg-[rgba(74,222,128,0.1)] text-[var(--accent)]"}`}>{driveResult}</div>
             )}
-            <div className="px-4 py-3 border-t border-[#1E242C] flex justify-between items-center">
-              <div className="text-[10px] text-[#484F58]">Saving to: {threadFolderPath.map((p) => p.name).join(" / ") || "..."}</div>
+            <div className="px-4 py-3 border-t border-[var(--border)] flex justify-between items-center">
+              <div className="text-[10px] text-[var(--text-muted)]">Saving to: {threadFolderPath.map((p) => p.name).join(" / ") || "..."}</div>
               <button onClick={saveAllToDrive} disabled={savingToDrive}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-[11px] font-bold disabled:opacity-50">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold disabled:opacity-50">
                 <ExternalLink size={12} /> {savingToDrive ? "Uploading..." : "Save Here"}
               </button>
             </div>

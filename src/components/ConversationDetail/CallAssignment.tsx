@@ -99,7 +99,7 @@ export default function CallAssignment({
     <button
       disabled
       title="No team members have call skillset. Enable in Settings → Team Members"
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[11px] font-semibold text-[#484F58] cursor-not-allowed"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[11px] font-semibold text-[var(--text-muted)] cursor-not-allowed"
     >
       <Phone size={12} />
       Call
@@ -113,19 +113,19 @@ export default function CallAssignment({
         disabled={assigning}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
           currentCaller
-            ? "border-[rgba(88,166,255,0.3)] bg-[rgba(88,166,255,0.08)] text-[#58A6FF]"
-            : "border-[#1E242C] bg-[#12161B] text-[#7D8590] hover:text-[#E6EDF3] hover:bg-[#181D24]"
+            ? "border-[rgba(88,166,255,0.3)] bg-[rgba(88,166,255,0.08)] text-[var(--info)]"
+            : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
         }`}
       >
         <Phone size={12} />
         {assigning ? "..." : currentCaller ? (currentCaller as any).name || "Caller" : "Call"}
-        <ChevronDown size={10} className="text-[#484F58]" />
+        <ChevronDown size={10} className="text-[var(--text-muted)]" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1">
-          <div className="px-3 py-2 border-b border-[#1E242C]">
-            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+        <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
+          <div className="px-3 py-2 border-b border-[var(--border)]">
+            <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Assign caller
             </div>
           </div>
@@ -133,7 +133,7 @@ export default function CallAssignment({
           {currentCaller && (
             <button
               onClick={handleRemoveCaller}
-              className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-[#F85149] hover:bg-[rgba(248,81,73,0.08)] transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-[var(--danger)] hover:bg-[rgba(248,81,73,0.08)] transition-colors"
             >
               <X size={13} />
               Remove call assignment
@@ -147,12 +147,12 @@ export default function CallAssignment({
                 key={m.id}
                 onClick={() => handleAssignCaller(m)}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] transition-colors ${
-                  isActive ? "bg-[rgba(88,166,255,0.08)]" : "hover:bg-[#1E242C]"
+                  isActive ? "bg-[rgba(88,166,255,0.08)]" : "hover:bg-[var(--border)]"
                 }`}
               >
                 <Avatar initials={m.initials} color={m.color} size={20} />
-                <span className={isActive ? "text-[#58A6FF] font-medium" : "text-[#E6EDF3]"}>{m.name}</span>
-                {isActive && <Check size={13} className="text-[#58A6FF] ml-auto" />}
+                <span className={isActive ? "text-[var(--info)] font-medium" : "text-[var(--text-primary)]"}>{m.name}</span>
+                {isActive && <Check size={13} className="text-[var(--info)] ml-auto" />}
               </button>
             );
           })}

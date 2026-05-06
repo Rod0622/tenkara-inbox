@@ -34,17 +34,17 @@ export default function MoveToFolderDropdown({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#1E242C] bg-[#12161B] text-[11px] font-medium text-[#7D8590] hover:bg-[#181D24]"
+        className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
       >
         <FolderOpen size={12} />
         <span>Move to</span>
-        <ChevronDown size={10} className="text-[#484F58]" />
+        <ChevronDown size={10} className="text-[var(--text-muted)]" />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1 max-h-[320px] overflow-y-auto">
-          <div className="px-3 py-2 border-b border-[#1E242C]">
-            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1 max-h-[320px] overflow-y-auto">
+          <div className="px-3 py-2 border-b border-[var(--border)]">
+            <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Move to folder
             </div>
           </div>
@@ -57,13 +57,13 @@ export default function MoveToFolderDropdown({
                 onClick={() => !active && move(folder.id)}
                 className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] ${
                   active
-                    ? "text-[#4ADE80] bg-[rgba(74,222,128,0.06)]"
-                    : "text-[#7D8590] hover:bg-[#1E242C]"
+                    ? "text-[var(--accent)] bg-[rgba(74,222,128,0.06)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--border)]"
                 }`}
               >
                 <span className="text-[13px]">{folder.icon || "📁"}</span>
                 <span className="flex-1 text-left truncate">{folder.name}</span>
-                {active && <Check size={12} className="text-[#4ADE80]" />}
+                {active && <Check size={12} className="text-[var(--accent)]" />}
               </button>
             );
           })}
@@ -72,4 +72,3 @@ export default function MoveToFolderDropdown({
     </div>
   );
 }
-

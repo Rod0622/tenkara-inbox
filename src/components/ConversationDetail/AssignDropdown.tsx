@@ -62,35 +62,35 @@ export default function AssignDropdown({
         <button
           onClick={() => setOpen((v) => !v)}
           disabled={assigning}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-medium hover:bg-[var(--surface-2)] transition-all"
         >
           <Avatar initials={currentAssignee.initials} color={currentAssignee.color} size={18} />
           <span style={{ color: currentAssignee.color }}>{currentAssignee.name}</span>
-          <ChevronDown size={12} className="text-[#484F58]" />
+          <ChevronDown size={12} className="text-[var(--text-muted)]" />
         </button>
       ) : (
         <div className="flex">
           <button
             onClick={() => currentUser && handleAssign(currentUser.id)}
             disabled={assigning}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg border border-[#1E242C] border-r-0 bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg border border-[var(--border)] border-r-0 bg-[var(--surface)] text-[12px] font-medium hover:bg-[var(--surface-2)] transition-all"
           >
-            <User size={14} className="text-[#4ADE80]" />
-            <span className="text-[#E6EDF3]">{assigning ? "Assigning..." : "Assign to me"}</span>
+            <User size={14} className="text-[var(--accent)]" />
+            <span className="text-[var(--text-primary)]">{assigning ? "Assigning..." : "Assign to me"}</span>
           </button>
           <button
             onClick={() => setOpen((v) => !v)}
-            className="px-2 py-1.5 rounded-r-lg border border-[#1E242C] bg-[#12161B] hover:bg-[#181D24] transition-all"
+            className="px-2 py-1.5 rounded-r-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition-all"
           >
-            <ChevronDown size={12} className="text-[#484F58]" />
+            <ChevronDown size={12} className="text-[var(--text-muted)]" />
           </button>
         </div>
       )}
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1">
-          <div className="px-3 py-2 border-b border-[#1E242C]">
-            <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
+          <div className="px-3 py-2 border-b border-[var(--border)]">
+            <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Assign to team member
             </div>
           </div>
@@ -98,7 +98,7 @@ export default function AssignDropdown({
           {currentAssignee && (
             <button
               onClick={() => handleAssign(null)}
-              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#F85149] hover:bg-[#1E242C]"
+              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--danger)] hover:bg-[var(--border)]"
             >
               <X size={14} />
               Unassign
@@ -113,8 +113,8 @@ export default function AssignDropdown({
                 <button
                   key={member.id}
                   onClick={() => handleAssign(member.id)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] ${
-                    active ? "text-[#4ADE80]" : "text-[#E6EDF3]"
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[var(--border)] ${
+                    active ? "text-[var(--accent)]" : "text-[var(--text-primary)]"
                   }`}
                 >
                   <Avatar initials={member.initials} color={member.color} size={20} />
@@ -122,12 +122,12 @@ export default function AssignDropdown({
                     <div className="font-medium">
                       {member.name}
                       {member.id === currentUser?.id && (
-                        <span className="text-[10px] text-[#484F58] ml-1">(me)</span>
+                        <span className="text-[10px] text-[var(--text-muted)] ml-1">(me)</span>
                       )}
                     </div>
-                    <div className="text-[10px] text-[#484F58]">{member.department}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{member.department}</div>
                   </div>
-                  {active && <Check size={14} className="text-[#4ADE80]" />}
+                  {active && <Check size={14} className="text-[var(--accent)]" />}
                 </button>
               );
             })}
