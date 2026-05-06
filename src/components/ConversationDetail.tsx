@@ -1792,11 +1792,19 @@ export default function ConversationDetail({
               let globalMatchIdx = 0;
               const searchQ = threadSearch.trim().toLowerCase();
 
-              return messages.map((msg: any) => {
+              return messages.map((msg: any, idx: number) => {
                 const bodyText = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ") : "") || msg.snippet || "";
                 const matchCountInMsg = searchQ ? (bodyText.toLowerCase().split(searchQ).length - 1) : 0;
                 const msgStartIdx = globalMatchIdx;
                 globalMatchIdx += matchCountInMsg;
+                // Phase 4e: drop cap on the first message of the thread, but ONLY if it's
+                // text-only (no body_html). HTML emails have unpredictable structure
+                // (tables, banners, blockquotes) where ::first-letter would land in the
+                // wrong place. This keeps drop caps as flair on simple replies and notes,
+                // and avoids breaking marketing/templated emails.
+                const isFirstMessage = idx === 0;
+                const isTextOnly = !msg.body_html;
+                const showDropCap = isFirstMessage && isTextOnly && !searchQ;
 
                 return (
                   <div
@@ -1808,14 +1816,14 @@ export default function ConversationDetail({
                     } ${searchQ && matchCountInMsg > 0 ? "ring-1 ring-[var(--highlight)]/20" : ""}`}
                   >
                 <MessageHeader msg={msg} convo={convo} />
-                <div className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
+                <div className="text-[14px] leading-[1.7] text-[var(--text-secondary)]">
                   {msg.body_html && !searchQ ? (
                     <div
                       className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--border)] [&_td]:p-2 [&_th]:border [&_th]:border-[var(--border)] [&_th]:p-2 [&_th]:bg-[var(--surface-2)] [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:my-2 [&_a]:text-[var(--info)] [&_a]:underline [&_a]:break-all [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--text-secondary)] [&_pre]:bg-[var(--surface-2)] [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_hr]:border-[var(--border)]"
                       dangerouslySetInnerHTML={{ __html: msg.body_html }}
                     />
                   ) : (
-                    <div className="whitespace-pre-wrap">
+                    <div className={`whitespace-pre-wrap${showDropCap ? " [&::first-letter]:font-serif [&::first-letter]:text-[46px] [&::first-letter]:leading-[0.85] [&::first-letter]:float-left [&::first-letter]:pr-2 [&::first-letter]:pt-1 [&::first-letter]:text-[var(--text-primary)]" : ""}`}>
                       {searchQ ? (
                         <HighlightedText text={bodyText || "(No text content)"} query={searchQ} matchRefs={matchRefs} startIndex={msgStartIdx} />
                       ) : (
