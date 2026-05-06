@@ -22,12 +22,12 @@ function ThreadCard({ thread, showAccount }: { thread: any; showAccount?: boolea
           </div>
           <div className="text-[11px] text-[var(--text-secondary)] mb-1.5 truncate">{thread.preview || "No preview"}</div>
           <div className="flex flex-wrap gap-1.5 text-[10px]">
-            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[#9BA7B4]">{thread.status || "open"}</span>
+            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">{thread.status || "open"}</span>
             {showAccount && thread.account_name && <span className="rounded-full border border-[#BC8CFF]/20 bg-[rgba(188,140,255,0.08)] px-2 py-0.5 text-[#BC8CFF]">{thread.account_name}</span>}
-            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[#9BA7B4]">{fmtRel(thread.last_message_at)}</span>
+            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">{fmtRel(thread.last_message_at)}</span>
           </div>
         </div>
-        <a href={href} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--info)] hover:bg-[#151A21]"><ExternalLink size={11} /> Open</a>
+        <a href={href} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"><ExternalLink size={11} /> Open</a>
       </div>
     </div>
   );
@@ -75,9 +75,9 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   };
 
   if (loading) return <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]"><div className="mx-auto max-w-7xl px-6 py-10"><div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--text-secondary)]">Loading command center...</div></div></div>;
-  if (error || !data) return <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]"><div className="mx-auto max-w-5xl px-6 py-10"><div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6"><AlertTriangle className="text-[#F87171] mb-2" size={20} /><div className="text-lg font-semibold text-[#F87171]">Unable to load</div><div className="mt-2 text-sm text-[#9BA7B4]">{error}</div><Link href="/" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-semibold text-[var(--info)] hover:bg-[#151A21]"><ArrowLeft size={16} /> Back</Link></div></div></div>;
+  if (error || !data) return <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]"><div className="mx-auto max-w-5xl px-6 py-10"><div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6"><AlertTriangle className="text-[#F87171] mb-2" size={20} /><div className="text-lg font-semibold text-[#F87171]">Unable to load</div><div className="mt-2 text-sm text-[var(--text-secondary)]">{error}</div><Link href="/" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"><ArrowLeft size={16} /> Back</Link></div></div></div>;
 
-  const { contact, summary, threads, cross_account_threads=[], domain_threads=[], domain_contacts=[], tasks, notes, thread_summaries, supplier_hours, responsiveness } = data;
+  const { contact, summary, threads, cross_account_threads=[], domain_threads=[], domain_contacts=[], tasks, notes, thread_summaries, supplier_hours, responsiveness, responsiveness_summary } = data;
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
   const dismissedTasks = tasks.filter((t: any) => t.status === "dismissed");
@@ -157,11 +157,37 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
         </div>
 
         {/* Responsiveness */}
-        {responsiveness && (responsiveness.supplier || responsiveness.team) && (
+        {(responsiveness_summary || (responsiveness && (responsiveness.supplier || responsiveness.team))) && (
           <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-            <div className="flex items-center gap-2 mb-3"><Clock3 size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Response Times</span></div>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2"><Clock3 size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Response Times</span></div>
+              {responsiveness_summary && (() => {
+                const tier = responsiveness_summary.tier as "excellent" | "good" | "fair" | "low" | "no_response";
+                const TIER_COLORS: Record<string, string> = { excellent: "var(--accent)", good: "var(--info)", fair: "var(--warning)", low: "var(--danger)", no_response: "var(--text-muted)" };
+                const TIER_BG: Record<string, string> = { excellent: "rgba(74,222,128,0.10)", good: "rgba(88,166,255,0.10)", fair: "rgba(240,136,62,0.10)", low: "rgba(248,81,73,0.10)", no_response: "rgba(72,79,88,0.10)" };
+                const TIER_LABELS: Record<string, string> = { excellent: "Excellent", good: "Good", fair: "Fair", low: "Low", no_response: "No response" };
+                const color = TIER_COLORS[tier] || "var(--text-muted)";
+                const bg = TIER_BG[tier] || "rgba(72,79,88,0.10)";
+                const label = TIER_LABELS[tier] || "—";
+                const score = responsiveness_summary.score;
+                const exchanges = responsiveness_summary.qualifying_exchanges;
+                const median = responsiveness_summary.weighted_median_minutes ?? responsiveness_summary.all_time_median_minutes ?? null;
+                const updated = responsiveness_summary.score_updated_at ? new Date(responsiveness_summary.score_updated_at) : null;
+                const updatedLabel = updated ? fmtRel(updated.toISOString()) : "";
+                return (
+                  <div className="flex items-center gap-2 flex-wrap" title={`Median ${fmtMinutes(median)} over ${exchanges} exchanges${updatedLabel ? ` · updated ${updatedLabel}` : ""}`}>
+                    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border" style={{ color, background: bg, borderColor: color + "40" }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                      {label}
+                      <span className="text-[10px] opacity-70">· score {score}/4</span>
+                    </span>
+                    <span className="text-[10px] text-[var(--text-secondary)]">{exchanges} exchanges{median !== null ? ` · ${fmtMinutes(median)} median` : ""}</span>
+                  </div>
+                );
+              })()}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {responsiveness.supplier && (
+              {responsiveness && responsiveness.supplier && (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text-secondary)] mb-2">Supplier Responsiveness</div>
                   <div className="flex items-baseline gap-2 mb-2">
@@ -176,7 +202,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                   </div>
                 </div>
               )}
-              {responsiveness.team && (
+              {responsiveness && responsiveness.team && (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text-secondary)] mb-2">Our Team Responsiveness</div>
                   <div className="flex items-baseline gap-2 mb-2">

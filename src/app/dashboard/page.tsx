@@ -246,6 +246,34 @@ export default function DashboardPage() {
         }
       }
 
+      // Batch 10: fetch stored responsiveness scores from supplier_contacts.
+      // Cron /api/cron/score-suppliers populates these every 6h.
+      const scoreByEmail: Record<string, { score: number; tier: string; qualifying_exchanges: number; weighted_median_minutes: number | null; recent_median_minutes: number | null; all_time_median_minutes: number | null }> = {};
+      try {
+        const { data: scoredContacts } = await getSupabase()
+          .from("supplier_contacts")
+          .select("email, responsiveness_score, responsiveness_tier, qualifying_exchanges, weighted_median_minutes, recent_median_minutes, all_time_median_minutes")
+          .not("responsiveness_score", "is", null);
+        for (const sc of (scoredContacts || [])) {
+          if (!sc.email) continue;
+          scoreByEmail[String(sc.email).toLowerCase()] = {
+            score: sc.responsiveness_score,
+            tier: sc.responsiveness_tier,
+            qualifying_exchanges: sc.qualifying_exchanges ?? 0,
+            weighted_median_minutes: sc.weighted_median_minutes,
+            recent_median_minutes: sc.recent_median_minutes,
+            all_time_median_minutes: sc.all_time_median_minutes,
+          };
+        }
+      } catch (_e) { /* non-critical — chip just won't show */ }
+
+      // Helper: median of a number array (lower-mid, matches scoring lib)
+      const medianMins = (arr: number[]): number | null => {
+        if (arr.length === 0) return null;
+        const s = arr.slice().sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+
       // Aggregate suppliers (with assignee tracking and subjects)
       const suppMap: Record<string, { email: string; domain: string; supplier_replies: number[]; team_replies: number[]; accounts: Set<string>; assignees: Set<string>; subjects: Set<string> }> = {};
       for (const r of records) {
@@ -259,15 +287,35 @@ export default function DashboardPage() {
         if (cm?.assignee_id) suppMap[r.supplier_email].assignees.add(cm.assignee_id);
         if (cm?.subject) suppMap[r.supplier_email].subjects.add(cm.subject);
       }
-      const suppList = Object.values(suppMap).map(s => ({
-        ...s,
-        accounts: Array.from(s.accounts),
-        assignee_ids: Array.from(s.assignees),
-        subjects: Array.from(s.subjects),
-        supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
-        team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
-        total: s.supplier_replies.length + s.team_replies.length,
-      })).sort((a, b) => b.total - a.total);
+      const suppList = Object.values(suppMap).map(s => {
+        const stored = scoreByEmail[s.email.toLowerCase()] || null;
+        // Prefer stored weighted_median (from cron) when present and date filters are not narrowing the data;
+        // otherwise compute median from records currently loaded.
+        const recordsMedian = medianMins(s.supplier_replies);
+        const supplier_median = stored && stored.weighted_median_minutes !== null && !effectiveDateFrom && !effectiveDateTo
+          ? stored.weighted_median_minutes
+          : recordsMedian;
+        return {
+          ...s,
+          accounts: Array.from(s.accounts),
+          assignee_ids: Array.from(s.assignees),
+          subjects: Array.from(s.subjects),
+          supplier_avg: s.supplier_replies.length > 0 ? Math.round(s.supplier_replies.reduce((a, b) => a + b, 0) / s.supplier_replies.length) : null,
+          team_avg: s.team_replies.length > 0 ? Math.round(s.team_replies.reduce((a, b) => a + b, 0) / s.team_replies.length) : null,
+          supplier_median,
+          team_median: medianMins(s.team_replies),
+          total: s.supplier_replies.length + s.team_replies.length,
+          tier_score: stored?.score ?? null,
+          tier: stored?.tier ?? null,
+          tier_qualifying_exchanges: stored?.qualifying_exchanges ?? null,
+        };
+      }).sort((a, b) => {
+        // Sort: tier desc (excellent first), then total desc
+        const aScore = a.tier_score ?? -1;
+        const bScore = b.tier_score ?? -1;
+        if (bScore !== aScore) return bScore - aScore;
+        return b.total - a.total;
+      });
       setSupplierRtData(suppList);
 
       // Aggregate user response times (with per-supplier breakdown)
@@ -1109,26 +1157,44 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <div className="space-y-1">
-                      <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
-                        <span>Supplier</span><span className="text-center">Their Avg Response</span><span className="text-center">Our Avg Response</span><span className="text-center">Exchanges</span><span className="text-center">Assigned To</span><span className="text-center">Domain</span>
+                      <div className="grid grid-cols-[1fr_2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
+                        <span>Tier</span><span>Supplier</span><span className="text-center">Their Median</span><span className="text-center">Our Median</span><span className="text-center">Exchanges</span><span className="text-center">Assigned To</span><span className="text-center">Domain</span>
                       </div>
                       {supplierRtData
                         .filter((s: any) => rtAccountFilter === "all" || s.accounts.includes(rtAccountFilter))
                         .filter((s: any) => !supplierSearch || s.email.toLowerCase().includes(supplierSearch.toLowerCase()) || s.domain.toLowerCase().includes(supplierSearch.toLowerCase()))
                         .map((s: any) => {
                           const fmtM = (m: number | null) => m === null ? "—" : m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
-                          const sColor = s.supplier_avg === null ? "var(--text-muted)" : s.supplier_avg <= 240 ? "var(--accent)" : s.supplier_avg <= 720 ? "var(--highlight)" : s.supplier_avg <= 1440 ? "var(--warning)" : "var(--danger)";
-                          const tColor = s.team_avg === null ? "var(--text-muted)" : s.team_avg <= 240 ? "var(--accent)" : s.team_avg <= 720 ? "var(--highlight)" : s.team_avg <= 1440 ? "var(--warning)" : "var(--danger)";
+                          const sColor = s.supplier_median === null ? "var(--text-muted)" : s.supplier_median <= 240 ? "var(--accent)" : s.supplier_median <= 720 ? "var(--highlight)" : s.supplier_median <= 1440 ? "var(--warning)" : "var(--danger)";
+                          const tColor = s.team_median === null ? "var(--text-muted)" : s.team_median <= 240 ? "var(--accent)" : s.team_median <= 720 ? "var(--highlight)" : s.team_median <= 1440 ? "var(--warning)" : "var(--danger)";
                           const assignees = (s.assignee_ids || []).map((id: string) => userStats.find(u => u.id === id)).filter(Boolean);
+                          // Tier chip — Batch 10
+                          const tier = s.tier as string | null;
+                          const tierColors: Record<string, string> = { excellent: "var(--accent)", good: "var(--info)", fair: "var(--warning)", low: "var(--danger)", no_response: "var(--text-muted)" };
+                          const tierBg: Record<string, string> = { excellent: "rgba(74,222,128,0.10)", good: "rgba(88,166,255,0.10)", fair: "rgba(240,136,62,0.10)", low: "rgba(248,81,73,0.10)", no_response: "rgba(72,79,88,0.10)" };
+                          const tierLabels: Record<string, string> = { excellent: "Excellent", good: "Good", fair: "Fair", low: "Low", no_response: "No response" };
+                          const tColorChip = tier ? tierColors[tier] || "var(--text-muted)" : "var(--text-muted)";
+                          const tBgChip = tier ? tierBg[tier] || "rgba(72,79,88,0.10)" : "rgba(72,79,88,0.10)";
+                          const tLabelChip = tier ? tierLabels[tier] || "—" : "—";
                           return (
                             <a key={s.email} href={"/contacts/" + encodeURIComponent(s.email)}
-                              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] items-center hover:border-[var(--info)]/30 transition-colors cursor-pointer">
+                              className="grid grid-cols-[1fr_2fr_1fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] items-center hover:border-[var(--info)]/30 transition-colors cursor-pointer">
+                              <div>
+                                {tier ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border" style={{ color: tColorChip, background: tBgChip, borderColor: tColorChip + "40" }} title={`Score ${s.tier_score}/4 · ${s.tier_qualifying_exchanges ?? 0} exchanges`}>
+                                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: tColorChip }} />
+                                    {tLabelChip}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-[var(--text-muted)]">—</span>
+                                )}
+                              </div>
                               <div className="truncate">
                                 <div className="text-[13px] font-medium truncate">{s.email}</div>
                                 {s.subjects && s.subjects.length > 0 && <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">{s.subjects[0]}{s.subjects.length > 1 ? ` +${s.subjects.length - 1} more` : ""}</div>}
                               </div>
-                              <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_avg)}</div>
-                              <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_avg)}</div>
+                              <div className="text-center text-sm font-semibold" style={{ color: sColor }}>{fmtM(s.supplier_median)}</div>
+                              <div className="text-center text-sm font-semibold" style={{ color: tColor }}>{fmtM(s.team_median)}</div>
                               <div className="text-center text-sm text-[var(--text-primary)]">{s.total}</div>
                               <div className="text-center">
                                 {assignees.length > 0 ? (
