@@ -8,7 +8,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -3666,6 +3666,9 @@ function FormsTab() {
     { label: "", field_type: "text", is_required: false, placeholder: "", options: null, default_value: "" },
   ]);
 
+  // Batch 13: submissions viewer state
+  const [viewingSubmissionsFor, setViewingSubmissionsFor] = useState<any | null>(null);
+
   useEffect(() => {
     Promise.all([
       fetch("/api/forms").then((r) => r.json()),
@@ -3836,6 +3839,16 @@ function FormsTab() {
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-[#4ADE80]" size={24} /></div>;
 
+  // Batch 13: when viewing submissions for a specific form, show that view instead of the regular forms list
+  if (viewingSubmissionsFor) {
+    return (
+      <FormSubmissionsView
+        form={viewingSubmissionsFor}
+        onBack={() => setViewingSubmissionsFor(null)}
+      />
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
@@ -3886,9 +3899,14 @@ function FormsTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setViewingSubmissionsFor(f)}
+                    title="View submissions"
+                    className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#58A6FF]"><Eye size={14} /></button>
                   <button onClick={() => { setEditingId(f.id); loadFormIntoEditor(f); }}
+                    title="Edit form"
                     className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3]"><Edit2 size={14} /></button>
                   <button onClick={() => handleDelete(f.id)}
+                    title="Delete form"
                     className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149]"><Trash2 size={14} /></button>
                 </div>
               </div>
@@ -3902,6 +3920,253 @@ function FormsTab() {
             <div className="text-xs mt-1">Create a form for call logs, meeting notes, or any structured data</div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Form Submissions View (Batch 13) ─────────────────
+// Shows all submissions for a single form template with search, expand-to-view-responses,
+// and CSV export. Reached by clicking the eye icon next to a form in FormsTab.
+function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [template, setTemplate] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/forms/submissions?form_template_id=${form.id}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error || "Failed to load submissions");
+        } else {
+          setSubmissions(data.submissions || []);
+          setTemplate(data.template || form);
+        }
+      } catch {
+        if (!cancelled) setError("Network error");
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [form.id]);
+
+  // Filter by submitter name, conversation subject, or any response value
+  const filtered = submissions.filter((sub: any) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    if (sub.submitter?.name?.toLowerCase().includes(q)) return true;
+    if (sub.submitter?.email?.toLowerCase().includes(q)) return true;
+    if (sub.conversation?.subject?.toLowerCase().includes(q)) return true;
+    if (sub.conversation?.from_email?.toLowerCase().includes(q)) return true;
+    // Also search inside the responses
+    const responseValues = Object.values(sub.responses || {});
+    for (const v of responseValues) {
+      const str = Array.isArray(v) ? v.join(" ") : String(v ?? "");
+      if (str.toLowerCase().includes(q)) return true;
+    }
+    return false;
+  });
+
+  const fields = (template?.fields || []).slice().sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const fmtTimestamp = (iso: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.round(diffMs / 60000);
+    const diffHr = Math.round(diffMs / 3600000);
+    const diffDays = Math.round(diffMs / 86400000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin} min ago`;
+    if (diffHr < 24) return `${diffHr}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (d.getFullYear() === now.getFullYear()) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const renderResponseValue = (field: any, raw: any) => {
+    if (raw === undefined || raw === null || raw === "") return <span className="text-[#484F58] italic">empty</span>;
+    if (Array.isArray(raw)) return <span>{raw.join(", ")}</span>;
+    if (typeof raw === "boolean") return <span>{raw ? "Yes" : "No"}</span>;
+    return <span className="whitespace-pre-wrap">{String(raw)}</span>;
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-3xl mx-auto p-8">
+        <div className="flex justify-center py-20">
+          <Loader2 className="animate-spin text-[#4ADE80]" size={24} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      {/* Header with back button */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onBack}
+            className="p-2 rounded-lg border border-[#1E242C] hover:bg-[#1E242C] text-[#7D8590] hover:text-[#E6EDF3] transition-colors shrink-0"
+            title="Back to forms"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight truncate">{form.name}</h1>
+            <p className="text-sm text-[#7D8590] mt-1">
+              {submissions.length} submission{submissions.length === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+        {submissions.length > 0 && (
+          <a
+            href={`/api/forms/submissions?form_template_id=${form.id}&format=csv`}
+            download
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] font-semibold text-sm hover:bg-[#3BC96E] transition-colors shrink-0"
+            title="Download all submissions as CSV"
+          >
+            <Download size={16} /> Export CSV
+          </a>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-lg bg-[#F85149]/10 border border-[#F85149]/30 text-sm text-[#F85149]">
+          {error}
+        </div>
+      )}
+
+      {/* Search */}
+      {submissions.length > 0 && (
+        <div className="relative mb-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by submitter, conversation, or response content..."
+            className="w-full pl-3 pr-8 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#484F58] hover:text-[#F85149]"
+              title="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Empty states */}
+      {submissions.length === 0 && (
+        <div className="text-center py-12 text-[#484F58]">
+          <ClipboardCheck size={32} className="mx-auto mb-3 opacity-50" />
+          <div className="text-sm">No submissions yet</div>
+          <div className="text-xs mt-1">Submissions will appear here once team members fill out this form</div>
+        </div>
+      )}
+      {submissions.length > 0 && filtered.length === 0 && search && (
+        <div className="text-center py-8 text-[#484F58] text-sm">
+          No submissions match "{search}"
+        </div>
+      )}
+
+      {/* Submissions list */}
+      <div className="space-y-2">
+        {filtered.map((sub: any) => {
+          const isExpanded = expandedId === sub.id;
+          const submitter = sub.submitter;
+          const convo = sub.conversation;
+          return (
+            <div
+              key={sub.id}
+              className={`rounded-xl bg-[#12161B] border transition-colors ${
+                isExpanded ? "border-[#4ADE80]/30" : "border-[#1E242C] hover:border-[#1E242C]/80"
+              }`}
+            >
+              {/* Row header — clickable to expand */}
+              <button
+                onClick={() => setExpandedId(isExpanded ? null : sub.id)}
+                className="w-full flex items-start gap-3 p-4 text-left"
+              >
+                {/* Avatar */}
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5"
+                  style={{ background: submitter?.color || "#7D8590" }}
+                >
+                  {submitter?.initials || (submitter?.name || "?").slice(0, 2).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-[#E6EDF3]">
+                      {submitter?.name || "Unknown user"}
+                    </span>
+                    <span className="text-[11px] text-[#484F58]">
+                      {fmtTimestamp(sub.created_at)}
+                    </span>
+                  </div>
+                  {convo && (
+                    <div className="text-[11px] text-[#7D8590] mt-1 truncate">
+                      <span className="text-[#484F58]">on</span>{" "}
+                      <span className="text-[#58A6FF]">{convo.subject || "(no subject)"}</span>
+                      {convo.from_email && (
+                        <span className="text-[#484F58]"> · {convo.from_email}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <ChevronDown
+                  size={16}
+                  className={`text-[#484F58] shrink-0 mt-2 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {/* Expanded responses */}
+              {isExpanded && (
+                <div className="border-t border-[#1E242C] p-4 space-y-2.5">
+                  {fields.map((field: any) => {
+                    const raw = (sub.responses || {})[field.id] ?? (sub.responses || {})[field.label];
+                    return (
+                      <div key={field.id} className="grid grid-cols-[140px_1fr] gap-3 items-start">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-[#484F58] pt-0.5">
+                          {field.label}
+                        </div>
+                        <div className="text-[13px] text-[#E6EDF3]">
+                          {renderResponseValue(field, raw)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {convo && (
+                    <div className="pt-2 border-t border-[#1E242C]">
+                      <a
+                        href={`/?conversation=${convo.id}`}
+                        className="text-[11px] text-[#58A6FF] hover:underline inline-flex items-center gap-1"
+                      >
+                        Open conversation →
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
