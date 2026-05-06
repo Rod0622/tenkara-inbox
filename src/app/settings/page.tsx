@@ -4155,7 +4155,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
                   {convo && (
                     <div className="pt-2 border-t border-[#1E242C]">
                       <a
-                        href={`/?conversation=${convo.id}`}
+                        href={`/#conversation=${convo.id}`}
                         className="text-[11px] text-[#58A6FF] hover:underline inline-flex items-center gap-1"
                       >
                         Open conversation →
