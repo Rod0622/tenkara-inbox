@@ -48,11 +48,11 @@ const config: Config = {
       // ─── Phase 4a typography ───────────────────────────────
       // Reads from CSS variables set by next/font in layout.tsx.
       // sans  = DM Sans (existing body UI)
-      // mono  = Geist Mono (was JetBrains Mono — Phase 4a swap)
+      // mono  = IBM Plex Mono (was JetBrains Mono — Phase 4a swap)
       // serif = Instrument Serif (Atelier headlines — applied in 4b+)
       fontFamily: {
         sans: ["var(--font-sans)", "DM Sans", "system-ui", "sans-serif"],
-        mono: ["var(--font-mono)", "Geist Mono", "Consolas", "monospace"],
+        mono: ["var(--font-mono)", "IBM Plex Mono", "Consolas", "monospace"],
         serif: ["var(--font-serif)", "Instrument Serif", "Georgia", "serif"],
       },
       animation: {

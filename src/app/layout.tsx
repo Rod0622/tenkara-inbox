@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Geist_Mono, Instrument_Serif } from "next/font/google";
+import { DM_Sans, IBM_Plex_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 
@@ -18,8 +18,10 @@ export const metadata: Metadata = {
 // `font-mono`, `font-serif` resolve to these.
 //
 // DM Sans: existing body UI font (kept).
-// Geist Mono: replaces JetBrains Mono. Thinner, more modern, matches
-//   Option B's editorial aesthetic.
+// IBM Plex Mono: replaces JetBrains Mono. Modern monospace from IBM
+//   Carbon design system. Clean and slightly humanist — used in
+//   place of Geist Mono since Geist isn't yet in Next 14.2.x's
+//   font/google manifest.
 // Instrument Serif: Atelier headlines. Will be applied to specific
 //   page titles and conversation subjects in subsequent sub-phases (4b+).
 
@@ -30,7 +32,9 @@ const dmSans = DM_Sans({
   weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
+// Geist Mono isn't in next/font/google's manifest for Next 14.2.x —
+// IBM Plex Mono is a clean modern substitute that ships with the framework.
+const ibmPlexMono = IBM_Plex_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   display: "swap",
@@ -80,7 +84,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   // Compose the three font CSS-variable classes onto <body>
-  const fontClasses = `${dmSans.variable} ${geistMono.variable} ${instrumentSerif.variable}`;
+  const fontClasses = `${dmSans.variable} ${ibmPlexMono.variable} ${instrumentSerif.variable}`;
 
   return (
     <html lang="en">
