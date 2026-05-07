@@ -209,9 +209,9 @@ export default function DashboardPage() {
   async function loadSlaData() {
     setSlaLoading(true);
     try {
-      // Batch 31: /api/metrics now only returns awaiting-reply lists (point-in-time data).
-      // Response time stats are read from /api/response-times?summary=true (wall-clock,
-      // matches the supplier responsiveness scoring spec).
+      // Batch 32: fire all 3 endpoints in parallel rather than serially.
+      // /api/metrics, /api/response-times?summary=true, and /api/response-times
+      // are all independent; running them in parallel cuts wait time meaningfully.
       let url = "/api/metrics?";
       if (effectiveDateFrom) url += "date_from=" + effectiveDateFrom + "&";
       if (effectiveDateTo) url += "date_to=" + effectiveDateTo + "&";
@@ -220,22 +220,26 @@ export default function DashboardPage() {
       if (effectiveDateFrom) rtUrl += "&date_from=" + effectiveDateFrom;
       if (effectiveDateTo) rtUrl += "&date_to=" + effectiveDateTo;
 
-      // Fire both requests in parallel — they're independent
-      const [metricsRes, rtRes] = await Promise.all([
+      let rtRecordsUrl = "/api/response-times?";
+      if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
+      if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
+
+      const [metricsRes, rtRes, recRes] = await Promise.all([
         fetch(url).catch(() => null),
         fetch(rtUrl).catch(() => null),
+        fetch(rtRecordsUrl).catch(() => null),
       ]);
 
       const metricsJson = metricsRes && metricsRes.ok ? await metricsRes.json() : null;
       const rtJson = rtRes && rtRes.ok ? await rtRes.json() : null;
+      const recJson = recRes && recRes.ok ? await recRes.json() : null;
 
-      // Merge the two endpoints' data into the slaData shape the rest of the
-      // component expects. Response time stats come from /api/response-times,
-      // awaiting-reply data comes from the new trimmed /api/metrics.
+      // Merge metrics + response-times summary into slaData. Response time stats
+      // come from /api/response-times (wall-clock, matches the scoring spec);
+      // awaiting-reply data comes from the trimmed /api/metrics.
       const teamOverall = rtJson?.team_responsiveness?.overall || { avg_minutes: 0, total: 0 };
       const merged = {
         overall: {
-          // wall-clock hours, derived from minutes
           avg_response_hours: teamOverall.avg_minutes ? Math.round((teamOverall.avg_minutes / 60) * 10) / 10 : 0,
           total_responses: teamOverall.total || 0,
           awaiting_our_reply: metricsJson?.overall?.awaiting_our_reply ?? null,
@@ -246,26 +250,30 @@ export default function DashboardPage() {
       };
       setSlaData(merged);
 
-      // Build supplier list from response_times records
-      let rtRecordsUrl = "/api/response-times?";
-      if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
-      if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
-      const recRes = await fetch(rtRecordsUrl);
-      const recJson = await recRes.json();
-      const records = recJson.records || [];
+      // Build supplier list from response_times records (already fetched above)
+      const records = recJson?.records || [];
 
       // Fetch conversation metadata for subjects and assignees
       const convoIds = Array.from(new Set(records.map((r: any) => r.conversation_id).filter(Boolean)));
       const convoMeta: Record<string, { subject: string; assignee_id: string | null }> = {};
       if (convoIds.length > 0) {
-        // Fetch in chunks of 200
+        // Batch 32: fetch chunks in parallel rather than serially. With ~7 chunks
+        // of 200ms each, serial fetching cost ~1.4s. In parallel it's ~200ms total.
+        const chunks: string[][] = [];
         for (let ci = 0; ci < convoIds.length; ci += 200) {
-          const chunk = convoIds.slice(ci, ci + 200);
-          const { data: convos } = await getSupabase()
-            .from("conversations")
-            .select("id, subject, assignee_id")
-            .in("id", chunk);
-          for (const c of (convos || [])) convoMeta[c.id] = { subject: c.subject, assignee_id: c.assignee_id };
+          chunks.push(convoIds.slice(ci, ci + 200) as string[]);
+        }
+        const results = await Promise.all(
+          chunks.map((chunk) =>
+            getSupabase()
+              .from("conversations")
+              .select("id, subject, assignee_id")
+              .in("id", chunk)
+              .then(({ data }) => data || [])
+          )
+        );
+        for (const convos of results) {
+          for (const c of convos) convoMeta[c.id] = { subject: c.subject, assignee_id: c.assignee_id };
         }
       }
 
