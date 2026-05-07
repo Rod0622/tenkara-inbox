@@ -969,7 +969,8 @@ function TeamTab() {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteData, setInviteData] = useState({ email: "", name: "", role: "member", department: "Uncategorized" });
   const [inviting, setInviting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string; inviteUrl?: string; emailSent?: boolean; emailError?: string | null } | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [managingAccessId, setManagingAccessId] = useState<string | null>(null);
 
@@ -1040,13 +1041,16 @@ function TeamTab() {
       const data = await res.json();
 
       if (res.ok) {
-        setInviteResult({ success: true, message: data.message });
+        setInviteResult({
+          success: true,
+          message: data.message,
+          inviteUrl: data.inviteUrl,
+          emailSent: data.emailSent,
+          emailError: data.emailError,
+        });
         setInviteData({ email: "", name: "", role: "member", department: "Uncategorized" });
         fetchMembers();
-        setTimeout(() => {
-          setShowInvite(false);
-          setInviteResult(null);
-        }, 3000);
+        // Batch 36: do NOT auto-close. Admin needs time to copy the URL if email failed.
       } else {
         setInviteResult({ success: false, message: data.error });
       }
@@ -1161,22 +1165,57 @@ function TeamTab() {
               </div>
 
               {inviteResult && (
-                <div className={`px-3 py-2.5 rounded-lg text-xs flex items-center gap-2 ${
-                  inviteResult.success
-                    ? "bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-[var(--accent)]"
-                    : "bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-[var(--danger)]"
-                }`}>
-                  {inviteResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-                  {inviteResult.message}
+                <div className="space-y-2">
+                  <div className={`px-3 py-2.5 rounded-lg text-xs flex items-start gap-2 ${
+                    inviteResult.success
+                      ? "bg-[rgba(74,222,128,0.08)] border border-[rgba(74,222,128,0.15)] text-[var(--accent)]"
+                      : "bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-[var(--danger)]"
+                  }`}>
+                    {inviteResult.success ? <CheckCircle size={14} className="mt-0.5 shrink-0" /> : <AlertCircle size={14} className="mt-0.5 shrink-0" />}
+                    <span className="leading-relaxed">{inviteResult.message}</span>
+                  </div>
+
+                  {/* Batch 36: show invite URL persistently with a copy button.
+                      Always shown when invite succeeded — useful as a backup even
+                      when email did send (in case it lands in spam, or the user
+                      asks for it again). */}
+                  {inviteResult.success && inviteResult.inviteUrl && (
+                    <div className="px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Invite Link {inviteResult.emailSent ? "(also sent via email)" : "— share this manually"}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(inviteResult.inviteUrl || "");
+                            setCopiedInvite(true);
+                            setTimeout(() => setCopiedInvite(false), 1500);
+                          }}
+                          className="px-2.5 py-1 rounded-md text-[10px] font-medium bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent-strong)] transition-colors"
+                        >
+                          {copiedInvite ? "Copied!" : "Copy link"}
+                        </button>
+                      </div>
+                      <div className="text-[11px] font-mono text-[var(--text-secondary)] break-all select-all">
+                        {inviteResult.inviteUrl}
+                      </div>
+                      {inviteResult.emailError && (
+                        <div className="text-[10px] text-[var(--danger)] mt-1">
+                          Email send failed: {inviteResult.emailError}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setShowInvite(false)}
+                  onClick={() => { setShowInvite(false); setInviteResult(null); }}
                   className="px-4 py-2.5 rounded-lg border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors"
                 >
-                  Cancel
+                  {inviteResult?.success ? "Done" : "Cancel"}
                 </button>
                 <button
                   onClick={handleInvite}
@@ -1188,7 +1227,7 @@ function TeamTab() {
                   }`}
                 >
                   {inviting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                  {inviting ? "Sending Invite..." : "Send Invitation"}
+                  {inviting ? "Sending Invite..." : (inviteResult?.success ? "Send Another" : "Send Invitation")}
                 </button>
               </div>
 

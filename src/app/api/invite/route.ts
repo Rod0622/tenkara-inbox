@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
+import { refreshGoogleToken } from "@/lib/google-oauth";
 
 function getAppUrl() {
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
@@ -30,6 +31,89 @@ function pickColor() {
     "#F5D547",
   ];
   return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// Batch 36: change this to switch which mailbox transactional emails come from.
+// Set to a specific email to hardcode, or leave empty/undefined to fall back to
+// "first account that can actually send" (less predictable, more brittle).
+const PREFERRED_SENDER = "operations@trytenkara.com";
+
+/**
+ * Pick the email account that should send transactional emails (invites etc.).
+ *
+ * Strategy:
+ *  1. Use PREFERRED_SENDER if it exists and is active
+ *  2. Otherwise the first active account with usable credentials
+ *
+ * Returns null if no usable account is found.
+ */
+async function pickSenderAccount(supabase: any) {
+  if (PREFERRED_SENDER) {
+    const { data: preferred } = await supabase
+      .from("email_accounts")
+      .select("*")
+      .eq("email", PREFERRED_SENDER)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (preferred) return preferred;
+  }
+  const { data: accounts } = await supabase
+    .from("email_accounts")
+    .select("*")
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+  return (accounts || [])[0] || null;
+}
+
+/**
+ * Build a nodemailer transport for the given account, using whichever auth
+ * mechanism the account actually supports.
+ *
+ * - google_oauth → SMTP via XOAUTH2 with a freshly-refreshed access token
+ * - everything else → plain SMTP using stored smtp_password (or imap_password fallback)
+ *
+ * Microsoft OAuth accounts intentionally NOT supported here — they'd need
+ * Microsoft Graph API send, which we can add later if needed. For now they fail
+ * fast with a clear error so admins can fall back to the manual invite link.
+ */
+async function buildTransport(account: any) {
+  if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+    // Get a fresh access token (expires every ~1 hour, so this is the safe path)
+    const accessToken = await refreshGoogleToken(account.id, false);
+    return nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      auth: {
+        type: "OAuth2",
+        user: account.email,
+        accessToken,
+      },
+    } as any);
+  }
+
+  if (account.provider === "microsoft_oauth") {
+    // Not supported in this batch — Microsoft Graph send would be a separate change.
+    throw new Error(
+      "Sending invites from Microsoft OAuth accounts is not yet supported. " +
+      "Use a Google or SMTP-credentialed account, or share the invite URL manually."
+    );
+  }
+
+  // Plain SMTP path (App Password or password set during Connect via SMTP form)
+  if (!account.smtp_host || !(account.smtp_password || account.imap_password)) {
+    throw new Error("Account has no usable SMTP credentials");
+  }
+  return nodemailer.createTransport({
+    host: account.smtp_host,
+    port: account.smtp_port || 587,
+    secure: account.smtp_port === 465,
+    auth: {
+      user: account.smtp_user || account.imap_user || account.email,
+      pass: account.smtp_password || account.imap_password,
+    },
+    tls: { rejectUnauthorized: false },
+  });
 }
 
 // POST /api/invite
@@ -166,29 +250,18 @@ export async function POST(req: NextRequest) {
   const appUrl = getAppUrl();
   const acceptUrl = `${appUrl}/accept-invite/${inviteToken}`;
 
+  // ── Send invite email via the appropriate auth method ────────────────────
   let emailSent = false;
   let emailError: string | null = null;
+  let senderEmail: string | null = null;
 
   try {
-    const { data: accounts } = await supabase
-      .from("email_accounts")
-      .select("*")
-      .eq("is_active", true)
-      .limit(1);
-
-    const account = accounts?.[0];
-
-    if (account?.smtp_host && (account?.smtp_password || account?.imap_password)) {
-      const transport = nodemailer.createTransport({
-        host: account.smtp_host,
-        port: account.smtp_port || 587,
-        secure: account.smtp_port === 465,
-        auth: {
-          user: account.smtp_user || account.imap_user || account.email,
-          pass: account.smtp_password || account.imap_password,
-        },
-        tls: { rejectUnauthorized: false },
-      });
+    const account = await pickSenderAccount(supabase);
+    if (!account) {
+      emailError = "No active email account available to send invite from.";
+    } else {
+      senderEmail = account.email;
+      const transport = await buildTransport(account);
 
       await transport.sendMail({
         from: `"Tenkara Inbox" <${account.email}>`,
@@ -220,8 +293,6 @@ export async function POST(req: NextRequest) {
       });
 
       emailSent = true;
-    } else {
-      emailError = "No active SMTP account available to send invite email.";
     }
   } catch (err: any) {
     console.error("Invite email failed:", err);
@@ -233,8 +304,9 @@ export async function POST(req: NextRequest) {
     emailSent,
     emailError,
     inviteUrl: acceptUrl,
+    senderEmail,
     message: emailSent
-      ? `Invitation sent to ${normalizedEmail}`
+      ? `Invitation sent to ${normalizedEmail} from ${senderEmail || "Tenkara"}`
       : `Invite created. Share this link manually: ${acceptUrl}`,
   });
 }
