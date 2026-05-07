@@ -97,11 +97,13 @@ export default function SidebarTeamList({
                   >
                     {m.initials}
                   </div>
-                  {/* Status dot */}
+                  {/* Status dot — always green when active so it reads as "online"
+                      universally, gray when OOO so it reads as "unavailable". Theme-independent. */}
                   <span
                     className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[var(--bg)] ${
-                      m.is_currently_ooo ? "bg-[#FCA5A5]" : "bg-[var(--accent)]"
+                      m.is_currently_ooo ? "bg-[var(--text-muted)]" : "bg-[#10b981]"
                     }`}
+                    title={m.is_currently_ooo ? "Out of office" : "Active"}
                   />
                 </div>
 
