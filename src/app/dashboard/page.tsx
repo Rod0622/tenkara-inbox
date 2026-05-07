@@ -191,6 +191,7 @@ export default function DashboardPage() {
   // SLA/KPI metrics
   const [slaData, setSlaData] = useState<any>(null);
   const [slaLoading, setSlaLoading] = useState(false);
+  const [slaRecordsLoading, setSlaRecordsLoading] = useState(false);
   const [slaSubTab, setSlaSubTab] = useState<"response-times" | "supplier-responsiveness" | "awaiting-ours" | "awaiting-supplier">("response-times");
   const [supplierRtData, setSupplierRtData] = useState<any[]>([]);
   const [userRtData, setUserRtData] = useState<any[]>([]);
@@ -208,10 +209,19 @@ export default function DashboardPage() {
 
   async function loadSlaData() {
     setSlaLoading(true);
+    setSlaRecordsLoading(true);
     try {
-      // Batch 32: fire all 3 endpoints in parallel rather than serially.
-      // /api/metrics, /api/response-times?summary=true, and /api/response-times
-      // are all independent; running them in parallel cuts wait time meaningfully.
+      // Batch 33: Two-phase loading.
+      //
+      // Phase 1 (fast): /api/metrics + /api/response-times?summary=true.
+      // Together these give us the cards (avg, total, awaiting counts) and the
+      // awaiting-reply lists. Both endpoints are small/fast. We unblock the UI
+      // (setSlaLoading(false)) as soon as these return.
+      //
+      // Phase 2 (slow): /api/response-times (no summary) returns ALL response
+      // time records — historically several MB. Used only for the per-supplier
+      // and per-user breakdown tables. Loaded in the background; the relevant
+      // sub-tabs show their own loading state until records arrive.
       let url = "/api/metrics?";
       if (effectiveDateFrom) url += "date_from=" + effectiveDateFrom + "&";
       if (effectiveDateTo) url += "date_to=" + effectiveDateTo + "&";
@@ -220,23 +230,15 @@ export default function DashboardPage() {
       if (effectiveDateFrom) rtUrl += "&date_from=" + effectiveDateFrom;
       if (effectiveDateTo) rtUrl += "&date_to=" + effectiveDateTo;
 
-      let rtRecordsUrl = "/api/response-times?";
-      if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
-      if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
-
-      const [metricsRes, rtRes, recRes] = await Promise.all([
+      // Phase 1: fast pair in parallel
+      const [metricsRes, rtRes] = await Promise.all([
         fetch(url).catch(() => null),
         fetch(rtUrl).catch(() => null),
-        fetch(rtRecordsUrl).catch(() => null),
       ]);
 
       const metricsJson = metricsRes && metricsRes.ok ? await metricsRes.json() : null;
       const rtJson = rtRes && rtRes.ok ? await rtRes.json() : null;
-      const recJson = recRes && recRes.ok ? await recRes.json() : null;
 
-      // Merge metrics + response-times summary into slaData. Response time stats
-      // come from /api/response-times (wall-clock, matches the scoring spec);
-      // awaiting-reply data comes from the trimmed /api/metrics.
       const teamOverall = rtJson?.team_responsiveness?.overall || { avg_minutes: 0, total: 0 };
       const merged = {
         overall: {
@@ -249,8 +251,16 @@ export default function DashboardPage() {
         awaiting_supplier_reply: metricsJson?.awaiting_supplier_reply || [],
       };
       setSlaData(merged);
+      setSlaLoading(false); // Cards + awaiting tabs are usable now
 
-      // Build supplier list from response_times records (already fetched above)
+      // Phase 2: records + per-supplier / per-user aggregation. Run in the
+      // background. The slow records fetch was the SLA tab's main bottleneck.
+      let rtRecordsUrl = "/api/response-times?";
+      if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
+      if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
+
+      const recRes = await fetch(rtRecordsUrl).catch(() => null);
+      const recJson = recRes && recRes.ok ? await recRes.json() : null;
       const records = recJson?.records || [];
 
       // Fetch conversation metadata for subjects and assignees
@@ -389,6 +399,7 @@ export default function DashboardPage() {
       console.error("Failed to load SLA metrics");
     } finally {
       setSlaLoading(false);
+      setSlaRecordsLoading(false);
     }
   }
 
@@ -1116,6 +1127,12 @@ export default function DashboardPage() {
 
                 {/* Response Times by User (from response_times table) */}
                 {slaSubTab === "response-times" && (
+                  slaRecordsLoading && userRtData.length === 0 ? (
+                    <div className="text-center py-12 text-[var(--text-muted)] text-xs">
+                      <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)] mx-auto mb-2" />
+                      Loading response time records…
+                    </div>
+                  ) : (
                   <div className="space-y-1">
                     <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
                       <span>Team Member</span><span className="text-center">Avg Response</span><span className="text-center">Fastest</span><span className="text-center">Slowest</span><span className="text-center">Responses</span>
@@ -1170,10 +1187,17 @@ export default function DashboardPage() {
                     })}
                     {userRtData.length === 0 && <Empty text="No response data yet" />}
                   </div>
+                  )
                 )}
 
                 {/* Supplier Response Times */}
                 {slaSubTab === "supplier-responsiveness" && (
+                  slaRecordsLoading && supplierRtData.length === 0 ? (
+                    <div className="text-center py-12 text-[var(--text-muted)] text-xs">
+                      <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)] mx-auto mb-2" />
+                      Loading supplier response data…
+                    </div>
+                  ) : (
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <select value={rtAccountFilter} onChange={(e) => setRtAccountFilter(e.target.value)}
@@ -1244,6 +1268,7 @@ export default function DashboardPage() {
                       {supplierRtData.length === 0 && <Empty text="No supplier response data yet. Run the backfill first." />}
                     </div>
                   </div>
+                  )
                 )}
 
                 {/* Awaiting Our Reply */}
