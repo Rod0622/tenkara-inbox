@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -86,6 +87,15 @@ export default function LoginPage() {
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
+
+          <div className="text-center pt-1">
+            <Link
+              href="/forgot-password"
+              className="text-[#7D8590] text-xs hover:text-[#E6EDF3] transition-colors"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </form>
 
         <p className="text-[#484F58] text-xs text-center mt-6">
