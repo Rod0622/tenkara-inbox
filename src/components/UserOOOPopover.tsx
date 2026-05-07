@@ -139,36 +139,36 @@ export default function UserOOOPopover({
 
       <div
         style={popoverStyle}
-        className="bg-[#0F1318] border border-[#1E242C] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[500px]"
+        className="bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[500px]"
       >
-        <div className="flex items-center justify-between px-3 py-2 border-b border-[#1E242C]">
-          <span className="text-xs font-bold text-[#E6EDF3]">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+          <span className="text-xs font-bold text-[var(--text-primary)]">
             {canEdit ? "Out of Office" : `${targetUserName}'s status`}
           </span>
-          <button onClick={onClose} className="text-[#7D8590] hover:text-[#E6EDF3]">
+          <button onClick={onClose} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
             <X size={14} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {loading ? (
-            <div className="text-center py-4 text-[#484F58] text-xs">Loading...</div>
+            <div className="text-center py-4 text-[var(--text-muted)] text-xs">Loading...</div>
           ) : (
             <>
               {/* Current status */}
-              <div className="flex items-center gap-2 px-2 py-2 bg-[#12161B] rounded-lg">
+              <div className="flex items-center gap-2 px-2 py-2 bg-[var(--surface)] rounded-lg">
                 <span
-                  className={`w-2 h-2 rounded-full ${isCurrentlyOOO ? "bg-[#FCA5A5]" : "bg-[#4ADE80]"}`}
+                  className={`w-2 h-2 rounded-full ${isCurrentlyOOO ? "bg-[#FCA5A5]" : "bg-[var(--accent)]"}`}
                 />
-                <span className="text-[11px] text-[#E6EDF3] font-semibold">
+                <span className="text-[11px] text-[var(--text-primary)] font-semibold">
                   {isCurrentlyOOO ? "Currently OOO" : "Active"}
                 </span>
               </div>
 
               {/* Indefinite toggle */}
               {canEdit && (
-                <label className="flex items-center justify-between px-2 py-2 bg-[#12161B] rounded-lg cursor-pointer">
-                  <span className="text-[11px] text-[#E6EDF3]">I'm currently OOO (until cleared)</span>
+                <label className="flex items-center justify-between px-2 py-2 bg-[var(--surface)] rounded-lg cursor-pointer">
+                  <span className="text-[11px] text-[var(--text-primary)]">I'm currently OOO (until cleared)</span>
                   <input
                     type="checkbox"
                     checked={!!indefinitePeriod}
@@ -181,11 +181,11 @@ export default function UserOOOPopover({
               {/* Scheduled periods */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] text-[#7D8590] uppercase tracking-wider">Scheduled OOO</span>
+                  <span className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wider">Scheduled OOO</span>
                   {canEdit && !adding && (
                     <button
                       onClick={() => setAdding(true)}
-                      className="text-[10px] text-[#58A6FF] hover:text-[#7cc0ff] flex items-center gap-1"
+                      className="text-[10px] text-[var(--info)] hover:text-[var(--info)] flex items-center gap-1"
                     >
                       <Plus size={10} /> Add
                     </button>
@@ -193,7 +193,7 @@ export default function UserOOOPopover({
                 </div>
 
                 {scheduledPeriods.length === 0 && !adding ? (
-                  <div className="text-[11px] text-[#484F58] py-2">No scheduled OOO periods</div>
+                  <div className="text-[11px] text-[var(--text-muted)] py-2">No scheduled OOO periods</div>
                 ) : (
                   <div className="space-y-2">
                     {scheduledPeriods.map((p) => {
@@ -205,7 +205,7 @@ export default function UserOOOPopover({
                         <div
                           key={p.id}
                           className={`px-2 py-2 rounded-md border text-[11px] ${
-                            isActive ? "border-[#5C2828] bg-[#1F1414] text-[#FCA5A5]" : "border-[#1E242C] bg-[#0B0E11] text-[#9CA3AF]"
+                            isActive ? "border-[#5C2828] bg-[#1F1414] text-[#FCA5A5]" : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)]"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -219,14 +219,14 @@ export default function UserOOOPopover({
                             {canEdit && (
                               <button
                                 onClick={() => deletePeriod(p.id)}
-                                className="text-[#7D8590] hover:text-[#F85149] shrink-0"
+                                className="text-[var(--text-secondary)] hover:text-[var(--danger)] shrink-0"
                                 title="Remove"
                               >
                                 <Trash2 size={11} />
                               </button>
                             )}
                           </div>
-                          {p.note && <div className="mt-1 text-[#7D8590] truncate">{p.note}</div>}
+                          {p.note && <div className="mt-1 text-[var(--text-secondary)] truncate">{p.note}</div>}
                         </div>
                       );
                     })}
@@ -234,40 +234,40 @@ export default function UserOOOPopover({
                 )}
 
                 {adding && canEdit && (
-                  <div className="mt-2 space-y-1.5 p-2 bg-[#12161B] rounded-lg border border-[#1E242C]">
+                  <div className="mt-2 space-y-1.5 p-2 bg-[var(--surface)] rounded-lg border border-[var(--border)]">
                     <div>
-                      <label className="text-[10px] text-[#7D8590] block mb-0.5">Start date</label>
+                      <label className="text-[10px] text-[var(--text-secondary)] block mb-0.5">Start date</label>
                       <input
                         type="date"
                         value={newStart}
                         onChange={(e) => setNewStart(e.target.value)}
-                        className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                        className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-[#7D8590] block mb-0.5">End date (blank = indefinite)</label>
+                      <label className="text-[10px] text-[var(--text-secondary)] block mb-0.5">End date (blank = indefinite)</label>
                       <input
                         type="date"
                         value={newEnd}
                         onChange={(e) => setNewEnd(e.target.value)}
-                        className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                        className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-[#7D8590] block mb-0.5">Note (optional)</label>
+                      <label className="text-[10px] text-[var(--text-secondary)] block mb-0.5">Note (optional)</label>
                       <input
                         type="text"
                         value={newNote}
                         onChange={(e) => setNewNote(e.target.value)}
                         placeholder="e.g. annual leave"
-                        className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]"
+                        className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                       />
                     </div>
                     <div className="flex gap-2 pt-1">
                       <button
                         onClick={addScheduledPeriod}
                         disabled={!newStart}
-                        className="flex-1 px-2 py-1 rounded bg-[#4ADE80] text-[#0B0E11] text-[10px] font-bold hover:bg-[#3fc671] disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex-1 px-2 py-1 rounded bg-[var(--accent)] text-[var(--bg)] text-[10px] font-bold hover:bg-[var(--accent-strong)] disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Save
                       </button>
@@ -278,7 +278,7 @@ export default function UserOOOPopover({
                           setNewEnd("");
                           setNewNote("");
                         }}
-                        className="flex-1 px-2 py-1 rounded bg-[#1E242C] text-[#9CA3AF] text-[10px] hover:bg-[#252C36]"
+                        className="flex-1 px-2 py-1 rounded bg-[var(--border)] text-[var(--text-secondary)] text-[10px] hover:bg-[var(--border-strong)]"
                       >
                         Cancel
                       </button>

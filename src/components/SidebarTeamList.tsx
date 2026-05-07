@@ -65,11 +65,11 @@ export default function SidebarTeamList({
     <div className="px-2 pt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full px-2.5 pb-1 flex items-center gap-1.5 text-[10px] font-bold text-[#484F58] uppercase tracking-widest hover:text-[#7D8590] transition-colors"
+        className="w-full px-2.5 pb-1 flex items-center gap-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest hover:text-[var(--text-secondary)] transition-colors"
       >
         <Users size={10} />
         <span>Team</span>
-        <span className="text-[#7D8590] normal-case font-normal tracking-normal ml-1">
+        <span className="text-[var(--text-secondary)] normal-case font-normal tracking-normal ml-1">
           ({activeCount} active{oooCount > 0 ? `, ${oooCount} OOO` : ""})
         </span>
         <ChevronDown size={10} className={`ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
@@ -87,29 +87,29 @@ export default function SidebarTeamList({
                   if (el) buttonRefs.current.set(m.id, el);
                 }}
                 onClick={() => handleMemberClick(m)}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left hover:bg-[#12161B] transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left hover:bg-[var(--surface)] transition-colors"
               >
                 {/* Avatar */}
                 <div className="relative shrink-0">
                   <div
-                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-[#0B0E11]"
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-[var(--bg)]"
                     style={{ background: m.color }}
                   >
                     {m.initials}
                   </div>
                   {/* Status dot */}
                   <span
-                    className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[#0B0E11] ${
-                      m.is_currently_ooo ? "bg-[#FCA5A5]" : "bg-[#4ADE80]"
+                    className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[var(--bg)] ${
+                      m.is_currently_ooo ? "bg-[#FCA5A5]" : "bg-[var(--accent)]"
                     }`}
                   />
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <span className="text-[11px] font-semibold text-[#E6EDF3] truncate">
+                    <span className="text-[11px] font-semibold text-[var(--text-primary)] truncate">
                       {m.name}
-                      {isMe && <span className="text-[#484F58] font-normal"> (you)</span>}
+                      {isMe && <span className="text-[var(--text-muted)] font-normal"> (you)</span>}
                     </span>
                   </div>
                   <div className="text-[10px] truncate">
@@ -118,7 +118,7 @@ export default function SidebarTeamList({
                         🌴 OOO{m.ooo_end_date ? ` until ${new Date(m.ooo_end_date).toLocaleDateString()}` : ""}
                       </span>
                     ) : (
-                      <span className="text-[#484F58]">{m.department || "—"}</span>
+                      <span className="text-[var(--text-muted)]">{m.department || "—"}</span>
                     )}
                   </div>
                 </div>
