@@ -209,19 +209,42 @@ export default function DashboardPage() {
   async function loadSlaData() {
     setSlaLoading(true);
     try {
+      // Batch 31: /api/metrics now only returns awaiting-reply lists (point-in-time data).
+      // Response time stats are read from /api/response-times?summary=true (wall-clock,
+      // matches the supplier responsiveness scoring spec).
       let url = "/api/metrics?";
       if (effectiveDateFrom) url += "date_from=" + effectiveDateFrom + "&";
       if (effectiveDateTo) url += "date_to=" + effectiveDateTo + "&";
-      const res = await fetch(url);
-      const data = await res.json();
-      setSlaData(data);
 
-      // Also load response_times from the response_times table for supplier and user breakdowns
       let rtUrl = "/api/response-times?summary=true";
       if (effectiveDateFrom) rtUrl += "&date_from=" + effectiveDateFrom;
       if (effectiveDateTo) rtUrl += "&date_to=" + effectiveDateTo;
-      const rtRes = await fetch(rtUrl);
-      const rtJson = await rtRes.json();
+
+      // Fire both requests in parallel — they're independent
+      const [metricsRes, rtRes] = await Promise.all([
+        fetch(url).catch(() => null),
+        fetch(rtUrl).catch(() => null),
+      ]);
+
+      const metricsJson = metricsRes && metricsRes.ok ? await metricsRes.json() : null;
+      const rtJson = rtRes && rtRes.ok ? await rtRes.json() : null;
+
+      // Merge the two endpoints' data into the slaData shape the rest of the
+      // component expects. Response time stats come from /api/response-times,
+      // awaiting-reply data comes from the new trimmed /api/metrics.
+      const teamOverall = rtJson?.team_responsiveness?.overall || { avg_minutes: 0, total: 0 };
+      const merged = {
+        overall: {
+          // wall-clock hours, derived from minutes
+          avg_response_hours: teamOverall.avg_minutes ? Math.round((teamOverall.avg_minutes / 60) * 10) / 10 : 0,
+          total_responses: teamOverall.total || 0,
+          awaiting_our_reply: metricsJson?.overall?.awaiting_our_reply ?? null,
+          awaiting_supplier_reply: metricsJson?.overall?.awaiting_supplier_reply ?? null,
+        },
+        awaiting_our_reply: metricsJson?.awaiting_our_reply || [],
+        awaiting_supplier_reply: metricsJson?.awaiting_supplier_reply || [],
+      };
+      setSlaData(merged);
 
       // Build supplier list from response_times records
       let rtRecordsUrl = "/api/response-times?";
@@ -1049,7 +1072,7 @@ export default function DashboardPage() {
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                     <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Avg Response Time</div>
                     <div className="text-2xl font-bold text-[var(--accent)] font-mono tabular-nums">{formatBusinessTime(slaData.overall.avg_response_hours)}</div>
-                    <div className="text-[10px] text-[var(--text-muted)] mt-1">business hours</div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1">wall-clock</div>
                   </div>
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                     <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1">Total Responses</div>
@@ -1057,12 +1080,12 @@ export default function DashboardPage() {
                   </div>
                   <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 p-4">
                     <div className="text-[10px] text-[var(--danger)] uppercase font-semibold mb-1">Awaiting Our Reply</div>
-                    <div className="text-2xl font-bold text-[var(--danger)] font-mono tabular-nums">{slaData.overall.awaiting_our_reply}</div>
+                    <div className="text-2xl font-bold text-[var(--danger)] font-mono tabular-nums">{slaData.overall.awaiting_our_reply ?? "—"}</div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-1">supplier waiting on us</div>
                   </div>
                   <div className="rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4">
                     <div className="text-[10px] text-[var(--warning)] uppercase font-semibold mb-1">Awaiting Supplier Reply</div>
-                    <div className="text-2xl font-bold text-[var(--warning)] font-mono tabular-nums">{slaData.overall.awaiting_supplier_reply}</div>
+                    <div className="text-2xl font-bold text-[var(--warning)] font-mono tabular-nums">{slaData.overall.awaiting_supplier_reply ?? "—"}</div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-1">we sent last message</div>
                   </div>
                 </div>
@@ -1072,8 +1095,8 @@ export default function DashboardPage() {
                   {([
                     { id: "response-times" as const, label: "Response Times by User" },
                     { id: "supplier-responsiveness" as const, label: "Supplier Response Times" },
-                    { id: "awaiting-ours" as const, label: "Awaiting Our Reply (" + slaData.overall.awaiting_our_reply + ")" },
-                    { id: "awaiting-supplier" as const, label: "Awaiting Supplier Reply (" + slaData.overall.awaiting_supplier_reply + ")" },
+                    { id: "awaiting-ours" as const, label: "Awaiting Our Reply (" + (slaData.overall.awaiting_our_reply ?? "—") + ")" },
+                    { id: "awaiting-supplier" as const, label: "Awaiting Supplier Reply (" + (slaData.overall.awaiting_supplier_reply ?? "—") + ")" },
                   ]).map((t) => (
                     <button key={t.id} onClick={() => setSlaSubTab(t.id)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
