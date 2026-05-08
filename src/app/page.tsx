@@ -173,14 +173,30 @@ export default function InboxPage() {
       const isSystemInbox = selectedFolder.is_system && folderName === "inbox";
       const isSystemSent = selectedFolder.is_system && folderName === "sent";
 
+      // Phase 3: when the user is on the "All" or "Closed" sub-view, do NOT
+      // strip assigned conversations at this stage. ConversationList will apply
+      // the appropriate filter (or load closures from a different source).
+      // Only the default "unassigned" sub-view applies the assignee=null filter.
+      const includeAssigned = folderSubView !== "unassigned";
+
       if (isSystemInbox) {
-        // Team inbox: show unassigned conversations only
-        filtered = conversations.filter(
-          (c) =>
-            c.email_account_id === activeMailbox &&
-            !c.assignee_id &&
-            (c.folder_id === null || c.folder_id === selectedFolder.id)
-        );
+        if (includeAssigned) {
+          // All / Closed sub-views: include every conversation in this account's Inbox,
+          // assigned or not. ConversationList narrows further.
+          filtered = conversations.filter(
+            (c) =>
+              c.email_account_id === activeMailbox &&
+              (c.folder_id === null || c.folder_id === selectedFolder.id)
+          );
+        } else {
+          // Team inbox (default click): show unassigned conversations only
+          filtered = conversations.filter(
+            (c) =>
+              c.email_account_id === activeMailbox &&
+              !c.assignee_id &&
+              (c.folder_id === null || c.folder_id === selectedFolder.id)
+          );
+        }
       } else if (isSystemSent) {
         filtered = conversations.filter(
           (c) =>
@@ -247,6 +263,7 @@ export default function InboxPage() {
     activeMailbox,
     activeFolder,
     activeView,
+    folderSubView,
     currentUser,
     searchQuery,
     searchResults,
