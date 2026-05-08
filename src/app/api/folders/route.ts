@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { ensureFolderLabel } from "@/lib/folder-labels";
 
 // GET /api/folders — list all folders
 export async function GET() {
@@ -58,6 +59,15 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Auto-create a label with the same name as the folder. Best-effort —
+  // don't fail the request if the label hook errors. The label will be
+  // applied to conversations when they are moved into this folder.
+  try {
+    if (folder?.id) await ensureFolderLabel(folder.id);
+  } catch (e: any) {
+    console.error("[folders/POST] ensureFolderLabel failed:", e?.message || e);
   }
 
   return NextResponse.json({ folder });

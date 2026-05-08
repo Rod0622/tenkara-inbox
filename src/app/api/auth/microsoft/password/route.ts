@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { ensureAccountLabels } from "@/lib/folder-labels";
 
 // POST /api/auth/microsoft/password — Connect client Microsoft 365 email via IMAP
 // Saves credentials without testing IMAP (basic auth may be disabled)
@@ -47,12 +48,28 @@ export async function POST(req: NextRequest) {
       sync_error: null,
     };
 
+    // Track the account id so we can run the labels hook after either branch.
+    let accountId: string | null = null;
+
     if (existing) {
       const { error } = await supabase.from("email_accounts").update(accountData).eq("id", existing.id);
       if (error) return NextResponse.json({ error: "Update failed: " + error.message }, { status: 500 });
+      accountId = existing.id;
     } else {
-      const { error } = await supabase.from("email_accounts").insert(accountData);
+      const { data: created, error } = await supabase
+        .from("email_accounts")
+        .insert(accountData)
+        .select("id")
+        .single();
       if (error) return NextResponse.json({ error: "Insert failed: " + error.message }, { status: 500 });
+      accountId = created?.id || null;
+    }
+
+    // Ensure auto-labels + Completed folder. Best-effort — do not fail the request.
+    try {
+      if (accountId) await ensureAccountLabels(accountId);
+    } catch (e: any) {
+      console.error("[microsoft/password/POST] ensureAccountLabels failed:", e?.message || e);
     }
 
     return NextResponse.json({

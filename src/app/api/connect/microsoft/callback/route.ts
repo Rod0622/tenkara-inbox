@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { ensureAccountLabels } from "@/lib/folder-labels";
 
 // GET /api/connect/microsoft/callback — Handle Microsoft OAuth callback
 export async function GET(req: NextRequest) {
@@ -94,16 +95,32 @@ export async function GET(req: NextRequest) {
     const { data: existing } = await supabase
       .from("email_accounts").select("id").eq("email", email).maybeSingle();
 
+    // Track the account id so we can run the labels hook after either branch.
+    let accountId: string | null = null;
+
     if (existing) {
       const { error: updateErr } = await supabase.from("email_accounts").update(accountData).eq("id", existing.id);
       if (updateErr) {
         return NextResponse.redirect(baseUrl + "/settings?error=" + encodeURIComponent("Failed to save: " + updateErr.message));
       }
+      accountId = existing.id;
     } else {
-      const { error: insertErr } = await supabase.from("email_accounts").insert(accountData);
+      const { data: created, error: insertErr } = await supabase
+        .from("email_accounts")
+        .insert(accountData)
+        .select("id")
+        .single();
       if (insertErr) {
         return NextResponse.redirect(baseUrl + "/settings?error=" + encodeURIComponent("Failed to save: " + insertErr.message));
       }
+      accountId = created?.id || null;
+    }
+
+    // Ensure auto-labels + Completed folder. Best-effort.
+    try {
+      if (accountId) await ensureAccountLabels(accountId);
+    } catch (e: any) {
+      console.error("[connect/microsoft/callback] ensureAccountLabels failed:", e?.message || e);
     }
 
     return NextResponse.redirect(baseUrl + "/settings?success=" + encodeURIComponent("Connected " + email + " via Microsoft OAuth"));

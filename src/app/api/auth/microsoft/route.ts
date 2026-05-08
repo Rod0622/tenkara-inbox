@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { getGraphToken } from "@/lib/microsoft-graph";
+import { ensureAccountLabels } from "@/lib/folder-labels";
 
 // POST /api/auth/microsoft — Connect via Azure AD Graph API (Our Company accounts)
 export async function POST(req: NextRequest) {
@@ -68,11 +69,28 @@ export async function POST(req: NextRequest) {
       const id = account_id || existing?.id;
       const { data, error } = await supabase.from("email_accounts").update(accountFields).eq("id", id).select().single();
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      // Ensure auto-labels + Completed folder exist for this account.
+      // Best-effort — do not fail the request if this hook errors.
+      try {
+        if (id) await ensureAccountLabels(id);
+      } catch (e: any) {
+        console.error("[microsoft/POST] ensureAccountLabels failed:", e?.message || e);
+      }
+
       return NextResponse.json({ success: true, message: "Connected " + trimmedEmail, account: data });
     }
 
     const { data: newAccount, error: createErr } = await supabase.from("email_accounts").insert(accountFields).select().single();
     if (createErr) return NextResponse.json({ error: createErr.message }, { status: 500 });
+
+    // Ensure auto-labels + Completed folder for the new account.
+    try {
+      if (newAccount?.id) await ensureAccountLabels(newAccount.id);
+    } catch (e: any) {
+      console.error("[microsoft/POST] ensureAccountLabels failed:", e?.message || e);
+    }
+
     return NextResponse.json({ success: true, message: "Connected " + trimmedEmail, account: newAccount });
 
   } catch (err: any) {
