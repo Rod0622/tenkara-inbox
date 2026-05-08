@@ -3,6 +3,7 @@ import { simpleParser, ParsedMail } from "mailparser";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -283,6 +284,10 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               if (ce) continue;
               conversationId = nc.id;
               result.newConversations++;
+
+              // Auto-apply [account, Inbox] labels (or just [account] for outbound).
+              // Best-effort — never throws.
+              await onNewConversationFromSync(conversationId, accountId, isOutbound);
             }
 
             await supabase.from("messages").insert({
@@ -429,7 +434,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
         // Find or create conversation
         const conversationId = await findOrCreateConversation(
-          supabase, accountId, email
+          supabase, accountId, email, account.email
         );
 
         // Insert message
@@ -734,7 +739,8 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
 async function findOrCreateConversation(
   supabase: any,
   accountId: string,
-  email: ParsedEmail
+  email: ParsedEmail,
+  accountEmail: string
 ): Promise<string> {
   // Strategy 1: Match by In-Reply-To header
   if (email.inReplyTo) {
@@ -801,6 +807,15 @@ async function findOrCreateConversation(
     .single();
 
   if (error) throw new Error(`Create conversation failed: ${error.message}`);
+
+  // Newly created — apply [account, Inbox] auto-labels.
+  // The caller passes the account.email so we can determine inbound vs outbound here.
+  // Best-effort — never throws, so we don't bail the sync over a labeling issue.
+  await onNewConversationFromSync(
+    newConvo.id,
+    accountId,
+    isOutbound(email.fromEmail, accountEmail)
+  );
 
   return newConvo.id;
 }

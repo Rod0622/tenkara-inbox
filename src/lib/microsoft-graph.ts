@@ -1,4 +1,5 @@
 import { createServerClient } from "@/lib/supabase";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -373,6 +374,10 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             if (ce) { result.errors.push(ce.message); continue; }
             conversationId = nc.id;
             result.newConversations++;
+
+            // Auto-apply [account, Inbox] labels (or just [account] for outbound).
+            // Best-effort — never throws.
+            await onNewConversationFromSync(conversationId, accountId, isOutbound);
           }
 
           const emailBodyHtml = email.body?.contentType === "html" ? email.body.content : null;

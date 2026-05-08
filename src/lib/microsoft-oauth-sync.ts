@@ -1,4 +1,5 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -177,6 +178,10 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           }
           conversationId = nc.id;
           result.newConversations++;
+
+          // Auto-apply [account, Inbox] labels (or just [account] for outbound).
+          // Best-effort — never throws.
+          await onNewConversationFromSync(conversationId, accountId, isOutbound);
         }
 
         // Insert message

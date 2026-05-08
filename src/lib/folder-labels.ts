@@ -286,3 +286,35 @@ export async function swapFolderLabel(
     await applyLabelsToConversation(conversationId, [newLabelId]);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// onNewConversationFromSync
+//
+// Called once per newly-created conversation during inbound sync (IMAP or
+// Microsoft Graph). Applies the appropriate auto-labels:
+//
+//   • Inbound mail (isOutbound=false): [account_label, "Inbox"]
+//   • Outbound mail (isOutbound=true): [account_label] only
+//     (outbound conversations belong in Sent, not Inbox)
+//
+// Best-effort — never throws. If anything goes wrong, logs and returns.
+// Caller should NOT await this in a tight loop where one failure might
+// matter, but in practice the cost is one upsert per new conversation.
+// ────────────────────────────────────────────────────────────────────
+
+export async function onNewConversationFromSync(
+  conversationId: string,
+  accountId: string,
+  isOutbound: boolean
+): Promise<void> {
+  try {
+    const { account_label_id, inbox_label_id } = await ensureAccountLabels(accountId);
+    const labelsToApply: Array<string | null> = [account_label_id];
+    if (!isOutbound) {
+      labelsToApply.push(inbox_label_id);
+    }
+    await applyLabelsToConversation(conversationId, labelsToApply);
+  } catch (e: any) {
+    console.error("[onNewConversationFromSync] failed:", e?.message || e);
+  }
+}
