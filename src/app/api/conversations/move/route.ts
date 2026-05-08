@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForEvent } from "@/lib/rule-engine";
+import { swapFolderLabel } from "@/lib/folder-labels";
 
-// PATCH /api/conversations/move — move conversation(s) to a folder
+// PATCH /api/conversations/move — move conversation(s) to a folder.
+//
+// Behavior change (Phase 1, Batch D):
+//   • Moving NO LONGER auto-unassigns. The assignee stays the same after move.
+//     Only the Close action (separate route, coming later) auto-unassigns.
+//   • On move, the conversation's folder label is swapped: the old folder's
+//     label is removed and the new folder's label is added (account label
+//     is untouched).
 export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
@@ -20,7 +28,9 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "conversation_ids required" }, { status: 400 });
   }
 
-  // Capture previous folder_ids per conversation BEFORE update so we can fire team_changed events
+  // Capture previous folder_ids per conversation BEFORE update so we can:
+  //   (1) fire team_changed events for changed folders
+  //   (2) swap labels (strip old folder label, add new folder label)
   const { data: previousRows } = await supabase
     .from("conversations")
     .select("id, folder_id")
@@ -30,14 +40,10 @@ export async function PATCH(req: NextRequest) {
     previousFolderById.set(row.id, row.folder_id || null);
   }
 
-  // folder_id can be null (move to root / unassign from folder)
+  // folder_id can be null (move to root / unassign from folder).
+  // NOTE: We deliberately do NOT clear assignee_id on move anymore.
+  // Only the Close action unassigns. Folder moves keep the assignee in place.
   const update: any = { folder_id: folder_id || null };
-
-  // If moving to a folder, also clear assignee (back to team space)
-  // Unless folder_id is null (which means unassigning from folder)
-  if (folder_id) {
-    update.assignee_id = null;
-  }
 
   const { error } = await supabase
     .from("conversations")
@@ -71,8 +77,21 @@ export async function PATCH(req: NextRequest) {
 
   await supabase.from("activity_log").insert(logEntries);
 
+  // Swap folder labels per conversation. Best-effort — never throws.
+  // Account label stays put; only the folder label changes.
+  // We loop sequentially to keep error handling simple; volume is typically small.
+  const newFolderId = folder_id || null;
+  for (const id of ids) {
+    const oldFolderId = previousFolderById.get(id) ?? null;
+    if (oldFolderId === newFolderId) continue; // no actual change
+    try {
+      await swapFolderLabel(id, oldFolderId, newFolderId);
+    } catch (labelErr: any) {
+      console.error("[move/PATCH] label swap error for", id, ":", labelErr?.message || labelErr);
+    }
+  }
+
   // Fire team_changed rule events — one per conversation that actually changed folders
-  // Build a small cache of folder names so we don't re-query the same one
   const folderNameCache = new Map<string, string | null>();
   if (folder_id && newFolderName) folderNameCache.set(folder_id, newFolderName);
 
@@ -88,7 +107,6 @@ export async function PATCH(req: NextRequest) {
     for (const f of (oldFolders || [])) folderNameCache.set(f.id, f.name);
   }
 
-  const newFolderId = folder_id || null;
   for (const id of ids) {
     const oldFolderId = previousFolderById.get(id) ?? null;
     if (oldFolderId === newFolderId) continue; // no actual change for this conversation
