@@ -1,5 +1,11 @@
 export type TaskStatus = "todo" | "in_progress" | "completed" | "dismissed";
 
+// Phase 3: nested sub-views under each folder.
+//   • "unassigned" — clicking the folder name itself: status=open, assignee=null, folder=this
+//   • "all"        — All sub-view: any conversation tagged with this folder's label
+//   • "closed"     — Closed sub-view: conversations closed FROM this folder (via conversation_closures)
+export type FolderSubView = "unassigned" | "all" | "closed";
+
 export interface TeamMember {
   id: string;
   email: string;
@@ -183,6 +189,8 @@ export interface SidebarProps {
   setActiveView: (view: string) => void;
   activeFolder: string | null;
   setActiveFolder: (id: string | null) => void;
+  folderSubView?: FolderSubView;
+  setFolderSubView?: (view: FolderSubView) => void;
   mailboxes: Mailbox[];
   conversations: Conversation[];
   currentUser: TeamMember | null;
@@ -201,6 +209,7 @@ export interface ConversationListProps {
   setSearchScope?: (scope: "all" | "account" | "folder") => void;
   activeMailbox?: string | null;
   activeFolder?: string | null;
+  folderSubView?: FolderSubView;
   emailAccounts?: any[];
   folders?: any[];
   teamMembers: TeamMember[];
@@ -217,7 +226,7 @@ export interface ConversationDetailProps {
   onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string, categoryId?: string, dueTime?: string) => Promise<void>;
   onUpdateTask: (taskId: string, updates: { status?: TaskStatus; dueDate?: string | null; assigneeIds?: string[] }) => Promise<void>;
   onAssign: (conversationId: string, assigneeId: string | null, updatedConversation?: any) => Promise<void>;
-  onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[], cc?: string, bcc?: string) => Promise<void>;
+  onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[]) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
   globalSearchQuery?: string;
 }

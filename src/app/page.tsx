@@ -52,6 +52,11 @@ export default function InboxPage() {
   const [activeView, setActiveView] = useState("inbox");
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  // Phase 3: which sub-view of the active folder to show.
+  //   • "unassigned" (default) — folder name itself: open + unassigned + in this folder
+  //   • "all" — All sub-view: any conversation tagged with this folder's label
+  //   • "closed" — Closed sub-view: closures from this folder (separate data source)
+  const [folderSubView, setFolderSubView] = useState<"unassigned" | "all" | "closed">("unassigned");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState<"all" | "account" | "folder">("all");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
@@ -316,18 +321,12 @@ export default function InboxPage() {
     updatedConversation?: any
   ) => {
     if (activeConvo && activeConvo.id === conversationId) {
-      // Batch 11: deterministically clear `assignee` on unassign so the header doesn't show stale data.
-      // Previously: `updatedConversation?.assignee || newAssignee || undefined` could leave the
-      // embedded object intact in some edge cases. Now we explicitly set `null` when unassigning.
-      const isUnassigning = assigneeId === null;
-      const newAssignee = isUnassigning
-        ? null
-        : (teamMembers.find((m) => m.id === assigneeId) || null);
+      const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
       setActiveConvo({
         ...activeConvo,
         assignee_id: assigneeId,
         folder_id: assigneeId ? null : activeConvo.folder_id,
-        assignee: isUnassigning ? null : (updatedConversation?.assignee || newAssignee),
+        assignee: updatedConversation?.assignee || newAssignee || undefined,
       } as Conversation);
     }
     refetch();
@@ -463,6 +462,8 @@ export default function InboxPage() {
         setActiveView={setActiveView}
         activeFolder={activeFolder}
         setActiveFolder={setActiveFolder}
+        folderSubView={folderSubView}
+        setFolderSubView={setFolderSubView}
         mailboxes={emailAccounts}
         conversations={conversations}
         currentUser={currentUser}
@@ -528,6 +529,7 @@ export default function InboxPage() {
             setSearchScope={setSearchScope}
             activeMailbox={activeMailbox}
             activeFolder={activeFolder}
+            folderSubView={folderSubView}
             emailAccounts={emailAccounts}
             folders={folders}
             teamMembers={teamMembers}
