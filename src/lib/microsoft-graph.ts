@@ -1,5 +1,5 @@
 import { createServerClient } from "@/lib/supabase";
-import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -398,6 +398,11 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
           });
           if (me) { result.errors.push(me.message); continue; }
+
+          // Reopen check (best-effort). conversationId is non-null here.
+          if (conversationId) {
+            await onIncomingMessageReopenCheck(conversationId, isOutbound);
+          }
 
           const convoUpdate: any = {
             preview: (email.bodyPreview || bodyText).slice(0, 200),

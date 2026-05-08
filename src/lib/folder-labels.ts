@@ -391,3 +391,97 @@ export async function onNewConversationFromSync(
     console.error("[onNewConversationFromSync] failed:", e?.message || e);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Business-days helper
+//
+// Returns true if `at` is within `days` business days of `now`.
+// Business days = Mon–Fri. We count days, not hours — close enough
+// for the supplier-reply reopen window per spec.
+// ────────────────────────────────────────────────────────────────────
+
+function isWithinBusinessDays(at: Date, now: Date, days: number): boolean {
+  const cursor = new Date(at);
+  let bizCount = 0;
+  while (cursor < now) {
+    cursor.setDate(cursor.getDate() + 1);
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) bizCount++;
+    if (bizCount > days) return false;
+  }
+  return bizCount <= days;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// onIncomingMessageReopenCheck
+//
+// Called by the sync code right after an INBOUND message is added to an
+// EXISTING conversation (i.e. the conversation already existed; this isn't
+// a new conversation). Implements the reopen rule per spec:
+//
+//   • If conversation is currently closed:
+//       – flip status to "open"
+//       – if currently unassigned AND most recent closure was within 3
+//         business days → assign to last closer
+//       – if unassigned AND > 3 business days → leave unassigned, leave in
+//         the folder it was closed to (drops back to that folder's team
+//         triage view)
+//       – if currently assigned (someone took over) → leave assignee alone
+//
+// Best-effort — never throws.
+// ────────────────────────────────────────────────────────────────────
+
+export async function onIncomingMessageReopenCheck(
+  conversationId: string,
+  isOutbound: boolean
+): Promise<void> {
+  if (isOutbound) return; // outbound messages don't trigger reopen
+  try {
+    const supabase = createServerClient();
+
+    // Fetch current state
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("id, status, assignee_id")
+      .eq("id", conversationId)
+      .maybeSingle();
+
+    if (!convo || convo.status !== "closed") return; // nothing to reopen
+
+    // Build the update. Always flip to open.
+    const update: any = { status: "open" };
+
+    // If currently unassigned, check the last closure for auto-reassignment
+    if (!convo.assignee_id) {
+      const { data: lastClosure } = await supabase
+        .from("conversation_closures")
+        .select("closed_by_user_id, closed_at")
+        .eq("conversation_id", conversationId)
+        .order("closed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastClosure?.closed_at && lastClosure.closed_by_user_id) {
+        const closedAt = new Date(lastClosure.closed_at);
+        const now = new Date();
+        if (isWithinBusinessDays(closedAt, now, 3)) {
+          update.assignee_id = lastClosure.closed_by_user_id;
+        }
+      }
+    }
+
+    await supabase.from("conversations").update(update).eq("id", conversationId);
+
+    // Activity log
+    await supabase.from("activity_log").insert({
+      conversation_id: conversationId,
+      actor_id: null,
+      action: "reopened_by_supplier_reply",
+      details: {
+        auto_assigned_to: update.assignee_id || null,
+      },
+    });
+  } catch (e: any) {
+    console.error("[onIncomingMessageReopenCheck] failed:", e?.message || e);
+  }
+}
