@@ -267,6 +267,26 @@ export async function removeLabelsFromConversation(
 // Pass null for newFolderId if it's being moved to "no folder" (root).
 // ────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────
+// swapFolderLabel
+//
+// Called when a conversation is moved between folders. Removes the old
+// folder's label (if any) and adds the new folder's label (if any).
+// Account label is untouched. Idempotent — calling with same old/new is a no-op.
+//
+// Special handling for the global "Inbox" label:
+//   • If the destination folder's name is NOT "Inbox", and the conversation
+//     currently has the "Inbox" label, that label is stripped. This handles
+//     the case where the conversation has the Inbox label from inbound-mail
+//     auto-labeling but no folder_id was set (transitional data, or future
+//     bugs in folder_id tracking).
+//   • If the destination IS the Inbox folder, the Inbox label is added (this
+//     happens naturally via the new-folder-label add path).
+//
+// Pass null for oldFolderId if the conversation wasn't in a folder before.
+// Pass null for newFolderId if it's being moved to "no folder" (root).
+// ────────────────────────────────────────────────────────────────────
+
 export async function swapFolderLabel(
   conversationId: string,
   oldFolderId: string | null,
@@ -274,14 +294,45 @@ export async function swapFolderLabel(
 ): Promise<void> {
   if (oldFolderId === newFolderId) return; // no-op
 
+  const supabase = createServerClient();
+
+  // Resolve label ids for old and new folders
   const oldLabelId = oldFolderId ? await ensureFolderLabel(oldFolderId) : null;
   const newLabelId = newFolderId ? await ensureFolderLabel(newFolderId) : null;
 
-  // Don't strip the old label if it happens to be the same UUID as the new label
-  // (can happen if two folders share a name → share a label id).
-  if (oldLabelId && oldLabelId !== newLabelId) {
-    await removeLabelsFromConversation(conversationId, [oldLabelId]);
+  // Look up the new folder's name to decide whether to strip the global Inbox label.
+  let newFolderName: string | null = null;
+  if (newFolderId) {
+    const { data: f } = await supabase
+      .from("folders")
+      .select("name")
+      .eq("id", newFolderId)
+      .maybeSingle();
+    newFolderName = f?.name || null;
   }
+
+  // Collect label ids to strip.
+  const labelsToStrip: string[] = [];
+
+  // Standard old-folder strip (don't strip if it's the same label as the new one,
+  // which can happen when two folders share a name).
+  if (oldLabelId && oldLabelId !== newLabelId) {
+    labelsToStrip.push(oldLabelId);
+  }
+
+  // If destination is NOT the Inbox folder, also strip the global Inbox label
+  // (handles transitional data where folder_id was NULL but Inbox label was applied).
+  if (newFolderName?.toLowerCase() !== "inbox") {
+    const inboxLabelId = await ensureGlobalLabel("Inbox");
+    if (inboxLabelId && inboxLabelId !== newLabelId && !labelsToStrip.includes(inboxLabelId)) {
+      labelsToStrip.push(inboxLabelId);
+    }
+  }
+
+  if (labelsToStrip.length > 0) {
+    await removeLabelsFromConversation(conversationId, labelsToStrip);
+  }
+
   if (newLabelId) {
     await applyLabelsToConversation(conversationId, [newLabelId]);
   }
@@ -291,15 +342,17 @@ export async function swapFolderLabel(
 // onNewConversationFromSync
 //
 // Called once per newly-created conversation during inbound sync (IMAP or
-// Microsoft Graph). Applies the appropriate auto-labels:
+// Microsoft Graph). Applies the appropriate auto-labels AND sets folder_id:
 //
-//   • Inbound mail (isOutbound=false): [account_label, "Inbox"]
-//   • Outbound mail (isOutbound=true): [account_label] only
+//   • Inbound mail (isOutbound=false): folder_id = account's Inbox folder,
+//     labels = [account_label, "Inbox"]
+//   • Outbound mail (isOutbound=true): folder_id stays null, labels = [account_label]
 //     (outbound conversations belong in Sent, not Inbox)
 //
+// Setting folder_id is critical so future moves can correctly identify and
+// strip the old folder's label.
+//
 // Best-effort — never throws. If anything goes wrong, logs and returns.
-// Caller should NOT await this in a tight loop where one failure might
-// matter, but in practice the cost is one upsert per new conversation.
 // ────────────────────────────────────────────────────────────────────
 
 export async function onNewConversationFromSync(
@@ -308,11 +361,31 @@ export async function onNewConversationFromSync(
   isOutbound: boolean
 ): Promise<void> {
   try {
+    const supabase = createServerClient();
     const { account_label_id, inbox_label_id } = await ensureAccountLabels(accountId);
     const labelsToApply: Array<string | null> = [account_label_id];
+
     if (!isOutbound) {
       labelsToApply.push(inbox_label_id);
+
+      // Set folder_id to the account's Inbox folder so future moves work correctly.
+      const { data: inboxFolder } = await supabase
+        .from("folders")
+        .select("id")
+        .eq("email_account_id", accountId)
+        .ilike("name", "Inbox")
+        .eq("is_system", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (inboxFolder?.id) {
+        await supabase
+          .from("conversations")
+          .update({ folder_id: inboxFolder.id })
+          .eq("id", conversationId);
+      }
     }
+
     await applyLabelsToConversation(conversationId, labelsToApply);
   } catch (e: any) {
     console.error("[onNewConversationFromSync] failed:", e?.message || e);
