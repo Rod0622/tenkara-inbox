@@ -376,8 +376,8 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             result.newConversations++;
 
             // Auto-apply [account, Inbox] labels (or just [account] for outbound).
-            // Best-effort — never throws.
-            await onNewConversationFromSync(conversationId, accountId, isOutbound);
+            // Best-effort — never throws. Use nc.id directly so TS narrows correctly.
+            await onNewConversationFromSync(nc.id, accountId, isOutbound);
           }
 
           const emailBodyHtml = email.body?.contentType === "html" ? email.body.content : null;

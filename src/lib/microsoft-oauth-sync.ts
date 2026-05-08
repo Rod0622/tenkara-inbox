@@ -180,8 +180,8 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           result.newConversations++;
 
           // Auto-apply [account, Inbox] labels (or just [account] for outbound).
-          // Best-effort — never throws.
-          await onNewConversationFromSync(conversationId, accountId, isOutbound);
+          // Best-effort — never throws. Use nc.id directly so TS narrows correctly.
+          await onNewConversationFromSync(nc.id, accountId, isOutbound);
         }
 
         // Insert message
