@@ -102,13 +102,26 @@ export async function GET(req: NextRequest) {
   // Filter out any closures whose conversation has been deleted (conversation: null)
   const validClosures = (closures || []).filter((c: any) => c.conversation);
 
+  // Flatten the closure->conversation join into a list of conversations,
+  // each carrying the closure metadata as extra fields. This is what
+  // ConversationList expects to render (it's coded for conversation records).
+  const flatConversations = validClosures.map((c: any) => ({
+    ...c.conversation,
+    // Closure footprint metadata (so the UI can show "closed by X on Y" if it wants)
+    _closure_id: c.id,
+    _closed_at: c.closed_at,
+    _closed_by: c.closed_by,
+    _closed_from_folder_id: c.closed_from_folder_id,
+    _closed_to_folder_id: c.closed_to_folder_id,
+  }));
+
   // Compute the cursor for the next page (oldest closed_at in this batch)
   const nextCursor = validClosures.length === limit
     ? validClosures[validClosures.length - 1]?.closed_at || null
     : null;
 
   return NextResponse.json({
-    closures: validClosures,
+    conversations: flatConversations,
     next_cursor: nextCursor,
     has_more: nextCursor !== null,
   });
