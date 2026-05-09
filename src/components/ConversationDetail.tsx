@@ -307,6 +307,15 @@ export default function ConversationDetail({
   const [forwardSubject, setForwardSubject] = useState("");
   const [forwardBody, setForwardBody] = useState("");
   const [forwardSending, setForwardSending] = useState(false);
+  // Reply-as-modal state: gives users the ability to edit To / Subject before sending,
+  // unlike the inline reply textarea which only supports the body.
+  const [showReplyModal, setShowReplyModal] = useState(false);
+  const [replyModalTo, setReplyModalTo] = useState("");
+  const [replyModalCc, setReplyModalCc] = useState("");
+  const [replyModalBcc, setReplyModalBcc] = useState("");
+  const [replyModalSubject, setReplyModalSubject] = useState("");
+  const [replyModalBody, setReplyModalBody] = useState("");
+  const [replyModalSending, setReplyModalSending] = useState(false);
   const [trashingConversation, setTrashingConversation] = useState(false);
   const [markingSpam, setMarkingSpam] = useState(false);
 
@@ -868,32 +877,78 @@ export default function ConversationDetail({
   };
 
   const handleReplyAction = () => {
+    if (!convo) return;
     setActiveTab("messages");
 
+    // Pre-populate the modal:
+    //   • To: most recent inbound sender, otherwise original convo.from_email
+    //   • Subject: existing subject prefixed with "Re: " (unless already prefixed)
+    //   • Body: empty (signature will be appended on send via the existing pipeline)
     const latestInbound =
       [...messages].reverse().find((msg: any) => !msg.is_outbound) || messages[messages.length - 1];
 
-    if (!replyText.trim() && latestInbound) {
-      const fromLine = latestInbound.from_name
-        ? `\n\n---\nOn ${
-            latestInbound.sent_at
-              ? new Date(latestInbound.sent_at).toLocaleString()
-              : "an earlier message"
-          }, ${latestInbound.from_name} <${latestInbound.from_email || ""}> wrote:\n`
-        : `\n\n---\nPrevious message:\n`;
+    const replyTo = latestInbound?.from_email || convo.from_email || "";
+    const baseSubject = String(convo.subject || "").trim();
+    const replySubject = /^re:\s/i.test(baseSubject)
+      ? baseSubject
+      : `Re: ${baseSubject || "(No subject)"}`;
 
-      const quotedBody = String(latestInbound.body_text || latestInbound.snippet || "")
-        .split("\n")
-        .map((line) => `> ${line}`)
-        .join("\n");
+    setReplyModalTo(replyTo);
+    setReplyModalCc("");
+    setReplyModalBcc("");
+    setReplyModalSubject(replySubject);
+    setReplyModalBody("");
+    setShowReplyModal(true);
+  };
 
-      setReplyText(`${fromLine}${quotedBody}`);
+  const handleSendReplyModal = async () => {
+    if (!convo) return;
+    if (!replyModalTo.trim() || !replyModalSubject.trim() || !replyModalBody.trim()) return;
+
+    // Optional missing-attachment check (mirrors Forward flow)
+    const warning = checkMissingAttachments(replyModalBody, 0);
+    if (warning && !confirm(warning + "\n\nSend anyway?")) return;
+
+    try {
+      setReplyModalSending(true);
+
+      // Use /api/send in REPLY mode (conversation_id present) so the message
+      // threads correctly into this conversation. The endpoint accepts
+      // overrides for `to` and `subject`.
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          account_id: convo.email_account_id,
+          to: replyModalTo.trim(),
+          cc: replyModalCc.trim(),
+          bcc: replyModalBcc.trim(),
+          subject: replyModalSubject.trim(),
+          body: replyModalBody,
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to send reply");
+      }
+
+      // Close + reset
+      setShowReplyModal(false);
+      setReplyModalTo("");
+      setReplyModalCc("");
+      setReplyModalBcc("");
+      setReplyModalSubject("");
+      setReplyModalBody("");
+    } catch (error: any) {
+      console.error("Reply (modal) failed:", error);
+      alert(error?.message || "Failed to send reply");
+    } finally {
+      setReplyModalSending(false);
     }
-
-    setTimeout(() => {
-      replyTextareaRef.current?.focus();
-      replyTextareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
   };
 
   const handleOpenForward = () => {
@@ -3537,6 +3592,111 @@ export default function ConversationDetail({
     </div>
   </div>
 )}
+
+      {/* Reply Modal — full-form reply with editable To / Cc / Bcc / Subject / Body.
+          Threads into the existing conversation via /api/send's reply mode. */}
+      {showReplyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 shrink-0">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">Reply</div>
+                <div className="text-xs text-[var(--text-secondary)]">
+                  Edit recipients and subject before sending. The reply will thread into this conversation.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReplyModal(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                title="Close"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">To</label>
+                <input
+                  type="text"
+                  value={replyModalTo}
+                  onChange={(e) => setReplyModalTo(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Cc</label>
+                <input
+                  type="text"
+                  value={replyModalCc}
+                  onChange={(e) => setReplyModalCc(e.target.value)}
+                  placeholder="optional cc recipients"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Bcc</label>
+                <input
+                  type="text"
+                  value={replyModalBcc}
+                  onChange={(e) => setReplyModalBcc(e.target.value)}
+                  placeholder="optional bcc recipients"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Subject</label>
+                <input
+                  type="text"
+                  value={replyModalSubject}
+                  onChange={(e) => setReplyModalSubject(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Message</label>
+                <textarea
+                  value={replyModalBody}
+                  onChange={(e) => setReplyModalBody(e.target.value)}
+                  placeholder="Type your reply..."
+                  rows={14}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none resize-y"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-4 shrink-0 bg-[var(--surface)]">
+              <button
+                type="button"
+                onClick={() => setShowReplyModal(false)}
+                className="px-3 py-2 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-2)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReplyModal}
+                disabled={
+                  replyModalSending ||
+                  !replyModalTo.trim() ||
+                  !replyModalSubject.trim() ||
+                  !replyModalBody.trim()
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--accent)] disabled:opacity-50"
+              >
+                <Send size={14} />
+                {replyModalSending ? "Sending..." : "Send Reply"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Form Modal */}
       {showFormModal && (
