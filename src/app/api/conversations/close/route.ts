@@ -65,7 +65,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const previousFolderId: string | null = convo.folder_id || null;
+  let previousFolderId: string | null = convo.folder_id || null;
+
+  // If the conversation has no folder_id, infer the source folder as the account's
+  // Inbox folder. This ensures the closure footprint always points to a real folder
+  // so the Closed sub-view can filter by closed_from_folder_id reliably.
+  // Match by name only (not is_system) since some installs have is_system=false on
+  // technically-system folders.
+  if (!previousFolderId) {
+    const { data: inboxFolder } = await supabase
+      .from("folders")
+      .select("id")
+      .eq("email_account_id", convo.email_account_id)
+      .ilike("name", "Inbox")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (inboxFolder?.id) previousFolderId = inboxFolder.id;
+  }
 
   // Apply the close: move folder + unassign user.
   // NOTE: Per spec change, status stays as-is (typically "open"). The conversation
