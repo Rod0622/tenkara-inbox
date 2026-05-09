@@ -8,7 +8,7 @@ import { createBrowserClient } from "@/lib/supabase";
 function Avatar({ initials, color, size = 20 }: { initials: string; color: string; size?: number }) {
   return (
     <div
-      className="rounded-full flex items-center justify-center font-semibold text-[#0B0E11] flex-shrink-0"
+      className="rounded-full flex items-center justify-center font-semibold text-[var(--bg)] flex-shrink-0"
       style={{ width: size, height: size, fontSize: size * 0.4, background: color }}
     >
       {initials}
@@ -56,7 +56,7 @@ function highlightText(text: string, query: string): React.ReactNode {
   const parts = text.split(new RegExp(`(${escaped})`, "gi"));
   return parts.map((part, i) =>
     part.toLowerCase() === query.toLowerCase()
-      ? <mark key={i} className="bg-[#F5D547]/40 text-[#E6EDF3] rounded px-0.5">{part}</mark>
+      ? <mark key={i} className="bg-[var(--highlight)]/40 text-[var(--text-primary)] rounded px-0.5">{part}</mark>
       : part
   );
 }
@@ -116,11 +116,11 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-semibold text-[#484F58] uppercase">Labels</span>
+        <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Labels</span>
         {(filters.labelIds || []).length > 1 && (
           <button
             onClick={() => setFilters({ ...filters, labelLogic: filters.labelLogic === "and" ? "or" : "and" })}
-            className="px-2 py-0.5 rounded text-[9px] font-bold border border-[#1E242C] text-[#58A6FF] hover:bg-[#12161B] transition-colors"
+            className="px-2 py-0.5 rounded text-[9px] font-bold border border-[var(--border)] text-[var(--info)] hover:bg-[var(--surface)] transition-colors"
           >
             {filters.labelLogic === "and" ? "AND" : "OR"}
           </button>
@@ -171,17 +171,17 @@ function FilterPanel({
   };
 
   return (
-    <div className="p-3 border-b border-[#1E242C] bg-[#0D1117] animate-fade-in">
+    <div className="p-3 border-b border-[var(--border)] bg-[var(--surface)] animate-fade-in">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-bold text-[#484F58] uppercase tracking-wider">Filters</span>
+        <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Filters</span>
         <div className="flex gap-2">
           <button
             onClick={() => setFilters(defaultFilters)}
-            className="text-[10px] text-[#484F58] hover:text-[#7D8590] transition-colors"
+            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
           >
             Clear all
           </button>
-          <button onClick={onClose} className="text-[#484F58] hover:text-[#7D8590]">
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
             <X size={14} />
           </button>
         </div>
@@ -189,7 +189,7 @@ function FilterPanel({
 
       {/* Date Range — Presets */}
       <div className="mb-2.5">
-        <div className="text-[10px] font-semibold text-[#484F58] mb-1 flex items-center gap-1">
+        <div className="text-[10px] font-semibold text-[var(--text-muted)] mb-1 flex items-center gap-1">
           <Calendar size={10} /> Date
         </div>
         <div className="flex flex-wrap gap-1 mb-1.5">
@@ -206,8 +206,8 @@ function FilterPanel({
               onClick={() => handlePresetClick(opt.value)}
               className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
                 filters.dateRange === opt.value
-                  ? "bg-[#4ADE80] text-[#0B0E11]"
-                  : "bg-[#1E242C] text-[#7D8590] hover:bg-[#242930]"
+                  ? "bg-[var(--accent)] text-[var(--bg)]"
+                  : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
               }`}
             >
               {opt.label}
@@ -219,28 +219,28 @@ function FilterPanel({
         {filters.dateRange === "custom" && (
           <div className="flex items-center gap-2 mt-1.5 animate-fade-in">
             <div className="flex-1">
-              <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">From</label>
+              <label className="text-[9px] text-[var(--text-muted)] uppercase font-semibold tracking-wider block mb-0.5">From</label>
               <input
                 type="date"
                 value={filters.dateFrom}
                 onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
-                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+                className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40 [color-scheme:dark]"
               />
             </div>
-            <div className="text-[#484F58] text-[10px] pt-3">→</div>
+            <div className="text-[var(--text-muted)] text-[10px] pt-3">→</div>
             <div className="flex-1">
-              <label className="text-[9px] text-[#484F58] uppercase font-semibold tracking-wider block mb-0.5">To</label>
+              <label className="text-[9px] text-[var(--text-muted)] uppercase font-semibold tracking-wider block mb-0.5">To</label>
               <input
                 type="date"
                 value={filters.dateTo}
                 onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
-                className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] outline-none focus:border-[#4ADE80]/40 [color-scheme:dark]"
+                className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/40 [color-scheme:dark]"
               />
             </div>
             {(filters.dateFrom || filters.dateTo) && (
               <button
                 onClick={() => setFilters({ ...filters, dateFrom: "", dateTo: "" })}
-                className="pt-3 text-[#484F58] hover:text-[#F85149] transition-colors"
+                className="pt-3 text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"
                 title="Clear dates"
               >
                 <X size={12} />
@@ -252,7 +252,7 @@ function FilterPanel({
 
       {/* Assigned To */}
       <div className="mb-2.5">
-        <div className="text-[10px] font-semibold text-[#484F58] mb-1 flex items-center gap-1">
+        <div className="text-[10px] font-semibold text-[var(--text-muted)] mb-1 flex items-center gap-1">
           <User size={10} /> Assigned to
         </div>
         <div className="flex flex-wrap gap-1">
@@ -260,8 +260,8 @@ function FilterPanel({
             onClick={() => setFilters({ ...filters, assignedTo: null })}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
               filters.assignedTo === null
-                ? "bg-[#4ADE80] text-[#0B0E11]"
-                : "bg-[#1E242C] text-[#7D8590] hover:bg-[#242930]"
+                ? "bg-[var(--accent)] text-[var(--bg)]"
+                : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
             }`}
           >
             Anyone
@@ -270,8 +270,8 @@ function FilterPanel({
             onClick={() => setFilters({ ...filters, assignedTo: "unassigned" })}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
               filters.assignedTo === "unassigned"
-                ? "bg-[#4ADE80] text-[#0B0E11]"
-                : "bg-[#1E242C] text-[#7D8590] hover:bg-[#242930]"
+                ? "bg-[var(--accent)] text-[var(--bg)]"
+                : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
             }`}
           >
             Unassigned
@@ -282,12 +282,12 @@ function FilterPanel({
               onClick={() => setFilters({ ...filters, assignedTo: m.id })}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
                 filters.assignedTo === m.id
-                  ? "bg-[#4ADE80] text-[#0B0E11]"
-                  : "bg-[#1E242C] text-[#7D8590] hover:bg-[#242930]"
+                  ? "bg-[var(--accent)] text-[var(--bg)]"
+                  : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
               }`}
             >
               <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0"
-                style={{ background: filters.assignedTo === m.id ? "#0B0E11" : m.color, color: filters.assignedTo === m.id ? "#4ADE80" : "#0B0E11" }}>
+                style={{ background: filters.assignedTo === m.id ? "var(--bg)" : m.color, color: filters.assignedTo === m.id ? "var(--accent)" : "var(--bg)" }}>
                 {m.initials}
               </span>
               {m.name}
@@ -298,14 +298,14 @@ function FilterPanel({
 
       {/* From email */}
       <div className="mb-2.5">
-        <div className="text-[10px] font-semibold text-[#484F58] mb-1 flex items-center gap-1">
+        <div className="text-[10px] font-semibold text-[var(--text-muted)] mb-1 flex items-center gap-1">
           <Mail size={10} /> From / To
         </div>
         <input
           value={filters.fromEmail}
           onChange={(e) => setFilters({ ...filters, fromEmail: e.target.value })}
           placeholder="Filter by email address..."
-          className="w-full px-2 py-1 rounded bg-[#0B0E11] border border-[#1E242C] text-[11px] text-[#E6EDF3] placeholder:text-[#484F58] outline-none focus:border-[#4ADE80]/40"
+          className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]/40"
         />
       </div>
 
@@ -314,21 +314,21 @@ function FilterPanel({
 
       {/* Quick toggles */}
       <div className="flex gap-3">
-        <label className="flex items-center gap-1.5 text-[10px] text-[#7D8590] cursor-pointer">
+        <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-secondary)] cursor-pointer">
           <input
             type="checkbox"
             checked={filters.unreadOnly}
             onChange={(e) => setFilters({ ...filters, unreadOnly: e.target.checked })}
-            className="accent-[#4ADE80] w-3 h-3"
+            className="accent-[var(--accent)] w-3 h-3"
           />
           Unread only
         </label>
-        <label className="flex items-center gap-1.5 text-[10px] text-[#7D8590] cursor-pointer">
+        <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-secondary)] cursor-pointer">
           <input
             type="checkbox"
             checked={filters.starredOnly}
             onChange={(e) => setFilters({ ...filters, starredOnly: e.target.checked })}
-            className="accent-[#4ADE80] w-3 h-3"
+            className="accent-[var(--accent)] w-3 h-3"
           />
           Starred only
         </label>
@@ -342,7 +342,7 @@ export default function ConversationList({
   conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery,
   searchScope = "all", setSearchScope, activeMailbox, activeFolder, folderSubView = "unassigned", emailAccounts = [], folders = [],
   teamMembers, onBulkAction, searchSnippets, searchTaskResults = [], onOpenConversation,
-}: ConversationListProps & { searchTaskResults?: any[]; onOpenConversation?: (id: string) => void }) {
+}: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -353,38 +353,36 @@ export default function ConversationList({
   const [taskUserFilter, setTaskUserFilter] = useState<string>("all");
 
   // Phase 3: Closed sub-view fetches from /api/conversations/closed-from
-  // (separate data source from the in-memory conversations list).
+  // (separate data source — closures table, not the conversations array).
   const [closedConvos, setClosedConvos] = useState<any[]>([]);
   const [closedLoading, setClosedLoading] = useState(false);
   const [closedNextCursor, setClosedNextCursor] = useState<string | null>(null);
   const [closedHasMore, setClosedHasMore] = useState(false);
 
+  // Fetch closed conversations whenever Closed sub-view is active.
   useEffect(() => {
-    // Reset closed list when folder or sub-view changes
-    setClosedConvos([]);
-    setClosedNextCursor(null);
-    setClosedHasMore(false);
-
-    // Only fetch when we're on the Closed sub-view of a folder
-    if (folderSubView !== "closed" || !activeFolder) return;
-
+    if (folderSubView !== "closed" || !activeFolder) {
+      setClosedConvos([]);
+      setClosedNextCursor(null);
+      setClosedHasMore(false);
+      return;
+    }
     let cancelled = false;
     setClosedLoading(true);
     fetch(`/api/conversations/closed-from?folder_id=${activeFolder}&limit=50`)
       .then((r) => r.json())
-      .then((data) => {
+      .then((d) => {
         if (cancelled) return;
-        setClosedConvos(data.closures || []);
-        setClosedNextCursor(data.next_cursor || null);
-        setClosedHasMore(!!data.has_more);
+        setClosedConvos(d.conversations || []);
+        setClosedNextCursor(d.next_cursor || null);
+        setClosedHasMore(!!d.has_more);
       })
       .catch((e) => {
         if (!cancelled) console.error("[ConversationList] closed-from fetch failed:", e);
       })
-      .finally(() => {
+      .then(() => {
         if (!cancelled) setClosedLoading(false);
       });
-
     return () => {
       cancelled = true;
     };
@@ -394,13 +392,13 @@ export default function ConversationList({
     if (!activeFolder || !closedNextCursor || closedLoading) return;
     setClosedLoading(true);
     try {
-      const res = await fetch(
+      const r = await fetch(
         `/api/conversations/closed-from?folder_id=${activeFolder}&limit=50&before=${encodeURIComponent(closedNextCursor)}`
       );
-      const data = await res.json();
-      setClosedConvos((prev) => [...prev, ...(data.closures || [])]);
-      setClosedNextCursor(data.next_cursor || null);
-      setClosedHasMore(!!data.has_more);
+      const d = await r.json();
+      setClosedConvos((prev) => [...prev, ...(d.conversations || [])]);
+      setClosedNextCursor(d.next_cursor || null);
+      setClosedHasMore(!!d.has_more);
     } catch (e) {
       console.error("[ConversationList] loadMoreClosed failed:", e);
     } finally {
@@ -470,40 +468,49 @@ export default function ConversationList({
 
   // Apply filters
   const filteredConversations = useMemo(() => {
-    // Phase 3: Closed sub-view uses closedConvos as source (closures table),
-    // not the in-memory conversations list. Map each closure to its conversation
-    // so the rest of the rendering pipeline works unchanged.
-    let result: any[];
-    if (folderSubView === "closed" && activeFolder) {
-      result = closedConvos
-        .map((cl: any) => cl.conversation)
-        .filter(Boolean);
-    } else {
-      result = conversations;
+    let result = conversations;
 
-      // Phase 3: Apply sub-view filtering for "unassigned" and "all" modes.
-      // Both are scoped to a folder; if no activeFolder, no extra filter.
-      if (activeFolder) {
-        if (folderSubView === "unassigned") {
-          // Folder name click: unassigned + in this folder, status filter depends on folder.
-          // System Spam folder → status="spam"; Trash → status="trash"; everything else → "open".
-          // (Conversations don't get status="closed" anymore — close uses the closures table only.)
-          const activeF = (folders || []).find((f: any) => f.id === activeFolder);
-          const fName = String(activeF?.name || "").toLowerCase();
-          const isSystem = !!activeF?.is_system;
-          const requiredStatus = isSystem && fName === "spam"
-            ? "spam"
-            : isSystem && fName === "trash"
-              ? "trash"
-              : "open";
+    // Phase 3: Closed sub-view uses closedConvos as source (closures table),
+    // not the regular conversations array.
+    if (folderSubView === "closed" && activeFolder) {
+      result = closedConvos;
+    } else if (activeFolder) {
+      // Sub-view filtering for "unassigned" and "all" modes (scoped to a folder).
+      if (folderSubView === "unassigned") {
+        // Folder name click: unassigned + status appropriate to the folder type.
+        // Spam → status="spam"; Trash → status="trash"; everything else → "open".
+        // Note: match by NAME only (not is_system) and skip folder_id check on Spam/Trash
+        // since their conversations may have folder_id=NULL or differ from the system folder.
+        const activeF = (folders || []).find((f: any) => f.id === activeFolder);
+        const fName = String(activeF?.name || "").trim().toLowerCase();
+        const isSpam = fName === "spam";
+        const isTrash = fName === "trash";
+        const isSpamOrTrash = isSpam || isTrash;
+        const requiredStatus = isSpam ? "spam" : isTrash ? "trash" : "open";
+
+        if (isSpamOrTrash) {
+          // Trust upstream page.tsx filter; just narrow to status + unassigned.
+          result = result.filter(
+            (c: any) => c.status === requiredStatus && !c.assignee_id
+          );
+        } else {
           result = result.filter(
             (c: any) =>
               c.folder_id === activeFolder &&
               c.status === requiredStatus &&
               !c.assignee_id
           );
-        } else if (folderSubView === "all") {
-          // All sub-view: any conversation in this folder, any status, any assignee
+        }
+      } else if (folderSubView === "all") {
+        // All sub-view: any conversation in this folder, any status, any assignee.
+        // Spam/Trash fall back to status if folder_id is missing.
+        const activeF = (folders || []).find((f: any) => f.id === activeFolder);
+        const fName = String(activeF?.name || "").trim().toLowerCase();
+        if (fName === "spam") {
+          result = result.filter((c: any) => c.status === "spam" || c.folder_id === activeFolder);
+        } else if (fName === "trash") {
+          result = result.filter((c: any) => c.status === "trash" || c.folder_id === activeFolder);
+        } else {
           result = result.filter((c: any) => c.folder_id === activeFolder);
         }
       }
@@ -615,28 +622,28 @@ export default function ConversationList({
   const isSelecting = selectedIds.size > 0;
 
   return (
-    <div className="w-[360px] min-w-[360px] h-full bg-[#12161B] border-r border-[#1E242C] flex flex-col overflow-hidden">
+    <div className="w-[360px] min-w-[360px] h-full bg-[var(--surface)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       {/* Search + Filter toggle */}
       <div className="p-3 pb-2">
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C]">
-          <Search size={16} className="text-[#484F58]" />
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+          <Search size={16} className="text-[var(--text-muted)]" />
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search conversations..."
-            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
+            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
           />
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
               hasActiveFilters
-                ? "bg-[rgba(74,222,128,0.12)] text-[#4ADE80]"
-                : "text-[#484F58] hover:text-[#7D8590]"
+                ? "bg-[rgba(74,222,128,0.12)] text-[var(--accent)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
             title="Filters"
           >
             <Filter size={12} />
-            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]" />}
+            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
           </button>
         </div>
 
@@ -653,8 +660,8 @@ export default function ConversationList({
                 onClick={() => setSearchScope(scope.id)}
                 className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
                   searchScope === scope.id
-                    ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30"
-                    : "text-[#484F58] hover:text-[#7D8590] border border-[#1E242C]"
+                    ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border)]"
                 }`}
               >
                 {scope.label}
@@ -667,49 +674,49 @@ export default function ConversationList({
       {/* Bulk action bar */}
       {isSelecting && (
         <div className="px-3 pb-2 animate-fade-in">
-          <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-[#161B22] border border-[#1E242C]">
+          <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
             <button
               onClick={selectAll}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-[#E6EDF3] hover:text-[#4ADE80] transition-colors mr-1"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors mr-1"
             >
               <div className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center transition-all ${
                 selectedIds.size === filteredConversations.length
-                  ? "border-[#4ADE80] bg-[#4ADE80]"
-                  : "border-[#484F58]"
+                  ? "border-[var(--accent)] bg-[var(--accent)]"
+                  : "border-[var(--text-muted)]"
               }`}>
                 {selectedIds.size === filteredConversations.length && (
-                  <Check size={9} className="text-[#0B0E11]" />
+                  <Check size={9} className="text-[var(--bg)]" />
                 )}
               </div>
-              <span className="text-[#4ADE80] tabular-nums">{selectedIds.size}</span>
+              <span className="text-[var(--accent)] tabular-nums">{selectedIds.size}</span>
             </button>
 
-            <div className="w-px h-4 bg-[#1E242C] mx-0.5" />
+            <div className="w-px h-4 bg-[var(--border)] mx-0.5" />
 
             <button
               onClick={() => handleBulkAction("star")}
-              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F5D547] transition-all"
+              className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--highlight)] transition-all"
               title="Star selected"
             >
               <Star size={13} />
             </button>
             <button
               onClick={() => handleBulkAction("mark_unread")}
-              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#BC8CFF] transition-all"
+              className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[#BC8CFF] transition-all"
               title="Mark as unread"
             >
               <MailOpen size={13} />
             </button>
             <button
               onClick={() => handleBulkAction("archive")}
-              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#58A6FF] transition-all"
+              className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--info)] transition-all"
               title="Archive selected"
             >
               <Archive size={13} />
             </button>
             <button
               onClick={() => handleBulkAction("delete")}
-              className="p-1.5 rounded hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149] transition-all"
+              className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition-all"
               title="Delete selected"
             >
               <Trash2 size={13} />
@@ -719,7 +726,7 @@ export default function ConversationList({
 
             <button
               onClick={() => setSelectedIds(new Set())}
-              className="p-1 rounded text-[#484F58] hover:text-[#7D8590] transition-colors"
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
               title="Clear selection"
             >
               <X size={13} />
@@ -744,11 +751,11 @@ export default function ConversationList({
         <div className="px-3 pb-1">
           <div className="flex items-center gap-1">
             <button onClick={() => setSearchTab("conversations")}
-              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "conversations" ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"}`}>
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "conversations" ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>
               Conversations ({conversations.length})
             </button>
             <button onClick={() => setSearchTab("tasks")}
-              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "tasks" ? "bg-[#1E242C] text-[#E6EDF3]" : "text-[#484F58] hover:text-[#7D8590]"}`}>
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${searchTab === "tasks" ? "bg-[var(--border)] text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"}`}>
               Tasks ({searchTaskResults.length})
             </button>
           </div>
@@ -760,15 +767,15 @@ export default function ConversationList({
         <div className="flex-1 overflow-y-auto px-1.5">
           {/* User filter */}
           <div className="px-2.5 py-2 flex items-center gap-1 flex-wrap">
-            <span className="text-[9px] text-[#484F58] uppercase">Filter:</span>
+            <span className="text-[9px] text-[var(--text-muted)] uppercase">Filter:</span>
             <button onClick={() => setTaskUserFilter("all")}
-              className={`px-2 py-0.5 rounded text-[9px] font-medium ${taskUserFilter === "all" ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
+              className={`px-2 py-0.5 rounded text-[9px] font-medium ${taskUserFilter === "all" ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-muted)] border border-[var(--border)]"}`}>
               All
             </button>
             {teamMembers.map(m => (
               <button key={m.id} onClick={() => setTaskUserFilter(taskUserFilter === m.id ? "all" : m.id)}
-                className={`px-2 py-0.5 rounded text-[9px] font-medium flex items-center gap-1 ${taskUserFilter === m.id ? "bg-[#4ADE80]/12 text-[#4ADE80] border border-[#4ADE80]/30" : "text-[#484F58] border border-[#1E242C]"}`}>
-                <span className="w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-bold text-[#0B0E11]" style={{ background: m.color }}>{m.initials}</span>
+                className={`px-2 py-0.5 rounded text-[9px] font-medium flex items-center gap-1 ${taskUserFilter === m.id ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/30" : "text-[var(--text-muted)] border border-[var(--border)]"}`}>
+                <span className="w-3 h-3 rounded-full flex items-center justify-center text-[6px] font-bold text-[var(--bg)]" style={{ background: m.color }}>{m.initials}</span>
                 {m.name.split(" ")[0]}
               </button>
             ))}
@@ -777,29 +784,29 @@ export default function ConversationList({
             .filter((t: any) => taskUserFilter === "all" || (t.task_assignees || []).some((a: any) => a.team_member_id === taskUserFilter))
             .map((t: any) => {
               const assignees = (t.task_assignees || []).map((a: any) => a.team_member || {});
-              const statusColors: Record<string, string> = { todo: "#58A6FF", in_progress: "#F5D547", completed: "#4ADE80", dismissed: "#F0883E" };
+              const statusColors: Record<string, string> = { todo: "var(--info)", in_progress: "var(--highlight)", completed: "var(--accent)", dismissed: "var(--warning)" };
               return (
                 <div key={t.id}
-                  className="relative flex flex-col gap-1 p-2.5 mb-0.5 rounded-lg hover:bg-[#181D24] cursor-pointer transition-all"
+                  className="relative flex flex-col gap-1 p-2.5 mb-0.5 rounded-lg hover:bg-[var(--surface-2)] cursor-pointer transition-all"
                   onClick={() => t.conversation?.id && onOpenConversation?.(t.conversation.id)}
                 >
                   <div className="flex items-start gap-2">
-                    <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: statusColors[t.status] || "#484F58" }} />
+                    <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: statusColors[t.status] || "var(--text-muted)" }} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-medium text-[#E6EDF3] leading-tight">{t.text}</div>
+                      <div className="text-[12px] font-medium text-[var(--text-primary)] leading-tight">{t.text}</div>
                       {t.conversation?.subject && (
-                        <div className="text-[10px] text-[#484F58] truncate mt-0.5">Thread: {t.conversation.subject}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">Thread: {t.conversation.subject}</div>
                       )}
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                        <span className="text-[9px] px-1.5 py-0.5 rounded border border-[#1E242C] text-[#7D8590]">{t.status}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-secondary)]">{t.status}</span>
                         {t.category && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: (t.category.color || "#484F58") + "20", color: t.category.color || "#484F58" }}>{t.category.name}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: (t.category.color || "var(--text-muted)") + "20", color: t.category.color || "var(--text-muted)" }}>{t.category.name}</span>
                         )}
                         {t.due_date && (
-                          <span className="text-[9px] text-[#F0883E]">{t.due_date}</span>
+                          <span className="text-[9px] text-[var(--warning)]">{t.due_date}</span>
                         )}
                         {assignees.map((a: any) => (
-                          <span key={a.id} className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold text-[#0B0E11]" style={{ background: a.color || "#484F58" }} title={a.name}>{(a.initials || "?").slice(0, 2)}</span>
+                          <span key={a.id} className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold text-[var(--bg)]" style={{ background: a.color || "var(--text-muted)" }} title={a.name}>{(a.initials || "?").slice(0, 2)}</span>
                         ))}
                       </div>
                     </div>
@@ -808,7 +815,7 @@ export default function ConversationList({
               );
             })}
           {searchTaskResults.filter((t: any) => taskUserFilter === "all" || (t.task_assignees || []).some((a: any) => a.team_member_id === taskUserFilter)).length === 0 && (
-            <div className="text-center py-8 text-[#484F58] text-[11px]">No tasks match this filter</div>
+            <div className="text-center py-8 text-[var(--text-muted)] text-[11px]">No tasks match this filter</div>
           )}
         </div>
       )}
@@ -816,15 +823,27 @@ export default function ConversationList({
       {/* Conversation list — hide when showing task search results */}
       {(searchTab === "conversations" || searchQuery.trim().length < 2 || !searchTaskResults || searchTaskResults.length === 0) && (
       <div className="flex-1 overflow-y-auto px-1.5">
-        {Object.entries(grouped).map(([date, convos]) => (
+        {Object.entries(grouped).map(([date, convos]) => {
+          // Phase 4d: distinguish "month + year" labels (e.g. "April 2026")
+          // from relative labels ("Today", "Yesterday", "This Week").
+          // Months get the magazine treatment: italic serif month + mono year + hairline rule.
+          const monthMatch = date.match(/^([A-Z][a-z]+)\s+(\d{4})$/);
+          return (
           <div key={date}>
-            <div className="text-[11px] font-semibold text-[#484F58] px-2.5 pt-3 pb-1.5 tracking-wide">
-              {date}
-            </div>
+            {monthMatch ? (
+              <div className="flex items-baseline gap-3 px-2.5 pt-5 pb-2">
+                <span className="font-serif italic text-[var(--text-secondary)] text-[14px] leading-none">{monthMatch[1]}</span>
+                <span className="font-mono text-[10px] tracking-widest text-[var(--text-muted)] leading-none">{monthMatch[2]}</span>
+                <div className="flex-1 border-t border-[var(--border)]" />
+              </div>
+            ) : (
+              <div className="text-[10px] font-semibold uppercase text-[var(--text-muted)] px-2.5 pt-3 pb-1.5 tracking-widest">
+                {date}
+              </div>
+            )}
             {convos.map((c) => {
               const isActive = activeConvo?.id === c.id;
               const isSelected = selectedIds.has(c.id);
-              const assignee = c.assignee || teamMembers.find((t) => t.id === c.assignee_id);
               const labels = c.labels?.map((cl) => cl.label).filter(Boolean) || [];
 
               return (
@@ -841,8 +860,8 @@ export default function ConversationList({
                   }}
                   className={`relative flex gap-2 p-2.5 mb-0.5 rounded-lg w-full text-left transition-all cursor-pointer group ${
                     c.id === highlightedConvoId
-                      ? "bg-[#4ADE80]/10 ring-2 ring-[#4ADE80]/30 border border-[#4ADE80]"
-                      : isActive ? "bg-[#1E242C]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[#181D24]"
+                      ? "bg-[var(--accent)]/10 ring-2 ring-[var(--accent)]/30 border border-[var(--accent)]"
+                      : isActive ? "bg-[var(--border)]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[var(--surface-2)]"
                   }`}
                   onClick={() => setActiveConvo(c)}
                 >
@@ -853,46 +872,43 @@ export default function ConversationList({
                   >
                     <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all cursor-pointer ${
                       isSelected
-                        ? "border-[#4ADE80] bg-[#4ADE80]"
-                        : "border-[#484F58] hover:border-[#7D8590]"
+                        ? "border-[var(--accent)] bg-[var(--accent)]"
+                        : "border-[var(--text-muted)] hover:border-[var(--text-secondary)]"
                     }`}>
-                      {isSelected && <Check size={10} className="text-[#0B0E11]" />}
+                      {isSelected && <Check size={10} className="text-[var(--bg)]" />}
                     </div>
                   </div>
 
                   {/* Unread dot */}
                   {c.is_unread && !isSelecting && (
-                    <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-[#4ADE80]" />
+                    <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-[var(--accent)]" />
                   )}
 
                   <div className="flex-1 min-w-0">
                     {/* Header row */}
                     <div className="flex items-center gap-1.5 mb-0.5">
-                      {assignee && (
-                        <Avatar initials={assignee.initials} color={assignee.color} size={18} />
-                      )}
-                      <span className={`text-[13px] truncate flex-1 ${c.is_unread ? "font-bold text-[#E6EDF3]" : "font-medium text-[#7D8590]"}`}>
+                      <span className={`text-[13px] truncate flex-1 ${c.is_unread ? "font-bold text-[var(--text-primary)]" : "font-medium text-[var(--text-secondary)]"}`}>
                         {c.from_name}
                       </span>
-                      {c.is_starred && <span className="text-[#F5D547] text-[12px]">★</span>}
+                      {c.is_starred && <span className="text-[var(--highlight)] text-[12px]">★</span>}
                       {reminderConvoIds[c.id] && (
-                        <span className="text-[#F0883E] flex-shrink-0" title={"Follow-up: " + new Date(reminderConvoIds[c.id]).toLocaleString()}>
+                        <span className="text-[var(--warning)] flex-shrink-0" title={"Follow-up: " + new Date(reminderConvoIds[c.id]).toLocaleString()}>
                           <AlarmClock size={12} />
                         </span>
                       )}
-                      <span className="text-[11px] text-[#484F58] tabular-nums whitespace-nowrap">
+                      <span className="text-[11px] text-[var(--text-muted)] tabular-nums font-mono whitespace-nowrap">
                         {formatTime(c.last_message_at)}
                       </span>
                     </div>
 
                     {/* Subject */}
-                    <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[#E6EDF3]" : "text-[#7D8590]"}`}>
-                      {(c as any).has_attachments && <Paperclip size={11} className="text-[#484F58] flex-shrink-0" />}
+                    <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                      {(c as any).has_attachments && <Paperclip size={11} className="text-[var(--text-muted)] flex-shrink-0" />}
                       <span className="truncate">{searchQuery.trim().length >= 2 ? highlightText(c.subject, searchQuery) : c.subject}</span>
                     </div>
 
                     {/* Preview / Search snippet */}
-                    <div className="text-[11.5px] text-[#484F58] truncate mb-1.5">
+                    <div className="text-[11.5px] text-[var(--text-muted)] truncate mb-1.5">
                       {searchQuery.trim().length >= 2 && searchSnippets?.[c.id] ? (
                         <span>{highlightText(searchSnippets[c.id], searchQuery)}</span>
                       ) : (
@@ -913,29 +929,27 @@ export default function ConversationList({
               );
             })}
           </div>
-        ))}
+          );
+        })}
 
         {filteredConversations.length === 0 && (
-          <div className="text-center py-16 text-[#484F58] text-sm">
+          <div className="text-center py-16 text-[var(--text-muted)] text-sm">
             {folderSubView === "closed" && activeFolder
-              ? (closedLoading
-                  ? "Loading closed conversations..."
-                  : "No closed conversations yet — closures will appear here once the Close action ships.")
+              ? (closedLoading ? "Loading…" : "No closed conversations from this folder yet")
               : hasActiveFilters
                 ? "No conversations match your filters"
                 : "No conversations found"}
           </div>
         )}
 
-        {/* Phase 3: Load More button for paginated Closed sub-view */}
         {folderSubView === "closed" && activeFolder && closedHasMore && (
-          <div className="text-center py-4">
+          <div className="text-center py-3">
             <button
               onClick={loadMoreClosed}
               disabled={closedLoading}
-              className="px-3 py-1.5 text-[12px] rounded-md bg-[#1E242C] text-[#7D8590] hover:bg-[#2A323D] hover:text-[#E6EDF3] transition-colors disabled:opacity-50"
+              className="text-[11px] px-3 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface)] disabled:opacity-50 transition-colors"
             >
-              {closedLoading ? "Loading..." : "Load more"}
+              {closedLoading ? "Loading…" : "Load more"}
             </button>
           </div>
         )}

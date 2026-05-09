@@ -147,7 +147,7 @@ export default function Sidebar({
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
-  // Phase 3: track which folders have been expanded to show All/Closed sub-views
+  // Phase 3: folders the user expanded to show All / Closed sub-views
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [addingFolder, setAddingFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
@@ -376,9 +376,15 @@ export default function Sidebar({
   <div className="flex items-center gap-2.5">
     <button
       onClick={() => setShowNotifications(!showNotifications)}
-      className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[#39D2C0] flex items-center justify-center text-base font-extrabold text-[var(--bg)] hover:opacity-90 transition-opacity"
+      className="relative w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center hover:bg-[var(--accent-strong)] transition-colors"
     >
-      T
+      {/* Tenkara loop icon — white version sits on the gold/green button regardless of theme. */}
+      <img
+        src="/logo-icon-white.png"
+        alt="Tenkara"
+        className="w-5 h-5"
+        draggable={false}
+      />
       {notifCount > 0 && (
         <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[var(--danger)] text-[9px] font-bold text-white flex items-center justify-center">
           {notifCount > 99 ? "99+" : notifCount}
@@ -387,10 +393,14 @@ export default function Sidebar({
     </button>
 
     <div className="flex-1 min-w-0">
-      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-none">
-        Ten<span className="italic">kara</span>
+      {/* Wordmark — two lines: "Tenkara" on top, "Shared Inbox" italic below.
+          Both in Instrument Serif (same as page headlines). */}
+      <div className="text-base font-normal font-serif text-[var(--text-primary)] tracking-tight leading-none truncate">
+        Tenkara
       </div>
-      <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Shared Inbox</div>
+      <div className="text-[12px] font-normal font-serif italic text-[var(--text-secondary)] tracking-tight leading-tight mt-0.5 truncate">
+        Shared Inbox
+      </div>
     </div>
 
     <button
@@ -561,8 +571,7 @@ export default function Sidebar({
                 <span className="flex items-center gap-1.5 shrink-0">
                   {unread > 0 && (
                     <span
-                      className="min-w-[18px] h-[18px] rounded-full px-1 text-[var(--bg)] text-[11px] font-bold flex items-center justify-center"
-                      style={{ background: mb.color || "var(--accent)" }}
+                      className="min-w-[18px] h-[18px] rounded-full px-1 bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold flex items-center justify-center"
                     >
                       {unread}
                     </span>
@@ -580,41 +589,31 @@ export default function Sidebar({
                     const isSystemSpam = folder.is_system && folderNameLower === "spam";
                     const isFolderExpanded = expandedFolders.has(folder.id);
 
-                    // Is THIS folder the currently-selected one?
+                    // Active = currently selected. Inbox is special-cased: when nothing is
+                    // explicitly chosen but the account is active, Inbox is the implied folder.
                     const isFolderActive = isSystemInbox
                       ? activeMailbox === mb.id && (!activeFolder || activeFolder === folder.id)
                       : activeFolder === folder.id;
 
-                    // Counts: badges show what you'd see if you CLICKED the folder name.
-                    // Per spec: clicking folder name = unassigned in this folder, status depends on
-                    // folder type (Spam → status="spam", Trash → status="trash", everything else → "open").
-                    let folderUnreadCount = 0;
-                    let folderClickCount = 0;
+                    // Counts mirror what clicking the folder NAME would show:
+                    // unassigned + status appropriate to the folder type.
+                    let folderConvos;
                     if (isSystemInbox) {
-                      const visible = mbConvos.filter((c: any) =>
-                        c.status === "open" &&
-                        !c.assignee_id &&
-                        (c.folder_id === folder.id || !c.folder_id)
-                      );
-                      folderClickCount = visible.length;
-                      folderUnreadCount = visible.filter((c: any) => c.is_unread).length;
+                      folderConvos = unassignedConvos.filter((c) => !c.folder_id || c.folder_id === folder.id);
                     } else if (isSystemTrash) {
-                      const visible = mbConvos.filter((c: any) => c.status === "trash" && !c.assignee_id);
-                      folderClickCount = visible.length;
-                      folderUnreadCount = visible.filter((c: any) => c.is_unread).length;
+                      folderConvos = mbConvos.filter((c: any) => c.status === "trash" && !c.assignee_id);
                     } else if (isSystemSpam) {
-                      const visible = mbConvos.filter((c: any) => c.status === "spam" && !c.assignee_id);
-                      folderClickCount = visible.length;
-                      folderUnreadCount = visible.filter((c: any) => c.is_unread).length;
+                      folderConvos = mbConvos.filter((c: any) => c.status === "spam" && !c.assignee_id);
                     } else {
-                      const visible = mbConvos.filter((c: any) =>
+                      folderConvos = mbConvos.filter((c) =>
                         c.folder_id === folder.id &&
-                        c.status === "open" &&
+                        c.status !== "spam" && c.status !== "trash" &&
                         !c.assignee_id
                       );
-                      folderClickCount = visible.length;
-                      folderUnreadCount = visible.filter((c: any) => c.is_unread).length;
                     }
+
+                    const folderTotal = folderConvos.length;
+                    const folderUnread = folderConvos.filter((c) => c.is_unread).length;
 
                     const handleFolderClick = () => {
                       window.location.hash = "";
@@ -637,7 +636,7 @@ export default function Sidebar({
                     return (
                       <div key={folder.id}>
                         <div className="flex items-center group/folder">
-                          {/* Phase 3: expand caret to show All / Closed sub-views */}
+                          {/* Phase 3: expand caret to reveal All / Closed sub-views */}
                           <button
                             onClick={toggleFolderExpand}
                             className="w-4 h-5 flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] shrink-0"
@@ -659,19 +658,18 @@ export default function Sidebar({
                                   : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
                             }`}
                           >
-                            <span className="text-[13px] shrink-0">{folder.icon}</span>
+                            {/* Folder icon removed per user request — too informal */}
                             <span className="flex-1 truncate">{folder.name}</span>
                             <span className="flex items-center gap-1 shrink-0">
-                              {folderUnreadCount > 0 && (
+                              {folderUnread > 0 && (
                                 <span
-                                  className="min-w-[16px] h-[16px] rounded-full px-1 text-[var(--bg)] text-[10px] font-bold flex items-center justify-center"
-                                  style={{ background: mb.color || "var(--accent)" }}
+                                  className="min-w-[16px] h-[16px] rounded-full px-1 bg-[var(--accent)] text-[var(--bg)] text-[10px] font-bold flex items-center justify-center"
                                 >
-                                  {folderUnreadCount}
+                                  {folderUnread}
                                 </span>
                               )}
-                              {folderClickCount > 0 && (
-                                <span className="text-[10px] text-[var(--text-muted)]">{folderClickCount}</span>
+                              {folderTotal > 0 && (
+                                <span className="text-[10px] text-[var(--text-muted)]">{folderTotal}</span>
                               )}
                             </span>
                           </button>

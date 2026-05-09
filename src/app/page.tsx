@@ -54,7 +54,7 @@ export default function InboxPage() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   // Phase 3: which sub-view of the active folder to show.
   //   • "unassigned" (default) — folder name itself: open + unassigned + in this folder
-  //   • "all" — All sub-view: any conversation tagged with this folder's label
+  //   • "all" — All sub-view: any conversation in this folder
   //   • "closed" — Closed sub-view: closures from this folder (separate data source)
   const [folderSubView, setFolderSubView] = useState<"unassigned" | "all" | "closed">("unassigned");
   const [searchQuery, setSearchQuery] = useState("");
@@ -173,10 +173,8 @@ export default function InboxPage() {
       const isSystemInbox = selectedFolder.is_system && folderName === "inbox";
       const isSystemSent = selectedFolder.is_system && folderName === "sent";
 
-      // Phase 3: when the user is on the "All" or "Closed" sub-view, do NOT
-      // strip assigned conversations at this stage. ConversationList will apply
-      // the appropriate filter (or load closures from a different source).
-      // Only the default "unassigned" sub-view applies the assignee=null filter.
+      // Phase 3: when on All / Closed sub-views, do NOT strip assigned convos at this stage.
+      // ConversationList narrows further. Only the default "unassigned" sub-view stays strict.
       const includeAssigned = folderSubView !== "unassigned";
 
       if (isSystemInbox) {
@@ -338,12 +336,18 @@ export default function InboxPage() {
     updatedConversation?: any
   ) => {
     if (activeConvo && activeConvo.id === conversationId) {
-      const newAssignee = assigneeId ? teamMembers.find((m) => m.id === assigneeId) : null;
+      // Batch 11: deterministically clear `assignee` on unassign so the header doesn't show stale data.
+      // Previously: `updatedConversation?.assignee || newAssignee || undefined` could leave the
+      // embedded object intact in some edge cases. Now we explicitly set `null` when unassigning.
+      const isUnassigning = assigneeId === null;
+      const newAssignee = isUnassigning
+        ? null
+        : (teamMembers.find((m) => m.id === assigneeId) || null);
       setActiveConvo({
         ...activeConvo,
         assignee_id: assigneeId,
         folder_id: assigneeId ? null : activeConvo.folder_id,
-        assignee: updatedConversation?.assignee || newAssignee || undefined,
+        assignee: isUnassigning ? null : (updatedConversation?.assignee || newAssignee),
       } as Conversation);
     }
     refetch();
