@@ -66,22 +66,25 @@ export async function POST(req: NextRequest) {
   }
 
   let previousFolderId: string | null = convo.folder_id || null;
+  console.log("[close] convo.folder_id:", convo.folder_id, "target_folder_id:", target_folder_id, "account:", convo.email_account_id);
 
-  // If the conversation has no folder_id, infer the source folder as the account's
-  // Inbox folder. This ensures the closure footprint always points to a real folder
-  // so the Closed sub-view can filter by closed_from_folder_id reliably.
-  // Match by name only (not is_system) since some installs have is_system=false on
-  // technically-system folders.
+  // PHASE 1 FALLBACK: if the conversation has no folder_id, look for an Inbox folder
+  // by name (case-insensitive). Logs what it finds for diagnostics.
   if (!previousFolderId) {
     const { data: inboxFolder } = await supabase
       .from("folders")
-      .select("id")
+      .select("id, name, is_system, created_at")
       .eq("email_account_id", convo.email_account_id)
       .ilike("name", "Inbox")
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (inboxFolder?.id) previousFolderId = inboxFolder.id;
+    if (inboxFolder?.id) {
+      previousFolderId = inboxFolder.id;
+      console.log("[close] phase1 fallback: matched 'Inbox' folder:", inboxFolder.name, inboxFolder.id);
+    } else {
+      console.log("[close] phase1 fallback: no folder named 'Inbox' for account", convo.email_account_id);
+    }
   }
 
   // Apply the close: move folder + unassign user.
@@ -143,27 +146,48 @@ export async function POST(req: NextRequest) {
     console.error("[close] swapFolderLabel failed:", e?.message || e);
   }
 
-  // FINAL fallback: if we still don't have a previousFolderId at this point,
-  // pick ANY folder belonging to this email account that isn't the target folder.
-  // The earliest-created folder is almost always the system Inbox. This guarantees
-  // the closure footprint always points to a real folder so the Closed sub-view
-  // can find it.
+  // PHASE 2 FALLBACK: still no previousFolderId? Try harder. We rank candidates:
+  // 1. Any folder named "Inbox" (case-insensitive) — best match for "where the conversation came from"
+  // 2. Otherwise: earliest-created folder for this account that isn't the target.
+  //
+  // This guarantees the closure footprint always points to a real folder so the
+  // Closed sub-view can find it.
   if (!previousFolderId) {
-    const { data: anyFolder } = await supabase
+    // Try Inbox-by-name one more time (in case phase 1 was skipped due to convo.folder_id being a value that already pointed to Test).
+    const { data: inboxFolder } = await supabase
       .from("folders")
       .select("id, name")
       .eq("email_account_id", convo.email_account_id)
+      .ilike("name", "Inbox")
       .neq("id", target_folder_id)
-      .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (anyFolder?.id) {
-      previousFolderId = anyFolder.id;
-      console.log("[close] previousFolderId fallback to earliest folder:", anyFolder.name, anyFolder.id);
+    if (inboxFolder?.id) {
+      previousFolderId = inboxFolder.id;
+      console.log("[close] phase2 fallback: matched 'Inbox' folder:", inboxFolder.name, inboxFolder.id);
     } else {
-      console.error("[close] could NOT find any source folder for closure footprint. account:", convo.email_account_id);
+      // Last resort: ANY folder for this account, NOT named spam/trash/sent/drafts (avoid wrong defaults).
+      const { data: anyFolder } = await supabase
+        .from("folders")
+        .select("id, name")
+        .eq("email_account_id", convo.email_account_id)
+        .neq("id", target_folder_id)
+        .not("name", "ilike", "spam")
+        .not("name", "ilike", "trash")
+        .not("name", "ilike", "sent")
+        .not("name", "ilike", "drafts")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (anyFolder?.id) {
+        previousFolderId = anyFolder.id;
+        console.log("[close] phase2 fallback: earliest non-special folder:", anyFolder.name, anyFolder.id);
+      } else {
+        console.error("[close] could NOT find any source folder. account:", convo.email_account_id);
+      }
     }
   }
+  console.log("[close] writing closure with closed_from_folder_id:", previousFolderId, "closed_to_folder_id:", target_folder_id);
 
   // Record the closure footprint
   const { error: closureErr } = await supabase
