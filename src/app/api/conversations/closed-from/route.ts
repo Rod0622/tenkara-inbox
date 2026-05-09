@@ -24,8 +24,36 @@ export async function GET(req: NextRequest) {
   );
   const before = req.nextUrl.searchParams.get("before"); // ISO timestamp
 
-  // Build query: closures where closed_from_folder_id matches, joined with
-  // the conversation row so the UI can render it like a normal list item.
+  // Look up the folder's name + account so we can match closures by NAME-equivalence,
+  // not just strict UUID equality. This handles cases where:
+  //   • The same email account has multiple folders with the same name (e.g. IMAP "INBOX"
+  //     vs Microsoft Graph "Inbox") — the Sidebar shows ONE of them but closures may
+  //     have been recorded against ANOTHER one with the same name.
+  //   • The close API's fallback picked a different "Inbox" UUID than the Sidebar uses.
+  //
+  // Strategy: find ALL folders for this account that share the clicked folder's name,
+  // then query closures whose closed_from_folder_id is in that set.
+  const { data: clickedFolder } = await supabase
+    .from("folders")
+    .select("id, name, email_account_id")
+    .eq("id", folderId)
+    .maybeSingle();
+
+  // Build the set of folder IDs to match against.
+  let folderIdsToMatch: string[] = [folderId];
+  if (clickedFolder?.name && clickedFolder?.email_account_id) {
+    const { data: siblingFolders } = await supabase
+      .from("folders")
+      .select("id")
+      .eq("email_account_id", clickedFolder.email_account_id)
+      .ilike("name", clickedFolder.name);
+    if (siblingFolders && siblingFolders.length > 0) {
+      folderIdsToMatch = siblingFolders.map((f: any) => f.id);
+    }
+  }
+  console.log("[closed-from] folder_id query param:", folderId, "matched folder IDs:", folderIdsToMatch);
+
+  // Build query: closures where closed_from_folder_id is in our matched set.
   let query = supabase
     .from("conversation_closures")
     .select(`
@@ -57,7 +85,7 @@ export async function GET(req: NextRequest) {
       ),
       closed_by:team_members!conversation_closures_closed_by_user_id_fkey(id, name, email)
     `)
-    .eq("closed_from_folder_id", folderId)
+    .in("closed_from_folder_id", folderIdsToMatch)
     .order("closed_at", { ascending: false })
     .limit(limit);
 
