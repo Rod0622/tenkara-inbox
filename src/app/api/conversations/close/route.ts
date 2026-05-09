@@ -67,18 +67,56 @@ export async function POST(req: NextRequest) {
 
   const previousFolderId: string | null = convo.folder_id || null;
 
-  // Apply the close: move folder + unassign + status=closed
+  // Apply the close: move folder + unassign user.
+  // NOTE: Per spec change, status stays as-is (typically "open"). The conversation
+  // does NOT become "closed" — closure is recorded in conversation_closures only.
+  // This way, the conversation reappears in the destination folder's
+  // unassigned-open view (the team triage view at the next stage).
   const { error: updateErr } = await supabase
     .from("conversations")
     .update({
       folder_id: target_folder_id,
       assignee_id: null,
-      status: "closed",
     })
     .eq("id", conversation_id);
 
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  }
+
+  // Unassign the caller too: clear assignees from any open call-category tasks
+  // on this conversation. Caller is modeled as the assignee of a task whose
+  // category name contains "call".
+  try {
+    const { data: callCategory } = await supabase
+      .from("task_categories")
+      .select("id")
+      .ilike("name", "%call%")
+      .limit(1)
+      .maybeSingle();
+
+    if (callCategory?.id) {
+      // Find tasks on this conversation that are call-category and not done
+      const { data: callTasks } = await supabase
+        .from("tasks")
+        .select("id, status")
+        .eq("conversation_id", conversation_id)
+        .eq("category_id", callCategory.id);
+
+      const openCallTaskIds = (callTasks || [])
+        .filter((t: any) => t.status !== "completed" && t.status !== "dismissed")
+        .map((t: any) => t.id);
+
+      if (openCallTaskIds.length > 0) {
+        await supabase
+          .from("task_assignees")
+          .delete()
+          .in("task_id", openCallTaskIds);
+      }
+    }
+  } catch (e: any) {
+    console.error("[close] caller unassign failed:", e?.message || e);
+    // Non-fatal — keep going
   }
 
   // Swap the folder label (best-effort)

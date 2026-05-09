@@ -3,7 +3,7 @@ import { simpleParser, ParsedMail } from "mailparser";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
-import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -301,13 +301,6 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               sent_at: sentAt,
             });
 
-            // Reopen check: if the conversation was closed and a supplier reply just landed,
-            // flip status back to open and (if unassigned) reassign to last closer if within
-            // 3 business days. Best-effort, never throws.
-            if (conversationId) {
-              await onIncomingMessageReopenCheck(conversationId, isOutbound);
-            }
-
             await supabase.from("conversations").update({
               preview: snippet.slice(0, 200),
               last_message_at: sentAt,
@@ -465,9 +458,6 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           result.errors.push(`Message ${email.uid}: ${msgError.message}`);
           continue;
         }
-
-        // Reopen check after successful message insert
-        await onIncomingMessageReopenCheck(conversationId, isOutbound(email.fromEmail, account.email));
 
         // Update conversation with latest message info
         const convoUpdate: any = {

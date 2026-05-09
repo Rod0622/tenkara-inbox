@@ -1,5 +1,5 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
-import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -209,13 +209,6 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         if (me) {
           console.error("MS OAuth sync: message insert failed:", me.message);
           continue;
-        }
-
-        // Reopen check after successful message insert.
-        // conversationId is non-null at this point (we either threaded into an existing
-        // one or created a new one above) but TS can't narrow through the let-declared var.
-        if (conversationId) {
-          await onIncomingMessageReopenCheck(conversationId, isOutbound);
         }
 
         result.newMessages++;

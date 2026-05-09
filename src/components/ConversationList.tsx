@@ -485,11 +485,21 @@ export default function ConversationList({
       // Both are scoped to a folder; if no activeFolder, no extra filter.
       if (activeFolder) {
         if (folderSubView === "unassigned") {
-          // Folder name click: open + unassigned + in this folder
+          // Folder name click: unassigned + in this folder, status filter depends on folder.
+          // System Spam folder → status="spam"; Trash → status="trash"; everything else → "open".
+          // (Conversations don't get status="closed" anymore — close uses the closures table only.)
+          const activeF = (folders || []).find((f: any) => f.id === activeFolder);
+          const fName = String(activeF?.name || "").toLowerCase();
+          const isSystem = !!activeF?.is_system;
+          const requiredStatus = isSystem && fName === "spam"
+            ? "spam"
+            : isSystem && fName === "trash"
+              ? "trash"
+              : "open";
           result = result.filter(
             (c: any) =>
               c.folder_id === activeFolder &&
-              c.status === "open" &&
+              c.status === requiredStatus &&
               !c.assignee_id
           );
         } else if (folderSubView === "all") {
@@ -565,7 +575,7 @@ export default function ConversationList({
     }
 
     return result;
-  }, [conversations, filters, folderSubView, activeFolder, closedConvos]);
+  }, [conversations, filters, folderSubView, activeFolder, closedConvos, folders]);
 
   const grouped = useMemo(() => groupByDate(filteredConversations), [filteredConversations]);
 
