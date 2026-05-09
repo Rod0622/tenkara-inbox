@@ -41,37 +41,37 @@ export default function DraftsPanel({
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="animate-spin text-[#4ADE80]" size={24} />
+        <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0B0E11]">
+    <div className="flex-1 overflow-y-auto bg-[var(--bg)]">
       <div className="max-w-3xl mx-auto p-6">
         <div className="flex items-center gap-3 mb-6">
-          <FileEdit size={22} className="text-[#58A6FF]" />
+          <FileEdit size={22} className="text-[var(--info)]" />
           <div>
-            <h1 className="text-xl font-bold text-[#E6EDF3]">Drafts</h1>
-            <p className="text-xs text-[#7D8590]">{drafts.length} draft{drafts.length !== 1 ? "s" : ""}</p>
+            <h1 className="text-xl font-bold text-[var(--text-primary)]">Drafts</h1>
+            <p className="text-xs text-[var(--text-secondary)]">{drafts.length} draft{drafts.length !== 1 ? "s" : ""}</p>
           </div>
         </div>
 
         {drafts.length === 0 ? (
           <div className="text-center py-16">
-            <FileEdit size={40} className="mx-auto mb-3 text-[#484F58] opacity-50" />
-            <div className="text-sm text-[#484F58]">No drafts</div>
-            <div className="text-xs text-[#484F58] mt-1">Drafts will appear here when created automatically or saved manually</div>
+            <FileEdit size={40} className="mx-auto mb-3 text-[var(--text-muted)] opacity-50" />
+            <div className="text-sm text-[var(--text-muted)]">No drafts</div>
+            <div className="text-xs text-[var(--text-muted)] mt-1">Drafts will appear here when created automatically or saved manually</div>
           </div>
         ) : (
           <div className="space-y-2">
             {drafts.map((draft) => (
-              <div key={draft.id} className="group p-4 rounded-xl bg-[#12161B] border border-[#1E242C] hover:border-[#1E242C]/80 transition-all">
+              <div key={draft.id} className="group p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border)]/80 transition-all">
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     {/* Subject + account */}
                     <div className="flex items-center gap-2 mb-1">
-                      <div className="text-sm font-medium text-[#E6EDF3] truncate">
+                      <div className="text-sm font-medium text-[var(--text-primary)] truncate">
                         {draft.subject || draft.conversation?.subject || "No subject"}
                       </div>
                       {draft.source === "auto_follow_up" && (
@@ -82,20 +82,20 @@ export default function DraftsPanel({
                     </div>
 
                     {/* To + account */}
-                    <div className="text-[11px] text-[#7D8590] mb-1.5">
+                    <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">
                       To: {draft.to_addresses || draft.conversation?.from_email || "—"}
                       {draft.account && (
-                        <span className="text-[#484F58]"> · via {draft.account.name || draft.account.email}</span>
+                        <span className="text-[var(--text-muted)]"> · via {draft.account.name || draft.account.email}</span>
                       )}
                     </div>
 
                     {/* Body preview */}
-                    <div className="text-xs text-[#484F58] line-clamp-2">
+                    <div className="text-xs text-[var(--text-muted)] line-clamp-2">
                       {draft.body_text?.slice(0, 200) || "(empty)"}
                     </div>
 
                     {/* Timestamp */}
-                    <div className="flex items-center gap-1 mt-2 text-[10px] text-[#484F58]">
+                    <div className="flex items-center gap-1 mt-2 text-[10px] text-[var(--text-muted)]">
                       <Clock size={10} />
                       <span>Last edited {new Date(draft.updated_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</span>
                     </div>
@@ -105,7 +105,7 @@ export default function DraftsPanel({
                   <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => draft.conversation_id && onOpenConversation?.(draft.conversation_id)}
-                      className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#58A6FF]"
+                      className="p-1.5 rounded-md hover:bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--info)]"
                       title="Open conversation & edit draft"
                     >
                       <ExternalLink size={14} />
@@ -113,7 +113,7 @@ export default function DraftsPanel({
                     <button
                       onClick={() => handleDelete(draft.id)}
                       disabled={deleting === draft.id}
-                      className="p-1.5 rounded-md hover:bg-[#1E242C] text-[#7D8590] hover:text-[#F85149] disabled:opacity-50"
+                      className="p-1.5 rounded-md hover:bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--danger)] disabled:opacity-50"
                       title="Delete draft"
                     >
                       <Trash2 size={14} />

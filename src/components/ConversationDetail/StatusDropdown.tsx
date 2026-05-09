@@ -145,18 +145,18 @@ export default function StatusDropdown({
         <button
           onClick={() => setOpen((v) => !v)}
           disabled={submitting}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] font-medium hover:bg-[#181D24] transition-all"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-medium hover:bg-[var(--surface-2)] transition-all"
           title={isClosed ? "Conversation is closed" : "Conversation is open"}
         >
           <Circle size={10} fill={statusColor} stroke={statusColor} />
           <span style={{ color: statusColor }}>{statusLabel}</span>
-          <ChevronDown size={12} className="text-[#484F58]" />
+          <ChevronDown size={12} className="text-[var(--text-muted)]" />
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[#161B22] border border-[#1E242C] rounded-xl shadow-2xl shadow-black/40 py-1">
-            <div className="px-3 py-2 border-b border-[#1E242C]">
-              <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-wider">
+          <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
+            <div className="px-3 py-2 border-b border-[var(--border)]">
+              <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
                 Conversation status
               </div>
             </div>
@@ -164,12 +164,12 @@ export default function StatusDropdown({
             {/* Open option (current state when not closed) */}
             <div
               className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] ${
-                !isClosed ? "text-[#4ADE80]" : "text-[#7D8590]"
+                !isClosed ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
               }`}
             >
               <Circle size={12} fill="#4ADE80" stroke="#4ADE80" />
               <span className="flex-1">Open</span>
-              {!isClosed && <Check size={14} className="text-[#4ADE80]" />}
+              {!isClosed && <Check size={14} className="text-[var(--accent)]" />}
             </div>
 
             {/* Close option */}
@@ -179,7 +179,7 @@ export default function StatusDropdown({
                   setOpen(false);
                   setShowCloseModal(true);
                 }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#E6EDF3] hover:bg-[#1E242C] text-left"
+                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] text-left"
               >
                 <Circle size={12} fill="#7D8590" stroke="#7D8590" />
                 <span className="flex-1">Close…</span>
@@ -194,7 +194,7 @@ export default function StatusDropdown({
                     ? ""
                     : "Only the assignee can close this conversation"
                 }
-                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#484F58] cursor-not-allowed"
+                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-muted)] cursor-not-allowed"
               >
                 <Circle size={12} fill="#7D8590" stroke="#7D8590" />
                 <span className="flex-1">Close…</span>
@@ -205,7 +205,7 @@ export default function StatusDropdown({
             {canReopen && (
               <button
                 onClick={handleReopen}
-                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[#4ADE80] hover:bg-[#1E242C] text-left"
+                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--accent)] hover:bg-[var(--surface-hover)] text-left"
               >
                 <RotateCcw size={12} />
                 <span className="flex-1">Reopen</span>
@@ -222,19 +222,19 @@ export default function StatusDropdown({
           onClick={() => !submitting && setShowCloseModal(false)}
         >
           <div
-            className="w-full max-w-md bg-[#161B22] border border-[#1E242C] rounded-2xl shadow-2xl"
+            className="w-full max-w-md bg-[var(--surface-2)] border border-[var(--border)] rounded-2xl shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
               <div>
-                <div className="text-sm font-bold text-[#E6EDF3]">Close conversation</div>
-                <div className="text-[10px] text-[#484F58] mt-0.5">
+                <div className="text-sm font-bold text-[var(--text-primary)]">Close conversation</div>
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
                   Move to a folder. The conversation will be unassigned and marked closed.
                 </div>
               </div>
               <button
                 onClick={() => !submitting && setShowCloseModal(false)}
-                className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center"
+                className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] flex items-center justify-center"
               >
                 <X size={16} />
               </button>
@@ -242,13 +242,13 @@ export default function StatusDropdown({
 
             <div className="p-4 space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-[#7D8590] mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">
                   Move to folder
                 </label>
                 <select
                   value={targetFolderId}
                   onChange={(e) => setTargetFolderId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] [color-scheme:dark]"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] [color-scheme:dark]"
                 >
                   {closableFolders.length === 0 && (
                     <option value="">No folders available</option>
@@ -265,7 +265,7 @@ export default function StatusDropdown({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-[#7D8590] mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">
                   Note (optional)
                 </label>
                 <textarea
@@ -273,7 +273,7 @@ export default function StatusDropdown({
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Why are you closing this? (visible in conversation notes)"
                   rows={3}
-                  className="w-full px-3 py-2 rounded-lg bg-[#0B0E11] border border-[#1E242C] text-sm text-[#E6EDF3] outline-none focus:border-[#4ADE80] placeholder:text-[#484F58]"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
                 />
               </div>
             </div>
@@ -282,14 +282,14 @@ export default function StatusDropdown({
               <button
                 onClick={() => setShowCloseModal(false)}
                 disabled={submitting}
-                className="px-3 py-1.5 rounded-lg border border-[#1E242C] text-[#7D8590] text-sm hover:bg-[#1E242C] disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmClose}
                 disabled={submitting || !targetFolderId}
-                className="px-4 py-1.5 rounded-lg bg-[#4ADE80] text-[#0B0E11] text-sm font-bold hover:bg-[#5FE890] disabled:opacity-40"
+                className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-bold hover:bg-[var(--accent-strong)] disabled:opacity-40"
               >
                 {submitting ? "Closing…" : "Close conversation"}
               </button>

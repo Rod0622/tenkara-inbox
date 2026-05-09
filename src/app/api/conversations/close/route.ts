@@ -143,6 +143,28 @@ export async function POST(req: NextRequest) {
     console.error("[close] swapFolderLabel failed:", e?.message || e);
   }
 
+  // FINAL fallback: if we still don't have a previousFolderId at this point,
+  // pick ANY folder belonging to this email account that isn't the target folder.
+  // The earliest-created folder is almost always the system Inbox. This guarantees
+  // the closure footprint always points to a real folder so the Closed sub-view
+  // can find it.
+  if (!previousFolderId) {
+    const { data: anyFolder } = await supabase
+      .from("folders")
+      .select("id, name")
+      .eq("email_account_id", convo.email_account_id)
+      .neq("id", target_folder_id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (anyFolder?.id) {
+      previousFolderId = anyFolder.id;
+      console.log("[close] previousFolderId fallback to earliest folder:", anyFolder.name, anyFolder.id);
+    } else {
+      console.error("[close] could NOT find any source folder for closure footprint. account:", convo.email_account_id);
+    }
+  }
+
   // Record the closure footprint
   const { error: closureErr } = await supabase
     .from("conversation_closures")
