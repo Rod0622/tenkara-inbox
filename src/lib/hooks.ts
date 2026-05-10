@@ -641,11 +641,17 @@ export function useActions() {
     }).catch(() => {});
   }, []);
 
-  const addNote = async (conversationId: string, text: string, title?: string) => {
+  const addNote = async (conversationId: string, text: string, title?: string, messageId?: string | null) => {
     const res = await fetch("/api/conversations/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId, text, title: title || "", author_id: currentUserId }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        text,
+        title: title || "",
+        author_id: currentUserId,
+        message_id: messageId || null,
+      }),
     });
 
     if (!res.ok) {
@@ -717,19 +723,11 @@ export function useActions() {
     }
   };
 
-  // Batch 11: cc/bcc support added for the main reply editor.
-  const sendReply = async (conversationId: string, body: string, attachments?: { name: string; type: string; data: string }[], cc?: string, bcc?: string) => {
+  const sendReply = async (conversationId: string, body: string, attachments?: { name: string; type: string; data: string }[]) => {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        body,
-        attachments: attachments || undefined,
-        cc: cc?.trim() || undefined,
-        bcc: bcc?.trim() || undefined,
-        actor_id: currentUserId
-      }),
+      body: JSON.stringify({ conversation_id: conversationId, body, attachments: attachments || undefined, actor_id: currentUserId }),
     });
 
     if (!res.ok) {

@@ -13,12 +13,32 @@ export async function POST(req: NextRequest) {
   const conversationId = body.conversation_id || body.conversationId;
   const text = body.text;
   const title = body.title || "";
+  // Optional: pin this note to a specific message in the conversation thread.
+  // NULL means a general (whole-conversation) note. Validated below — must belong
+  // to this conversation if provided.
+  const messageId = body.message_id || body.messageId || null;
 
   if (!conversationId || !text?.trim()) {
     return NextResponse.json(
       { error: "conversation_id and text are required" },
       { status: 400 }
     );
+  }
+
+  // If a message_id is supplied, make sure it actually belongs to this conversation.
+  // Prevents a typo or malicious payload from cross-linking unrelated threads.
+  if (messageId) {
+    const { data: msg } = await supabase
+      .from("messages")
+      .select("id, conversation_id")
+      .eq("id", messageId)
+      .maybeSingle();
+    if (!msg || msg.conversation_id !== conversationId) {
+      return NextResponse.json(
+        { error: "message_id does not belong to this conversation" },
+        { status: 400 }
+      );
+    }
   }
 
   // Get the current user to set as author
@@ -47,6 +67,7 @@ export async function POST(req: NextRequest) {
       author_id: authorId,
       title: title.trim(),
       text: text.trim(),
+      message_id: messageId,
     })
     .select("*, author:team_members(*)")
     .single();
@@ -119,4 +140,61 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ notes: notes || [] });
+}
+
+// PATCH /api/conversations/notes — update an existing note's message attachment
+//   body: { note_id, message_id }  — pass message_id=null to detach.
+// Used for the "attach to message" button on existing notes.
+export async function PATCH(req: NextRequest) {
+  const supabase = createServerClient();
+  const body = await req.json();
+
+  const noteId = body.note_id || body.noteId;
+  // message_id can be null (detach) or a string (attach). undefined is rejected.
+  if (!noteId || body.message_id === undefined) {
+    return NextResponse.json(
+      { error: "note_id and message_id (string or null) are required" },
+      { status: 400 }
+    );
+  }
+  const messageId: string | null = body.message_id || null;
+
+  // Look up the note so we know which conversation it belongs to,
+  // then verify the new message_id is part of that same conversation.
+  const { data: existingNote } = await supabase
+    .from("notes")
+    .select("id, conversation_id")
+    .eq("id", noteId)
+    .maybeSingle();
+
+  if (!existingNote) {
+    return NextResponse.json({ error: "Note not found" }, { status: 404 });
+  }
+
+  if (messageId) {
+    const { data: msg } = await supabase
+      .from("messages")
+      .select("id, conversation_id")
+      .eq("id", messageId)
+      .maybeSingle();
+    if (!msg || msg.conversation_id !== existingNote.conversation_id) {
+      return NextResponse.json(
+        { error: "message_id does not belong to this note's conversation" },
+        { status: 400 }
+      );
+    }
+  }
+
+  const { data: note, error } = await supabase
+    .from("notes")
+    .update({ message_id: messageId })
+    .eq("id", noteId)
+    .select("*, author:team_members(*)")
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ note });
 }

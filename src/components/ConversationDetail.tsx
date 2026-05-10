@@ -39,6 +39,8 @@ import {
   Users,
   X,
   ClipboardCheck,
+  Link2,
+  StickyNote,
 } from "lucide-react";
 import FormModal from "./FormModal";
 import {
@@ -263,6 +265,16 @@ export default function ConversationDetail({
   }, [convo?.email_account_id]);
   const [noteText, setNoteText] = useState("");
   const [noteTitle, setNoteTitle] = useState("");
+  // Optional: pin the new note to a specific message in the thread
+  const [noteMessageId, setNoteMessageId] = useState<string | null>(null);
+  // When set, briefly highlight the note with this id (after navigating from a marker)
+  const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
+  // Notes by id → DOM element, used to scroll-to-note when clicking a marker
+  const noteRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Which note is currently in the "pick a message to attach" mode (for retroactive attaching)
+  const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
+  // Loading state during retroactive attach/detach
+  const [attachingPending, setAttachingPending] = useState<string | null>(null);
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [showTaskInput, setShowTaskInput] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -587,12 +599,48 @@ export default function ConversationDetail({
 
   const handleAddNoteInternal = async () => {
     if (!convo || !noteText.trim()) return;
-    await onAddNote(convo.id, noteText.trim(), noteTitle.trim());
+    await onAddNote(convo.id, noteText.trim(), noteTitle.trim(), noteMessageId);
     setNoteText("");
     setNoteTitle("");
-    setNoteText("");
+    setNoteMessageId(null);
     setShowNoteInput(false);
     await refetchDetail();
+  };
+
+  // Click a note-marker on a message: switch to Notes tab, scroll to + flash the note.
+  const handleJumpToNote = (noteId: string) => {
+    setActiveTab("notes");
+    // Defer to next tick so the Notes tab DOM is mounted
+    setTimeout(() => {
+      const el = noteRefs.current[noteId];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      setHighlightedNoteId(noteId);
+      // Clear the highlight after the flash animation
+      setTimeout(() => setHighlightedNoteId(null), 1800);
+    }, 80);
+  };
+
+  // Retroactively attach an existing note to a specific message (or detach if null).
+  const handleAttachNoteToMessage = async (noteId: string, messageId: string | null) => {
+    setAttachingPending(noteId);
+    try {
+      const res = await fetch("/api/conversations/notes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note_id: noteId, message_id: messageId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || "Failed to update note attachment");
+        return;
+      }
+      setAttachingNoteId(null);
+      await refetchDetail();
+    } finally {
+      setAttachingPending(null);
+    }
   };
 
   const handleAddTaskInternal = async () => {
@@ -1897,6 +1945,7 @@ export default function ConversationDetail({
                 return (
                   <div
                     key={msg.id}
+                    data-message-id={msg.id}
                     className={`mb-4 p-4 rounded-xl border ${
                       msg.is_outbound
                         ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
@@ -1904,6 +1953,33 @@ export default function ConversationDetail({
                     } ${searchQ && matchCountInMsg > 0 ? "ring-1 ring-[var(--highlight)]/20" : ""}`}
                   >
                 <MessageHeader msg={msg} convo={convo} />
+
+                {/* Note markers — show small chips for any notes attached to THIS message.
+                    Click a chip to jump to the note in the Notes tab. */}
+                {(() => {
+                  const attachedNotes = (notes || []).filter((n: any) => n.message_id === msg.id);
+                  if (attachedNotes.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2 mb-2">
+                      {attachedNotes.map((n: any) => {
+                        const authorName = n.author?.name || "Someone";
+                        const titleOrPreview = n.title || (n.text ? String(n.text).slice(0, 40) : "Note");
+                        return (
+                          <button
+                            key={n.id}
+                            onClick={() => handleJumpToNote(n.id)}
+                            title={`Note by ${authorName}: ${titleOrPreview}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-[var(--info)]/30 bg-[var(--info)]/10 text-[11px] font-medium text-[var(--info)] hover:bg-[var(--info)]/20 transition-colors max-w-[260px]"
+                          >
+                            <StickyNote size={10} className="shrink-0" />
+                            <span className="truncate">{titleOrPreview}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 <div className="text-[14px] leading-[1.7] text-[var(--text-secondary)]">
                   {msg.body_html && !searchQ ? (
                     <div
@@ -2051,12 +2127,43 @@ export default function ConversationDetail({
                   rows={4}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
                 />
+
+                {/* Optional: pin this note to a specific message in the thread.
+                    A general note (default) doesn't reference any message. */}
+                {messages.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2">
+                    <div className="text-[11px] font-semibold text-[var(--text-secondary)] mb-1.5 flex items-center gap-1.5">
+                      <Link2 size={11} />
+                      Attach to a specific message <span className="text-[var(--text-muted)] font-normal">(optional)</span>
+                    </div>
+                    <select
+                      value={noteMessageId || ""}
+                      onChange={(e) => setNoteMessageId(e.target.value || null)}
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                    >
+                      <option value="">— General note (no specific message) —</option>
+                      {messages.map((m: any, i: number) => {
+                        const sender = m.from_name || m.from_email || "Unknown sender";
+                        const date = m.sent_at ? new Date(m.sent_at).toLocaleString() : "";
+                        const previewSrc = m.body_text || m.snippet || (m.body_html ? m.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "");
+                        const preview = String(previewSrc).slice(0, 50);
+                        return (
+                          <option key={m.id} value={m.id}>
+                            #{i + 1} • {sender} • {date}{preview ? ` — ${preview}…` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-2 mt-3">
                   <button
                     onClick={() => {
                       setShowNoteInput(false);
                       setNoteText("");
                       setNoteTitle("");
+                      setNoteMessageId(null);
                     }}
                     className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-2)]"
                   >
@@ -2080,14 +2187,56 @@ export default function ConversationDetail({
             {notes.map((note: any) => {
               const author =
                 note.author || teamMembers.find((member) => member.id === note.author_id) || null;
+              // If attached, find which message in the thread this note points to.
+              const attachedMessage = note.message_id
+                ? messages.find((m: any) => m.id === note.message_id)
+                : null;
+              const attachedIdx = attachedMessage
+                ? messages.findIndex((m: any) => m.id === note.message_id)
+                : -1;
+              const isHighlighted = highlightedNoteId === note.id;
+              const isAttaching = attachingNoteId === note.id;
+              const isPending = attachingPending === note.id;
+
               return (
-                <div key={note.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div
+                  key={note.id}
+                  ref={(el) => { noteRefs.current[note.id] = el; }}
+                  className={`rounded-xl border p-4 transition-all duration-300 ${
+                    isHighlighted
+                      ? "border-[var(--accent)] bg-[var(--accent-dim)] shadow-lg ring-2 ring-[var(--accent)]/30"
+                      : "border-[var(--border)] bg-[var(--surface)]"
+                  }`}
+                >
                   {note.title && (
                     <div className="text-[14px] font-bold text-[var(--text-primary)] mb-1.5 flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--info)] flex-shrink-0" />
                       {note.title}
                     </div>
                   )}
+
+                  {/* Attached-message badge (if pinned to a specific message) — clickable */}
+                  {attachedMessage && (
+                    <div className="mb-2">
+                      <button
+                        onClick={() => {
+                          setActiveTab("messages");
+                          setTimeout(() => {
+                            const msgEl = document.querySelector(`[data-message-id="${attachedMessage.id}"]`);
+                            if (msgEl) msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }, 80);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--info)]/30 bg-[var(--info)]/10 text-[11px] font-medium text-[var(--info)] hover:bg-[var(--info)]/20 transition-colors"
+                        title="Jump to the message this note is about"
+                      >
+                        <Link2 size={10} />
+                        <span className="truncate max-w-[300px]">
+                          On message #{attachedIdx + 1} from {attachedMessage.from_name || attachedMessage.from_email || "Unknown"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2 mb-2">
                     {author ? (
                       <Avatar initials={author.initials} color={author.color} size={20} />
@@ -2107,6 +2256,64 @@ export default function ConversationDetail({
                     </div>
                   </div>
                   <div className="text-[13px] text-[var(--text-secondary)] whitespace-pre-wrap">{note.text}</div>
+
+                  {/* Retroactive attach/detach controls */}
+                  {!isAttaching && (
+                    <div className="mt-3 pt-2 border-t border-[var(--border)]/50 flex items-center justify-end gap-2">
+                      {attachedMessage && (
+                        <button
+                          onClick={() => handleAttachNoteToMessage(note.id, null)}
+                          disabled={isPending}
+                          className="text-[11px] text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-40"
+                        >
+                          {isPending ? "Detaching…" : "Detach from message"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setAttachingNoteId(note.id)}
+                        className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--info)]"
+                      >
+                        <Link2 size={10} />
+                        {attachedMessage ? "Change message" : "Attach to message"}
+                      </button>
+                    </div>
+                  )}
+
+                  {isAttaching && messages.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-[var(--border)]/50 space-y-2">
+                      <div className="text-[11px] font-semibold text-[var(--text-secondary)]">
+                        Pick a message to attach this note to:
+                      </div>
+                      <select
+                        defaultValue={note.message_id || ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          handleAttachNoteToMessage(note.id, v || null);
+                        }}
+                        disabled={isPending}
+                        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50"
+                      >
+                        <option value="">— None (general note) —</option>
+                        {messages.map((m: any, i: number) => {
+                          const sender = m.from_name || m.from_email || "Unknown";
+                          const date = m.sent_at ? new Date(m.sent_at).toLocaleString() : "";
+                          return (
+                            <option key={m.id} value={m.id}>
+                              #{i + 1} • {sender} • {date}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => setAttachingNoteId(null)}
+                          className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
