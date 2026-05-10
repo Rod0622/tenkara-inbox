@@ -4069,9 +4069,11 @@ export default function ConversationDetail({
           // Convert plain-text (with \n line breaks) into HTML that contentEditable
           // will render correctly. Setting innerHTML with raw \n collapses them to
           // single spaces — losing the AI's paragraph spacing.
+          // Each paragraph is followed by an empty <p></p> for visible breathing
+          // room between paragraphs (matches how the AI's output looks in the modal).
           const htmlToInsert = String(text || "")
             .split(/\n{2,}/)
-            .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+            .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p><p><br></p>`)
             .join("");
           // Insert into the reply editor — preserve any existing draft by appending
           if (replyText && replyText.trim()) {
