@@ -73,6 +73,36 @@ import WatchToggle from "./WatchToggle";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
+// Strip HTML tags + decode common entities from a string. Used when we surface
+// message previews in chips/labels — raw email bodies often contain &nbsp; &amp;
+// etc. that look ugly when shown as plain text.
+function plainPreview(input: any, maxLen = 80): string {
+  if (!input) return "";
+  let s = String(input);
+  // Strip tags first
+  s = s.replace(/<[^>]*>/g, " ");
+  // Decode named entities we commonly see
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'");
+  // Decode numeric entities (decimal and hex)
+  s = s.replace(/&#(\d+);/g, (_, n) => {
+    try { return String.fromCharCode(parseInt(n, 10)); } catch { return ""; }
+  });
+  s = s.replace(/&#x([0-9a-f]+);/gi, (_, n) => {
+    try { return String.fromCharCode(parseInt(n, 16)); } catch { return ""; }
+  });
+  // Collapse whitespace
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length > maxLen) s = s.slice(0, maxLen) + "…";
+  return s;
+}
+
 export default function ConversationDetail({
   conversation: convo,
   currentUser,
@@ -267,6 +297,11 @@ export default function ConversationDetail({
   const [noteTitle, setNoteTitle] = useState("");
   // Optional: pin the new note to a specific message in the thread
   const [noteMessageId, setNoteMessageId] = useState<string | null>(null);
+  // Selection mode in Messages tab — set when user is picking a message to attach.
+  //   "creating" = picking for the new-note form
+  //   string id  = picking for an existing note (retroactive change)
+  //   null       = not in selection mode
+  const [pickingMessageFor, setPickingMessageFor] = useState<"creating" | string | null>(null);
   // When set, briefly highlight the note with this id (after navigating from a marker)
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
   // Notes by id → DOM element, used to scroll-to-note when clicking a marker
@@ -641,6 +676,36 @@ export default function ConversationDetail({
     } finally {
       setAttachingPending(null);
     }
+  };
+
+  // Triggered when the user is in "pick a message" mode and clicks one.
+  // Routes the pick back to whichever workflow started selection mode.
+  const handleMessagePicked = (messageId: string) => {
+    if (pickingMessageFor === "creating") {
+      // For the new-note form: just store the id and return to the Notes tab
+      setNoteMessageId(messageId);
+      setPickingMessageFor(null);
+      setActiveTab("notes");
+    } else if (typeof pickingMessageFor === "string") {
+      // For an existing note: PATCH the attachment, return to Notes tab
+      const noteId = pickingMessageFor;
+      handleAttachNoteToMessage(noteId, messageId);
+      setPickingMessageFor(null);
+      setActiveTab("notes");
+    }
+  };
+
+  // Enter selection mode for the new-note form, switching to Messages tab.
+  const startPickingForNewNote = () => {
+    setPickingMessageFor("creating");
+    setActiveTab("messages");
+  };
+
+  // Enter selection mode for an existing note, switching to Messages tab.
+  const startPickingForExistingNote = (noteId: string) => {
+    setPickingMessageFor(noteId);
+    setAttachingNoteId(null); // close any inline picker that was open
+    setActiveTab("messages");
   };
 
   const handleAddTaskInternal = async () => {
@@ -1873,6 +1938,33 @@ export default function ConversationDetail({
       >
         {activeTab === "messages" && (
           <>
+            {/* Selection-mode banner — appears when the user came here from a note's
+                "Attach to message" action. Each message in the list below becomes
+                clickable until they pick one or cancel. */}
+            {pickingMessageFor !== null && (
+              <div className="mb-3 px-4 py-3 rounded-xl border-2 border-[var(--info)] bg-[var(--info)]/10 flex items-center justify-between gap-3 sticky top-0 z-10">
+                <div className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+                  <Link2 size={14} className="text-[var(--info)]" />
+                  <span className="font-semibold">Pick a message</span>
+                  <span className="text-[var(--text-secondary)]">
+                    {pickingMessageFor === "creating"
+                      ? "to attach to your new note"
+                      : "to attach this note to"}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    setPickingMessageFor(null);
+                    // Return to wherever the user came from
+                    setActiveTab("notes");
+                  }}
+                  className="text-[12px] px-3 py-1 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
             {/* Attachment summary bar — shows all attachments across all messages */}
             <ThreadAttachmentBar messages={messages} />
 
@@ -1941,15 +2033,27 @@ export default function ConversationDetail({
                 const isFirstMessage = idx === 0;
                 const isTextOnly = !msg.body_html;
                 const showDropCap = isFirstMessage && isTextOnly && !searchQ;
+                const isPickMode = pickingMessageFor !== null;
 
                 return (
                   <div
                     key={msg.id}
                     data-message-id={msg.id}
-                    className={`mb-4 p-4 rounded-xl border ${
-                      msg.is_outbound
-                        ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
-                        : "bg-[var(--surface)] border-[var(--surface-2)]"
+                    onClick={isPickMode ? () => handleMessagePicked(msg.id) : undefined}
+                    role={isPickMode ? "button" : undefined}
+                    tabIndex={isPickMode ? 0 : undefined}
+                    onKeyDown={isPickMode ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleMessagePicked(msg.id);
+                      }
+                    } : undefined}
+                    className={`mb-4 p-4 rounded-xl border transition-all ${
+                      isPickMode
+                        ? "cursor-pointer border-dashed border-[var(--info)]/40 hover:border-[var(--info)] hover:bg-[var(--info)]/5 hover:shadow-md"
+                        : msg.is_outbound
+                          ? "bg-[rgba(74,222,128,0.04)] border-[rgba(74,222,128,0.1)]"
+                          : "bg-[var(--surface)] border-[var(--surface-2)]"
                     } ${searchQ && matchCountInMsg > 0 ? "ring-1 ring-[var(--highlight)]/20" : ""}`}
                   >
                 <MessageHeader msg={msg} convo={convo} />
@@ -1967,7 +2071,10 @@ export default function ConversationDetail({
                         return (
                           <button
                             key={n.id}
-                            onClick={() => handleJumpToNote(n.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleJumpToNote(n.id);
+                            }}
                             title={`Note by ${authorName}: ${titleOrPreview}`}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-[var(--info)]/30 bg-[var(--info)]/10 text-[11px] font-medium text-[var(--info)] hover:bg-[var(--info)]/20 transition-colors max-w-[260px]"
                           >
@@ -2129,31 +2236,72 @@ export default function ConversationDetail({
                 />
 
                 {/* Optional: pin this note to a specific message in the thread.
-                    A general note (default) doesn't reference any message. */}
+                    Clicking the button drops the user into Messages tab in selection
+                    mode where they pick a message visually. The picked message shows
+                    here as a chip with a remove button. */}
                 {messages.length > 0 && (
-                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2">
-                    <div className="text-[11px] font-semibold text-[var(--text-secondary)] mb-1.5 flex items-center gap-1.5">
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2.5">
+                    <div className="text-[11px] font-semibold text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
                       <Link2 size={11} />
                       Attach to a specific message <span className="text-[var(--text-muted)] font-normal">(optional)</span>
                     </div>
-                    <select
-                      value={noteMessageId || ""}
-                      onChange={(e) => setNoteMessageId(e.target.value || null)}
-                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                    >
-                      <option value="">— General note (no specific message) —</option>
-                      {messages.map((m: any, i: number) => {
+                    {noteMessageId ? (
+                      (() => {
+                        const m = messages.find((x: any) => x.id === noteMessageId);
+                        const idx = messages.findIndex((x: any) => x.id === noteMessageId);
+                        if (!m) {
+                          // Fallback if the message somehow disappeared from the list
+                          return (
+                            <div className="text-[12px] text-[var(--text-muted)]">
+                              Selected message no longer in this thread.
+                              <button onClick={() => setNoteMessageId(null)} className="ml-2 underline hover:text-[var(--text-secondary)]">Clear</button>
+                            </div>
+                          );
+                        }
                         const sender = m.from_name || m.from_email || "Unknown sender";
                         const date = m.sent_at ? new Date(m.sent_at).toLocaleString() : "";
-                        const previewSrc = m.body_text || m.snippet || (m.body_html ? m.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "");
-                        const preview = String(previewSrc).slice(0, 50);
+                        const previewSrc = m.body_text || m.snippet || m.body_html;
+                        const preview = plainPreview(previewSrc, 80);
                         return (
-                          <option key={m.id} value={m.id}>
-                            #{i + 1} • {sender} • {date}{preview ? ` — ${preview}…` : ""}
-                          </option>
+                          <div className="flex items-start gap-2 rounded-md border border-[var(--info)]/30 bg-[var(--info)]/8 p-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] font-semibold text-[var(--info)]">
+                                #{idx + 1} · {sender} · {date}
+                              </div>
+                              {preview && (
+                                <div className="text-[11px] text-[var(--text-secondary)] mt-0.5 truncate">
+                                  {preview}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={startPickingForNewNote}
+                                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                                title="Pick a different message"
+                              >
+                                Change
+                              </button>
+                              <button
+                                onClick={() => setNoteMessageId(null)}
+                                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]/40"
+                                title="Remove the attachment"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
                         );
-                      })}
-                    </select>
+                      })()
+                    ) : (
+                      <button
+                        onClick={startPickingForNewNote}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-dashed border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:border-[var(--info)]/50 hover:text-[var(--info)] transition-colors"
+                      >
+                        <MessageSquare size={12} />
+                        Pick a message
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -2195,7 +2343,6 @@ export default function ConversationDetail({
                 ? messages.findIndex((m: any) => m.id === note.message_id)
                 : -1;
               const isHighlighted = highlightedNoteId === note.id;
-              const isAttaching = attachingNoteId === note.id;
               const isPending = attachingPending === note.id;
 
               return (
@@ -2258,62 +2405,28 @@ export default function ConversationDetail({
                   <div className="text-[13px] text-[var(--text-secondary)] whitespace-pre-wrap">{note.text}</div>
 
                   {/* Retroactive attach/detach controls */}
-                  {!isAttaching && (
-                    <div className="mt-3 pt-2 border-t border-[var(--border)]/50 flex items-center justify-end gap-2">
-                      {attachedMessage && (
-                        <button
-                          onClick={() => handleAttachNoteToMessage(note.id, null)}
-                          disabled={isPending}
-                          className="text-[11px] text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-40"
-                        >
-                          {isPending ? "Detaching…" : "Detach from message"}
-                        </button>
-                      )}
+                  {/* Retroactive attach/detach controls. The "Attach/Change message"
+                      button drops the user into selection mode in the Messages tab,
+                      same as the new-note flow — much easier than picking from a dropdown. */}
+                  <div className="mt-3 pt-2 border-t border-[var(--border)]/50 flex items-center justify-end gap-2">
+                    {attachedMessage && (
                       <button
-                        onClick={() => setAttachingNoteId(note.id)}
-                        className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--info)]"
-                      >
-                        <Link2 size={10} />
-                        {attachedMessage ? "Change message" : "Attach to message"}
-                      </button>
-                    </div>
-                  )}
-
-                  {isAttaching && messages.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-[var(--border)]/50 space-y-2">
-                      <div className="text-[11px] font-semibold text-[var(--text-secondary)]">
-                        Pick a message to attach this note to:
-                      </div>
-                      <select
-                        defaultValue={note.message_id || ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          handleAttachNoteToMessage(note.id, v || null);
-                        }}
+                        onClick={() => handleAttachNoteToMessage(note.id, null)}
                         disabled={isPending}
-                        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50"
+                        className="text-[11px] text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-40"
                       >
-                        <option value="">— None (general note) —</option>
-                        {messages.map((m: any, i: number) => {
-                          const sender = m.from_name || m.from_email || "Unknown";
-                          const date = m.sent_at ? new Date(m.sent_at).toLocaleString() : "";
-                          return (
-                            <option key={m.id} value={m.id}>
-                              #{i + 1} • {sender} • {date}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={() => setAttachingNoteId(null)}
-                          className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                        {isPending ? "Detaching…" : "Detach from message"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => startPickingForExistingNote(note.id)}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--info)] disabled:opacity-40"
+                    >
+                      <Link2 size={10} />
+                      {attachedMessage ? "Change message" : "Attach to message"}
+                    </button>
+                  </div>
                 </div>
               );
             })}
