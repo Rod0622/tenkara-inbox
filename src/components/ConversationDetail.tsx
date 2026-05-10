@@ -4066,11 +4066,18 @@ export default function ConversationDetail({
         })()}
         organizationName="Tenkara"
         onInsert={(text) => {
-          // Insert into the reply editor — preserve any existing draft text by appending
+          // Convert plain-text (with \n line breaks) into HTML that contentEditable
+          // will render correctly. Setting innerHTML with raw \n collapses them to
+          // single spaces — losing the AI's paragraph spacing.
+          const htmlToInsert = String(text || "")
+            .split(/\n{2,}/)
+            .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+            .join("");
+          // Insert into the reply editor — preserve any existing draft by appending
           if (replyText && replyText.trim()) {
-            setReplyText(replyText + "\n\n" + text);
+            setReplyText(replyText + "<p></p>" + htmlToInsert);
           } else {
-            setReplyText(text);
+            setReplyText(htmlToInsert);
           }
           setShowReplyEditor(true);
         }}

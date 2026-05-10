@@ -4,6 +4,18 @@ import { useState, useRef } from "react";
 import { X, Send, ChevronDown, Paperclip, File, Trash2, FolderOpen } from "lucide-react";
 import { useActions, useEmailAccounts } from "@/lib/hooks";
 import RichTextEditor, { getCleanHtml, htmlToPlainText } from "@/components/RichTextEditor";
+import AIDraftModal from "@/components/AIDraftModal";
+
+// Convert plain-text (with \n line breaks and \n\n paragraph breaks) into HTML
+// suitable for setting into a contentEditable. Without this, innerHTML collapses
+// newlines into single spaces — losing all the paragraph spacing the AI generated.
+function plainTextToHtml(text: string): string {
+  if (!text) return "";
+  return String(text)
+    .split(/\n{2,}/)
+    .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
 
 interface AttachmentFile {
   name: string;
@@ -44,6 +56,8 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [drivePath, setDrivePath] = useState<{ id: string; name: string }[]>([]);
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveDefaultFolder, setDriveDefaultFolder] = useState<string | null>(null);
+  // AI Draft modal — same workflow assistant used in reply
+  const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const accountId = selectedAccount || accounts[0]?.id || "";
@@ -242,10 +256,10 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
+    <div className="flex-1 flex flex-col bg-[#0B0E11] overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
-        <div className="text-base font-bold text-[var(--text-primary)] tracking-tight">
+      <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
+        <div className="text-base font-bold text-[#E6EDF3] tracking-tight">
           New Email
         </div>
         <div className="flex items-center gap-2">
@@ -254,8 +268,8 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             disabled={sending || (to.length === 0 && !toInput.trim()) || !subject.trim()}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-bold transition-all ${
               !sending && (to.length > 0 || toInput.trim()) && subject.trim()
-                ? "bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent)] active:scale-[0.98]"
-                : "bg-[var(--border)] text-[var(--text-muted)] cursor-not-allowed"
+                ? "bg-[#4ADE80] text-[#0B0E11] hover:bg-[#3FCF73] active:scale-[0.98]"
+                : "bg-[#1E242C] text-[#484F58] cursor-not-allowed"
             }`}
           >
             <Send size={14} />
@@ -263,7 +277,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           </button>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center transition-colors"
           >
             <X size={18} />
           </button>
@@ -273,30 +287,30 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
       {/* Form */}
       <div className="flex-1 overflow-y-auto">
         {error && (
-          <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.2)] text-[var(--danger)] text-[12px]">
+          <div className="mx-5 mt-3 px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.2)] text-[#F85149] text-[12px]">
             {error}
           </div>
         )}
 
         {/* From */}
-        <div className="px-5 py-2.5 border-b border-[var(--surface-2)] flex items-center gap-3">
-          <span className="text-[12px] font-semibold text-[var(--text-muted)] w-12 shrink-0">From</span>
+        <div className="px-5 py-2.5 border-b border-[#161B22] flex items-center gap-3">
+          <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">From</span>
           <div className="relative flex-1">
             <button
               ref={(el) => { (el as any)?.__btnRef && delete (el as any).__btnRef; if (el) (el as any).__btnRef = el; }}
               onClick={() => setShowAccountPicker(!showAccountPicker)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-all w-full"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1E242C] bg-[#12161B] text-[12px] text-[#E6EDF3] hover:bg-[#181D24] transition-all w-full"
             >
               <span className="text-[14px]">{currentAccount?.icon || "📬"}</span>
               <span className="flex-1 text-left truncate">
                 {currentAccount?.email || "Select account..."}
               </span>
-              <ChevronDown size={12} className="text-[var(--text-muted)]" />
+              <ChevronDown size={12} className="text-[#484F58]" />
             </button>
             {showAccountPicker && (
               <>
                 <div className="fixed inset-0 z-[60]" onClick={() => setShowAccountPicker(false)} />
-                <div className="fixed z-[61] bg-[var(--surface-2)] border border-[var(--border)] rounded-lg shadow-xl py-1"
+                <div className="fixed z-[61] bg-[#161B22] border border-[#1E242C] rounded-lg shadow-xl py-1"
                   style={{ width: 320 }}
                   ref={(el) => {
                     if (!el) return;
@@ -312,14 +326,14 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                     <button
                       key={acc.id}
                       onClick={() => { setSelectedAccount(acc.id); setShowAccountPicker(false); }}
-                      className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[var(--border)] transition-colors ${
-                        acc.id === accountId ? "text-[var(--accent)]" : "text-[var(--text-primary)]"
+                      className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[#1E242C] transition-colors ${
+                        acc.id === accountId ? "text-[#4ADE80]" : "text-[#E6EDF3]"
                       }`}
                     >
                       <span className="text-[14px]">{acc.icon || "📬"}</span>
                       <div className="flex-1 text-left">
                         <div className="font-medium">{acc.name}</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">{acc.email}</div>
+                        <div className="text-[10px] text-[#484F58]">{acc.email}</div>
                       </div>
                     </button>
                   ))}
@@ -330,13 +344,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         </div>
 
         {/* To — tag style */}
-        <div className="px-5 py-2 border-b border-[var(--surface-2)] flex items-center gap-3">
-          <span className="text-[12px] font-semibold text-[var(--text-muted)] w-12 shrink-0">To</span>
+        <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
+          <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">To</span>
           <div className="flex-1 flex flex-wrap items-center gap-1">
             {to.map((email, i) => (
-              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--border)] text-[11px] text-[var(--text-primary)]">
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
                 {email}
-                <button onClick={() => setTo((prev) => prev.filter((_, j) => j !== i))} className="text-[var(--text-muted)] hover:text-[var(--danger)]">
+                <button onClick={() => setTo((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]">
                   <X size={10} />
                 </button>
               </span>
@@ -363,28 +377,28 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                 }
               }}
               placeholder={to.length === 0 ? "recipient@example.com" : "Add another..."}
-              className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
+              className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
             />
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {!showCc && (
-              <button onClick={() => setShowCc(true)} className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">Cc</button>
+              <button onClick={() => setShowCc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590]">Cc</button>
             )}
             {!showBcc && (
-              <button onClick={() => setShowBcc(true)} className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">Bcc</button>
+              <button onClick={() => setShowBcc(true)} className="text-[11px] text-[#484F58] hover:text-[#7D8590]">Bcc</button>
             )}
           </div>
         </div>
 
         {/* CC — tag style */}
         {showCc && (
-          <div className="px-5 py-2 border-b border-[var(--surface-2)] flex items-center gap-3">
-            <span className="text-[12px] font-semibold text-[var(--text-muted)] w-12 shrink-0">Cc</span>
+          <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
+            <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">Cc</span>
             <div className="flex-1 flex flex-wrap items-center gap-1">
               {cc.map((email, i) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--border)] text-[11px] text-[var(--text-primary)]">
+                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
                   {email}
-                  <button onClick={() => setCc((prev) => prev.filter((_, j) => j !== i))} className="text-[var(--text-muted)] hover:text-[var(--danger)]"><X size={10} /></button>
+                  <button onClick={() => setCc((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]"><X size={10} /></button>
                 </span>
               ))}
               <input
@@ -401,7 +415,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                 }}
                 onBlur={() => { if (ccInput.trim()) { const e = ccInput.trim().replace(/,$/, ""); if (e && !cc.includes(e)) setCc((prev) => [...prev, e]); setCcInput(""); }}}
                 placeholder="cc@example.com"
-                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
+                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
               />
             </div>
           </div>
@@ -409,13 +423,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
 
         {/* BCC — tag style */}
         {showBcc && (
-          <div className="px-5 py-2 border-b border-[var(--surface-2)] flex items-center gap-3">
-            <span className="text-[12px] font-semibold text-[var(--text-muted)] w-12 shrink-0">Bcc</span>
+          <div className="px-5 py-2 border-b border-[#161B22] flex items-center gap-3">
+            <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">Bcc</span>
             <div className="flex-1 flex flex-wrap items-center gap-1">
               {bcc.map((email, i) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--border)] text-[11px] text-[var(--text-primary)]">
+                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1E242C] text-[11px] text-[#E6EDF3]">
                   {email}
-                  <button onClick={() => setBcc((prev) => prev.filter((_, j) => j !== i))} className="text-[var(--text-muted)] hover:text-[var(--danger)]"><X size={10} /></button>
+                  <button onClick={() => setBcc((prev) => prev.filter((_, j) => j !== i))} className="text-[#484F58] hover:text-[#F85149]"><X size={10} /></button>
                 </span>
               ))}
               <input
@@ -432,20 +446,20 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                 }}
                 onBlur={() => { if (bccInput.trim()) { const e = bccInput.trim().replace(/,$/, ""); if (e && !bcc.includes(e)) setBcc((prev) => [...prev, e]); setBccInput(""); }}}
                 placeholder="bcc@example.com"
-                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
+                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
               />
             </div>
           </div>
         )}
 
         {/* Subject */}
-        <div className="px-5 py-2.5 border-b border-[var(--surface-2)] flex items-center gap-3">
-          <span className="text-[12px] font-semibold text-[var(--text-muted)] w-12 shrink-0">Subject</span>
+        <div className="px-5 py-2.5 border-b border-[#161B22] flex items-center gap-3">
+          <span className="text-[12px] font-semibold text-[#484F58] w-12 shrink-0">Subject</span>
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Email subject"
-            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
+            className="flex-1 bg-transparent border-none outline-none text-[#E6EDF3] text-[13px] placeholder:text-[#484F58]"
           />
         </div>
 
@@ -462,6 +476,7 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             onAttach={() => fileInputRef.current?.click()}
             onDrive={() => openDrivePicker()}
             onTemplate={() => openTemplatePicker()}
+            onAIDraft={() => setShowAIDraftModal(true)}
           />
         </div>
 
@@ -470,11 +485,11 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           <div className="px-5 pb-3">
             <div className="flex flex-wrap gap-2">
               {attachments.map((att, i) => (
-                <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px]">
-                  <File size={12} className="text-[var(--info)] shrink-0" />
-                  <span className="text-[var(--text-primary)] max-w-[150px] truncate">{att.name}</span>
-                  <span className="text-[var(--text-muted)]">{formatSize(att.size)}</span>
-                  <button onClick={() => removeAttachment(i)} className="text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors ml-0.5">
+                <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#12161B] border border-[#1E242C] text-[11px]">
+                  <File size={12} className="text-[#58A6FF] shrink-0" />
+                  <span className="text-[#E6EDF3] max-w-[150px] truncate">{att.name}</span>
+                  <span className="text-[#484F58]">{formatSize(att.size)}</span>
+                  <button onClick={() => removeAttachment(i)} className="text-[#484F58] hover:text-[#F85149] transition-colors ml-0.5">
                     <X size={11} />
                   </button>
                 </div>
@@ -487,19 +502,19 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
       {/* Template Picker Modal */}
       {showTemplateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowTemplateModal(false)}>
-          <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="w-full max-w-lg bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
               <div>
-                <div className="text-sm font-bold text-[var(--text-primary)]">Insert Template</div>
-                <div className="text-[10px] text-[var(--text-muted)]">Click a template to insert it</div>
+                <div className="text-sm font-bold text-[#E6EDF3]">Insert Template</div>
+                <div className="text-[10px] text-[#484F58]">Click a template to insert it</div>
               </div>
-              <button onClick={() => setShowTemplateModal(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
+              <button onClick={() => setShowTemplateModal(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
                 <X size={16} />
               </button>
             </div>
             <div className="max-h-[400px] overflow-y-auto">
               {templates.length === 0 ? (
-                <div className="text-center py-8 text-[var(--text-muted)] text-[12px]">No templates yet. Create them in Settings.</div>
+                <div className="text-center py-8 text-[#484F58] text-[12px]">No templates yet. Create them in Settings.</div>
               ) : (
                 <div className="p-2 space-y-0.5">
                   {["organization", "personal"].map((scope) => {
@@ -507,21 +522,21 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                     if (scopeTemplates.length === 0) return null;
                     return (
                       <div key={scope}>
-                        <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest px-3 pt-2 pb-1">
+                        <div className="text-[10px] font-bold text-[#484F58] uppercase tracking-widest px-3 pt-2 pb-1">
                           {scope === "organization" ? "🏢 Organization" : "👤 Personal"}
                         </div>
                         {scopeTemplates.map((tpl) => (
                           <button key={tpl.id} onClick={() => insertTemplate(tpl)}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
                             <div className="flex-1 min-w-0">
-                              <div className="text-[12px] font-semibold text-[var(--text-primary)]">{tpl.name}</div>
-                              {tpl.subject && <div className="text-[10px] text-[var(--text-muted)] truncate">Subject: {tpl.subject}</div>}
-                              <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">
+                              <div className="text-[12px] font-semibold text-[#E6EDF3]">{tpl.name}</div>
+                              {tpl.subject && <div className="text-[10px] text-[#484F58] truncate">Subject: {tpl.subject}</div>}
+                              <div className="text-[10px] text-[#484F58] truncate mt-0.5">
                                 {tpl.body.replace(/<[^>]*>/g, "").slice(0, 80)}...
                               </div>
                             </div>
                             {tpl.category && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[var(--info)] shrink-0">{tpl.category}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[#58A6FF] shrink-0">{tpl.category}</span>
                             )}
                           </button>
                         ))}
@@ -538,13 +553,13 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
       {/* Drive Picker Modal */}
       {showDriveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowDriveModal(false)}>
-          <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="w-full max-w-md bg-[#12161B] border border-[#1E242C] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[#1E242C] flex items-center justify-between">
               <div>
-                <div className="text-sm font-bold text-[var(--text-primary)]">Insert from Google Drive</div>
-                <div className="text-[10px] text-[var(--text-muted)]">Click a file to attach it</div>
+                <div className="text-sm font-bold text-[#E6EDF3]">Insert from Google Drive</div>
+                <div className="text-[10px] text-[#484F58]">Click a file to attach it</div>
               </div>
-              <button onClick={() => setShowDriveModal(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
+              <button onClick={() => setShowDriveModal(false)} className="w-7 h-7 rounded-md text-[#484F58] hover:text-[#E6EDF3] hover:bg-[#1E242C] flex items-center justify-center">
                 <X size={16} />
               </button>
             </div>
@@ -553,33 +568,33 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
                 <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
                   {drivePath.map((fp, i) => (
                     <span key={fp.id} className="flex items-center gap-1">
-                      {i > 0 && <span className="text-[var(--text-muted)]">/</span>}
-                      <button onClick={() => navigateDrivePath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
+                      {i > 0 && <span className="text-[#484F58]">/</span>}
+                      <button onClick={() => navigateDrivePath(i)} className="text-[#58A6FF] hover:underline">{fp.name}</button>
                     </span>
                   ))}
                 </div>
               )}
               {driveLoading ? (
-                <div className="text-center py-6 text-[var(--text-muted)] text-[12px]">Loading...</div>
+                <div className="text-center py-6 text-[#484F58] text-[12px]">Loading...</div>
               ) : (
                 <div className="space-y-0.5">
                   {driveFolders.map((f) => (
                     <button key={f.id} onClick={() => navigateDriveFolder(f)}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
-                      <FolderOpen size={14} className="text-[var(--warning)]" />
-                      <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1E242C] text-left transition-colors">
+                      <FolderOpen size={14} className="text-[#F0883E]" />
+                      <span className="text-[12px] text-[#E6EDF3]">{f.name}</span>
                     </button>
                   ))}
                   {driveFiles.map((f) => (
                     <button key={f.id} onClick={() => { attachDriveFile(f); setShowDriveModal(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[rgba(74,222,128,0.08)] text-left transition-colors">
-                      <File size={14} className="text-[var(--info)]" />
-                      <span className="text-[12px] text-[var(--text-primary)] flex-1 truncate">{f.name}</span>
-                      <span className="text-[10px] text-[var(--text-muted)]">{f.size ? formatSize(f.size) : ""}</span>
+                      <File size={14} className="text-[#58A6FF]" />
+                      <span className="text-[12px] text-[#E6EDF3] flex-1 truncate">{f.name}</span>
+                      <span className="text-[10px] text-[#484F58]">{f.size ? formatSize(f.size) : ""}</span>
                     </button>
                   ))}
                   {driveFolders.length === 0 && driveFiles.length === 0 && (
-                    <div className="text-[11px] text-[var(--text-muted)] py-4 text-center">No files in this folder</div>
+                    <div className="text-[11px] text-[#484F58] py-4 text-center">No files in this folder</div>
                   )}
                 </div>
               )}
@@ -587,6 +602,30 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
           </div>
         </div>
       )}
+
+      {/* AI Draft Modal — same workflow assistant as reply.
+          For new compose, we don't have a conversation context, so the
+          incoming-message + supplier fields start empty. The user fills them
+          in within the modal. Inserted text is converted from plain-text to
+          HTML (paragraph breaks preserved) before being placed in the editor. */}
+      <AIDraftModal
+        open={showAIDraftModal}
+        onClose={() => setShowAIDraftModal(false)}
+        initialSupplierCompany=""
+        initialContactName=""
+        initialEmailSubject={subject || ""}
+        initialIncomingMessage=""
+        organizationName="Tenkara"
+        onInsert={(text) => {
+          const htmlToInsert = plainTextToHtml(text);
+          if (bodyHtml && bodyHtml.trim()) {
+            // Append to existing draft, separated by a paragraph break
+            setBodyHtml(bodyHtml + "<p></p>" + htmlToInsert);
+          } else {
+            setBodyHtml(htmlToInsert);
+          }
+        }}
+      />
     </div>
   );
 }
