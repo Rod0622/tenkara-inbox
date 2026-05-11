@@ -71,6 +71,16 @@ export async function POST(req: NextRequest) {
       break;
     }
 
+    case "restore": {
+      // Restore trashed/spam conversations back to "open"
+      const { error: e } = await supabase
+        .from("conversations")
+        .update({ status: "open" })
+        .in("id", ids);
+      error = e;
+      break;
+    }
+
     case "move_folder": {
       // Move to a different email account (folder)
       if (!body.target_account_id) {
