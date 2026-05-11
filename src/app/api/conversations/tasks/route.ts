@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyTaskAssigned } from "@/lib/notifications";
+import { autoWatchTaskAssignees } from "@/lib/watchers";
 import { addBusinessHours, getSupplierHoursForConversation } from "@/lib/business-hours";
 import type { Task, TaskStatus } from "@/types";
 import { runRulesForEvent } from "@/lib/rule-engine";
@@ -265,6 +266,14 @@ export async function POST(req: NextRequest) {
       await notifyTaskAssigned(insert.data.id, assigneeIds, actorId, text, conversationId || undefined);
     } catch (_e) { /* best-effort */ }
 
+    // Auto-watch: assignees should follow the thread automatically
+    // so the conversation appears in their Watching folder. Best-effort.
+    if (conversationId && assigneeIds.length > 0) {
+      try {
+        await autoWatchTaskAssignees(conversationId, assigneeIds, "task_assigned");
+      } catch (_e) { /* best-effort */ }
+    }
+
     // Fire event-based rules (new_comment trigger, comment_type: task)
     // Only fire when there's a conversation context — standalone tasks don't trigger rules
     if (conversationId) {
@@ -447,6 +456,16 @@ export async function PATCH(req: NextRequest) {
           if (insertRes.error && !isMissingJoinError(insertRes.error)) {
             console.error("PATCH /api/tasks assignee insert failed:", insertRes.error);
             return NextResponse.json({ error: insertRes.error.message }, { status: 500 });
+          }
+
+          // Auto-watch new assignees on the parent conversation. The task row
+          // we just updated above (result.data) carries conversation_id.
+          // Skip if the task is standalone (no conversation).
+          const taskConvoId = result.data?.conversation_id;
+          if (taskConvoId) {
+            try {
+              await autoWatchTaskAssignees(taskConvoId, assigneeIds, "task_assigned");
+            } catch (_e) { /* best-effort */ }
           }
         }
       }
