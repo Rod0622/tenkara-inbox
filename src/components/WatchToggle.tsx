@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, X } from "lucide-react";
+import { Bell, BellOff, Eye, EyeOff, X } from "lucide-react";
 
 interface WatcherRow {
   conversation_id: string;
@@ -163,7 +163,7 @@ export default function WatchToggle({ conversationId, userId, onChange, variant 
             : "text-[#7D8590] hover:bg-[#12161B] hover:text-[#E6EDF3]"
         }`}
       >
-        {isWatching ? <Eye size={16} /> : <Eye size={16} className="opacity-60" />}
+        {isWatching ? <Bell size={16} /> : <BellOff size={16} className="opacity-60" />}
       </button>
 
       {/* Watching-management popover */}
