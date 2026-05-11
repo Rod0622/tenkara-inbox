@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { createServerClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -7,109 +10,47 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 
-// Kara is the in-app expert for Tenkara Inbox. Her PRIMARY job is helping
-// admins build automation rules in Settings -> Rules. This prompt enumerates
-// every trigger, condition, operator, and action so she never has to guess.
-// If you add a new trigger/condition/action to the engine, add it here too.
+// ── Load source files into memory ONCE at module init ───────────────────────
+// We bake the actual rule-engine source code + database schema directly into
+// Kara's context so she reasons from real logic rather than paraphrased
+// descriptions. Read at module load so it's held in Node memory across
+// requests; combined with Anthropic's prompt caching (see cache_control
+// below), each Kara request after the first costs ~10% of the full input.
+//
+// Loaded defensively: if a file is missing in some weird deploy state,
+// fall back to an empty string rather than crashing the route.
 
-const KARA_SYSTEM_PROMPT = `You are **Kara**, the in-app expert for Tenkara Inbox - a Missive-style shared team inbox built on Next.js, Vercel, and Supabase.
+function safeRead(relativePath: string): string {
+  try {
+    return readFileSync(join(process.cwd(), relativePath), "utf-8");
+  } catch (e) {
+    console.warn(`[api/ai/kara] could not read ${relativePath}:`, (e as any)?.message);
+    return "";
+  }
+}
+
+const RULE_ENGINE_SOURCE = safeRead("src/lib/rule-engine.ts");
+const SCHEMA_SQL_SOURCE = safeRead("supabase/schema.sql");
+
+// ── Build the base system prompt ────────────────────────────────────────────
+//
+// Structure (order matters for cache effectiveness — static-first, dynamic-last):
+//   1. Identity & instructions (rarely changes) — CACHED
+//   2. Rule engine source code (rarely changes) — CACHED
+//   3. Database schema (rarely changes) — CACHED
+//   4. Admin override (changes whenever an admin edits it) — NOT CACHED
+//
+// Anthropic prompt caching applies to a `cache_control: { type: "ephemeral" }`
+// marker placed at a specific point in the system blocks; everything BEFORE
+// (and at) the marker is cached. So the marker goes between (3) and (4).
+
+const KARA_BASE_INSTRUCTIONS = `You are **Kara**, the in-app expert for Tenkara Inbox - a Missive-style shared team inbox built on Next.js, Vercel, and Supabase.
 
 Your two jobs, in order of priority:
 
-1. **Primary: Rule Engine guide.** When an admin describes an automation they want, you give them step-by-step instructions to build it in Settings -> Rules. Reference the actual UI labels they will see. If their desired rule can't be built with current triggers/conditions/actions, say so explicitly and list what features would need to be added.
+1. **Primary: Rule Engine guide.** When an admin describes an automation they want, give them step-by-step instructions to build it in Settings -> Rules. Reference the actual UI labels they will see. The full source code of the rule engine is included below, so you can reason about exactly what is supported and what isn't.
 
 2. **Secondary: App expert.** Answer "how do I...", "where is...", "is it possible to..." questions about Tenkara Inbox. Be concise, point them to the right page/tab, and never invent features that don't exist.
-
-# RULE ENGINE - Complete reference
-
-The Rule Engine lives at **Settings -> Rules**. A rule has three parts: **Trigger** (when it runs), **Conditions** (filter the events), **Actions** (what it does).
-
-## TRIGGERS (4 top-level types + 7 user-action sub-events)
-
-- **Incoming** (\`incoming\`) - fires when a new inbound email arrives. Most common trigger. Fields available: subject, from_email, from_name, sender_domain, to/cc/bcc, body_text, has_attachments, email_account, headers.
-- **Outgoing** (\`outgoing\`) - fires when we send an email out. Same fields as Incoming.
-- **Unreplied** (\`unreplied\`) - fires hourly via cron when a conversation is awaiting a supplier reply for some duration. Same fields as Incoming.
-- **User Action** - parent for 7 event-based sub-triggers. Pick **User Action**, then a sub-trigger from "Triggers on":
-  - **Any user action** (\`user_action\`) - generic; rarely the right choice. Prefer a specific sub-event.
-  - **Label added** (\`label_added\`) - fires when a label is added. Field: \`added_label_name\`.
-  - **Label removed** (\`label_removed\`) - Field: \`removed_label_name\`.
-  - **New comment (note or task)** (\`new_comment\`) - fires when someone posts an internal note OR creates a task. Fields: \`comment_text\`, \`comment_type\` (\`"note"\` / \`"task"\` / \`"comment"\`), \`comment_mention\` (user ID or \`@everyone\`).
-  - **Assignee changed** (\`assignee_changed\`) - fires on any assignee change. Field: \`action_initiator\` (who made the change).
-  - **Team changed** (\`team_changed\`) - fires when a conversation moves between team folders.
-  - **Conversation closed** (\`conversation_closed\`).
-  - **Conversation reopened** (\`conversation_reopened\`).
-
-## CONDITION FIELDS
-
-### Message-based (Incoming / Outgoing / Unreplied):
-- \`subject\`, \`from_email\`, \`from_name\`, \`sender_domain\`
-- \`to_addresses\`, \`cc_addresses\`, \`bcc_addresses\`, \`to_cc_bcc\` (combined)
-- \`body_text\`, \`any_field\` (searches across most fields)
-- \`email_account\` (matches mailbox UUID)
-- \`has_attachments\` (use with is_true / is_false)
-- \`headers\` (raw email headers)
-
-### Event-only (User Action sub-triggers):
-- \`added_label_name\` - only for "Label added"
-- \`removed_label_name\` - only for "Label removed"
-- \`comment_text\` / \`comment_type\` / \`comment_mention\` - only for "New comment"
-- \`action_initiator\` - user UUID of whoever triggered the event
-
-## OPERATORS
-
-- \`contains\` / \`not_contains\` - substring (case-insensitive)
-- \`equals\` / \`is\` - exact match
-- \`not_equals\` / \`is_not\` - opposite
-- \`starts_with\` / \`ends_with\`
-- \`is_true\` / \`is_false\` - for boolean fields
-- \`is_present\` / \`is_absent\` - field has any value / is empty
-- \`greater_than\` / \`less_than\` - numeric
-
-## MATCH MODES & GROUPS
-
-Rule-level: \`all\` (every condition), \`any\` (at least one), \`none\` (none match).
-Conditions can be **grouped (nested)** with their own match_mode. Use for complex AND/OR combinations.
-
-## ACTIONS
-
-### Label
-- **Add label** (\`add_label\`) - value = label name or UUID
-- **Remove label** (\`remove_label\`)
-
-### Assignment
-- **Assign to** (\`assign_to\`) - value = team member UUID
-- **Assign sender** (\`assign_sender\`) - assigns to sender if they're in the team
-- **Unassign** (\`unassign\`)
-- **Unassign all** (\`unassign_all\`) - also clears task assignees
-
-### Flags
-- **Star** / **Unstar** (\`mark_starred\` / \`unstar\`)
-- **Mark as read** / **Mark as unread** (\`mark_read\` / \`mark_unread\`)
-
-### Status / folder
-- **Move to folder** (\`move_to_folder\`) - value = folder UUID
-- **Set status** (\`set_status\`) - "open" / "closed" / "snoozed" / "trash" / "spam"
-- **Archive** / **Close conversation** - both set status to "closed"
-- **Snooze** / **Discard snooze**
-- **Trash** / **Mark as spam**
-
-### Communication
-- **Send auto-reply** (\`send_auto_reply\`) - value = canned reply body
-- **Forward email** (\`forward_email\`) - value = recipient email
-- **Slack notify** (\`slack_notify\`) - posts to configured Slack channel
-
-### Watch / collab
-- **Add watcher** / **Remove watcher** (\`add_watcher\` / \`remove_watcher\`) - value = user UUID
-
-### Tasks / notes
-- **Add note** (\`add_note\`) - value = note text
-- **Add task** (\`add_task\`) - with task_description, task_assignee_mode (\`"all"\` / \`"assigned_users"\` / \`"specific"\` / \`"initiator"\`), task_assignee_ids, task_due_days, task_due_hours
-- **Create task from template** (\`create_task_template\`) - value = template UUID
-- **Set priority** (\`set_priority\`)
-- **Stop processing** (\`stop_processing\`) - halts the rule chain for this event
-
-### Integrations
-- **Webhook** (\`webhook\`) - value = URL; supports webhook_secret + webhook_run_once
 
 # HOW TO RESPOND
 
@@ -131,11 +72,11 @@ Conditions can be **grouped (nested)** with their own match_mode. Use for comple
 
 **Not currently possible.** Here's why and what we'd need:
 
-[Specific gap]
+[Specific gap based on the actual code below]
 
 **To enable this, we'd need to add:**
 - [Specific trigger/condition/action that would need to be built]
-- [Any new data plumbing]
+- [Any new data plumbing - reference exact column names from the schema below if relevant]
 
 **Closest workaround today (if any):** [best partial solution]
 
@@ -154,11 +95,52 @@ Helpful, direct, no fluff. Treat the admin as a technical peer. If their questio
 
 # DO NOT
 
-- No code or SQL - admins configure through a UI.
+- No code or SQL unless the admin explicitly asks - they configure through a UI.
 - Don't reference UUIDs unless the admin gave you one. Use names: "the label called 'Urgent'", not the UUID.
-- Don't invent triggers, conditions, or actions not on the lists above. Say so explicitly if asked.
+- Don't invent triggers, conditions, or actions not in the rule engine source below. Say so explicitly if asked.
 - Don't promise future features. State what's missing and stop.
 `;
+
+const KARA_RULE_ENGINE_BLOCK = `
+
+# RULE ENGINE SOURCE CODE
+
+This is the ACTUAL implementation of the rule engine that processes triggers, conditions, and actions. Use it as the source of truth when answering questions about what's possible.
+
+\`\`\`typescript
+${RULE_ENGINE_SOURCE}
+\`\`\`
+`;
+
+const KARA_SCHEMA_BLOCK = `
+
+# DATABASE SCHEMA
+
+This is the Supabase schema for Tenkara Inbox. Reference it when explaining where data comes from or what fields are available.
+
+\`\`\`sql
+${SCHEMA_SQL_SOURCE}
+\`\`\`
+`;
+
+// ── Load admin override from Supabase ──────────────────────────────────────
+// Read on every request so admin edits in Settings -> Kara take effect immediately
+// (rather than waiting for module reload).
+
+async function getOverridePrompt(): Promise<string> {
+  try {
+    const supabase = createServerClient();
+    const { data } = await supabase
+      .from("kara_settings")
+      .select("system_prompt_override")
+      .eq("singleton_key", "kara")
+      .maybeSingle();
+    return data?.system_prompt_override?.trim() || "";
+  } catch (e) {
+    console.warn("[api/ai/kara] could not load override:", (e as any)?.message);
+    return "";
+  }
+}
 
 export async function POST(req: NextRequest) {
   if (!anthropic) {
@@ -183,8 +165,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Sanitize: each message must have role: "user" | "assistant" and string content.
-  // We don't pass a system message in `messages` - it goes via the `system` parameter.
   const cleanedMessages = messages
     .filter((m: any) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
     .map((m: any) => ({ role: m.role, content: m.content }));
@@ -196,11 +176,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const overrideText = await getOverridePrompt();
+
+  // ── Build system blocks ─────────────────────────────────────────────────
+  // Anthropic API accepts system as either a string OR an array of TextBlockParam.
+  // We use the array form so we can mark the static portion as cache-eligible.
+
+  const systemBlocks: any[] = [
+    { type: "text", text: KARA_BASE_INSTRUCTIONS },
+    { type: "text", text: KARA_RULE_ENGINE_BLOCK },
+    {
+      type: "text",
+      text: KARA_SCHEMA_BLOCK,
+      cache_control: { type: "ephemeral" },  // <- everything up to here is cached
+    },
+  ];
+
+  // Append admin override AFTER the cache marker so admin edits don't
+  // invalidate the cached portion.
+  if (overrideText) {
+    systemBlocks.push({
+      type: "text",
+      text: `\n\n# ADMIN INSTRUCTIONS (org-specific)\n\nThe Tenkara Inbox admin has added the following instructions. These take precedence over the base instructions where they conflict.\n\n${overrideText}`,
+    });
+  }
+
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-7",
       max_tokens: 2000,
-      system: KARA_SYSTEM_PROMPT,
+      system: systemBlocks,
       messages: cleanedMessages,
     });
 
@@ -208,6 +213,17 @@ export async function POST(req: NextRequest) {
       .filter((b: any) => b.type === "text")
       .map((b: any) => b.text)
       .join("\n");
+
+    // Log cache metrics so we can see savings in Vercel logs
+    const usage: any = (response as any).usage || {};
+    if (usage.cache_creation_input_tokens || usage.cache_read_input_tokens) {
+      console.log("[api/ai/kara] cache stats:", {
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+      });
+    }
 
     return NextResponse.json({ text });
   } catch (err: any) {

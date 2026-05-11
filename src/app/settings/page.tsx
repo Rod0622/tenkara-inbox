@@ -9,7 +9,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -56,6 +56,7 @@ const TABS = [
   { id: "task_templates", label: "Task Templates", icon: ClipboardList },
   { id: "forms", label: "Forms", icon: ClipboardCheck },
   { id: "templates", label: "Email Templates", icon: FileSignature },
+  { id: "kara", label: "Kara (AI Assistant)", icon: Sparkles },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -120,6 +121,7 @@ export default function SettingsPage() {
         {activeTab === "task_templates" && <TaskTemplatesTab />}
         {activeTab === "forms" && <FormsTab />}
         {activeTab === "templates" && <EmailTemplatesTab />}
+        {activeTab === "kara" && <KaraTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -4413,6 +4415,191 @@ function EmailTemplatesTab() {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+// ── Kara Tab — admin-editable system prompt override ────────────────────────
+//
+// Kara's core knowledge (rule engine source, schema, base instructions) is
+// baked into /api/ai/kara/route.ts and cannot be edited here. This textarea
+// is for ORG-SPECIFIC additions: "we always assign procurement to Maria",
+// "treat any email mentioning 'urgent rush' as priority", etc.
+//
+// The override is appended after the cached base prompt, so edits take effect
+// on the next Kara message without invalidating Anthropic's prompt cache.
+function KaraTab() {
+  const [override, setOverride] = useState("");
+  const [original, setOriginal] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ai/kara/settings");
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data?.error || "Failed to load Kara settings");
+        } else {
+          setOverride(data.system_prompt_override || "");
+          setOriginal(data.system_prompt_override || "");
+          setUpdatedAt(data.updated_at || null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Network error");
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const dirty = override !== original;
+
+  const handleSave = async () => {
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      const res = await fetch("/api/ai/kara/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ system_prompt_override: override }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error || "Failed to save");
+      } else {
+        setOriginal(data.system_prompt_override || "");
+        setUpdatedAt(data.updated_at || null);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Network error");
+    }
+    setSaving(false);
+  };
+
+  const handleReset = () => {
+    setOverride(original);
+    setError("");
+  };
+
+  const fmtTimestamp = (iso: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto p-8">
+      <div className="mb-6">
+        <h1 className="text-3xl font-normal font-serif tracking-tight">Kara (AI Assistant)</h1>
+        <p className="text-sm text-[var(--text-secondary)] mt-1">
+          Customize what Kara knows about your team and processes
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16">
+          <Loader2 className="w-6 h-6 animate-spin text-[var(--accent)] mx-auto" />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* What's baked in (informational) */}
+          <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={14} className="text-[var(--accent)]" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">What Kara already knows</span>
+            </div>
+            <ul className="text-[12px] text-[var(--text-secondary)] space-y-1 leading-relaxed">
+              <li>• The complete Rule Engine source code (every trigger, condition field, operator, and action)</li>
+              <li>• The full database schema (conversations, messages, tasks, watchers, labels, folders, etc.)</li>
+              <li>• How to respond when a rule IS possible vs. NOT possible (with feature-gap reporting)</li>
+              <li>• Identity: she points users to <span className="text-[var(--text-primary)] font-semibold">Inky</span> for email drafts, not herself</li>
+            </ul>
+            <div className="mt-3 text-[10px] text-[var(--text-muted)] italic">
+              These are loaded server-side from the codebase and cached. You can&apos;t edit them here — but you can add to them below.
+            </div>
+          </div>
+
+          {/* Admin override textarea */}
+          <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">Additional instructions</div>
+                <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                  Org-specific knowledge, conventions, or behaviour. Appended after the base instructions.
+                </div>
+              </div>
+              {updatedAt && (
+                <div className="text-[10px] text-[var(--text-muted)] text-right">
+                  Last saved<br />{fmtTimestamp(updatedAt)}
+                </div>
+              )}
+            </div>
+
+            <textarea
+              value={override}
+              onChange={(e) => setOverride(e.target.value)}
+              placeholder={`Examples:
+
+• Always assign emails from suppliers in China to David before any auto-rules fire.
+• When a user asks about "RFQ" rules, remind them we use the "Quote Request" label rather than the literal word RFQ.
+• Our team timezone is EST. Always describe due dates in that context.
+• If asked about Microsoft Graph or Bobber Labs, explain we use the info@bobberlabs.com mailbox with Graph API.
+
+Leave this empty to use the base instructions only.`}
+              rows={14}
+              className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors placeholder:text-[var(--text-muted)] font-mono leading-relaxed resize-y"
+            />
+
+            <div className="flex items-center gap-2 mt-3">
+              <span className="text-[10px] text-[var(--text-muted)]">
+                {override.length} character{override.length === 1 ? "" : "s"}
+              </span>
+              <div className="flex-1" />
+              {dirty && (
+                <button
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)] hover:bg-[var(--border)] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={!dirty || saving}
+                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  !dirty || saving
+                    ? "bg-[var(--border)] text-[var(--text-muted)] cursor-not-allowed"
+                    : "bg-[var(--accent)] text-[var(--bg)] hover:bg-[var(--accent-strong)]"
+                }`}
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <Check size={12} /> : null}
+                {saving ? "Saving..." : saved ? "Saved!" : "Save"}
+              </button>
+            </div>
+
+            {error && (
+              <div className="mt-2 px-3 py-2 rounded-lg bg-[rgba(248,81,73,0.08)] border border-[rgba(248,81,73,0.15)] text-xs text-[var(--danger)]">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* Cost note */}
+          <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-muted)] leading-relaxed">
+            <div className="font-semibold text-[var(--text-secondary)] mb-1">A note on cost</div>
+            Kara runs on Claude Opus 4.7 (Anthropic&apos;s most capable model). The Rule Engine source and database schema are baked in as cached context, so the first message of a session costs about $0.15 and follow-up messages cost about $0.015 each (90% cheaper via prompt caching). Editing instructions here doesn&apos;t invalidate the cache.
+          </div>
+        </div>
       )}
     </div>
   );
