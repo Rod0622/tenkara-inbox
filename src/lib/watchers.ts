@@ -3,23 +3,24 @@ import { createServerClient } from "@/lib/supabase";
 /**
  * Auto-watch assignees on a conversation when they're assigned to a task within it.
  *
- * v2 (debugging): rewritten to mirror /api/conversations/watchers POST exactly,
- * one row at a time, no array upsert, no ignoreDuplicates. The previous version
- * silently no-op'd in production — most likely cause was the combination of
- * array upsert + ignoreDuplicates: true. This version is verbose and per-user.
- *
- * Idempotent — upsert on (conversation_id, user_id), same as the manual endpoint.
- * If the user is already watching, this OVERWRITES watch_source and notification
- * prefs back to defaults. That's a small downside vs the manual path (which keeps
- * existing prefs), but task-assignment is a strong signal that the user wants
- * the standard prefs anyway. If users complain, switch to a select-then-insert
+ * Idempotent — upserts on (conversation_id, user_id), mirroring the manual
+ * /api/conversations/watchers POST endpoint exactly. If the user is already
+ * watching, this OVERWRITES watch_source and notification prefs back to
+ * defaults. For the task-assignment trigger that's acceptable; if users start
+ * complaining their custom prefs get reset, switch to a select-then-insert
  * pattern that skips existing rows entirely.
  *
  * Caveats:
- *   - This is best-effort. Failures are logged but don't break task creation.
+ *   - Best-effort. Failures log to the server console but don't break task
+ *     creation, which is the user-facing operation.
  *   - Skips empty user IDs and de-dupes the list.
- *   - Each user gets its own upsert call — slower for tasks with many assignees,
- *     but matches the proven working pattern.
+ *   - Per-user loop, not a bulk upsert. An earlier array + ignoreDuplicates
+ *     version silently no-op'd in production, so this matches the proven
+ *     single-row pattern.
+ *
+ * Required: the `watch_source` value must be in the CHECK constraint on
+ * `inbox.conversation_watchers.watch_source`. Currently allowed:
+ *   'manual', 'rule', 'auto', 'task_assigned'.
  *
  * Called from:
  *   - POST /api/tasks                 (initial task creation with assignees)
@@ -32,26 +33,13 @@ export async function autoWatchTaskAssignees(
   userIds: string[],
   watchSource: string = "task_assigned"
 ): Promise<void> {
-  console.log("[autoWatchTaskAssignees] start", { conversationId, userIds, watchSource });
-
-  if (!conversationId) {
-    console.log("[autoWatchTaskAssignees] skip: no conversationId");
-    return;
-  }
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    console.log("[autoWatchTaskAssignees] skip: empty userIds");
-    return;
-  }
+  if (!conversationId) return;
+  if (!Array.isArray(userIds) || userIds.length === 0) return;
 
   const cleaned = Array.from(
-    new Set(
-      userIds.filter((id) => typeof id === "string" && id.trim())
-    )
+    new Set(userIds.filter((id) => typeof id === "string" && id.trim()))
   );
-  if (cleaned.length === 0) {
-    console.log("[autoWatchTaskAssignees] skip: cleaned list empty");
-    return;
-  }
+  if (cleaned.length === 0) return;
 
   const supabase = createServerClient();
 
@@ -66,9 +54,6 @@ export async function autoWatchTaskAssignees(
     notify_on_comment: false,
   };
 
-  // Upsert one row at a time, mirroring the proven-working /api/conversations/watchers POST.
-  // We deliberately do NOT use the bulk upsert + ignoreDuplicates pattern here;
-  // v1 of this helper used that and silently no-op'd in production.
   for (const userId of cleaned) {
     const row = {
       conversation_id: conversationId,
@@ -77,13 +62,15 @@ export async function autoWatchTaskAssignees(
       ...DEFAULT_PREFS,
     };
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("conversation_watchers")
       .upsert(row, { onConflict: "conversation_id,user_id" })
       .select()
       .single();
 
     if (error) {
+      // Best-effort: log and move on. We don't want a watcher-table issue to
+      // break task creation, which is the user-facing operation.
       console.error("[autoWatchTaskAssignees] upsert failed", {
         conversationId,
         userId,
@@ -92,14 +79,6 @@ export async function autoWatchTaskAssignees(
         hint: (error as any).hint,
         code: (error as any).code,
       });
-    } else {
-      console.log("[autoWatchTaskAssignees] upsert ok", {
-        conversationId,
-        userId,
-        watch_id: (data as any)?.id,
-      });
     }
   }
-
-  console.log("[autoWatchTaskAssignees] done", { conversationId, count: cleaned.length });
 }
