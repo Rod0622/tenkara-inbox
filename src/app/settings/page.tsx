@@ -1,4 +1,5 @@
 "use client";
+
 import KaraAssistant from "@/components/KaraAssistant";
 import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
@@ -123,6 +124,9 @@ export default function SettingsPage() {
 
       {/* Connect Email Modal */}
       {showConnectModal && <ConnectEmailModal onClose={() => setShowConnectModal(false)} />}
+
+      {/* Floating Kara — rules & app assistant. Visible on every settings tab. */}
+      <KaraAssistant />
     </div>
   );
 }
@@ -4410,7 +4414,6 @@ function EmailTemplatesTab() {
           )}
         </>
       )}
-    <KaraAssistant />
     </div>
   );
 }
