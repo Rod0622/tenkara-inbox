@@ -2910,8 +2910,21 @@ export default function ConversationDetail({
                           </>
                         )}
 
-                        {/* Reset SLA Timer */}
+                        {/* Reset SLA Timer — only available once the task is actually
+                            being worked on. While the task is still in "to do" the
+                            timer is the pressure to start; resetting it then would
+                            defeat its purpose. Once someone has marked themselves
+                            "in progress", a reset is fair game (supplier didn't
+                            answer, callback rescheduled, etc.).
+                            "In progress" is true if EITHER:
+                              • task.status === "in_progress" (single-assignee mode), OR
+                              • any assignee has personal_status === "in_progress" (multi-assignee mode). */}
                         {task.due_date && task.status !== "completed" && task.status !== "dismissed" && !task.is_done && (() => {
+                          const overallInProgress = task.status === "in_progress";
+                          const anyAssigneeInProgress = (task.assignees || []).some(
+                            (a: any) => a?.personal_status === "in_progress"
+                          );
+                          if (!overallInProgress && !anyAssigneeInProgress) return null;
                           const taskRef = task;
                           return (
                             <SlaResetPanel
