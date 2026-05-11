@@ -140,7 +140,8 @@ export default function Sidebar({
   mailboxes,
   conversations,
   currentUser,
-  taskCount = 0,
+  taskTodoCount = 0,
+  taskInProgressCount = 0,
   mySentCount: mySentCountProp,
   onMoveToFolder,
 }: SidebarProps) {
@@ -483,7 +484,7 @@ export default function Sidebar({
 
         {[
           { id: "inbox", label: "Inbox", icon: Inbox, count: myTotalCount, unread: myUnreadCount },
-          { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount, unread: 0 },
+          { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskTodoCount + taskInProgressCount, unread: 0 },
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
@@ -515,10 +516,20 @@ export default function Sidebar({
                     {item.unread > 99 ? "99+" : item.unread}
                   </span>
                 )}
-                {item.count > 0 && (
-                  <span className="text-[11px] text-[var(--text-muted)]">
-                    {item.count}
-                  </span>
+                {item.id === "tasks" ? (
+                  (taskTodoCount > 0 || taskInProgressCount > 0) && (
+                    <span className="text-[11px] text-[var(--text-muted)] tabular-nums">
+                      {taskTodoCount}
+                      <span className="mx-1 text-[var(--text-muted)]/60">|</span>
+                      {taskInProgressCount}
+                    </span>
+                  )
+                ) : (
+                  item.count > 0 && (
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {item.count}
+                    </span>
+                  )
                 )}
               </span>
             </button>

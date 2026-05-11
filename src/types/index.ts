@@ -194,7 +194,8 @@ export interface SidebarProps {
   mailboxes: Mailbox[];
   conversations: Conversation[];
   currentUser: TeamMember | null;
-  taskCount?: number;
+  taskTodoCount?: number;
+  taskInProgressCount?: number;
   mySentCount?: number;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
 }

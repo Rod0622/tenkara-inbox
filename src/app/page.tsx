@@ -488,7 +488,33 @@ export default function InboxPage() {
         mailboxes={emailAccounts}
         conversations={conversations}
         currentUser={currentUser}
-        taskCount={personalTasks.filter((task) => task.status !== "completed" && task.status !== "dismissed").length}
+        taskTodoCount={(() => {
+          // Mirror TaskBoard.getMyStatus: for multi-assignee tasks, use the
+          // current user's personal_status; for single-assignee, use task.status.
+          // Dismissed always counts as dismissed.
+          const myStatus = (task: any): string => {
+            if (task.status === "dismissed") return "dismissed";
+            const assignees = task.assignees || [];
+            if (assignees.length > 1 && currentUser) {
+              const me = assignees.find((a: any) => a.id === currentUser.id);
+              if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
+            }
+            return task.status;
+          };
+          return personalTasks.filter((t) => myStatus(t) === "todo").length;
+        })()}
+        taskInProgressCount={(() => {
+          const myStatus = (task: any): string => {
+            if (task.status === "dismissed") return "dismissed";
+            const assignees = task.assignees || [];
+            if (assignees.length > 1 && currentUser) {
+              const me = assignees.find((a: any) => a.id === currentUser.id);
+              if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
+            }
+            return task.status;
+          };
+          return personalTasks.filter((t) => myStatus(t) === "in_progress").length;
+        })()}
         mySentCount={mySentConvoIds.size}
         onMoveToFolder={handleMoveToFolder}
       />
