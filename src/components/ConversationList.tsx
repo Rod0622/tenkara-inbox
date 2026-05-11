@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -621,6 +621,18 @@ export default function ConversationList({
 
   const isSelecting = selectedIds.size > 0;
 
+  // Detect whether the current folder view is the system Trash folder.
+  // When true, the bulk action bar swaps the "Delete" button (which moves to
+  // trash — pointless when already there) for a "Restore" button.
+  const isTrashFolder = (() => {
+    if (!activeFolder) return false;
+    const selectedFolder = folders.find((f: any) => f.id === activeFolder);
+    return !!(
+      selectedFolder?.is_system &&
+      String(selectedFolder.name || "").toLowerCase() === "trash"
+    );
+  })();
+
   return (
     <div className="w-[360px] min-w-[360px] h-full bg-[var(--surface)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       {/* Search + Filter toggle */}
@@ -714,13 +726,23 @@ export default function ConversationList({
             >
               <Archive size={13} />
             </button>
-            <button
-              onClick={() => handleBulkAction("delete")}
-              className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition-all"
-              title="Delete selected"
-            >
-              <Trash2 size={13} />
-            </button>
+            {isTrashFolder ? (
+              <button
+                onClick={() => handleBulkAction("restore")}
+                className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-all"
+                title="Restore selected from trash"
+              >
+                <RotateCcw size={13} />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleBulkAction("delete")}
+                className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition-all"
+                title="Delete selected"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
 
             <div className="flex-1" />
 

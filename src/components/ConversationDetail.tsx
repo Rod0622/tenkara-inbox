@@ -1176,6 +1176,41 @@ export default function ConversationDetail({
     }
   };
 
+  // Restore a trashed conversation back to "open" — reuses the trash spinner
+  // since the user can't do both at once and we want the trash button
+  // disabled while the restore is in flight.
+  const handleRestoreFromTrash = async () => {
+    if (!convo) return;
+    if (trashingConversation) return;
+
+    try {
+      setTrashingConversation(true);
+
+      const res = await fetch("/api/conversations/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          status: "open",
+          actor_id: currentUser?.id || null,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Failed to restore from trash");
+      }
+
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Restore from trash failed:", error);
+      alert("Restore from trash failed: " + (error?.message || "Unknown error"));
+    } finally {
+      setTrashingConversation(false);
+    }
+  };
+
   // Batch 6: Mark conversation as spam
   const handleMarkAsSpam = async () => {
     if (!convo) return;
@@ -1892,12 +1927,23 @@ export default function ConversationDetail({
             )}
 
             <button
-              onClick={handleTrashConversation}
-              title="Trash"
+              onClick={convo.status === "trash" ? handleRestoreFromTrash : handleTrashConversation}
+              title={convo.status === "trash" ? "Restore from trash" : "Trash"}
               disabled={trashingConversation}
-              className="w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] flex items-center justify-center hover:bg-[var(--surface-2)] disabled:opacity-50"
+              className={
+                convo.status === "trash"
+                  ? "px-2 h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[10px] font-bold text-[var(--accent)] flex items-center gap-1 hover:bg-[var(--surface-2)] disabled:opacity-50"
+                  : "w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] flex items-center justify-center hover:bg-[var(--surface-2)] disabled:opacity-50"
+              }
             >
-              <Trash2 size={16} />
+              {convo.status === "trash" ? (
+                <>
+                  <RotateCcw size={12} />
+                  Restore
+                </>
+              ) : (
+                <Trash2 size={16} />
+              )}
             </button>
           </div>
         </div>
