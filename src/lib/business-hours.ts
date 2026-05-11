@@ -51,11 +51,7 @@ export function calcBusinessHours(
 
   while (current < end) {
     try {
-      const locStr = current.toLocaleString("en-US", { timeZone: tz });
-      const loc = new Date(locStr);
-      const hour = loc.getHours();
-      const day = loc.getDay();
-
+      const { hour, day } = getZonedHourAndDay(current, tz);
       if (workDays.includes(day) && hour >= startHour && hour < endHour) {
         hours++;
       }
@@ -96,10 +92,88 @@ export function getBusinessHoursElapsed(
   return calcBusinessHours(due, now, supplier);
 }
 
+// Constant: the timezone we DISPLAY all stored due dates in.
+// Per team decision: storage and display always in EST, regardless of the
+// supplier's own business-hours timezone. Supplier tz is used only for
+// computing which hours count as business hours.
+const DISPLAY_TIMEZONE = "America/New_York";
+
+/**
+ * Read the hour-of-day and day-of-week of a Date in a specific timezone.
+ *
+ * Uses Intl.DateTimeFormat.formatToParts to avoid the classic round-trip bug
+ * with `new Date(date.toLocaleString(...))`, which double-converts and
+ * silently corrupts the moment by the offset between the formatted tz and
+ * the JS runtime's local tz.
+ */
+function getZonedHourAndDay(date: Date, tz: string): { hour: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    weekday: "short",
+    hour: "2-digit",
+  }).formatToParts(date);
+
+  let hour = 0;
+  let weekdayShort = "";
+  for (const p of parts) {
+    if (p.type === "hour") hour = parseInt(p.value, 10);
+    if (p.type === "weekday") weekdayShort = p.value;
+  }
+  // 24-hour formatting may emit "24" at midnight in some locales — normalize.
+  if (hour === 24) hour = 0;
+
+  const dayMap: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const day = dayMap[weekdayShort] ?? 0;
+
+  return { hour, day };
+}
+
+/**
+ * Format a Date as "YYYY-MM-DD" and "HH:MM" strings representing the
+ * wall-clock time in the given timezone. Uses Intl.DateTimeFormat parts to
+ * avoid timezone bugs.
+ */
+function formatZonedDateTime(date: Date, tz: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(date);
+
+  let y = "", m = "", d = "", hh = "", mm = "";
+  for (const p of parts) {
+    if (p.type === "year") y = p.value;
+    else if (p.type === "month") m = p.value;
+    else if (p.type === "day") d = p.value;
+    else if (p.type === "hour") hh = p.value;
+    else if (p.type === "minute") mm = p.value;
+  }
+  // Normalize "24:00" → "00:00" (shouldn't happen with en-CA but be safe)
+  if (hh === "24") hh = "00";
+
+  return {
+    date: `${y}-${m}-${d}`,
+    time: `${hh}:${mm}`,
+  };
+}
+
 /**
  * Given a start time and a number of business hours, compute the target date/time
  * by advancing only during business hours.
- * Returns { dueDate: "YYYY-MM-DD", dueTime: "HH:MM" }
+ *
+ * IMPORTANT: business-hours math uses the SUPPLIER's timezone (so a Manila
+ * supplier's "9am-5pm" is their wall-clock 9-5), but the returned strings are
+ * ALWAYS formatted as EST wall-clock per team decision. This means a Manila
+ * supplier's deadline displays as EST time in the UI.
+ *
+ * Returns { dueDate: "YYYY-MM-DD", dueTime: "HH:MM" } in DISPLAY_TIMEZONE (EST).
  */
 export function addBusinessHours(
   startFrom: Date,
@@ -110,27 +184,26 @@ export function addBusinessHours(
 
   let hoursToAdd = businessHours;
   const target = new Date(startFrom);
+  let iterations = 0;
 
   while (hoursToAdd > 0) {
     target.setTime(target.getTime() + 60 * 60 * 1000);
     try {
-      const locStr = target.toLocaleString("en-US", { timeZone: tz });
-      const loc = new Date(locStr);
-      const hour = loc.getHours();
-      const day = loc.getDay();
-
+      const { hour, day } = getZonedHourAndDay(target, tz);
       if (workDays.includes(day) && hour >= startHour && hour < endHour) {
         hoursToAdd--;
       }
     } catch (_e) {
-      hoursToAdd--; // Fallback
+      hoursToAdd--; // Fallback if Intl fails for some reason
     }
-    if (hoursToAdd > 1000) break; // Safety
+    iterations++;
+    if (iterations > 1000) break; // Safety: ~6 weeks of advancing
   }
 
+  const formatted = formatZonedDateTime(target, DISPLAY_TIMEZONE);
   return {
-    dueDate: target.toISOString().slice(0, 10),
-    dueTime: target.toTimeString().slice(0, 5),
+    dueDate: formatted.date,
+    dueTime: formatted.time,
   };
 }
 
