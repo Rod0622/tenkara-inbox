@@ -1,5 +1,5 @@
 "use client";
-
+import KaraAssistant from "@/components/KaraAssistant";
 import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
@@ -4410,6 +4410,7 @@ function EmailTemplatesTab() {
           )}
         </>
       )}
+    <KaraAssistant />
     </div>
   );
 }
