@@ -158,11 +158,11 @@ export default function ConversationDetail({
       if (marks.length === 0) return;
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
       // Reset all
-      marks.forEach((m) => (m as HTMLElement).style.background = "rgba(245,213,71,0.4)");
+      marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
       // Highlight and scroll to current
       const target = marks[idx] as HTMLElement;
       if (target) {
-        target.style.background = "rgba(245,213,71,0.8)";
+        target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
         // Find the closest scrollable parent and scroll
         const targetTop = target.offsetTop;
         let parent = target.offsetParent as HTMLElement | null;
@@ -411,10 +411,10 @@ export default function ConversationDetail({
       const marks = container.querySelectorAll("mark[data-match-idx]");
       if (marks.length === 0) return;
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
-      marks.forEach((m) => (m as HTMLElement).style.background = "rgba(245,213,71,0.4)");
+      marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
       const target = marks[idx] as HTMLElement;
       if (target) {
-        target.style.background = "rgba(245,213,71,0.8)";
+        target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
         let accumulatedTop = target.offsetTop;
         let parent = target.offsetParent as HTMLElement | null;
         while (parent && parent !== container) {
