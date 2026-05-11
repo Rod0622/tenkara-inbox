@@ -2899,7 +2899,7 @@ export default function ConversationDetail({
 
                         {task.due_date && (
                           <>
-                            <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[rgba(245,213,71,0.12)] text-[var(--highlight)]">
+                            <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-[var(--highlight-bg)] text-[var(--highlight)]">
                               Start by: {task.due_date}{task.due_time ? ` ${task.due_time.slice(0, 5)}` : ""}
                             </span>
                             <TaskCountdown
@@ -3179,7 +3179,7 @@ export default function ConversationDetail({
                             {thread.subject || "(No subject)"}
                           </div>
                           {sameSubject && (
-                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[rgba(245,213,71,0.12)] text-[var(--highlight)]">
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--highlight-bg)] text-[var(--highlight)]">
                               Possible duplicate
                             </span>
                           )}
@@ -3329,7 +3329,7 @@ export default function ConversationDetail({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,213,71,0.12)] text-[var(--highlight)]">
+                    <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-[var(--highlight-bg)] text-[var(--highlight)]">
                       {threadSummary.summary.intent
                         ? threadSummary.summary.intent.replace(/_/g, " ")
                         : "general inquiry"}
@@ -3515,7 +3515,7 @@ export default function ConversationDetail({
                             )}
 
                             {item.state === "still_open" && (
-                              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[rgba(245,213,71,0.12)] text-[var(--highlight)] shrink-0">
+                              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[var(--highlight-bg)] text-[var(--highlight)] shrink-0">
                                 Still open in tasks
                               </span>
                             )}

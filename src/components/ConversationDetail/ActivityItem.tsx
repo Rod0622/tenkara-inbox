@@ -235,7 +235,7 @@ export default function ActivityItem({
     <div className="flex items-start gap-3 py-2.5 border-b border-[var(--surface-2)] last:border-b-0">
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: `${config.color}20`, color: config.color }}
+        style={{ background: `color-mix(in srgb, ${config.color} 14%, transparent)`, color: config.color }}
       >
         <Icon size={14} />
       </div>

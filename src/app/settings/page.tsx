@@ -1256,7 +1256,7 @@ function TeamTab() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{m.name}</span>
                   {!m.password_hash && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(245,213,71,0.12)] text-[var(--highlight)] uppercase tracking-wider">
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--highlight-bg)] text-[var(--highlight)] uppercase tracking-wider">
                       Pending
                     </span>
                   )}
@@ -3624,7 +3624,7 @@ function TaskTemplatesTab() {
                           </span>
                         )}
                         {tpl.deadline_hours && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[rgba(245,213,71,0.12)] text-[var(--highlight)]">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--highlight-bg)] text-[var(--highlight)]">
                             Start within {tpl.deadline_hours}h
                           </span>
                         )}

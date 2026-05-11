@@ -54,6 +54,7 @@
   --warning: #F0883E;
   --danger: #F85149;
   --highlight: #F5D547;
+  --highlight-bg: rgba(245,213,71,0.12);
 }
 
 /* --- Light palette (Option B "Atelier" — warm cream + ink + gold) --- */
@@ -87,7 +88,8 @@
   --info: #2563eb;
   --warning: #b45309;
   --danger: #b91c1c;
-  --highlight: #fff7d6;
+  --highlight: #8a6d1a;
+  --highlight-bg: rgba(138,109,26,0.10);
 }
 
 /* Base reset */

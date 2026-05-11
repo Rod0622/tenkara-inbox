@@ -258,7 +258,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-3 flex items-center gap-2"><MessageSquare size={16} className="text-[var(--info)]" /><span className="text-sm font-semibold">Summary</span></div>
               <div className="text-sm leading-6 text-[#C9D1D9]">{summary.rollup || "No summary."}</div>
-              {summary.risk_signals?.length > 0 && <div className="mt-4"><div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--highlight)]"><ShieldAlert size={16} /> Risk Signals</div><div className="flex flex-wrap gap-2">{summary.risk_signals.map((r: string) => <span key={r} className="inline-flex items-center rounded-full border border-[rgba(245,213,71,0.24)] bg-[rgba(245,213,71,0.1)] px-3 py-1 text-xs font-semibold text-[var(--highlight)]">{r}</span>)}</div></div>}
+              {summary.risk_signals?.length > 0 && <div className="mt-4"><div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--highlight)]"><ShieldAlert size={16} /> Risk Signals</div><div className="flex flex-wrap gap-2">{summary.risk_signals.map((r: string) => <span key={r} className="inline-flex items-center rounded-full border border-[var(--highlight)]/20 bg-[var(--highlight-bg)] px-3 py-1 text-xs font-semibold text-[var(--highlight)]">{r}</span>)}</div></div>}
             </section>
 
             {/* This Account Threads */}
