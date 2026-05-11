@@ -116,8 +116,13 @@ export default function InboxPage() {
       });
   }, [currentUser?.id]);
 
-  // Track which conversations the current user is watching (for the "Watching" view filter)
+  // Track which conversations the current user is watching (for the "Watching" view filter).
+  // We track BOTH the set of IDs (for fast membership checks) AND a fallback map of
+  // full conversation data for watched threads that aren't already in the local
+  // `conversations` array. The local array only loads the top 300 recent + assigned;
+  // an older watched thread would otherwise count in the sidebar but never render.
   const [watchingConvoIds, setWatchingConvoIds] = useState<Set<string>>(new Set());
+  const [watchingExtraConvos, setWatchingExtraConvos] = useState<Conversation[]>([]);
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchWatching = async () => {
@@ -127,12 +132,58 @@ export default function InboxPage() {
         const data = await res.json();
         const ids = new Set<string>((data.watching || []).map((w: any) => w.conversation_id));
         setWatchingConvoIds(ids);
+
+        // Lazy-hydrate any watched conversations that aren't in the locally loaded
+        // `conversations` array. Without this, an older watched thread shows in the
+        // sidebar count but never appears in the Watching list (the cause of the
+        // "count says 3, list shows 2" bug).
+        if (ids.size === 0) {
+          setWatchingExtraConvos([]);
+          return;
+        }
+        const localIds = new Set(conversations.map((c) => c.id));
+        const missing = Array.from(ids).filter((id) => !localIds.has(id));
+        if (missing.length === 0) {
+          setWatchingExtraConvos([]);
+          return;
+        }
+        try {
+          const sb = createBrowserClient();
+          const { data: extra } = await sb
+            .from("conversations")
+            .select(`
+              id,
+              email_account_id,
+              folder_id,
+              thread_id,
+              subject,
+              from_name,
+              from_email,
+              preview,
+              is_unread,
+              is_starred,
+              assignee_id,
+              status,
+              has_attachments,
+              last_message_at,
+              created_at,
+              updated_at,
+              supplier_contact_id,
+              assignee:team_members!conversations_assignee_id_fkey(*),
+              labels:conversation_labels(label_id, label:labels(*))
+            `)
+            .in("id", missing)
+            .neq("status", "merged");
+          setWatchingExtraConvos((extra || []) as unknown as Conversation[]);
+        } catch (_e) {
+          setWatchingExtraConvos([]);
+        }
       } catch (_e) {}
     };
     fetchWatching();
     const id = setInterval(fetchWatching, 30000);
     return () => clearInterval(id);
-  }, [currentUser?.id]);
+  }, [currentUser?.id, conversations]);
 
   const accountEmails = useMemo(
     () => new Set(emailAccounts.map((a) => a.email?.toLowerCase()).filter(Boolean)),
@@ -215,8 +266,13 @@ export default function InboxPage() {
         // Personal sent: show conversations where I actually sent a message
         filtered = conversations.filter((c) => mySentConvoIds.has(c.id));
       } else if (activeView === "watching") {
-        // Watching: show conversations the current user is watching
-        filtered = conversations.filter((c) => watchingConvoIds.has(c.id));
+        // Watching: show conversations the current user is watching.
+        // Union: local convos that are watched + any watched convos hydrated
+        // separately (older threads not in the recent-300 fetch).
+        const fromLocal = conversations.filter((c) => watchingConvoIds.has(c.id));
+        const localIds = new Set(fromLocal.map((c) => c.id));
+        const extras = watchingExtraConvos.filter((c) => !localIds.has(c.id));
+        filtered = [...fromLocal, ...extras];
       } else if (activeView === "inbox") {
         // Personal inbox: show ALL conversations assigned to me
         filtered = conversations.filter(
@@ -268,6 +324,7 @@ export default function InboxPage() {
     accountEmails,
     mySentConvoIds,
     watchingConvoIds,
+    watchingExtraConvos,
   ]);
 
   // Handle hash-based navigation (notifications, task links, direct URLs)
