@@ -350,37 +350,104 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [backfillingId, setBackfillingId] = useState<string | null>(null);
   const [backfillResult, setBackfillResult] = useState<Record<string, string>>({});
 
-  // Triggers the attachment-backfill endpoint for one account. Walks every
-  // message in the account that's flagged has_attachments=true, fetches the
-  // attachment bytes from the upstream provider, and stores them in our
-  // Supabase Storage bucket.
+  // Triggers the attachment-backfill endpoint for one account, in a loop,
+  // until the server signals `done: true`. This handles the case where the
+  // account has more attachments than fit in a single 240s request window
+  // (Vercel functions have a 300s hard ceiling).
   //
-  // This is the one-time catch-up for messages that were synced BEFORE the
-  // attachment-storage feature shipped. New mail flows through the regular
-  // sync path and already gets its attachments stored.
+  // Behaviour:
+  //   • One click → the loop runs until the account is fully backfilled.
+  //   • Stats accumulate across chunks and update the inline label live.
+  //   • A non-JSON response (e.g. a Vercel timeout HTML page) is treated as
+  //     a transient error: we surface "Timed out — click again to resume"
+  //     rather than crashing on JSON.parse like the previous build did.
+  //   • Idempotent: every chunk re-queries which messages already have rows
+  //     in inbox.attachments and skips them, so even if a chunk dies
+  //     mid-message the resume is naturally safe.
   const runAttachmentBackfill = async (accountId: string, accountName: string) => {
     if (backfillingId) return;
-    if (!confirm(`Backfill attachments for "${accountName}"?\n\nThis will scan recent messages with attachments and download any that weren't captured during sync. Safe to re-run.`)) return;
+    if (!confirm(`Backfill attachments for "${accountName}"?\n\nThis will scan recent messages with attachments and download any that weren't captured during sync. Large accounts may take several minutes — the UI will keep working in the background. Safe to re-run.`)) return;
     setBackfillingId(accountId);
-    setBackfillResult((r) => ({ ...r, [accountId]: "" }));
+    setBackfillResult((r) => ({ ...r, [accountId]: "Starting…" }));
+
+    // Running totals across chunks
+    let totalUploaded = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    let chunkIndex = 0;
+    // Safety cap so a server bug can't trap the user in an infinite loop.
+    const MAX_CHUNKS = 40;
+
     try {
-      const res = await fetch("/api/attachments/backfill", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: accountId, limit: 500 }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${data.error || "failed"}` }));
-      } else {
+      while (chunkIndex < MAX_CHUNKS) {
+        chunkIndex++;
+        let res: Response;
+        try {
+          res = await fetch("/api/attachments/backfill", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_id: accountId, limit: 500 }),
+          });
+        } catch (netErr: any) {
+          setBackfillResult((r) => ({ ...r, [accountId]: `Network error: ${netErr?.message || "unknown"} — click again to resume` }));
+          break;
+        }
+
+        // The Vercel timeout page is HTML; parsing it as JSON would crash. We
+        // peek at the response and only parse JSON when the Content-Type is right.
+        const ctype = res.headers.get("content-type") || "";
+        if (!ctype.includes("application/json")) {
+          // Best-effort surface of what happened. Common case: Vercel timeout.
+          setBackfillResult((r) => ({
+            ...r,
+            [accountId]: `Timed out (so far: ${totalUploaded} new · ${totalSkipped} dedup · ${totalErrors} errors) — click again to resume`,
+          }));
+          break;
+        }
+
+        let data: any;
+        try {
+          data = await res.json();
+        } catch (parseErr: any) {
+          setBackfillResult((r) => ({ ...r, [accountId]: `Invalid response — click again to resume` }));
+          break;
+        }
+
+        if (!res.ok || !data.ok) {
+          setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${data?.error || res.statusText}` }));
+          break;
+        }
+
         const s = data.stats || {};
-        const summary = `${s.attachmentsUploaded || 0} new · ${s.attachmentsSkipped || 0} dedup · ${s.errors?.length || 0} errors`;
-        setBackfillResult((r) => ({ ...r, [accountId]: summary }));
+        totalUploaded += s.attachmentsUploaded || 0;
+        totalSkipped += s.attachmentsSkipped || 0;
+        totalErrors += (s.errors?.length || 0);
+
+        const live = `${totalUploaded} new · ${totalSkipped} dedup · ${totalErrors} errors`;
+        if (data.done) {
+          setBackfillResult((r) => ({ ...r, [accountId]: live }));
+          break;
+        }
+
+        // Not done: update the inline label with a progress hint and keep going.
+        setBackfillResult((r) => ({
+          ...r,
+          [accountId]: `${live} · chunk ${chunkIndex} done, continuing…`,
+        }));
+        // Tiny breather between chunks so the UI repaints and we don't
+        // hammer the function ceiling immediately.
+        await new Promise((r) => setTimeout(r, 250));
       }
-    } catch (e: any) {
-      setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${e?.message || "network"}` }));
+
+      if (chunkIndex >= MAX_CHUNKS) {
+        setBackfillResult((r) => ({
+          ...r,
+          [accountId]: `Stopped after ${chunkIndex} chunks (${totalUploaded} new · ${totalSkipped} dedup · ${totalErrors} errors). Click again to keep going.`,
+        }));
+      }
+    } finally {
+      setBackfillingId(null);
     }
-    setBackfillingId(null);
   };
 
   const fetchAccounts = () => {
