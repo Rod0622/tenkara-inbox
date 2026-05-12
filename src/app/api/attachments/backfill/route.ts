@@ -100,18 +100,56 @@ export async function POST(req: NextRequest) {
   };
 
   // 1. Pick candidate messages. Filter to has_attachments=true (the only
-  //    ones worth examining), oldest-first this time. Oldest-first gives
-  //    consistent progress when chunking — each call eats from the same end
-  //    and the unbacked-up tail shrinks predictably.
+  //    ones worth examining). We scope to the requested account at the
+  //    DATABASE level — previously the account filter was applied client-side
+  //    after pulling 500 messages across ALL accounts, which silently
+  //    starved smaller/older accounts when a noisy account dominated the
+  //    top-500 window.
+  //
+  //    Strategy: resolve the account's conversation_ids first (one cheap
+  //    indexed query), then filter messages by that set. This keeps the
+  //    work proportional to the requested scope.
+  let conversationIdScope: string[] | null = null;
+  if (accountIdParam) {
+    const { data: convRows, error: convErr } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("email_account_id", accountIdParam);
+    if (convErr) {
+      return NextResponse.json<BackfillResponse>({
+        ok: false,
+        stats,
+        done: true,
+        remaining: 0,
+        error: `Failed to scope conversations: ${convErr.message}`,
+      }, { status: 500 });
+    }
+    conversationIdScope = (convRows || []).map((r: any) => r.id);
+    if (conversationIdScope.length === 0) {
+      // Account has no conversations at all — nothing to do.
+      return NextResponse.json<BackfillResponse>({
+        ok: true,
+        stats,
+        done: true,
+        remaining: 0,
+      });
+    }
+  }
+
+  // Oldest-first so chunked progress moves through the backlog predictably:
+  // each call eats from the same end of the queue and the unbacked-up tail
+  // shrinks monotonically.
   let query = supabase
     .from("messages")
     .select("id, provider_message_id, conversation_id, conversations:conversation_id(email_account_id)")
     .eq("has_attachments", true)
-    .order("sent_at", { ascending: false })
+    .order("sent_at", { ascending: true })
     .limit(requestedLimit);
 
   if (conversationId) {
     query = query.eq("conversation_id", conversationId);
+  } else if (conversationIdScope) {
+    query = query.in("conversation_id", conversationIdScope);
   }
 
   const { data: candidateMessages, error: msgErr } = await query;
@@ -134,10 +172,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 2. Account scope filter
-  const filtered = accountIdParam
-    ? candidateMessages.filter((m: any) => m.conversations?.email_account_id === accountIdParam)
-    : candidateMessages;
+  // 2. The previous client-side account filter is no longer needed — the
+  //    query is already scoped. We keep `filtered` as a passthrough for the
+  //    downstream code below.
+  const filtered = candidateMessages;
 
   stats.scanned = filtered.length;
 
@@ -379,6 +417,15 @@ export async function POST(req: NextRequest) {
 
     const providerMsgId: string = msg.provider_message_id || "";
 
+    // Track whether the provider walk produced ANY attachment rows for this
+    // message. If we successfully scanned the message and found zero rows,
+    // the `has_attachments=true` flag was a false positive from sync (most
+    // commonly: a signature image that the provider doesn't expose as an
+    // attachment-eligible part). We flip the flag off so the UI's
+    // "not yet captured" banner stops showing for signature-only threads.
+    let scannedSuccessfully = false;
+    const attachmentsBefore = stats.attachmentsUploaded + stats.attachmentsSkipped;
+
     // ── Gmail OAuth ──
     if (account.provider === "google_oauth" && providerMsgId.startsWith("gmail:")) {
       const token = await getGmailToken(accountId);
@@ -389,14 +436,13 @@ export async function POST(req: NextRequest) {
       const gmailMsgId = providerMsgId.replace(/^gmail:/, "");
       try {
         await backfillGmail(msg.id, accountId, gmailMsgId, token);
+        scannedSuccessfully = true;
       } catch (e: any) {
         stats.errors.push({ message_id: msg.id, reason: `Gmail exception: ${e?.message || "unknown"}` });
       }
-      continue;
     }
-
     // ── Microsoft Graph ──
-    if (MICROSOFT_PROVIDERS.includes(account.provider)) {
+    else if (MICROSOFT_PROVIDERS.includes(account.provider)) {
       if (graphAppToken === undefined) {
         graphAppToken = await getGraphAppToken();
       }
@@ -406,17 +452,32 @@ export async function POST(req: NextRequest) {
       }
       try {
         await backfillMicrosoft(msg.id, accountId, account.email, providerMsgId, graphAppToken);
+        scannedSuccessfully = true;
       } catch (e: any) {
         stats.errors.push({ message_id: msg.id, reason: `Graph exception: ${e?.message || "unknown"}` });
       }
-      continue;
+    }
+    // ── Unsupported provider (e.g. raw IMAP) ──
+    else {
+      stats.errors.push({
+        message_id: msg.id,
+        reason: `Backfill not yet implemented for provider="${account.provider}"`,
+      });
+      continue; // Don't touch the flag for providers we haven't built yet.
     }
 
-    // ── Unsupported provider (e.g. raw IMAP) ──
-    stats.errors.push({
-      message_id: msg.id,
-      reason: `Backfill not yet implemented for provider="${account.provider}"`,
-    });
+    // False-positive cleanup. If the scan ran cleanly but produced no new
+    // attachment uploads or skips, the message has no real attachments to
+    // surface. Flip has_attachments=false so the UI stops nagging.
+    if (scannedSuccessfully) {
+      const attachmentsAfter = stats.attachmentsUploaded + stats.attachmentsSkipped;
+      if (attachmentsAfter === attachmentsBefore) {
+        await supabase
+          .from("messages")
+          .update({ has_attachments: false })
+          .eq("id", msg.id);
+      }
+    }
   }
 
   // 6. Tell the caller whether they should call again.
