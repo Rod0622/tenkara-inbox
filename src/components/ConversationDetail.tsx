@@ -103,6 +103,123 @@ function plainPreview(input: any, maxLen = 80): string {
   return s;
 }
 
+// Extract email addresses from a comma-separated header string.
+// Handles both raw addresses ("alice@x.com, bob@y.com") and the
+// "Name <email>" format ("Alice <alice@x.com>, Bob <bob@y.com>").
+// Returns lowercase, deduplicated, trimmed strings. Empty input -> [].
+function extractEmails(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const parts = String(raw).split(",");
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const angled = part.match(/<([^>]+)>/);
+    const candidate = (angled ? angled[1] : part).trim().toLowerCase();
+    if (!candidate) continue;
+    // Sanity check: must contain "@"
+    if (!candidate.includes("@")) continue;
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
+
+// Compute Reply All recipients from the message thread.
+//   primaryTo:    address that goes in the To: field (always one address)
+//   ccList:       additional addresses for the Cc: field (everyone else, dedup'd, sans ourselves)
+//   hasMultiple:  true when there's at least one Cc candidate — UI uses this to
+//                 decide whether to show the Reply All toggle/button at all.
+//
+// Semantics:
+//   • If the latest message was sent BY us (outbound), preserve its To/Cc.
+//   • If the latest message was received, To = its sender, Cc = all of its
+//     remaining To + Cc participants, minus ourselves.
+//   • The account's own email is always stripped — we never email ourselves.
+function computeReplyAllRecipients(
+  messages: any[],
+  accountEmail: string,
+  convoFromEmail: string | null | undefined,
+): { primaryTo: string; ccList: string[]; hasMultiple: boolean } {
+  const ownEmail = (accountEmail || "").toLowerCase();
+  // Find the message we'd be replying to: latest inbound, else latest message.
+  const latestInbound = [...messages].reverse().find((m: any) => !m.is_outbound);
+  const target = latestInbound || messages[messages.length - 1] || null;
+
+  if (!target) {
+    // No messages — fall back to convo.from_email if we have it.
+    const fallback = (convoFromEmail || "").trim().toLowerCase();
+    return {
+      primaryTo: fallback,
+      ccList: [],
+      hasMultiple: false,
+    };
+  }
+
+  const isOutbound = !!target.is_outbound;
+  const targetFrom = (target.from_email || "").trim().toLowerCase();
+  const toEmails = extractEmails(target.to_addresses);
+  const ccEmails = extractEmails(target.cc_addresses);
+
+  let primaryTo = "";
+  let candidates: string[] = [];
+
+  if (isOutbound) {
+    // We sent this one. Reply All = same To + same Cc (we're already the sender).
+    primaryTo = toEmails[0] || "";
+    candidates = [...toEmails.slice(1), ...ccEmails];
+  } else {
+    // We received this one. Reply All = sender, plus everyone else who got it.
+    primaryTo = targetFrom;
+    candidates = [...toEmails, ...ccEmails];
+  }
+
+  // Strip ourselves and the primary recipient from the Cc list, then dedup.
+  const seen = new Set<string>();
+  if (primaryTo) seen.add(primaryTo);
+  if (ownEmail) seen.add(ownEmail);
+  const ccList: string[] = [];
+  for (const e of candidates) {
+    if (!e) continue;
+    if (seen.has(e)) continue;
+    seen.add(e);
+    ccList.push(e);
+  }
+
+  return {
+    primaryTo,
+    ccList,
+    hasMultiple: ccList.length > 0,
+  };
+}
+
+// Collect every unique participant email across all messages in the thread.
+// Used by Forward's "pre-fill all participants" convenience. Strips ourselves
+// (the connected account) so we don't forward to our own inbox.
+function collectAllParticipants(
+  messages: any[],
+  accountEmail: string,
+): string[] {
+  const ownEmail = (accountEmail || "").toLowerCase();
+  const seen = new Set<string>();
+  if (ownEmail) seen.add(ownEmail);
+  const out: string[] = [];
+  for (const msg of messages || []) {
+    const fromE = (msg.from_email || "").trim().toLowerCase();
+    if (fromE && !seen.has(fromE) && fromE.includes("@")) {
+      seen.add(fromE);
+      out.push(fromE);
+    }
+    for (const addr of [...extractEmails(msg.to_addresses), ...extractEmails(msg.cc_addresses)]) {
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        out.push(addr);
+      }
+    }
+  }
+  return out;
+}
+
 export default function ConversationDetail({
   conversation: convo,
   currentUser,
@@ -216,6 +333,9 @@ export default function ConversationDetail({
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [showFormModal, setShowFormModal] = useState<{ taskId?: string; categoryId?: string } | null>(null);
   const [replySignature, setReplySignature] = useState("");
+  // Current connected account's email address. Used by Reply All to exclude
+  // ourselves from the recipient list (don't email yourself).
+  const [accountEmail, setAccountEmail] = useState<string>("");
   const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
 
   // Check for drafts when conversation loads
@@ -278,16 +398,18 @@ export default function ConversationDetail({
     return () => clearTimeout(timer);
   }, [replyText, convo?.id, showReplyEditor]);
 
-  // Fetch account signature for replies
+  // Fetch account signature for replies. Also pulls the account's email so
+  // Reply All can exclude it from recipient lists (otherwise we'd email ourselves).
   useEffect(() => {
     if (convo?.email_account_id) {
       Promise.resolve().then(() => {
         const sb = createBrowserClient();
         sb.from("email_accounts")
-          .select("signature, signature_enabled")
+          .select("email, signature, signature_enabled")
           .eq("id", convo.email_account_id)
           .single()
           .then(({ data }: any) => {
+            setAccountEmail((data?.email || "").toLowerCase());
             if (data?.signature_enabled && data?.signature) {
               setReplySignature(data.signature);
             } else {
@@ -295,6 +417,9 @@ export default function ConversationDetail({
             }
           });
       });
+    } else {
+      setAccountEmail("");
+      setReplySignature("");
     }
   }, [convo?.email_account_id]);
   const [noteText, setNoteText] = useState("");
@@ -367,6 +492,12 @@ export default function ConversationDetail({
   const [replyModalSubject, setReplyModalSubject] = useState("");
   const [replyModalBody, setReplyModalBody] = useState("");
   const [replyModalSending, setReplyModalSending] = useState(false);
+  // Reply All toggle for the top-bar Reply modal. When enabled, To stays as
+  // the primary sender and Cc auto-fills with the rest of the participants.
+  // We remember the computed Cc list separately so toggling off then back on
+  // restores it without re-walking the messages array.
+  const [replyModalReplyAll, setReplyModalReplyAll] = useState(false);
+  const [replyModalReplyAllCcList, setReplyModalReplyAllCcList] = useState<string[]>([]);
   const [trashingConversation, setTrashingConversation] = useState(false);
   const [markingSpam, setMarkingSpam] = useState(false);
 
@@ -1010,6 +1141,14 @@ export default function ConversationDetail({
       ? baseSubject
       : `Re: ${baseSubject || "(No subject)"}`;
 
+    // Pre-compute the Reply All cc list so the toggle inside the modal can
+    // flip it on without recomputing. We always START with Reply All OFF,
+    // even if there are multiple participants — explicit opt-in is safer
+    // (prevents accidentally CC'ing whole supplier teams).
+    const { ccList } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
+
+    setReplyModalReplyAll(false);
+    setReplyModalReplyAllCcList(ccList);
     setReplyModalTo(replyTo);
     setReplyModalCc("");
     setReplyModalBcc("");
@@ -1089,7 +1228,13 @@ export default function ConversationDetail({
       .filter(Boolean)
       .join("\n");
 
-    setForwardTo("");
+    // Pre-fill the To field with every unique participant in the thread
+    // (excluding the connected account's own email). Forward is usually
+    // routing this thread to someone NEW, so this is just a convenience —
+    // there's a "Clear" link in the modal to wipe it in one click.
+    const participants = collectAllParticipants(messages, accountEmail);
+
+    setForwardTo(participants.join(", "));
     setForwardCc("");
     setForwardSubject(
       convo.subject?.toLowerCase().startsWith("fwd:")
@@ -3752,6 +3897,34 @@ export default function ConversationDetail({
                   {loadedDraftId && (
                     <span className="text-[9px] text-[var(--warning)] font-semibold px-1.5 py-0.5 rounded bg-[var(--warning)]/10 border border-[var(--warning)]/20">Draft</span>
                   )}
+                  {/* Reply All — only shown when there are additional participants to add.
+                      Auto-fills the inline Cc field and opens it. Does nothing once the
+                      Cc field already contains the auto-fill (button hides itself). */}
+                  {(() => {
+                    const { ccList } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
+                    if (ccList.length === 0) return null;
+                    const existing = extractEmails(replyCc);
+                    const allPresent = ccList.every((e) => existing.includes(e));
+                    if (allPresent) return null;
+                    return (
+                      <button
+                        onClick={() => {
+                          // Merge with anything the user already typed in Cc
+                          const merged = [...existing];
+                          for (const e of ccList) {
+                            if (!merged.includes(e)) merged.push(e);
+                          }
+                          setReplyCc(merged.join(", "));
+                          setShowReplyCc(true);
+                        }}
+                        title={`Reply All — add Cc: ${ccList.join(", ")}`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--info)] hover:bg-[var(--surface-2)] transition-all text-[11px] font-semibold"
+                      >
+                        <Reply size={11} />
+                        Reply All ({ccList.length})
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={handleSendReplyInternal}
                     disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
@@ -3900,7 +4073,22 @@ export default function ConversationDetail({
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
         <div>
-          <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">To</label>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">To</label>
+            {/* Show a "Clear all" link whenever the To field has any content,
+                since Forward auto-fills with every thread participant — users
+                routing the thread to someone NEW want a one-click wipe. */}
+            {forwardTo.trim().length > 0 && (
+              <button
+                type="button"
+                onClick={() => setForwardTo("")}
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"
+                title="Clear the To field (pre-filled with all thread participants)"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           <input
             type="text"
             value={forwardTo}
@@ -3908,6 +4096,9 @@ export default function ConversationDetail({
             placeholder="recipient@example.com"
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
+          <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+            Pre-filled with all thread participants. Edit or clear as needed.
+          </div>
         </div>
 
         <div>
@@ -4001,6 +4192,59 @@ export default function ConversationDetail({
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {/* Reply All toggle — only shown when there are other participants to add.
+                  Toggling ON auto-fills the Cc field with the rest of the thread's
+                  participants (already excludes the primary recipient + the connected
+                  account's own email). Toggling OFF clears the Cc again. */}
+              {replyModalReplyAllCcList.length > 0 && (
+                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+                      <Reply size={12} />
+                      Reply All
+                    </div>
+                    <div className="text-[10px] text-[var(--text-secondary)] mt-0.5 truncate">
+                      {replyModalReplyAll
+                        ? `Cc'ing ${replyModalReplyAllCcList.length} other participant${replyModalReplyAllCcList.length === 1 ? "" : "s"}`
+                        : `${replyModalReplyAllCcList.length} other participant${replyModalReplyAllCcList.length === 1 ? "" : "s"} available to Cc`}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={replyModalReplyAll}
+                    onClick={() => {
+                      const next = !replyModalReplyAll;
+                      setReplyModalReplyAll(next);
+                      if (next) {
+                        // Merge into existing Cc rather than overwriting any
+                        // addresses the user might have typed manually.
+                        const existing = extractEmails(replyModalCc);
+                        const merged = [...existing];
+                        for (const e of replyModalReplyAllCcList) {
+                          if (!merged.includes(e)) merged.push(e);
+                        }
+                        setReplyModalCc(merged.join(", "));
+                      } else {
+                        // Remove only the auto-added addresses; preserve user-typed ones.
+                        const existing = extractEmails(replyModalCc);
+                        const remaining = existing.filter((e) => !replyModalReplyAllCcList.includes(e));
+                        setReplyModalCc(remaining.join(", "));
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                      replyModalReplyAll ? "bg-[var(--accent)]" : "bg-[var(--border)]"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        replyModalReplyAll ? "translate-x-5" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+
               <div>
                 <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">To</label>
                 <input
