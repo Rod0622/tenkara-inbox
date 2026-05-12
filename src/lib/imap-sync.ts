@@ -323,13 +323,28 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               continue;
             }
 
-            // Gmail API: walk MIME parts and fetch each attachment's bytes via
-            // users.messages.attachments.get. Inline images (cid: references)
-            // and regular file attachments are both captured.
+            // Gmail API: walk MIME parts and capture each attachment's bytes.
+            //
+            // Two delivery shapes exist (per Gmail API docs):
+            //   • Small attachments → `body.data` is base64url-encoded inline,
+            //     no `attachmentId`. Decode directly — no extra fetch needed.
+            //   • Larger attachments → `body.attachmentId` is present, `body.data`
+            //     is empty. Must fetch via users.messages.attachments.get.
+            //
+            // We also handle parts WITHOUT a filename when they have a content
+            // disposition or Content-ID — Yahoo and a few clients send images
+            // that way ("Attached Image" with no filename header).
             if (hasAttachments) {
               const collectParts = (payload: any, out: any[] = []) => {
                 if (!payload) return out;
-                if (payload.filename && payload.body?.attachmentId) {
+                const body = payload.body || {};
+                const hasBytes = !!body.attachmentId || !!body.data;
+                const mime = String(payload.mimeType || "");
+                // Skip text/html and text/plain body parts — those are the
+                // message body, not attachments. Everything else with bytes
+                // is a candidate.
+                const isBodyText = mime === "text/plain" || mime === "text/html";
+                if (!isBodyText && hasBytes && (payload.filename || mime.startsWith("image/") || mime.startsWith("application/"))) {
                   out.push(payload);
                 }
                 if (Array.isArray(payload.parts)) {
@@ -341,18 +356,29 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               for (let i = 0; i < parts.length; i++) {
                 const p = parts[i];
                 try {
-                  const attRes = await fetch(
-                    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${p.body.attachmentId}`,
-                    { headers: { Authorization: `Bearer ${gmailToken}` } }
-                  );
-                  if (!attRes.ok) {
-                    result.errors.push(`Gmail attach fetch ${p.filename} on ${msgId}: ${attRes.statusText}`);
+                  let buf: Buffer | null = null;
+
+                  if (p.body?.attachmentId) {
+                    // Larger attachments: separate fetch
+                    const attRes = await fetch(
+                      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${p.body.attachmentId}`,
+                      { headers: { Authorization: `Bearer ${gmailToken}` } }
+                    );
+                    if (!attRes.ok) {
+                      result.errors.push(`Gmail attach fetch ${p.filename || "(unnamed)"} on ${msgId}: ${attRes.statusText}`);
+                      continue;
+                    }
+                    const attJson = await attRes.json();
+                    buf = Buffer.from(attJson.data || "", "base64url");
+                  } else if (p.body?.data) {
+                    // Small inline attachments: decode directly from the body
+                    buf = Buffer.from(p.body.data, "base64url");
+                  }
+
+                  if (!buf || buf.length === 0) {
+                    result.errors.push(`Gmail attach ${p.filename || "(unnamed)"} on ${msgId}: empty body`);
                     continue;
                   }
-                  const attJson = await attRes.json();
-                  // Gmail returns data as base64url-encoded, NOT standard base64.
-                  // Buffer.from supports the "base64url" encoding name in Node 18+.
-                  const buf = Buffer.from(attJson.data || "", "base64url");
 
                   // Pull Content-ID and disposition out of the part headers so
                   // we know whether this is an inline image or a normal file.
@@ -363,13 +389,21 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   const contentIdRaw = findHeader("Content-ID");
                   const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
 
+                  // Derive a filename when the part doesn't carry one.
+                  // Yahoo sometimes sends inline images with no filename header.
+                  const fallbackName = (() => {
+                    const mt = String(p.mimeType || "").toLowerCase();
+                    const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
+                    return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
+                  })();
+
                   const up = await uploadAttachmentToStorage(supabase, {
                     accountId,
                     messageId: insertedGmailMsg.id,
                     attachment: {
-                      filename: p.filename || "attachment",
+                      filename: p.filename || fallbackName,
                       contentType: p.mimeType || "application/octet-stream",
-                      size: typeof p.body.size === "number" ? p.body.size : buf.length,
+                      size: typeof p.body?.size === "number" ? p.body.size : buf.length,
                       isInline: disposition.startsWith("inline") || !!contentId,
                       contentId,
                       checksum: null,
@@ -378,7 +412,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                     indexInMessage: i,
                   });
                   if (!up.ok && !up.skipped) {
-                    result.errors.push(`Gmail attach upload ${p.filename} on ${msgId}: ${up.error}`);
+                    result.errors.push(`Gmail attach upload ${p.filename || fallbackName} on ${msgId}: ${up.error}`);
                   }
                 } catch (attErr: any) {
                   result.errors.push(`Gmail attach exception on ${msgId}: ${attErr?.message || "unknown"}`);

@@ -181,6 +181,13 @@ export async function POST(req: NextRequest) {
   };
 
   // ── Gmail attachment fetch ──
+  // Handles BOTH delivery shapes Gmail uses:
+  //   • body.attachmentId present → must fetch via attachments.get (typical for >5MB)
+  //   • body.data present         → bytes are inline (small files, often unnamed
+  //                                  images from Yahoo etc.)
+  // Also accepts parts without `filename` when they have image/* or
+  // application/* mimeType — those are still real attachments, just lacking
+  // a filename header.
   const backfillGmail = async (
     msgRowId: string,
     accountId: string,
@@ -199,7 +206,14 @@ export async function POST(req: NextRequest) {
 
     const collectParts = (payload: any, out: any[] = []) => {
       if (!payload) return out;
-      if (payload.filename && payload.body?.attachmentId) out.push(payload);
+      const body = payload.body || {};
+      const hasBytes = !!body.attachmentId || !!body.data;
+      const mime = String(payload.mimeType || "");
+      // text/plain and text/html are the message body, not attachments.
+      const isBodyText = mime === "text/plain" || mime === "text/html";
+      if (!isBodyText && hasBytes && (payload.filename || mime.startsWith("image/") || mime.startsWith("application/"))) {
+        out.push(payload);
+      }
       if (Array.isArray(payload.parts)) for (const p of payload.parts) collectParts(p, out);
       return out;
     };
@@ -207,16 +221,27 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
-      const attRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${gmailMsgId}/attachments/${p.body.attachmentId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!attRes.ok) {
-        stats.errors.push({ message_id: msgRowId, reason: `Gmail attach fetch ${p.filename} failed` });
+      let buf: Buffer | null = null;
+
+      if (p.body?.attachmentId) {
+        const attRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${gmailMsgId}/attachments/${p.body.attachmentId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!attRes.ok) {
+          stats.errors.push({ message_id: msgRowId, reason: `Gmail attach fetch ${p.filename || "(unnamed)"} failed` });
+          continue;
+        }
+        const attJson = await attRes.json();
+        buf = Buffer.from(attJson.data || "", "base64url");
+      } else if (p.body?.data) {
+        buf = Buffer.from(p.body.data, "base64url");
+      }
+
+      if (!buf || buf.length === 0) {
+        stats.errors.push({ message_id: msgRowId, reason: `Gmail attach ${p.filename || "(unnamed)"}: empty body` });
         continue;
       }
-      const attJson = await attRes.json();
-      const buf = Buffer.from(attJson.data || "", "base64url");
 
       const headersList: { name: string; value: string }[] = p.headers || [];
       const findHeader = (n: string) =>
@@ -225,13 +250,20 @@ export async function POST(req: NextRequest) {
       const contentIdRaw = findHeader("Content-ID");
       const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
 
+      // Derive a filename for parts that don't carry one.
+      const fallbackName = (() => {
+        const mt = String(p.mimeType || "").toLowerCase();
+        const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
+        return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
+      })();
+
       const up = await uploadAttachmentToStorage(supabase, {
         accountId,
         messageId: msgRowId,
         attachment: {
-          filename: p.filename || "attachment",
+          filename: p.filename || fallbackName,
           contentType: p.mimeType || "application/octet-stream",
-          size: typeof p.body.size === "number" ? p.body.size : buf.length,
+          size: typeof p.body?.size === "number" ? p.body.size : buf.length,
           isInline: disposition.startsWith("inline") || !!contentId,
           contentId,
           checksum: null,

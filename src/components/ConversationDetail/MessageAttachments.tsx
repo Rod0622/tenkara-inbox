@@ -21,15 +21,37 @@ export default function MessageAttachments({ messageId }: { messageId: string })
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
 
-  // Reset when switching messages
+  // Auto-load on mount and whenever messageId changes. Previously this was
+  // gated behind a "Show attachments" button click, which surfaced
+  // "No downloadable attachments" noise everywhere. With auto-load we know
+  // the real state up front and can hide the row entirely when empty.
   useEffect(() => {
     setAttachments([]);
     setLoaded(false);
     setShowDrivePicker(false);
     setUploadResult(null);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/attachments?message_id=${messageId}`);
+        const data = await res.json();
+        if (cancelled) return;
+        setAttachments(data.attachments || []);
+      } catch (err) {
+        if (!cancelled) console.error("Failed to load attachments:", err);
+      }
+      if (!cancelled) {
+        setLoading(false);
+        setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [messageId]);
 
   const loadAttachments = async () => {
+    // Kept for any external callers that might still trigger a manual reload;
+    // a no-op if we already have data.
     if (loaded) return;
     setLoading(true);
     try {
@@ -232,23 +254,26 @@ export default function MessageAttachments({ messageId }: { messageId: string })
   // Compute non-inline attachments for display
   const visibleAttachments = loaded ? attachments.filter((a: any) => !a.isInline) : [];
 
+  // While loading, show a tiny spinner. After load:
+  //   • If there's nothing to show, render nothing at all (no "No
+  //     downloadable attachments" noise — that line is misleading when
+  //     the message has inline-only or hadn't been backfilled yet).
+  //   • If there are attachments, render them inline directly.
+  if (!loaded) {
+    if (!loading) return null;
+    return (
+      <div className="mt-3 text-[11px] text-[var(--text-muted)] flex items-center gap-1">
+        <Paperclip size={11} />
+        Loading attachments…
+      </div>
+    );
+  }
+
+  if (visibleAttachments.length === 0) return null;
+
   return (
     <div className="mt-3">
-      {!loaded ? (
-        <button
-          onClick={loadAttachments}
-          disabled={loading}
-          className="flex items-center gap-1.5 text-[11px] text-[var(--info)] hover:text-[#79B8FF] transition-colors"
-        >
-          <Paperclip size={12} />
-          {loading ? "Loading attachments..." : "Show attachments"}
-        </button>
-      ) : visibleAttachments.length === 0 ? (
-        <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
-          <Paperclip size={11} /> No downloadable attachments
-        </div>
-      ) : (
-        <div className="space-y-1.5">
+      <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[var(--text-muted)] font-semibold flex items-center gap-1">
               <Paperclip size={11} /> {visibleAttachments.length} attachment{visibleAttachments.length !== 1 ? "s" : ""}
@@ -303,7 +328,6 @@ export default function MessageAttachments({ messageId }: { messageId: string })
             ))}
           </div>
         </div>
-        )}
 
       {/* Drive Picker Modal */}
       {showDrivePicker && (
