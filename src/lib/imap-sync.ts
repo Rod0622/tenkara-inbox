@@ -4,6 +4,7 @@ import { createServerClient } from "@/lib/supabase";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -36,7 +37,23 @@ interface ParsedEmail {
   snippet: string;
   sentAt: Date;
   hasAttachments: boolean;
+  // Raw attachment bytes + metadata, captured during IMAP parse and uploaded
+  // to Supabase Storage by the sync loop. mailparser already decodes
+  // base64/quoted-printable, so `content` here is the actual file bytes.
+  attachments: ParsedAttachment[];
   gmailLabels: string[];
+}
+
+// What we capture from mailparser per attachment. We keep the original buffer
+// in memory only long enough to upload to Storage in the sync loop, then drop it.
+interface ParsedAttachment {
+  filename: string;
+  contentType: string;
+  size: number;
+  isInline: boolean;
+  contentId: string | null;
+  checksum: string | null;
+  content: Buffer;
 }
 
 interface SyncResult {
@@ -290,7 +307,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               await onNewConversationFromSync(nc.id, accountId, isOutbound);
             }
 
-            await supabase.from("messages").insert({
+            const { data: insertedGmailMsg, error: gmailInsertErr } = await supabase.from("messages").insert({
               conversation_id: conversationId,
               provider_message_id: `gmail:${msgId}`,
               from_name: fromName, from_email: fromEmail,
@@ -299,7 +316,75 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               snippet: snippet.slice(0, 200),
               is_outbound: isOutbound, has_attachments: hasAttachments,
               sent_at: sentAt,
-            });
+            }).select("id").single();
+
+            if (gmailInsertErr || !insertedGmailMsg) {
+              result.errors.push(`Gmail message ${msgId}: ${gmailInsertErr?.message || "insert failed"}`);
+              continue;
+            }
+
+            // Gmail API: walk MIME parts and fetch each attachment's bytes via
+            // users.messages.attachments.get. Inline images (cid: references)
+            // and regular file attachments are both captured.
+            if (hasAttachments) {
+              const collectParts = (payload: any, out: any[] = []) => {
+                if (!payload) return out;
+                if (payload.filename && payload.body?.attachmentId) {
+                  out.push(payload);
+                }
+                if (Array.isArray(payload.parts)) {
+                  for (const p of payload.parts) collectParts(p, out);
+                }
+                return out;
+              };
+              const parts = collectParts(msgData.payload || {});
+              for (let i = 0; i < parts.length; i++) {
+                const p = parts[i];
+                try {
+                  const attRes = await fetch(
+                    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${p.body.attachmentId}`,
+                    { headers: { Authorization: `Bearer ${gmailToken}` } }
+                  );
+                  if (!attRes.ok) {
+                    result.errors.push(`Gmail attach fetch ${p.filename} on ${msgId}: ${attRes.statusText}`);
+                    continue;
+                  }
+                  const attJson = await attRes.json();
+                  // Gmail returns data as base64url-encoded, NOT standard base64.
+                  // Buffer.from supports the "base64url" encoding name in Node 18+.
+                  const buf = Buffer.from(attJson.data || "", "base64url");
+
+                  // Pull Content-ID and disposition out of the part headers so
+                  // we know whether this is an inline image or a normal file.
+                  const headersList: { name: string; value: string }[] = p.headers || [];
+                  const findHeader = (n: string) =>
+                    headersList.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value || "";
+                  const disposition = findHeader("Content-Disposition").toLowerCase();
+                  const contentIdRaw = findHeader("Content-ID");
+                  const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
+
+                  const up = await uploadAttachmentToStorage(supabase, {
+                    accountId,
+                    messageId: insertedGmailMsg.id,
+                    attachment: {
+                      filename: p.filename || "attachment",
+                      contentType: p.mimeType || "application/octet-stream",
+                      size: typeof p.body.size === "number" ? p.body.size : buf.length,
+                      isInline: disposition.startsWith("inline") || !!contentId,
+                      contentId,
+                      checksum: null,
+                      content: buf,
+                    },
+                    indexInMessage: i,
+                  });
+                  if (!up.ok && !up.skipped) {
+                    result.errors.push(`Gmail attach upload ${p.filename} on ${msgId}: ${up.error}`);
+                  }
+                } catch (attErr: any) {
+                  result.errors.push(`Gmail attach exception on ${msgId}: ${attErr?.message || "unknown"}`);
+                }
+              }
+            }
 
             await supabase.from("conversations").update({
               preview: snippet.slice(0, 200),
@@ -437,26 +522,52 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           supabase, accountId, email, account.email
         );
 
-        // Insert message
-        const { error: msgError } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          provider_message_id: `${accountId}:${email.uid}`,
-          from_name: email.fromName,
-          from_email: email.fromEmail,
-          to_addresses: email.toAddresses,
-          cc_addresses: email.ccAddresses,
-          subject: email.subject,
-          body_text: email.bodyText,
-          body_html: email.bodyHtml,
-          snippet: email.snippet,
-          is_outbound: isOutbound(email.fromEmail, account.email),
-          has_attachments: email.hasAttachments,
-          sent_at: email.sentAt.toISOString(),
-        });
+        // Insert message — capture the row ID so we can attach files below.
+        // (Previously this was a fire-and-forget insert; we now need to know
+        // which message_id to link attachments to.)
+        const { data: insertedMsg, error: msgError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            provider_message_id: `${accountId}:${email.uid}`,
+            from_name: email.fromName,
+            from_email: email.fromEmail,
+            to_addresses: email.toAddresses,
+            cc_addresses: email.ccAddresses,
+            subject: email.subject,
+            body_text: email.bodyText,
+            body_html: email.bodyHtml,
+            snippet: email.snippet,
+            is_outbound: isOutbound(email.fromEmail, account.email),
+            has_attachments: email.hasAttachments,
+            sent_at: email.sentAt.toISOString(),
+          })
+          .select("id")
+          .single();
 
-        if (msgError) {
-          result.errors.push(`Message ${email.uid}: ${msgError.message}`);
+        if (msgError || !insertedMsg) {
+          result.errors.push(`Message ${email.uid}: ${msgError?.message || "insert failed"}`);
           continue;
+        }
+
+        // Upload attachments to Supabase Storage. Best-effort: a failure on
+        // any single attachment is logged in result.errors but does not abort
+        // the rest of the sync. Inline attachments are stored too so that
+        // signature images / cid: references can resolve later, but they're
+        // flagged in the table for the UI to filter out by default.
+        if (email.attachments && email.attachments.length > 0) {
+          for (let i = 0; i < email.attachments.length; i++) {
+            const att = email.attachments[i];
+            const up = await uploadAttachmentToStorage(supabase, {
+              accountId,
+              messageId: insertedMsg.id,
+              attachment: att as AttachmentUploadInput,
+              indexInMessage: i,
+            });
+            if (!up.ok && !up.skipped) {
+              result.errors.push(`Attachment ${att.filename} on msg ${email.uid}: ${up.error || "unknown"}`);
+            }
+          }
         }
 
         // Update conversation with latest message info
@@ -716,6 +827,22 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
       : [parsed.references]
     : [];
 
+  // Map mailparser's attachment objects into our internal shape. We keep
+  // raw Buffer content here so the sync loop can stream it to Storage; it
+  // gets dropped after upload so we don't blow up memory on big mailboxes.
+  const attachments: ParsedAttachment[] = (parsed.attachments || []).map((a: any) => ({
+    filename: String(a.filename || a.cid || "attachment").slice(0, 240),
+    contentType: String(a.contentType || "application/octet-stream"),
+    size: typeof a.size === "number" ? a.size : (Buffer.isBuffer(a.content) ? a.content.length : 0),
+    // mailparser sets contentDisposition='inline' for cid: images. Treat both
+    // explicit disposition and the presence of cid as inline so the UI can
+    // hide them from the attachment list by default.
+    isInline: a.contentDisposition === "inline" || !!a.cid,
+    contentId: a.cid || a.contentId || null,
+    checksum: a.checksum || null,
+    content: Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content || ""),
+  }));
+
   return {
     uid,
     messageId: parsed.messageId || null,
@@ -730,7 +857,8 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
     bodyHtml: typeof bodyHtml === "string" ? bodyHtml : "",
     snippet,
     sentAt: parsed.date || new Date(),
-    hasAttachments: (parsed.attachments?.length || 0) > 0,
+    hasAttachments: attachments.length > 0,
+    attachments,
     gmailLabels: [],
   };
 }

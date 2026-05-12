@@ -1,11 +1,34 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { downloadAttachmentBytes } from "@/lib/attachments-storage";
 
 const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-// Get Graph token
+// ─── Endpoint contract ──────────────────────────────────────────────────────
+//
+// GET /api/attachments?message_id=xxx
+//   → List attachments for a message (metadata only; no bytes).
+//     Returns: { attachments: [{ id, name, contentType, size, isInline }] }
+//
+// GET /api/attachments?message_id=xxx&attachment_id=yyy
+//   → Stream a single attachment's bytes back to the caller.
+//     Response is the file itself with appropriate Content-Type +
+//     Content-Disposition headers.
+//
+// GET /api/attachments?message_id=xxx&download_all=true
+//   → Returns base64-encoded data for every non-inline attachment.
+//     Used by the "Download all" action; consumed in JS and turned into a ZIP.
+//
+// Resolution order:
+//   1. Our own `inbox.attachments` table + Storage bucket. Works for any
+//      provider that has been (re)synced after we shipped attachment capture.
+//   2. Microsoft Graph fallback. Only kicks in if (1) returns nothing AND the
+//      provider is Microsoft — historically these worked via Graph and we
+//      keep that path live so old messages don't 404.
+// ────────────────────────────────────────────────────────────────────────────
+
 async function getGraphToken(): Promise<string> {
   const params = new URLSearchParams({
     client_id: process.env.MICROSOFT_CLIENT_ID || "",
@@ -22,9 +45,6 @@ async function getGraphToken(): Promise<string> {
   return data.access_token;
 }
 
-// GET /api/attachments?message_id=xxx — List attachments for a message
-// GET /api/attachments?message_id=xxx&attachment_id=yyy — Download specific attachment
-// GET /api/attachments?message_id=xxx&download_all=true — Download all as ZIP
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const messageId = req.nextUrl.searchParams.get("message_id");
@@ -35,7 +55,70 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "message_id is required" }, { status: 400 });
   }
 
-  // Get message and its account
+  // 1. Try our own Storage-backed attachments first.
+  const { data: ownRows, error: ownErr } = await supabase
+    .schema("inbox")
+    .from("attachments")
+    .select("id, filename, mime_type, size_bytes, is_inline, content_id, storage_path")
+    .eq("message_id", messageId);
+
+  const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
+
+  if (hasOwnRows) {
+    // ── List metadata only ──
+    if (!attachmentId && !downloadAll) {
+      return NextResponse.json({
+        attachments: ownRows!.map((r: any) => ({
+          id: r.id,
+          name: r.filename,
+          contentType: r.mime_type || "application/octet-stream",
+          size: r.size_bytes || 0,
+          isInline: !!r.is_inline,
+        })),
+      });
+    }
+
+    // ── Single download ──
+    if (attachmentId) {
+      const row = ownRows!.find((r: any) => r.id === attachmentId);
+      if (!row) {
+        return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+      }
+      const dl = await downloadAttachmentBytes(supabase, row.storage_path);
+      if (!dl) {
+        return NextResponse.json({ error: "Failed to download attachment from storage" }, { status: 500 });
+      }
+      return new NextResponse(new Uint8Array(dl.bytes), {
+        headers: {
+          "Content-Type": row.mime_type || dl.contentType || "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(row.filename)}"`,
+          "Content-Length": String(dl.bytes.length),
+        },
+      });
+    }
+
+    // ── Download all (non-inline) as base64 array ──
+    if (downloadAll === "true") {
+      const nonInline = ownRows!.filter((r: any) => !r.is_inline);
+      const allAttachments = [];
+      for (const row of nonInline) {
+        const dl = await downloadAttachmentBytes(supabase, row.storage_path);
+        if (dl) {
+          allAttachments.push({
+            name: row.filename,
+            contentType: row.mime_type || "application/octet-stream",
+            size: dl.bytes.length,
+            data: dl.bytes.toString("base64"),
+          });
+        }
+      }
+      return NextResponse.json({ attachments: allAttachments, format: "base64" });
+    }
+  }
+
+  // 2. No rows in our own table → fall back to Microsoft Graph for legacy
+  //    Microsoft accounts. For everything else, return empty (the message
+  //    was synced before attachment capture shipped — needs a backfill run).
   const { data: message, error: msgErr } = await supabase
     .from("messages")
     .select("*, conversation:conversations(email_account_id)")
@@ -61,20 +144,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Email account not found" }, { status: 404 });
   }
 
-  // Get the provider message ID (strip ms: prefix for Graph)
   const providerMsgId = message.provider_message_id || "";
   const isMicrosoft = MICROSOFT_PROVIDERS.includes(account.provider);
 
   if (isMicrosoft) {
     return handleGraphAttachments(account.email, providerMsgId, attachmentId, downloadAll === "true");
-  } else {
-    // For IMAP-synced messages, attachments aren't stored — would need re-fetch from IMAP
-    // For now, return empty since IMAP sync doesn't store attachments
-    return NextResponse.json({
-      attachments: [],
-      note: "IMAP attachment download requires re-fetching from mail server. Currently supported for Microsoft 365 accounts.",
-    });
   }
+
+  // Pre-capture Gmail/IMAP messages. Return empty + a hint so the UI can
+  // explain why nothing's here.
+  return NextResponse.json({
+    attachments: [],
+    note: "Attachments for this message were not captured during sync. Run the Attachment Backfill from Settings to re-fetch.",
+  });
 }
 
 async function handleGraphAttachments(
@@ -85,15 +167,9 @@ async function handleGraphAttachments(
 ) {
   try {
     const token = await getGraphToken();
-
-    // Strip the ms: prefix
     const graphMsgId = providerMsgId.replace(/^ms:/, "");
-    
-    // For Graph API, we need the Graph message ID (not internetMessageId)
-    // First try to find message by internetMessageId
     let graphMessageId = graphMsgId;
-    
-    // If the ID looks like an internetMessageId (contains @ or <), look up the real Graph ID
+
     if (graphMsgId.includes("@") || graphMsgId.includes("<")) {
       const searchRes = await fetch(
         `${GRAPH_BASE}/users/${userEmail}/messages?$filter=internetMessageId eq '${encodeURIComponent(graphMsgId)}'&$select=id`,
@@ -107,7 +183,6 @@ async function handleGraphAttachments(
       }
     }
 
-    // List attachments
     const listRes = await fetch(
       `${GRAPH_BASE}/users/${userEmail}/messages/${graphMessageId}/attachments`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -130,12 +205,10 @@ async function handleGraphAttachments(
       isInline: att.isInline || false,
     }));
 
-    // If just listing attachments
     if (!attachmentId && !downloadAll) {
       return NextResponse.json({ attachments });
     }
 
-    // Download specific attachment — fetch individually to get contentBytes
     if (attachmentId) {
       const attRes = await fetch(
         `${GRAPH_BASE}/users/${userEmail}/messages/${graphMessageId}/attachments/${attachmentId}`,
@@ -145,13 +218,11 @@ async function handleGraphAttachments(
         return NextResponse.json({ error: "Failed to download attachment" }, { status: 500 });
       }
       const att = await attRes.json();
-
       if (!att.contentBytes) {
         return NextResponse.json({ error: "Attachment has no content" }, { status: 404 });
       }
-
       const bytes = Buffer.from(att.contentBytes, "base64");
-      return new NextResponse(bytes, {
+      return new NextResponse(new Uint8Array(bytes), {
         headers: {
           "Content-Type": att.contentType || "application/octet-stream",
           "Content-Disposition": `attachment; filename="${encodeURIComponent(att.name)}"`,
@@ -160,11 +231,9 @@ async function handleGraphAttachments(
       });
     }
 
-    // Download all — fetch each attachment individually
     if (downloadAll) {
       const nonInline = (listData.value || []).filter((att: any) => !att.isInline);
       const allAttachments = [];
-
       for (const att of nonInline) {
         try {
           const attRes = await fetch(
@@ -186,7 +255,6 @@ async function handleGraphAttachments(
           console.error(`Failed to fetch attachment ${att.name}:`, e);
         }
       }
-
       return NextResponse.json({ attachments: allAttachments, format: "base64" });
     }
 

@@ -8,7 +8,8 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [allAttachments, setAllAttachments] = useState<{ messageId: string; fromName: string; attachments: any[] }[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  // Auto-expand once attachments load — user asked to skip the manual click step.
+  const [expanded, setExpanded] = useState(true);
   const [savingToDrive, setSavingToDrive] = useState(false);
   const [driveResult, setDriveResult] = useState<string | null>(null);
   const [downloadingAllThread, setDownloadingAllThread] = useState(false);
@@ -18,38 +19,52 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [threadLoadingFolders, setThreadLoadingFolders] = useState(false);
   const [threadDefaultFolderId, setThreadDefaultFolderId] = useState<string | null>(null);
 
-  // Reset when conversation changes (messages array changes)
+  // When the set of attachment-bearing messages changes (i.e. user switched
+  // conversations), reset state and auto-load. Previously this only reset
+  // and waited for a click; that hid attachments behind an extra step.
   const messageIds = messagesWithAttachments.map((m: any) => m.id).join(",");
   useEffect(() => {
     setAllAttachments([]);
     setLoaded(false);
-    setExpanded(false);
+    setExpanded(true);
     setDriveResult(null);
+    if (messagesWithAttachments.length === 0) return;
+    // Kick off the load immediately.
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const results: { messageId: string; fromName: string; attachments: any[] }[] = [];
+      for (const msg of messagesWithAttachments) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(`/api/attachments?message_id=${msg.id}`);
+          const data = await res.json();
+          const nonInline = (data.attachments || []).filter((a: any) => !a.isInline);
+          if (nonInline.length > 0) {
+            results.push({ messageId: msg.id, fromName: msg.from_name || "Unknown", attachments: nonInline });
+          }
+        } catch (e) { /* skip individual failures */ }
+      }
+      if (cancelled) return;
+      setAllAttachments(results);
+      setLoaded(true);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageIds]);
 
+  // Note: previously the bar hid itself if no message had has_attachments=true.
+  // We keep that behavior — no need to render an empty bar.
   if (messagesWithAttachments.length === 0) return null;
 
-  const loadAll = async () => {
-    if (loaded) { setExpanded(!expanded); return; }
-    setLoading(true);
-    const results: { messageId: string; fromName: string; attachments: any[] }[] = [];
-    for (const msg of messagesWithAttachments) {
-      try {
-        const res = await fetch(`/api/attachments?message_id=${msg.id}`);
-        const data = await res.json();
-        const nonInline = (data.attachments || []).filter((a: any) => !a.isInline);
-        if (nonInline.length > 0) {
-          results.push({ messageId: msg.id, fromName: msg.from_name || "Unknown", attachments: nonInline });
-        }
-      } catch (e) { /* skip */ }
-    }
-    setAllAttachments(results);
-    setLoaded(true);
-    setExpanded(true);
-    setLoading(false);
-  };
-
   const totalCount = allAttachments.reduce((sum, g) => sum + g.attachments.length, 0);
+
+  // After load: if the API returned ZERO non-inline attachments across every
+  // message-with-attachments-flag, that's the "pre-capture" case (e.g. messages
+  // synced before the storage migration). Show a helpful explainer instead of
+  // a misleading "0 attachments" header.
+  const isPreCapture = loaded && totalCount === 0 && messagesWithAttachments.length > 0;
 
   const downloadAtt = async (messageId: string, attId: string, name: string) => {
     try {
@@ -160,17 +175,37 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     setSavingToDrive(false);
   };
 
+  // Pre-capture explainer — these messages were flagged has_attachments=true
+  // during an earlier sync, before we stored the actual bytes. Direct the user
+  // to the Backfill button in Settings.
+  if (isPreCapture) {
+    return (
+      <div className="mb-3 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2.5 flex items-center gap-2">
+        <Paperclip size={14} className="text-[var(--warning)] shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+            {messagesWithAttachments.length} message{messagesWithAttachments.length !== 1 ? "s" : ""} have attachments — not yet captured
+          </div>
+          <div className="text-[10px] text-[var(--text-secondary)]">
+            Synced before attachment storage was enabled. Run Attachment Backfill in Settings → Accounts to fetch them.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
       <button
-        onClick={loadAll}
+        onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[var(--surface-2)] transition-colors"
       >
         <Paperclip size={14} className="text-[var(--info)]" />
         <span className="text-[12px] font-semibold text-[var(--text-primary)]">
-          {loaded ? `${totalCount} attachment${totalCount !== 1 ? "s" : ""}` : `${messagesWithAttachments.length} message${messagesWithAttachments.length !== 1 ? "s" : ""} with attachments`}
+          {loading
+            ? `Loading attachments from ${messagesWithAttachments.length} message${messagesWithAttachments.length !== 1 ? "s" : ""}…`
+            : `${totalCount} attachment${totalCount !== 1 ? "s" : ""}`}
         </span>
-        {loading && <span className="text-[10px] text-[var(--text-muted)]">Loading...</span>}
         {driveResult && (
           <span className={`text-[10px] ml-1 ${driveResult.startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}>
             {driveResult}
@@ -179,29 +214,27 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
         <ChevronDown size={12} className={`ml-auto text-[var(--text-muted)] transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
 
-      {expanded && loaded && (
+      {expanded && loaded && totalCount > 0 && (
         <div className="px-4 pb-3 border-t border-[var(--border)]">
           {/* Action buttons */}
-          {totalCount > 0 && (
-            <div className="flex items-center gap-3 py-2 border-b border-[var(--border)] mb-2">
-              <button
-                onClick={downloadAllThread}
-                disabled={downloadingAllThread}
-                className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[#3BC96E] font-semibold transition-colors"
-              >
-                <Download size={10} />
-                {downloadingAllThread ? "Downloading..." : "Download All"}
-              </button>
-              <button
-                onClick={openThreadDrivePicker}
-                disabled={savingToDrive}
-                className="flex items-center gap-1 text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold transition-colors"
-              >
-                <ExternalLink size={10} />
-                {savingToDrive ? "Uploading..." : "Save All to Drive"}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-3 py-2 border-b border-[var(--border)] mb-2">
+            <button
+              onClick={downloadAllThread}
+              disabled={downloadingAllThread}
+              className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[#3BC96E] font-semibold transition-colors"
+            >
+              <Download size={10} />
+              {downloadingAllThread ? "Downloading..." : "Download All"}
+            </button>
+            <button
+              onClick={openThreadDrivePicker}
+              disabled={savingToDrive}
+              className="flex items-center gap-1 text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold transition-colors"
+            >
+              <ExternalLink size={10} />
+              {savingToDrive ? "Uploading..." : "Save All to Drive"}
+            </button>
+          </div>
 
           {/* Attachment list grouped by sender */}
           <div className="space-y-2">

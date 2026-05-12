@@ -9,7 +9,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -345,6 +345,43 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingSignatureId, setEditingSignatureId] = useState<string | null>(null);
+  // Per-account backfill state. Tracks "running" + the most recent result so
+  // we can show "Saved N files" or an error inline next to the button.
+  const [backfillingId, setBackfillingId] = useState<string | null>(null);
+  const [backfillResult, setBackfillResult] = useState<Record<string, string>>({});
+
+  // Triggers the attachment-backfill endpoint for one account. Walks every
+  // message in the account that's flagged has_attachments=true, fetches the
+  // attachment bytes from the upstream provider, and stores them in our
+  // Supabase Storage bucket.
+  //
+  // This is the one-time catch-up for messages that were synced BEFORE the
+  // attachment-storage feature shipped. New mail flows through the regular
+  // sync path and already gets its attachments stored.
+  const runAttachmentBackfill = async (accountId: string, accountName: string) => {
+    if (backfillingId) return;
+    if (!confirm(`Backfill attachments for "${accountName}"?\n\nThis will scan recent messages with attachments and download any that weren't captured during sync. Safe to re-run.`)) return;
+    setBackfillingId(accountId);
+    setBackfillResult((r) => ({ ...r, [accountId]: "" }));
+    try {
+      const res = await fetch("/api/attachments/backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, limit: 500 }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${data.error || "failed"}` }));
+      } else {
+        const s = data.stats || {};
+        const summary = `${s.attachmentsUploaded || 0} new · ${s.attachmentsSkipped || 0} dedup · ${s.errors?.length || 0} errors`;
+        setBackfillResult((r) => ({ ...r, [accountId]: summary }));
+      }
+    } catch (e: any) {
+      setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${e?.message || "network"}` }));
+    }
+    setBackfillingId(null);
+  };
 
   const fetchAccounts = () => {
     getSupabase()
@@ -493,6 +530,27 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                     <button className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors">
                       <RefreshCw size={14} />
                     </button>
+                    {/* One-shot attachment backfill — re-fetches attachments for messages
+                        that were synced before storage was wired up. Shows the result
+                        inline (e.g. "5 new · 2 dedup · 0 errors") for a few seconds. */}
+                    <button
+                      onClick={() => runAttachmentBackfill(account.id, account.email || account.name || "account")}
+                      disabled={backfillingId === account.id || !!backfillingId}
+                      title="Backfill attachments for this account"
+                      className="h-8 px-2 rounded-md flex items-center gap-1 text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors disabled:opacity-50"
+                    >
+                      {backfillingId === account.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <Paperclip size={14} />}
+                      <span className="text-[10px] hidden md:inline">Backfill</span>
+                    </button>
+                    {backfillResult[account.id] && (
+                      <span
+                        className={`text-[10px] ${backfillResult[account.id].startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}
+                      >
+                        {backfillResult[account.id]}
+                      </span>
+                    )}
                     <button
                       onClick={() => handleDelete(account.id)}
                       className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--border)] transition-colors"
