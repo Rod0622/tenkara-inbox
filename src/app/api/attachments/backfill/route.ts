@@ -99,57 +99,28 @@ export async function POST(req: NextRequest) {
     messagesProcessed: 0,
   };
 
-  // 1. Pick candidate messages. Filter to has_attachments=true (the only
-  //    ones worth examining). We scope to the requested account at the
-  //    DATABASE level — previously the account filter was applied client-side
-  //    after pulling 500 messages across ALL accounts, which silently
-  //    starved smaller/older accounts when a noisy account dominated the
-  //    top-500 window.
+  // 1. Pick candidate messages. Filter to has_attachments=true. We scope to
+  //    the requested account at the database level using a PostgREST inner
+  //    join: `conversations!inner` makes the join mandatory, and we then
+  //    apply a filter on the joined column. This pushes the work into
+  //    SQL — vs. an earlier approach using a giant `.in()` clause that
+  //    blew past PostgREST's URL length limit on big accounts.
   //
-  //    Strategy: resolve the account's conversation_ids first (one cheap
-  //    indexed query), then filter messages by that set. This keeps the
-  //    work proportional to the requested scope.
-  let conversationIdScope: string[] | null = null;
-  if (accountIdParam) {
-    const { data: convRows, error: convErr } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("email_account_id", accountIdParam);
-    if (convErr) {
-      return NextResponse.json<BackfillResponse>({
-        ok: false,
-        stats,
-        done: true,
-        remaining: 0,
-        error: `Failed to scope conversations: ${convErr.message}`,
-      }, { status: 500 });
-    }
-    conversationIdScope = (convRows || []).map((r: any) => r.id);
-    if (conversationIdScope.length === 0) {
-      // Account has no conversations at all — nothing to do.
-      return NextResponse.json<BackfillResponse>({
-        ok: true,
-        stats,
-        done: true,
-        remaining: 0,
-      });
-    }
-  }
-
-  // Oldest-first so chunked progress moves through the backlog predictably:
-  // each call eats from the same end of the queue and the unbacked-up tail
-  // shrinks monotonically.
+  //    Oldest-first so chunked progress moves through the backlog
+  //    predictably: each call eats from the same end of the queue.
   let query = supabase
     .from("messages")
-    .select("id, provider_message_id, conversation_id, conversations:conversation_id(email_account_id)")
+    .select("id, provider_message_id, conversation_id, conversations!inner(email_account_id)")
     .eq("has_attachments", true)
     .order("sent_at", { ascending: true })
     .limit(requestedLimit);
 
   if (conversationId) {
     query = query.eq("conversation_id", conversationId);
-  } else if (conversationIdScope) {
-    query = query.in("conversation_id", conversationIdScope);
+  } else if (accountIdParam) {
+    // Filter via the inner-joined conversations row. The dotted path here is
+    // how PostgREST applies WHERE conditions to embedded relations.
+    query = query.eq("conversations.email_account_id", accountIdParam);
   }
 
   const { data: candidateMessages, error: msgErr } = await query;
@@ -172,9 +143,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 2. The previous client-side account filter is no longer needed — the
-  //    query is already scoped. We keep `filtered` as a passthrough for the
-  //    downstream code below.
+  // The query is already scoped at the DB layer; no client-side re-filter needed.
   const filtered = candidateMessages;
 
   stats.scanned = filtered.length;
@@ -403,7 +372,13 @@ export async function POST(req: NextRequest) {
     }
 
     stats.messagesProcessed++;
-    const accountId = (msg as any).conversations?.email_account_id;
+    // PostgREST's embedded relation can come back as either an object or a
+    // single-element array depending on the join modifier and the client's
+    // typing. Defensively normalize both shapes.
+    const convoRow: any = Array.isArray((msg as any).conversations)
+      ? (msg as any).conversations[0]
+      : (msg as any).conversations;
+    const accountId = convoRow?.email_account_id;
     if (!accountId) {
       stats.errors.push({ message_id: msg.id, reason: "No email_account_id on conversation" });
       continue;
@@ -418,13 +393,20 @@ export async function POST(req: NextRequest) {
     const providerMsgId: string = msg.provider_message_id || "";
 
     // Track whether the provider walk produced ANY attachment rows for this
-    // message. If we successfully scanned the message and found zero rows,
-    // the `has_attachments=true` flag was a false positive from sync (most
+    // message AND ran cleanly (no errors). If we successfully scanned the
+    // message, found zero rows, and threw no errors, the
+    // `has_attachments=true` flag was a false positive from sync (most
     // commonly: a signature image that the provider doesn't expose as an
     // attachment-eligible part). We flip the flag off so the UI's
     // "not yet captured" banner stops showing for signature-only threads.
+    //
+    // CRITICAL: we MUST NOT flip the flag if the walk had errors — otherwise
+    // a transient Gmail/Graph fetch failure would silently mark the message
+    // as "no attachments" and erase the user-visible signal that this needs
+    // another backfill pass.
     let scannedSuccessfully = false;
     const attachmentsBefore = stats.attachmentsUploaded + stats.attachmentsSkipped;
+    const errorsBefore = stats.errors.length;
 
     // ── Gmail OAuth ──
     if (account.provider === "google_oauth" && providerMsgId.startsWith("gmail:")) {
@@ -466,12 +448,15 @@ export async function POST(req: NextRequest) {
       continue; // Don't touch the flag for providers we haven't built yet.
     }
 
-    // False-positive cleanup. If the scan ran cleanly but produced no new
-    // attachment uploads or skips, the message has no real attachments to
-    // surface. Flip has_attachments=false so the UI stops nagging.
+    // False-positive cleanup. Only flip has_attachments=false when:
+    //   1. The scan ran without throwing (scannedSuccessfully)
+    //   2. The walk uploaded nothing (no new uploads or dedup skips)
+    //   3. The walk pushed no errors (so we're not papering over a fetch fail)
+    // This three-way check ensures we only clear the flag on clean negatives.
     if (scannedSuccessfully) {
       const attachmentsAfter = stats.attachmentsUploaded + stats.attachmentsSkipped;
-      if (attachmentsAfter === attachmentsBefore) {
+      const errorsAfter = stats.errors.length;
+      if (attachmentsAfter === attachmentsBefore && errorsAfter === errorsBefore) {
         await supabase
           .from("messages")
           .update({ has_attachments: false })
