@@ -209,6 +209,10 @@ export default function ConversationDetail({
   const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
+  // Tracks which compose surface opened the AI Draft modal so we know
+  // where to insert the generated text. Set right before opening AIDraft.
+  // Defaults to "inline" (the threaded reply composer below messages).
+  const [aiDraftTarget, setAiDraftTarget] = useState<"inline" | "replyModal" | "forwardModal">("inline");
   const [showReplyEditor, setShowReplyEditor] = useState(false);
   const [showFormModal, setShowFormModal] = useState<{ taskId?: string; categoryId?: string } | null>(null);
   const [replySignature, setReplySignature] = useState("");
@@ -3689,7 +3693,7 @@ export default function ConversationDetail({
                 onAttach={() => replyFileInputRef.current?.click()}
                 onDrive={() => openReplyDrivePicker()}
                 onTemplate={() => openReplyTemplatePicker()}
-                onAIDraft={() => setShowAIDraftModal(true)}
+                onAIDraft={() => { setAiDraftTarget("inline"); setShowAIDraftModal(true); }}
               />
               {/* Reply attachments */}
               <input ref={replyFileInputRef} type="file" multiple onChange={async (e) => {
@@ -3929,11 +3933,13 @@ export default function ConversationDetail({
 
         <div>
           <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Message</label>
-          <textarea
+          <RichTextEditor
             value={forwardBody}
-            onChange={(e) => setForwardBody(e.target.value)}
-            rows={14}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none resize-y"
+            onChange={setForwardBody}
+            placeholder="Type your message..."
+            minHeight={260}
+            signature={replySignature}
+            onAIDraft={() => { setAiDraftTarget("forwardModal"); setShowAIDraftModal(true); }}
           />
         </div>
       </div>
@@ -4040,12 +4046,13 @@ export default function ConversationDetail({
 
               <div>
                 <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Message</label>
-                <textarea
+                <RichTextEditor
                   value={replyModalBody}
-                  onChange={(e) => setReplyModalBody(e.target.value)}
+                  onChange={setReplyModalBody}
                   placeholder="Type your reply..."
-                  rows={14}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none resize-y"
+                  minHeight={260}
+                  signature={replySignature}
+                  onAIDraft={() => { setAiDraftTarget("replyModal"); setShowAIDraftModal(true); }}
                 />
               </div>
             </div>
@@ -4134,13 +4141,30 @@ export default function ConversationDetail({
             .split(/\n{2,}/)
             .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p><p><br></p>`)
             .join("");
-          // Insert into the reply editor — preserve any existing draft by appending
-          if (replyText && replyText.trim()) {
-            setReplyText(replyText + "<p></p>" + htmlToInsert);
+
+          // Route to whichever compose surface opened the AI Draft modal.
+          // Each surface preserves any existing draft by appending to it.
+          if (aiDraftTarget === "replyModal") {
+            if (replyModalBody && replyModalBody.trim()) {
+              setReplyModalBody(replyModalBody + "<p></p>" + htmlToInsert);
+            } else {
+              setReplyModalBody(htmlToInsert);
+            }
+          } else if (aiDraftTarget === "forwardModal") {
+            if (forwardBody && forwardBody.trim()) {
+              setForwardBody(forwardBody + "<p></p>" + htmlToInsert);
+            } else {
+              setForwardBody(htmlToInsert);
+            }
           } else {
-            setReplyText(htmlToInsert);
+            // Default: inline reply composer
+            if (replyText && replyText.trim()) {
+              setReplyText(replyText + "<p></p>" + htmlToInsert);
+            } else {
+              setReplyText(htmlToInsert);
+            }
+            setShowReplyEditor(true);
           }
-          setShowReplyEditor(true);
         }}
       />
 
