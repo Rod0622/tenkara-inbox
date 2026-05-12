@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { downloadAttachmentBytes } from "@/lib/attachments-storage";
 
-const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
+const MICROSOFT_PROVIDERS = ["microsoft_oauth", "microsoft", "godaddy", "outlook_com"];
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 // ─── Endpoint contract ──────────────────────────────────────────────────────

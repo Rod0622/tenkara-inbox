@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { refreshGoogleToken } from "@/lib/google-oauth";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
+import { backfillAttachmentsViaImap } from "@/lib/imap-attachment-backfill";
 
 // ─── Attachment backfill ────────────────────────────────────────────────────
 //
@@ -31,7 +32,10 @@ import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 //   • IMAP (App Password) — not yet implemented; falls through with an error
 // ────────────────────────────────────────────────────────────────────────────
 
-const MICROSOFT_PROVIDERS = ["microsoft", "godaddy", "outlook_com"];
+// Provider names actually used by the sync engine for Microsoft accounts.
+// `microsoft_oauth` is the canonical name written by the OAuth flow; the
+// other strings are kept for any legacy or alternate-tenant variants.
+const MICROSOFT_PROVIDERS = ["microsoft_oauth", "microsoft", "godaddy", "outlook_com"];
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 // Tunables. Numbers chosen so a single call can make meaningful progress
@@ -148,6 +152,19 @@ export async function POST(req: NextRequest) {
 
   stats.scanned = filtered.length;
 
+  // Diagnostic: log the shape of the first row in this batch so we can see
+  // why per-message logic might be failing in production without DB access.
+  if (filtered.length > 0) {
+    const sample = filtered[0] as any;
+    console.log("[backfill] first row shape:", {
+      id: sample.id,
+      provider_message_id: sample.provider_message_id,
+      conversation_id: sample.conversation_id,
+      conversations: sample.conversations,
+      conversations_type: Array.isArray(sample.conversations) ? "array" : typeof sample.conversations,
+    });
+  }
+
   // 3. Bulk-fetch which messages already have attachment rows so we can skip.
   const messageIds = filtered.map((m: any) => m.id);
   const { data: existingRows } = await supabase
@@ -169,7 +186,7 @@ export async function POST(req: NextRequest) {
     if (accountCache[accountId]) return accountCache[accountId];
     const { data } = await supabase
       .from("email_accounts")
-      .select("id, email, provider, oauth_refresh_token")
+      .select("id, email, provider, oauth_refresh_token, imap_host, imap_port, imap_user, imap_password, imap_tls")
       .eq("id", accountId)
       .single();
     accountCache[accountId] = data;
@@ -360,21 +377,45 @@ export async function POST(req: NextRequest) {
     }
   };
 
-  // 5. Main loop with soft time budget.
+  // 5. Pre-pass: separate IMAP-style messages from Gmail/Microsoft ones.
+  //    IMAP messages get batched per-account so we open ONE IMAP connection
+  //    per account per chunk rather than reconnecting per message. The other
+  //    providers are HTTP-based so per-message processing is fine.
+  //
+  //    Detection: provider_message_id format is either
+  //      • "gmail:{msgId}"     → Gmail API path
+  //      • "ms:<rfc822-id>"    → Microsoft Graph path
+  //      • "{accountId-uuid}:{uid}" → legacy IMAP path (UUID followed by colon and integer)
+  //
+  //    The UUID-prefixed format is what `imap-sync.ts` writes when it goes
+  //    through the IMAP code path (used by Operations and other Gmail-OAuth
+  //    accounts that were originally synced via App Password).
+  const isImapStyle = (pmid: string): boolean => {
+    if (!pmid) return false;
+    if (pmid.startsWith("gmail:") || pmid.startsWith("ms:")) return false;
+    // {uuid}:{integer-uid}
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d+$/i.test(pmid);
+  };
+
+  type ImapBucketMsg = {
+    msgRow: any;       // The original message row from DB
+    uid: number;
+  };
+  const imapBuckets: Record<string, ImapBucketMsg[]> = {}; // keyed by accountId
+
+  // Time-bounded loop guard reused across phases.
   let bailedOnTime = false;
+  const timeIsUp = () => Date.now() - startedAt > SOFT_TIME_BUDGET_MS;
+
+  // First pass: route each message either into the IMAP bucket or into the
+  // synchronous per-message handler. We do the Gmail/Microsoft work inline
+  // (since each call is fast HTTP), then circle back for IMAP at the end.
   for (const msg of toProcess) {
-    // Soft cutoff: stop accepting new work once we've burned 240s. The UI
-    // will call back to resume; the dedup query at the top of the next call
-    // makes this naturally idempotent.
-    if (Date.now() - startedAt > SOFT_TIME_BUDGET_MS) {
-      bailedOnTime = true;
-      break;
-    }
+    if (timeIsUp()) { bailedOnTime = true; break; }
 
     stats.messagesProcessed++;
     // PostgREST's embedded relation can come back as either an object or a
-    // single-element array depending on the join modifier and the client's
-    // typing. Defensively normalize both shapes.
+    // single-element array. Defensively normalize.
     const convoRow: any = Array.isArray((msg as any).conversations)
       ? (msg as any).conversations[0]
       : (msg as any).conversations;
@@ -393,22 +434,28 @@ export async function POST(req: NextRequest) {
     const providerMsgId: string = msg.provider_message_id || "";
 
     // Track whether the provider walk produced ANY attachment rows for this
-    // message AND ran cleanly (no errors). If we successfully scanned the
-    // message, found zero rows, and threw no errors, the
-    // `has_attachments=true` flag was a false positive from sync (most
-    // commonly: a signature image that the provider doesn't expose as an
-    // attachment-eligible part). We flip the flag off so the UI's
-    // "not yet captured" banner stops showing for signature-only threads.
-    //
-    // CRITICAL: we MUST NOT flip the flag if the walk had errors — otherwise
-    // a transient Gmail/Graph fetch failure would silently mark the message
-    // as "no attachments" and erase the user-visible signal that this needs
-    // another backfill pass.
+    // message AND ran cleanly. If we successfully scanned and found zero
+    // rows, the `has_attachments=true` flag was a false positive.
     let scannedSuccessfully = false;
     const attachmentsBefore = stats.attachmentsUploaded + stats.attachmentsSkipped;
     const errorsBefore = stats.errors.length;
 
-    // ── Gmail OAuth ──
+    // ── IMAP-style (legacy Gmail / generic IMAP) ──
+    // Defer to the batched IMAP pass after this loop.
+    if (isImapStyle(providerMsgId)) {
+      const uidStr = providerMsgId.split(":")[1];
+      const uid = parseInt(uidStr, 10);
+      if (Number.isNaN(uid)) {
+        stats.errors.push({ message_id: msg.id, reason: "IMAP UID parse failed" });
+        continue;
+      }
+      if (!imapBuckets[accountId]) imapBuckets[accountId] = [];
+      imapBuckets[accountId].push({ msgRow: msg, uid });
+      // No false-positive flip here — it happens after the batched IMAP call.
+      continue;
+    }
+
+    // ── Gmail OAuth (modern API path: "gmail:{msgId}") ──
     if (account.provider === "google_oauth" && providerMsgId.startsWith("gmail:")) {
       const token = await getGmailToken(accountId);
       if (!token) {
@@ -439,20 +486,19 @@ export async function POST(req: NextRequest) {
         stats.errors.push({ message_id: msg.id, reason: `Graph exception: ${e?.message || "unknown"}` });
       }
     }
-    // ── Unsupported provider (e.g. raw IMAP) ──
+    // ── Genuinely unsupported (e.g. unknown providerMsgId shape) ──
     else {
       stats.errors.push({
         message_id: msg.id,
-        reason: `Backfill not yet implemented for provider="${account.provider}"`,
+        reason: `Unrecognized provider="${account.provider}" pmid_prefix="${providerMsgId.split(":")[0] || "(empty)"}"`,
       });
-      continue; // Don't touch the flag for providers we haven't built yet.
+      continue;
     }
 
-    // False-positive cleanup. Only flip has_attachments=false when:
-    //   1. The scan ran without throwing (scannedSuccessfully)
-    //   2. The walk uploaded nothing (no new uploads or dedup skips)
-    //   3. The walk pushed no errors (so we're not papering over a fetch fail)
-    // This three-way check ensures we only clear the flag on clean negatives.
+    // False-positive cleanup for Gmail/Microsoft. Only flip the flag when:
+    //   1. The scan ran without throwing
+    //   2. The walk uploaded nothing
+    //   3. The walk pushed no errors
     if (scannedSuccessfully) {
       const attachmentsAfter = stats.attachmentsUploaded + stats.attachmentsSkipped;
       const errorsAfter = stats.errors.length;
@@ -465,6 +511,111 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 6. Second pass: process IMAP buckets, one connection per account.
+  //    Each bucket gets a single IMAP session that fetches ALL of that
+  //    account's UIDs in one round-trip — much cheaper than reconnecting
+  //    per message.
+  for (const accountId of Object.keys(imapBuckets)) {
+    if (timeIsUp()) { bailedOnTime = true; break; }
+    const bucket = imapBuckets[accountId];
+    if (bucket.length === 0) continue;
+    const account = await getAccount(accountId);
+    if (!account) {
+      for (const item of bucket) {
+        stats.errors.push({ message_id: item.msgRow.id, reason: "Account not found (IMAP batch)" });
+      }
+      continue;
+    }
+
+    const before = {
+      uploads: stats.attachmentsUploaded,
+      skips: stats.attachmentsSkipped,
+      errors: stats.errors.length,
+    };
+
+    try {
+      const r = await backfillAttachmentsViaImap(
+        supabase,
+        {
+          id: account.id,
+          email: account.email,
+          imap_host: account.imap_host,
+          imap_port: account.imap_port,
+          imap_user: account.imap_user,
+          imap_password: account.imap_password,
+          imap_tls: account.imap_tls,
+        },
+        {
+          accountId,
+          messages: bucket.map((b) => ({ messageRowId: b.msgRow.id, uid: b.uid })),
+        }
+      );
+      stats.attachmentsUploaded += r.uploadedCount;
+      stats.attachmentsSkipped += r.skippedCount;
+
+      // Per-message status → flag-clean and error tracking
+      for (const item of bucket) {
+        const st = r.status[item.msgRow.id];
+        if (st === "ok") {
+          // Clear false-positive flag only when this specific message added
+          // no new uploads/skips AND no errors got pushed for it.
+          const reason = r.errorReasons[item.msgRow.id];
+          if (!reason) {
+            // Check: did THIS message contribute uploads? We can't tell
+            // per-message from aggregate counters, so a simpler rule:
+            // if the overall bucket added 0 new uploads/skips AND 0 errors,
+            // every message in the bucket is a false positive. Otherwise
+            // we leave the flag alone (a bit conservative but safe).
+          }
+        } else if (st === "not_found") {
+          // UID no longer on the server — message was deleted from the
+          // mailbox after we synced it. Flag is no longer meaningful.
+          await supabase
+            .from("messages")
+            .update({ has_attachments: false })
+            .eq("id", item.msgRow.id);
+        } else if (st === "error") {
+          stats.errors.push({
+            message_id: item.msgRow.id,
+            reason: `IMAP backfill: ${r.errorReasons[item.msgRow.id] || "unknown"}`,
+          });
+        }
+      }
+
+      // Bucket-wide false-positive cleanup: if NOTHING was uploaded or
+      // errored for the whole batch, every message was a clean negative
+      // and we can flip their flags off in one batch update.
+      const after = {
+        uploads: stats.attachmentsUploaded,
+        skips: stats.attachmentsSkipped,
+        errors: stats.errors.length,
+      };
+      if (
+        after.uploads === before.uploads &&
+        after.skips === before.skips &&
+        after.errors === before.errors
+      ) {
+        const okIds = bucket
+          .filter((b) => r.status[b.msgRow.id] === "ok")
+          .map((b) => b.msgRow.id);
+        if (okIds.length > 0) {
+          await supabase
+            .from("messages")
+            .update({ has_attachments: false })
+            .in("id", okIds);
+        }
+      }
+    } catch (e: any) {
+      // Connection-level catastrophe.
+      for (const item of bucket) {
+        stats.errors.push({
+          message_id: item.msgRow.id,
+          reason: `IMAP batch failed: ${e?.message || "unknown"}`,
+        });
+      }
+    }
+  }
+
   // 6. Tell the caller whether they should call again.
   // `done` is true when we processed everything we considered AND we didn't
   // bail on time. If we bailed on time, more might be left even at this scan
@@ -472,10 +623,38 @@ export async function POST(req: NextRequest) {
   const remaining = Math.max(0, toProcess.length - stats.messagesProcessed);
   const done = !bailedOnTime && remaining === 0;
 
-  return NextResponse.json<BackfillResponse>({
+  // Aggregate error reasons so the UI / Vercel log can show WHAT failed,
+  // not just how many. Without this, "500 errors" is unactionable.
+  const errorCounts: Record<string, number> = {};
+  for (const e of stats.errors) {
+    // Group by the broad reason (strip dynamic parts like message IDs).
+    const reason = e.reason.split(":")[0].slice(0, 80);
+    errorCounts[reason] = (errorCounts[reason] || 0) + 1;
+  }
+  const topErrorReasons = Object.entries(errorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([reason, count]) => `${count}× ${reason}`);
+
+  // Log to Vercel so we have visibility even when the UI just shows counts.
+  console.log("[backfill] result:", {
+    accountIdParam,
+    conversationId,
+    scanned: stats.scanned,
+    messagesProcessed: stats.messagesProcessed,
+    uploaded: stats.attachmentsUploaded,
+    skipped: stats.attachmentsSkipped,
+    errorCount: stats.errors.length,
+    topErrorReasons,
+    bailedOnTime,
+    done,
+  });
+
+  return NextResponse.json<BackfillResponse & { topErrors?: string[] }>({
     ok: true,
     stats,
     done,
     remaining,
+    topErrors: topErrorReasons,
   });
 }
