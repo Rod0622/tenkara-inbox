@@ -549,7 +549,13 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
           [accountId]: `Chunk ${chunkIndex}: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors`,
         }));
 
-        if (data.done) {
+        // Stop when this chunk made zero progress (no candidates returned
+        // at all). Server's `done` flag can fire prematurely if PostgREST
+        // returned fewer candidates than asked-for — we don't trust it on
+        // its own.
+        const chunkProgress = (data.refreshed || 0) + (data.unchanged || 0);
+        const noMoreToDo = data.done && chunkProgress === 0;
+        if (noMoreToDo) {
           setRefreshBodyResult((r) => ({
             ...r,
             [accountId]: `Done: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors`,

@@ -201,7 +201,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    result.done = result.scanned < limit;  // If we hit the limit, there may be more
+    // 'done' is true when PostgREST itself returned fewer rows than asked
+    // for — that's the signal we've exhausted the candidate set. The
+    // post-filter `result.scanned` count is always <= candidates and isn't
+    // a reliable termination signal: a chunk with 100 candidates but only
+    // 50 actually-truncated would incorrectly look "done" using scanned.
+    const candidatesReturned = candidates?.length || 0;
+    result.done = candidatesReturned < limit;
     return NextResponse.json(result);
   } catch (fatal: any) {
     console.error("[refresh-body] fatal:", fatal);
