@@ -624,11 +624,12 @@ export async function POST(req: NextRequest) {
   const done = !bailedOnTime && remaining === 0;
 
   // Aggregate error reasons so the UI / Vercel log can show WHAT failed,
-  // not just how many. Without this, "500 errors" is unactionable.
+  // not just how many. Group by the first 120 chars so the IMAP/Graph
+  // exception detail is preserved — previously we truncated at the first
+  // colon which threw away exactly the useful part.
   const errorCounts: Record<string, number> = {};
   for (const e of stats.errors) {
-    // Group by the broad reason (strip dynamic parts like message IDs).
-    const reason = e.reason.split(":")[0].slice(0, 80);
+    const reason = e.reason.slice(0, 120);
     errorCounts[reason] = (errorCounts[reason] || 0) + 1;
   }
   const topErrorReasons = Object.entries(errorCounts)
@@ -636,7 +637,8 @@ export async function POST(req: NextRequest) {
     .slice(0, 5)
     .map(([reason, count]) => `${count}× ${reason}`);
 
-  // Log to Vercel so we have visibility even when the UI just shows counts.
+  // Also dump the first 3 raw errors so we can see exactly what's failing
+  // when a single category dominates.
   console.log("[backfill] result:", {
     accountIdParam,
     conversationId,
@@ -646,6 +648,7 @@ export async function POST(req: NextRequest) {
     skipped: stats.attachmentsSkipped,
     errorCount: stats.errors.length,
     topErrorReasons,
+    firstThreeErrors: stats.errors.slice(0, 3),
     bailedOnTime,
     done,
   });

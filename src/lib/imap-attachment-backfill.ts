@@ -73,12 +73,23 @@ export async function backfillAttachmentsViaImap(
 
   if (request.messages.length === 0) return result;
   if (!account.imap_password) {
+    console.warn("[imap-backfill] no imap_password on account", account.email);
     for (const m of request.messages) {
       result.status[m.messageRowId] = "error";
       result.errorReasons[m.messageRowId] = "Account has no IMAP password";
     }
     return result;
   }
+
+  console.log("[imap-backfill] starting", {
+    account: account.email,
+    host: account.imap_host,
+    port: account.imap_port || 993,
+    user: account.imap_user || account.email,
+    tls: account.imap_tls !== false,
+    messageCount: request.messages.length,
+    firstFewUids: request.messages.slice(0, 3).map((m) => m.uid),
+  });
 
   // Build a lookup so we can map UID → messageRowId quickly during fetch.
   const uidToRowId = new Map<number, string>();
@@ -113,6 +124,16 @@ export async function backfillAttachmentsViaImap(
     const imap = new Imap(imapConfig);
 
     imap.once("error", (err: any) => {
+      // Log raw error so we can see the actual reason in Vercel logs.
+      console.error("[imap-backfill] connection error:", {
+        account: account.email,
+        host: account.imap_host,
+        user: imapConfig.user,
+        err_message: err?.message,
+        err_source: err?.source,
+        err_type: err?.type,
+        err_code: err?.code,
+      });
       // Connection-level error: every requested UID gets marked errored.
       for (const m of request.messages) {
         if (!result.status[m.messageRowId]) {
