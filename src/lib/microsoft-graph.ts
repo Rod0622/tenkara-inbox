@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/supabase";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -367,7 +368,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               subject: subj,
               from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
               from_email: email.from?.emailAddress?.address || "",
-              preview: (email.bodyPreview || "").slice(0, 200),
+              preview: decodeEmailText(email.bodyPreview || "").slice(0, 200),
               is_unread: !isOutbound, status: "open",
               last_message_at: email.receivedDateTime || new Date().toISOString(),
             }).select("id").single();
@@ -381,7 +382,16 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           }
 
           const emailBodyHtml = email.body?.contentType === "html" ? email.body.content : null;
-          const bodyText = emailBodyHtml ? emailBodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : (email.bodyPreview || "");
+          // Decode entities in body text. Two cases:
+          //   1. HTML email: we strip tags and collapse whitespace, then
+          //      decode entities (the stripped HTML often contains
+          //      &nbsp; &amp; &#39; etc.).
+          //   2. No HTML: fall back to bodyPreview, which Graph also
+          //      delivers entity-encoded.
+          const rawBodyText = emailBodyHtml
+            ? emailBodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+            : (email.bodyPreview || "");
+          const bodyText = decodeEmailTextPreserveNewlines(rawBodyText);
           const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
           const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
@@ -400,7 +410,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           if (me) { result.errors.push(me.message); continue; }
 
           const convoUpdate: any = {
-            preview: (email.bodyPreview || bodyText).slice(0, 200),
+            preview: decodeEmailText(email.bodyPreview || bodyText).slice(0, 200),
             last_message_at: email.receivedDateTime || new Date().toISOString(),
             is_unread: !isOutbound,
           };

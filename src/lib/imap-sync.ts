@@ -5,6 +5,7 @@ import { runRulesForMessage } from "@/lib/rule-engine";
 import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
+import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -243,7 +244,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             const toAddresses = headers.to || "";
             const ccAddresses = headers.cc || "";
             const subject = headers.subject || "(No Subject)";
-            const snippet = msgData.snippet || "";
+            // Gmail's snippet field arrives HTML-entity-encoded (&#39; for
+            // apostrophes, &nbsp; for spaces, etc.). Decode once at the
+            // source so every downstream use (preview, snippet, body
+            // fallback) renders correctly in the UI.
+            const snippet = decodeEmailText(msgData.snippet || "");
             const sentAt = headers.date ? new Date(headers.date).toISOString() : new Date(parseInt(msgData.internalDate)).toISOString();
             const hasAttachments = (msgData.payload?.parts || []).some((p: any) => p.filename && p.filename.length > 0);
 
@@ -267,7 +272,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             };
             const extracted = extractBody(msgData.payload || {});
             const bodyHtml = extracted.html || null;
-            const bodyText = extracted.text || snippet;
+            // Decode HTML entities in body text. The text/plain part of an
+            // HTML email often has its own entity encoding (sometimes
+            // double-encoded), and even when it's true plaintext, decoding
+            // a non-entity-containing string is a no-op.
+            const bodyText = decodeEmailTextPreserveNewlines(extracted.text || snippet);
 
             // Check Gmail labels for category filtering
             const labels: string[] = msgData.labelIds || [];
@@ -404,7 +413,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                       filename: p.filename || fallbackName,
                       contentType: p.mimeType || "application/octet-stream",
                       size: typeof p.body?.size === "number" ? p.body.size : buf.length,
-                      isInline: disposition.startsWith("inline") || !!contentId,
+                      // Disposition is authoritative for "inline." A
+                      // Content-ID alone doesn't mean inline — Outlook and
+                      // Graph routinely set Content-ID on regular file
+                      // attachments. See longer comment in the IMAP path.
+                      isInline: disposition.startsWith("inline"),
                       contentId,
                       checksum: null,
                       content: buf,
@@ -868,10 +881,13 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
     filename: String(a.filename || a.cid || "attachment").slice(0, 240),
     contentType: String(a.contentType || "application/octet-stream"),
     size: typeof a.size === "number" ? a.size : (Buffer.isBuffer(a.content) ? a.content.length : 0),
-    // mailparser sets contentDisposition='inline' for cid: images. Treat both
-    // explicit disposition and the presence of cid as inline so the UI can
-    // hide them from the attachment list by default.
-    isInline: a.contentDisposition === "inline" || !!a.cid,
+    // mailparser sets contentDisposition='inline' for body-rendered parts.
+    // Disposition is the AUTHORITATIVE signal for "this is inline content,
+    // not a downloadable attachment." A Content-ID alone is NOT enough —
+    // many clients (Outlook, Microsoft Graph) attach Content-ID headers to
+    // ordinary downloadable attachments. Treating those as inline causes
+    // legitimate PDFs/spreadsheets to be hidden from the attachment list.
+    isInline: a.contentDisposition === "inline",
     contentId: a.cid || a.contentId || null,
     checksum: a.checksum || null,
     content: Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content || ""),
