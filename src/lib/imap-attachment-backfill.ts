@@ -18,14 +18,14 @@ import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 //   `UID FETCH` the raw body to re-parse.
 //
 // Authentication priority:
-//   1. xoauth2Token (Google OAuth → raw access token) — preferred, since
-//      App Passwords get invalidated when OAuth is set up on the account.
-//      node-imap takes the raw access token and handles the SASL framing
-//      ("user=…\x01auth=Bearer …\x01\x01" + base64) internally. Do NOT
-//      pre-encode — that would cause a silent connection hang on Gmail.
+//   1. xoauth2Token (Google OAuth → pre-built SASL XOAUTH2 string) —
+//      preferred, since App Passwords get invalidated when OAuth is set up
+//      on the account. Per node-imap's documented config, the `xoauth2`
+//      field takes the BASE64-ENCODED SASL string, NOT the raw access
+//      token. Use buildXOAuth2Token(email, accessToken) to produce it.
 //   2. imap_password (legacy App Password) — fallback only.
-//   The route handler is responsible for refreshing the OAuth access token
-//   and passing the access-token string in via `xoauth2Token`.
+//   The route handler is responsible for refreshing the OAuth access token,
+//   building the SASL string, and passing it as `xoauth2Token`.
 //
 // Connection lifecycle:
 //   • One IMAP connection per chunk of work (don't reconnect per message)
@@ -43,10 +43,11 @@ export interface ImapAccount {
   imap_user?: string | null;
   imap_password: string | null;
   imap_tls?: boolean | null;
-  // The raw Google OAuth access token (NOT a pre-built SASL string).
-  // When set, takes precedence over imap_password. node-imap will build the
-  // XOAUTH2 SASL response ("user=…\x01auth=Bearer …\x01\x01" + base64) from
-  // this access token plus the `user` field.
+  // The pre-built base64-encoded SASL XOAUTH2 string (NOT the raw access
+  // token). When set, takes precedence over imap_password.
+  //
+  // Build it via buildXOAuth2Token(email, accessToken), which produces:
+  //   base64("user=" + email + "\x01auth=Bearer " + accessToken + "\x01\x01")
   xoauth2Token?: string | null;
 }
 
@@ -140,17 +141,20 @@ export async function backfillAttachmentsViaImap(
       connTimeout: 15000,
       authTimeout: 15000,
     };
-    // Prefer OAuth (raw access token via XOAUTH2 SASL) when we have it.
-    // App Passwords are unreliable for Gmail accounts once OAuth is set up
-    // — Google often invalidates them. The route handler refreshes the
-    // OAuth access token and passes it via xoauth2Token.
+    // OAuth via SASL XOAUTH2 when we have it. App Passwords are unreliable
+    // for Gmail accounts once OAuth is set up — Google often invalidates
+    // them.
     //
-    // We set BOTH `xoauth2` and `xoauth` config keys because different
-    // versions of node-imap look for different field names — matches what
-    // the live sync code does.
+    // Per node-imap's documented config:
+    //   "xoauth2 - string - Base64-encoded OAuth2 token for The SASL XOAUTH2
+    //    Mechanism"
+    // So this field takes the pre-built SASL string from buildXOAuth2Token,
+    // NOT the raw access token. (The library does NOT do the encoding for
+    // you — that's what the `xoauth` field does, but `xoauth` is XOAUTH1,
+    // a totally different and obsolete mechanism. Setting `xoauth` here
+    // would make Gmail receive a malformed SASL argument.)
     if (account.xoauth2Token) {
       imapConfig.xoauth2 = account.xoauth2Token;
-      imapConfig.xoauth = account.xoauth2Token;
     } else {
       imapConfig.password = account.imap_password;
     }

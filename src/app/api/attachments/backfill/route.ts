@@ -6,7 +6,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { refreshGoogleToken } from "@/lib/google-oauth";
+import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 import { backfillAttachmentsViaImap } from "@/lib/imap-attachment-backfill";
 
@@ -533,22 +533,22 @@ export async function POST(req: NextRequest) {
       errors: stats.errors.length,
     };
 
-    // Build the XOAUTH2 access token for Gmail OAuth accounts. App Passwords
+    // Build the XOAUTH2 SASL string for Gmail OAuth accounts. App Passwords
     // get invalidated when an account is reconnected via OAuth, so when both
     // credentials exist we prefer OAuth — and for accounts that only have
     // OAuth (no App Password), it's the only option.
     //
-    // CRITICAL: node-imap's `xoauth2` config option takes the RAW access
-    // token. The library handles the "user=...\x01auth=Bearer ...\x01\x01"
-    // SASL framing and base64 encoding itself. Passing a pre-encoded SASL
-    // string causes double-encoding and a silent connection hang (server
-    // sends "+ ready for auth response", we send garbage, server waits
-    // forever for retry).
+    // node-imap docs (https://www.npmjs.com/package/node-imap):
+    //   "xoauth2 - string - Base64-encoded OAuth2 token for The SASL XOAUTH2
+    //    Mechanism"
+    // i.e. the library expects the PRE-BUILT, base64-encoded SASL string —
+    //   base64("user=" + email + "\x01auth=Bearer " + accessToken + "\x01\x01")
+    // NOT the raw access token. buildXOAuth2Token() does this encoding.
     let xoauth2Token: string | null = null;
     if (account.provider === "google_oauth" && account.oauth_refresh_token) {
       try {
         const accessToken = await refreshGoogleToken(accountId, false);
-        xoauth2Token = accessToken;
+        xoauth2Token = buildXOAuth2Token(account.email, accessToken);
       } catch (refreshErr: any) {
         // Fall back to App Password if refresh fails. If both fail, the
         // helper itself surfaces the credentials error.
