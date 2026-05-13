@@ -926,20 +926,19 @@ export default function ConversationList({
                     {/* Subject */}
                     <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
                       {/*
-                        Paperclip indicator: only show when there's at least one
-                        REAL (non-inline) attachment row for the thread. We
-                        intentionally do NOT key off has_attachments here —
-                        that field is a "sync said maybe" hint and can be true
-                        for threads that only contain signature inlines.
-                        attachment_count is a trigger-maintained column on
-                        conversations that counts non-inline attachment rows.
-                        Tenkara gold (accent) at 13px — visible but not loud.
+                        Paperclip indicator. Shows when EITHER the
+                        trigger-maintained attachment_count is positive OR
+                        the legacy has_attachments flag is true. Belt and
+                        suspenders: covers backfilled threads (count > 0)
+                        AND newly-arrived messages that haven't had their
+                        attachments captured yet (flag is true even if
+                        count is still 0). Tenkara gold at 13px.
                       */}
-                      {((c as any).attachment_count ?? 0) > 0 && (
+                      {(((c as any).attachment_count ?? 0) > 0 || (c as any).has_attachments) && (
                         <Paperclip
                           size={13}
                           className="text-[var(--accent)] flex-shrink-0"
-                          aria-label={`${(c as any).attachment_count} attachment${(c as any).attachment_count === 1 ? "" : "s"}`}
+                          aria-label="Has attachment"
                         />
                       )}
                       <span className="truncate">{searchQuery.trim().length >= 2 ? highlightText(c.subject, searchQuery) : c.subject}</span>
