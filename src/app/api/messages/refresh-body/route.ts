@@ -50,6 +50,7 @@ interface RefreshResult {
   unchanged: number;
   errors: { message_id: string; reason: string }[];
   done: boolean;
+  nextOffset?: number;
   error?: string;
 }
 
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
 
   const accountIdParam: string | null = body?.account_id || null;
   const singleMessageId: string | null = body?.message_id || null;
+  const offsetParam: number = Math.max(0, parseInt(String(body?.offset || "0"), 10) || 0);
   const limit = Math.min(
     Math.max(parseInt(String(body?.limit || "100"), 10) || 100, 1),
     MAX_MESSAGES_PER_CALL
@@ -76,16 +78,17 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    // 1. Find candidate messages: body_html IS NULL AND body_text is short
-    //    AND provider is Gmail OAuth (only path we can re-fetch from).
-    //    Also restrict to single-message override or account scope.
+    // 1. Find candidate messages: body_html IS NULL AND provider is Gmail.
+    //    Apply offset-based pagination so successive chunks scan DIFFERENT
+    //    rows. Without this, when many candidates fail the client-side
+    //    "body_text < 250" filter, the same rows return forever.
     let query = supabase
       .from("messages")
       .select("id, provider_message_id, body_text, conversation_id, conversations!inner(email_account_id, email_accounts!inner(provider))")
       .like("provider_message_id", "gmail:%")
       .is("body_html", null)
       .order("sent_at", { ascending: false })
-      .limit(limit);
+      .range(offsetParam, offsetParam + limit - 1);
 
     if (singleMessageId) {
       query = query.eq("id", singleMessageId);
@@ -108,8 +111,14 @@ export async function POST(req: NextRequest) {
     );
     result.scanned = toProcess.length;
 
+    const candidatesReturned = candidates?.length || 0;
+
     if (toProcess.length === 0) {
-      result.done = true;
+      // No messages to process in this offset window, but there may be more
+      // beyond it. Advance offset for the next chunk; only set done if
+      // PostgREST also returned fewer than the limit.
+      result.nextOffset = offsetParam + candidatesReturned;
+      result.done = candidatesReturned < limit;
       return NextResponse.json(result);
     }
 
@@ -206,9 +215,38 @@ export async function POST(req: NextRequest) {
     // post-filter `result.scanned` count is always <= candidates and isn't
     // a reliable termination signal: a chunk with 100 candidates but only
     // 50 actually-truncated would incorrectly look "done" using scanned.
-    const candidatesReturned = candidates?.length || 0;
+    // 'done' is true when PostgREST itself returned fewer rows than asked
+    // for — that's the signal we've exhausted the candidate set.
     result.done = candidatesReturned < limit;
-    return NextResponse.json(result);
+    // The next chunk should start AFTER everything this chunk just looked at,
+    // regardless of whether we refreshed/skipped/errored each one. This is
+    // what prevents the same 100 candidates from coming back forever when
+    // most of them are dropped by the client-side body_text filter.
+    result.nextOffset = offsetParam + candidatesReturned;
+
+    // Log a summary so we can diagnose unexpected error rates from Vercel logs.
+    const errorReasonCounts: Record<string, number> = {};
+    for (const e of result.errors) {
+      errorReasonCounts[e.reason] = (errorReasonCounts[e.reason] || 0) + 1;
+    }
+    const topErrors = Object.entries(errorReasonCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([reason, count]) => `${count}× ${reason}`);
+    console.log("[refresh-body] result:", {
+      accountIdParam,
+      offset: offsetParam,
+      candidatesReturned,
+      scanned: result.scanned,
+      refreshed: result.refreshed,
+      unchanged: result.unchanged,
+      errors: result.errors.length,
+      topErrors,
+      done: result.done,
+      nextOffset: result.nextOffset,
+    });
+
+    return NextResponse.json({ ...result, topErrors });
   } catch (fatal: any) {
     console.error("[refresh-body] fatal:", fatal);
     return NextResponse.json<RefreshResult>({

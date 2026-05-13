@@ -498,6 +498,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
     let totalUnchanged = 0;
     let totalErrors = 0;
     let chunkIndex = 0;
+    let nextOffset = 0;
     const MAX_CHUNKS = 120;
 
     try {
@@ -508,7 +509,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
           res = await fetch("/api/messages/refresh-body", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account_id: accountId, limit: 100 }),
+            body: JSON.stringify({ account_id: accountId, limit: 100, offset: nextOffset }),
           });
         } catch (netErr: any) {
           setRefreshBodyResult((r) => ({
@@ -543,16 +544,20 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         totalRefreshed += data.refreshed || 0;
         totalUnchanged += data.unchanged || 0;
         totalErrors += (data.errors?.length || 0);
+        if (typeof data.nextOffset === "number") {
+          nextOffset = data.nextOffset;
+        }
 
         setRefreshBodyResult((r) => ({
           ...r,
           [accountId]: `Chunk ${chunkIndex}: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors`,
         }));
 
-        // Stop when this chunk made zero progress (no candidates returned
-        // at all). Server's `done` flag can fire prematurely if PostgREST
-        // returned fewer candidates than asked-for — we don't trust it on
-        // its own.
+        // Stop when this chunk made zero progress AND PostgREST signaled
+        // it returned fewer rows than asked for (i.e. we've reached the end
+        // of the table). Server's `done` flag alone isn't enough — we also
+        // require zero successful processing this chunk, otherwise a single
+        // window of all-failing messages would short-circuit the loop.
         const chunkProgress = (data.refreshed || 0) + (data.unchanged || 0);
         const noMoreToDo = data.done && chunkProgress === 0;
         if (noMoreToDo) {
