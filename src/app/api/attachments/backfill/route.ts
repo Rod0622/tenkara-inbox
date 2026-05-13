@@ -486,12 +486,25 @@ export async function POST(req: NextRequest) {
         stats.errors.push({ message_id: msg.id, reason: `Graph exception: ${e?.message || "unknown"}` });
       }
     }
-    // ── Genuinely unsupported (e.g. unknown providerMsgId shape) ──
+    // ── Genuinely unsupported (unknown providerMsgId shape) ──
+    // We don't know how to fetch this message's attachments. Logging an
+    // error per-call would cause the auto-resume UI loop to spin forever
+    // since these messages stay at the head of the oldest-first queue.
+    // Best we can do is flip has_attachments=false so they drop out of the
+    // candidate set going forward. The UI's "not yet captured" banner will
+    // also disappear for these messages. Real loss of attachment data here
+    // is unlikely — these IDs were almost certainly produced by an
+    // experimental/older sync path and the original attachments would
+    // need a different recovery route (e.g. import from a Gmail Takeout).
     else {
       stats.errors.push({
         message_id: msg.id,
-        reason: `Unrecognized provider="${account.provider}" pmid_prefix="${providerMsgId.split(":")[0] || "(empty)"}"`,
+        reason: `Unrecognized provider="${account.provider}" pmid_prefix="${providerMsgId.split(":")[0] || "(empty)"}" — marking has_attachments=false to skip in future scans`,
       });
+      await supabase
+        .from("messages")
+        .update({ has_attachments: false })
+        .eq("id", msg.id);
       continue;
     }
 
