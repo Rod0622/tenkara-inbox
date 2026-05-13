@@ -643,12 +643,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 6. Tell the caller whether they should call again.
-  // `done` is true when we processed everything we considered AND we didn't
-  // bail on time. If we bailed on time, more might be left even at this scan
-  // window — the next call will re-query and find them.
-  const remaining = Math.max(0, toProcess.length - stats.messagesProcessed);
-  const done = !bailedOnTime && remaining === 0;
+  // 7. Tell the caller whether they should call again.
+  //
+  // Semantics: `done: true` means "the ACCOUNT is fully drained, stop calling".
+  // `done: false` means "there might be more work — call us again".
+  //
+  // Earlier this returned `done: true` whenever we happened to finish a
+  // chunk's `toProcess` list, but that's the wrong unit of work. Each
+  // chunk only LOOKS AT 500 rows from the query — there can be thousands
+  // more rows in the table that we haven't even queried yet. The auto-resume
+  // UI loop needs to keep calling until the QUERY itself returns nothing.
+  //
+  // Rule:
+  //   • If we got 0 candidate messages from the query → genuinely nothing
+  //     left to do for this account → done.
+  //   • If we bailed on the soft time budget → not done; resume.
+  //   • Otherwise we processed real work this chunk; the next call should
+  //     re-query and either find more work or come back empty → not done.
+  const accountFullyDrained = stats.scanned === 0;
+  const done = !bailedOnTime && accountFullyDrained;
+  const remaining = bailedOnTime
+    ? Math.max(0, toProcess.length - stats.messagesProcessed)
+    : (accountFullyDrained ? 0 : -1); // -1 signals "unknown but more likely"
 
   // Aggregate error reasons so the UI / Vercel log can show WHAT failed,
   // not just how many. Group by the first 120 chars so the IMAP/Graph
