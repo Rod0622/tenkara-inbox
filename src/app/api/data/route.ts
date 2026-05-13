@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     if (dataset === "all" || dataset === "conversations") {
       let q = supabase
         .from("conversations")
-        .select("id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, has_attachments, last_message_at, created_at, updated_at, assignee:team_members!conversations_assignee_id_fkey(id, name, email, department, role), labels:conversation_labels(label_id, label:labels(id, name, color, bg_color)), email_account:email_accounts(id, name, email)", { count: "exact" })
+        .select("id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, has_attachments, attachment_count, last_message_at, created_at, updated_at, assignee:team_members!conversations_assignee_id_fkey(id, name, email, department, role), labels:conversation_labels(label_id, label:labels(id, name, color, bg_color)), email_account:email_accounts(id, name, email)", { count: "exact" })
         .neq("status", "trash")
         .order("last_message_at", { ascending: false })
         .range(offset, offset + limit - 1);
