@@ -376,7 +376,10 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
     let totalErrors = 0;
     let chunkIndex = 0;
     // Safety cap so a server bug can't trap the user in an infinite loop.
-    const MAX_CHUNKS = 40;
+    // 120 chunks × ~245s ≈ 8 hours wall clock — more than enough to drain
+    // the largest accounts (Bobber Labs at ~23k attachments) in one click,
+    // while still bounded if something goes wrong server-side.
+    const MAX_CHUNKS = 120;
 
     try {
       while (chunkIndex < MAX_CHUNKS) {

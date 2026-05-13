@@ -375,16 +375,44 @@ export async function POST(req: NextRequest) {
     token: string,
   ) => {
     // Strip our "ms:" prefix if present, then resolve internetMessageId → Graph id.
+    //
+    // If the value already looks like an opaque Graph ID (no '@' or '<'), we
+    // use it as-is. Otherwise we resolve via $filter on internetMessageId.
+    // CRITICAL: do NOT percent-encode the angle brackets in the filter value.
+    // Microsoft Graph's index matches the raw value, not the percent-encoded
+    // form — `encodeURIComponent('<x>')` → `%3Cx%3E` will silently return
+    // zero results. We only need to escape characters that break OData
+    // syntax: single quotes (doubled).
     const stripped = providerMsgId.replace(/^ms:/, "");
-    let graphMsgId = stripped;
-    if (stripped.includes("@") || stripped.includes("<")) {
-      const searchRes = await fetchWithTimeout(
-        `${GRAPH_BASE}/users/${accountEmail}/messages?$filter=internetMessageId eq '${encodeURIComponent(stripped)}'&$select=id`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+    const looksLikeInternetMsgId = stripped.includes("@") || stripped.includes("<");
+    let graphMsgId: string | null = looksLikeInternetMsgId ? null : stripped;
+
+    if (looksLikeInternetMsgId) {
+      // Escape single quotes by doubling them (OData v4 string escaping).
+      const odataEscaped = stripped.replace(/'/g, "''");
+      const filterExpr = `internetMessageId eq '${odataEscaped}'`;
+      const searchUrl = `${GRAPH_BASE}/users/${encodeURIComponent(accountEmail)}/messages?$filter=${encodeURIComponent(filterExpr)}&$select=id`;
+      const searchRes = await fetchWithTimeout(searchUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (searchRes.ok) {
         const sd = await searchRes.json();
         if (sd.value?.[0]?.id) graphMsgId = sd.value[0].id;
+      }
+      if (!graphMsgId) {
+        // Couldn't resolve the internetMessageId → the message no longer
+        // exists in the Microsoft mailbox (deleted, moved out, or was
+        // synced into our DB from a different source). Clear
+        // has_attachments=false so it drops out of future backfill
+        // scans, and DO NOT push an error — we don't want to keep
+        // reporting "Bad Request" on every chunk for messages that
+        // genuinely can't be recovered. The user-visible "not yet
+        // captured" banner also disappears for them.
+        await supabase
+          .from("messages")
+          .update({ has_attachments: false })
+          .eq("id", msgRowId);
+        return;
       }
     }
 
