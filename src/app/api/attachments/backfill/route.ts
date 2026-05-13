@@ -177,6 +177,25 @@ export async function POST(req: NextRequest) {
   stats.alreadyBackfilled = alreadyHave.size;
   const toProcess = filtered.filter((m: any) => !alreadyHave.has(m.id));
 
+  // Stale-flag cleanup: messages that already have attachment rows but
+  // still carry has_attachments=true are "done but mis-flagged" — typically
+  // from live sync where the flag was set before attachment capture
+  // shipped, or from a partial earlier backfill. Clearing them here keeps
+  // them out of future backfill scans and makes the UI's "not yet
+  // captured" banner stop showing for them.
+  //
+  // We do this BEFORE the main loop because if every candidate is in
+  // `alreadyHave`, `toProcess` is empty, and we'd otherwise return
+  // done=false (since scanned > 0) and the UI auto-resume loop would
+  // spin firing empty chunks until MAX_CHUNKS.
+  if (alreadyHave.size > 0) {
+    const alreadyIds = Array.from(alreadyHave);
+    await supabase
+      .from("messages")
+      .update({ has_attachments: false })
+      .in("id", alreadyIds);
+  }
+
   // 4. Caches (one fetch per account regardless of how many messages we walk).
   const accountCache: Record<string, any> = {};
   const gmailTokenCache: Record<string, string> = {};
