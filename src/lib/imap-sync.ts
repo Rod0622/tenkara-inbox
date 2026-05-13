@@ -271,12 +271,59 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               return { html, text };
             };
             const extracted = extractBody(msgData.payload || {});
-            const bodyHtml = extracted.html || null;
-            // Decode HTML entities in body text. The text/plain part of an
-            // HTML email often has its own entity encoding (sometimes
-            // double-encoded), and even when it's true plaintext, decoding
-            // a non-entity-containing string is a no-op.
-            const bodyText = decodeEmailTextPreserveNewlines(extracted.text || snippet);
+            let bodyHtml: string | null = extracted.html || null;
+            let extractedText: string = extracted.text || "";
+
+            // Some Gmail messages have a MIME structure my hand-rolled walker
+            // can't decode — typically deeply nested multipart/related inside
+            // multipart/alternative, or unusual content-transfer-encodings.
+            // When the walker comes back empty AND a real snippet exists,
+            // fall back to a second fetch using format=raw + mailparser,
+            // which handles every MIME edge case correctly. This is the
+            // same parser that handles the IMAP path, so behaviour is
+            // consistent across providers.
+            if (!extractedText && !bodyHtml && msgData.snippet) {
+              try {
+                const rawUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=raw`;
+                const rawRes = await fetch(rawUrl, {
+                  headers: { Authorization: `Bearer ${gmailToken}` },
+                });
+                if (rawRes.ok) {
+                  const rawData = await rawRes.json();
+                  if (rawData.raw) {
+                    const rawBuf = Buffer.from(rawData.raw, "base64url");
+                    const parsed = await simpleParser(rawBuf);
+                    if (parsed.text) extractedText = parsed.text;
+                    if (parsed.html && !bodyHtml) {
+                      bodyHtml = typeof parsed.html === "string" ? parsed.html : null;
+                    }
+                  }
+                }
+              } catch (rawErr: any) {
+                // Non-fatal — we'll fall through to snippet below.
+                console.warn(`[gmail-sync] raw fallback failed for ${msgId}: ${rawErr?.message}`);
+              }
+            }
+
+            // Body text fallback chain (in priority order):
+            //   1. text/plain part from MIME walker (best — pure plaintext)
+            //   2. text/plain from mailparser raw fallback (covers cases the
+            //      hand-rolled walker missed)
+            //   3. text/html stripped of tags
+            //   4. snippet (last resort — capped at ~200 chars)
+            const htmlStrippedText = bodyHtml
+              ? bodyHtml
+                  // Drop <script> and <style> blocks entirely (content too)
+                  .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+                  // Replace <br> and <p> with newlines so paragraph structure survives
+                  .replace(/<br\s*\/?>/gi, "\n")
+                  .replace(/<\/p\s*>/gi, "\n\n")
+                  // Strip remaining tags
+                  .replace(/<[^>]*>/g, " ")
+              : "";
+            const bodyText = decodeEmailTextPreserveNewlines(
+              extractedText || htmlStrippedText || snippet
+            );
 
             // Check Gmail labels for category filtering
             const labels: string[] = msgData.labelIds || [];
