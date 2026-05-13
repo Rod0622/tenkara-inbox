@@ -17,6 +17,13 @@ import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 //   (provider_message_id format "{accountId}:{uid}"), we re-open IMAP and
 //   `UID FETCH` the raw body to re-parse.
 //
+// Authentication priority:
+//   1. xoauth2Token (Google OAuth → XOAUTH2 SASL) — preferred, since
+//      App Passwords get invalidated when OAuth is set up on the account.
+//   2. imap_password (legacy App Password) — fallback only.
+//   The route handler is responsible for refreshing the OAuth access token
+//   and passing the XOAUTH2 SASL string in via `xoauth2Token`.
+//
 // Connection lifecycle:
 //   • One IMAP connection per chunk of work (don't reconnect per message)
 //   • All UIDs fetched in a single search/fetch cycle when possible
@@ -31,6 +38,10 @@ export interface ImapAccount {
   imap_user?: string | null;
   imap_password: string | null;
   imap_tls?: boolean | null;
+  // When set, takes precedence over imap_password. Format is the XOAUTH2 SASL
+  // string from buildXOAuth2Token(email, accessToken) — node-imap passes it
+  // straight through to the server's AUTHENTICATE XOAUTH2 command.
+  xoauth2Token?: string | null;
 }
 
 export interface ImapBackfillRequest {
@@ -72,11 +83,11 @@ export async function backfillAttachmentsViaImap(
   };
 
   if (request.messages.length === 0) return result;
-  if (!account.imap_password) {
-    console.warn("[imap-backfill] no imap_password on account", account.email);
+  if (!account.xoauth2Token && !account.imap_password) {
+    console.warn("[imap-backfill] no credentials on account", account.email);
     for (const m of request.messages) {
       result.status[m.messageRowId] = "error";
-      result.errorReasons[m.messageRowId] = "Account has no IMAP password";
+      result.errorReasons[m.messageRowId] = "Account has neither XOAUTH2 nor IMAP password";
     }
     return result;
   }
@@ -87,6 +98,7 @@ export async function backfillAttachmentsViaImap(
     port: account.imap_port || 993,
     user: account.imap_user || account.email,
     tls: account.imap_tls !== false,
+    authMethod: account.xoauth2Token ? "xoauth2" : "password",
     messageCount: request.messages.length,
     firstFewUids: request.messages.slice(0, 3).map((m) => m.uid),
   });
@@ -117,10 +129,18 @@ export async function backfillAttachmentsViaImap(
       port: account.imap_port || 993,
       tls: account.imap_tls !== false,
       tlsOptions: { rejectUnauthorized: false },
-      password: account.imap_password,
       connTimeout: 15000,
       authTimeout: 15000,
     };
+    // Prefer OAuth (XOAUTH2 SASL) when we have it. App Passwords are
+    // unreliable for Gmail accounts once OAuth is set up — Google often
+    // invalidates them. The route handler builds the SASL string via
+    // buildXOAuth2Token(email, accessToken) and passes it as xoauth2Token.
+    if (account.xoauth2Token) {
+      imapConfig.xoauth2 = account.xoauth2Token;
+    } else {
+      imapConfig.password = account.imap_password;
+    }
     const imap = new Imap(imapConfig);
 
     imap.once("error", (err: any) => {

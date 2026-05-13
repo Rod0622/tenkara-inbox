@@ -6,7 +6,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
-import { refreshGoogleToken } from "@/lib/google-oauth";
+import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 import { backfillAttachmentsViaImap } from "@/lib/imap-attachment-backfill";
 
@@ -533,6 +533,25 @@ export async function POST(req: NextRequest) {
       errors: stats.errors.length,
     };
 
+    // Build the XOAUTH2 SASL token for Gmail OAuth accounts. App Passwords
+    // get invalidated when an account is reconnected via OAuth, so when both
+    // credentials exist we prefer OAuth — and for accounts that only have
+    // OAuth (no App Password), it's the only option.
+    let xoauth2Token: string | null = null;
+    if (account.provider === "google_oauth" && account.oauth_refresh_token) {
+      try {
+        const accessToken = await refreshGoogleToken(accountId, false);
+        xoauth2Token = buildXOAuth2Token(account.email, accessToken);
+      } catch (refreshErr: any) {
+        // Fall back to App Password if refresh fails. If both fail, the
+        // helper itself surfaces the credentials error.
+        console.warn("[imap-backfill] OAuth refresh failed; falling back to password", {
+          account: account.email,
+          err: refreshErr?.message,
+        });
+      }
+    }
+
     try {
       const r = await backfillAttachmentsViaImap(
         supabase,
@@ -544,6 +563,7 @@ export async function POST(req: NextRequest) {
           imap_user: account.imap_user,
           imap_password: account.imap_password,
           imap_tls: account.imap_tls,
+          xoauth2Token,
         },
         {
           accountId,
