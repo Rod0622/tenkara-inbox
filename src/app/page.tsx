@@ -253,11 +253,32 @@ export default function InboxPage() {
             c.folder_id === selectedFolder.id
         );
       } else {
-        filtered = conversations.filter(
-          (c) =>
-            c.email_account_id === activeMailbox &&
-            c.folder_id === selectedFolder.id
-        );
+        // Custom folder. Match by folder_id, but for All / Closed sub-views
+        // ALSO match by the folder's label name — assigning a conversation
+        // clears folder_id (so it leaves the unassigned view) but keeps the
+        // folder label, which is the durable record of "this conversation
+        // belongs to folder X." Without the label fallback, assigned
+        // threads disappear from their folder's All view entirely.
+        if (includeAssigned) {
+          const folderLabelName = String(selectedFolder.name || "").toLowerCase();
+          filtered = conversations.filter(
+            (c) =>
+              c.email_account_id === activeMailbox &&
+              (c.folder_id === selectedFolder.id ||
+                (c.labels || []).some(
+                  (cl: any) =>
+                    String(cl?.label?.name || "").toLowerCase() === folderLabelName
+                ))
+          );
+        } else {
+          // Default unassigned view: strict folder_id match. Correct for
+          // "inbox-zero" workflow — assigned threads should disappear.
+          filtered = conversations.filter(
+            (c) =>
+              c.email_account_id === activeMailbox &&
+              c.folder_id === selectedFolder.id
+          );
+        }
       }
     } else if (activeMailbox) {
       filtered = conversations.filter((c) => c.email_account_id === activeMailbox);

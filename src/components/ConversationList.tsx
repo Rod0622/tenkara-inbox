@@ -503,7 +503,15 @@ export default function ConversationList({
         }
       } else if (folderSubView === "all") {
         // All sub-view: any conversation in this folder, any status, any assignee.
-        // Spam/Trash fall back to status if folder_id is missing.
+        //
+        // Matching strategy:
+        //   • Spam/Trash → match by status (folder_id can be inconsistent
+        //     there because of how those statuses get applied)
+        //   • Other folders → match by folder_id OR by the folder's label name.
+        //     Assigning a conversation clears folder_id (so it leaves the
+        //     unassigned view) but keeps the folder's label, which is the
+        //     durable record of folder membership. Without the label
+        //     fallback, assigned threads disappear from All entirely.
         const activeF = (folders || []).find((f: any) => f.id === activeFolder);
         const fName = String(activeF?.name || "").trim().toLowerCase();
         if (fName === "spam") {
@@ -511,7 +519,14 @@ export default function ConversationList({
         } else if (fName === "trash") {
           result = result.filter((c: any) => c.status === "trash" || c.folder_id === activeFolder);
         } else {
-          result = result.filter((c: any) => c.folder_id === activeFolder);
+          result = result.filter(
+            (c: any) =>
+              c.folder_id === activeFolder ||
+              (c.labels || []).some(
+                (cl: any) =>
+                  String(cl?.label?.name || "").toLowerCase() === fName
+              )
+          );
         }
       }
     }
