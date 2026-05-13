@@ -414,7 +414,22 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         }
 
         if (!res.ok || !data.ok) {
-          setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${data?.error || res.statusText}` }));
+          // Defensively stringify whatever shape came back. The server *should*
+          // send `error` as a string, but Next.js's default error handler can
+          // return objects with shape { name, message, stack } when an
+          // unhandled exception escapes the route — and template-literal
+          // rendering of objects yields "[object Object]" which is useless.
+          let errMsg: string;
+          if (typeof data?.error === "string") {
+            errMsg = data.error;
+          } else if (data?.error && typeof data.error === "object") {
+            errMsg = data.error.message || JSON.stringify(data.error);
+          } else if (typeof data?.message === "string") {
+            errMsg = data.message;
+          } else {
+            errMsg = `HTTP ${res.status} ${res.statusText}`;
+          }
+          setBackfillResult((r) => ({ ...r, [accountId]: `Error: ${errMsg}` }));
           break;
         }
 
@@ -423,7 +438,15 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         totalSkipped += s.attachmentsSkipped || 0;
         totalErrors += (s.errors?.length || 0);
 
-        const live = `${totalUploaded} new · ${totalSkipped} dedup · ${totalErrors} errors`;
+        // Surface the most common error reasons so the user can see WHY
+        // a chunk failed (rather than just "500 errors"). The API now
+        // returns a `topErrors` array of "Nx reason" strings.
+        const topErrors: string[] = Array.isArray(data.topErrors) ? data.topErrors : [];
+        const errTail = totalErrors > 0 && topErrors.length > 0
+          ? ` — ${topErrors.slice(0, 2).join(", ")}`
+          : "";
+
+        const live = `${totalUploaded} new · ${totalSkipped} dedup · ${totalErrors} errors${errTail}`;
         if (data.done) {
           setBackfillResult((r) => ({ ...r, [accountId]: live }));
           break;

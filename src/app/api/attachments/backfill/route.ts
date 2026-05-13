@@ -82,7 +82,14 @@ async function getGraphAppToken(): Promise<string | null> {
 }
 
 export async function POST(req: NextRequest) {
-  const startedAt = Date.now();
+  // Outer try/catch — any unhandled exception bubbling out of the handler
+  // body would otherwise turn into Next.js's default error response, which
+  // serializes Error objects with a shape like { name, message, stack }.
+  // Template-literal rendering of that on the client yields "[object Object]"
+  // which is useless. Catch here, log the real reason, and return a proper
+  // JSON body with `error` as a plain string.
+  try {
+    const startedAt = Date.now();
   let body: any = {};
   try { body = await req.json(); } catch { /* allow empty body */ }
 
@@ -735,4 +742,32 @@ export async function POST(req: NextRequest) {
     remaining,
     topErrors: topErrorReasons,
   });
+  } catch (fatalErr: any) {
+    // Final-resort catch. Anything that throws here is something we didn't
+    // anticipate — log fully, return a string error so the UI doesn't
+    // render "[object Object]".
+    console.error("[backfill] fatal exception:", {
+      message: fatalErr?.message,
+      name: fatalErr?.name,
+      stack: fatalErr?.stack,
+      cause: fatalErr?.cause,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Backfill crashed: ${fatalErr?.message || String(fatalErr) || "unknown"}`,
+        stats: {
+          scanned: 0,
+          alreadyBackfilled: 0,
+          attachmentsUploaded: 0,
+          attachmentsSkipped: 0,
+          errors: [],
+          messagesProcessed: 0,
+        },
+        done: true,
+        remaining: 0,
+      },
+      { status: 500 }
+    );
+  }
 }
