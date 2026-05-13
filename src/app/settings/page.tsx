@@ -9,7 +9,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -350,6 +350,14 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const [backfillingId, setBackfillingId] = useState<string | null>(null);
   const [backfillResult, setBackfillResult] = useState<Record<string, string>>({});
 
+  // Same shape as the attachment backfill but for re-fetching message bodies.
+  // Gmail's MIME structure occasionally defeats our hand-rolled body extractor
+  // and we end up storing just the 200-char snippet as body_text. This pass
+  // re-fetches those messages with format=raw + mailparser to populate the
+  // full body_text and body_html.
+  const [refreshingBodyId, setRefreshingBodyId] = useState<string | null>(null);
+  const [refreshBodyResult, setRefreshBodyResult] = useState<Record<string, string>>({});
+
   // Triggers the attachment-backfill endpoint for one account, in a loop,
   // until the server signals `done: true`. This handles the case where the
   // account has more attachments than fit in a single 240s request window
@@ -473,6 +481,91 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
       }
     } finally {
       setBackfillingId(null);
+    }
+  };
+
+  // Re-fetch messages with truncated body_text. Same auto-resume loop pattern
+  // as runAttachmentBackfill: POST /api/messages/refresh-body until the
+  // server signals { done: true } or we hit the MAX_CHUNKS safety cap.
+  // Accumulates refreshed/unchanged/error counts across chunks.
+  const runBodyRefresh = async (accountId: string, accountName: string) => {
+    if (refreshingBodyId) return;
+    if (!confirm(`Refresh message bodies for "${accountName}"?\n\nThis will re-fetch full message bodies from Gmail for messages that were truncated during sync. Large accounts may take several minutes — the UI will keep working in the background. Safe to re-run.`)) return;
+    setRefreshingBodyId(accountId);
+    setRefreshBodyResult((r) => ({ ...r, [accountId]: "Starting…" }));
+
+    let totalRefreshed = 0;
+    let totalUnchanged = 0;
+    let totalErrors = 0;
+    let chunkIndex = 0;
+    const MAX_CHUNKS = 120;
+
+    try {
+      while (chunkIndex < MAX_CHUNKS) {
+        chunkIndex++;
+        let res: Response;
+        try {
+          res = await fetch("/api/messages/refresh-body", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_id: accountId, limit: 100 }),
+          });
+        } catch (netErr: any) {
+          setRefreshBodyResult((r) => ({
+            ...r,
+            [accountId]: `Network error: ${netErr?.message || "unknown"} — click again to retry`,
+          }));
+          break;
+        }
+
+        let data: any;
+        try {
+          data = await res.json();
+        } catch {
+          setRefreshBodyResult((r) => ({
+            ...r,
+            [accountId]: `Timed out (so far: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors) — click again to resume`,
+          }));
+          break;
+        }
+
+        if (!res.ok || !data.ok) {
+          // Defensive error stringification — see attachment backfill comment.
+          let errMsg: string;
+          if (typeof data?.error === "string") errMsg = data.error;
+          else if (data?.error && typeof data.error === "object") errMsg = data.error.message || JSON.stringify(data.error);
+          else if (typeof data?.message === "string") errMsg = data.message;
+          else errMsg = `HTTP ${res.status} ${res.statusText}`;
+          setRefreshBodyResult((r) => ({ ...r, [accountId]: `Error: ${errMsg}` }));
+          break;
+        }
+
+        totalRefreshed += data.refreshed || 0;
+        totalUnchanged += data.unchanged || 0;
+        totalErrors += (data.errors?.length || 0);
+
+        setRefreshBodyResult((r) => ({
+          ...r,
+          [accountId]: `Chunk ${chunkIndex}: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors`,
+        }));
+
+        if (data.done) {
+          setRefreshBodyResult((r) => ({
+            ...r,
+            [accountId]: `Done: ${totalRefreshed} refreshed · ${totalUnchanged} unchanged · ${totalErrors} errors`,
+          }));
+          break;
+        }
+      }
+
+      if (chunkIndex >= MAX_CHUNKS) {
+        setRefreshBodyResult((r) => ({
+          ...r,
+          [accountId]: `Stopped after ${MAX_CHUNKS} chunks (${totalRefreshed} refreshed · ${totalErrors} errors). Click again to keep going.`,
+        }));
+      }
+    } finally {
+      setRefreshingBodyId(null);
     }
   };
 
@@ -642,6 +735,26 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                         className={`text-[10px] ${backfillResult[account.id].startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}
                       >
                         {backfillResult[account.id]}
+                      </span>
+                    )}
+                    {/* One-shot body refresh — re-fetches Gmail messages whose
+                        body_text got truncated to the snippet during sync. */}
+                    <button
+                      onClick={() => runBodyRefresh(account.id, account.email || account.name || "account")}
+                      disabled={refreshingBodyId === account.id || !!refreshingBodyId}
+                      title="Refresh truncated message bodies for this account"
+                      className="h-8 px-2 rounded-md flex items-center gap-1 text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors disabled:opacity-50"
+                    >
+                      {refreshingBodyId === account.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <FileText size={14} />}
+                      <span className="text-[10px] hidden md:inline">Refresh bodies</span>
+                    </button>
+                    {refreshBodyResult[account.id] && (
+                      <span
+                        className={`text-[10px] ${refreshBodyResult[account.id].startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}
+                      >
+                        {refreshBodyResult[account.id]}
                       </span>
                     )}
                     <button
