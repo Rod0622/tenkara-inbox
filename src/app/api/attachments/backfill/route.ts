@@ -42,6 +42,34 @@ const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 // without bumping into Vercel's hard 300s ceiling.
 const SOFT_TIME_BUDGET_MS = 240_000; // 240s — leaves 60s headroom under Vercel's 300s
 const MAX_MESSAGES_PER_CALL = 500;   // We never scan more than this per call
+const PER_FETCH_TIMEOUT_MS = 20_000; // No single upstream HTTP call may hang
+                                     // longer than 20s. Without this, a stuck
+                                     // Microsoft Graph or Gmail API request
+                                     // could pin the whole Vercel function for
+                                     // its full 300s ceiling, skipping our
+                                     // 240s soft-bail entirely (and producing
+                                     // a "Task timed out" error rather than a
+                                     // proper "click again to resume" handoff).
+
+/**
+ * fetch() wrapped with an AbortSignal-based timeout. Throws a recognizable
+ * error message on timeout so callers can record a useful reason rather than
+ * "TypeError: fetch failed".
+ */
+async function fetchWithTimeout(input: string, init?: RequestInit, timeoutMs: number = PER_FETCH_TIMEOUT_MS): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: ctrl.signal });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Upstream fetch timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface BackfillStats {
   scanned: number;
@@ -69,7 +97,7 @@ async function getGraphAppToken(): Promise<string | null> {
       client_secret: process.env.MICROSOFT_CLIENT_SECRET || "",
       grant_type: "client_credentials",
     });
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`,
       { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString() }
     );
@@ -244,7 +272,7 @@ export async function POST(req: NextRequest) {
     gmailMsgId: string,
     token: string,
   ) => {
-    const msgRes = await fetch(
+    const msgRes = await fetchWithTimeout(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${gmailMsgId}?format=full`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -270,11 +298,19 @@ export async function POST(req: NextRequest) {
     const parts = collectParts(msgData.payload || {});
 
     for (let i = 0; i < parts.length; i++) {
+      // Inner-loop time guard — see equivalent comment in backfillMicrosoft.
+      if (Date.now() - startedAt > SOFT_TIME_BUDGET_MS) {
+        stats.errors.push({
+          message_id: msgRowId,
+          reason: `Gmail: bailed mid-attachment-walk at part ${i}/${parts.length} due to soft time budget`,
+        });
+        return;
+      }
       const p = parts[i];
       let buf: Buffer | null = null;
 
       if (p.body?.attachmentId) {
-        const attRes = await fetch(
+        const attRes = await fetchWithTimeout(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${gmailMsgId}/attachments/${p.body.attachmentId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -342,7 +378,7 @@ export async function POST(req: NextRequest) {
     const stripped = providerMsgId.replace(/^ms:/, "");
     let graphMsgId = stripped;
     if (stripped.includes("@") || stripped.includes("<")) {
-      const searchRes = await fetch(
+      const searchRes = await fetchWithTimeout(
         `${GRAPH_BASE}/users/${accountEmail}/messages?$filter=internetMessageId eq '${encodeURIComponent(stripped)}'&$select=id`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -353,7 +389,7 @@ export async function POST(req: NextRequest) {
     }
 
     // List attachments first — small payload, gives us names/types.
-    const listRes = await fetch(
+    const listRes = await fetchWithTimeout(
       `${GRAPH_BASE}/users/${accountEmail}/messages/${graphMsgId}/attachments`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -365,9 +401,21 @@ export async function POST(req: NextRequest) {
     const items: any[] = listData.value || [];
 
     for (let i = 0; i < items.length; i++) {
+      // Inner-loop guard: if processing one message's attachments is taking
+      // so long that we're approaching the soft budget, bail out of this
+      // message and let the outer loop's per-iteration check pick it up.
+      // Without this, a single message with many large attachments could
+      // exhaust the entire function budget.
+      if (Date.now() - startedAt > SOFT_TIME_BUDGET_MS) {
+        stats.errors.push({
+          message_id: msgRowId,
+          reason: `Graph: bailed mid-attachment-walk at item ${i}/${items.length} due to soft time budget`,
+        });
+        return;
+      }
       const meta = items[i];
       // Per-attachment fetch returns contentBytes; the list endpoint can omit it.
-      const detailRes = await fetch(
+      const detailRes = await fetchWithTimeout(
         `${GRAPH_BASE}/users/${accountEmail}/messages/${graphMsgId}/attachments/${meta.id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
