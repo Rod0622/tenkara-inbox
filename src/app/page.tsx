@@ -542,8 +542,8 @@ export default function InboxPage() {
 
   if (status === "loading") {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#0B0E11]">
-        <div className="w-8 h-8 rounded-full border-2 border-[#1E242C] border-t-[#4ADE80] animate-spin" />
+      <div className="h-screen w-screen flex items-center justify-center bg-[var(--bg)]">
+        <div className="w-8 h-8 rounded-full border-2 border-[var(--border)] border-t-[var(--accent)] animate-spin" />
       </div>
     );
   }
@@ -553,7 +553,7 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
+    <div className="h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text-primary)]">
       <PanelGroup direction="horizontal" autoSaveId="inbox-layout-v1" className="h-full w-full">
         {/* ── Panel 1: Sidebar ── */}
         <Panel defaultSize={14} minSize={10} maxSize={25} order={1} id="sidebar">
