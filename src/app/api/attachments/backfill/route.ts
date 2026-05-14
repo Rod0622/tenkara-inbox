@@ -212,24 +212,21 @@ export async function POST(req: NextRequest) {
   stats.alreadyBackfilled = alreadyHave.size;
   const toProcess = filtered.filter((m: any) => !alreadyHave.has(m.id));
 
-  // Stale-flag cleanup: messages that already have attachment rows but
-  // still carry has_attachments=true are "done but mis-flagged" — typically
-  // from live sync where the flag was set before attachment capture
-  // shipped, or from a partial earlier backfill. Clearing them here keeps
-  // them out of future backfill scans and makes the UI's "not yet
-  // captured" banner stop showing for them.
+  // NOTE: an earlier version of this code bulk-cleared `has_attachments=false`
+  // on every message in `alreadyHave` to keep them out of future backfill
+  // scans. That was destructive — it stripped the message-level flag from
+  // messages whose attachments were successfully captured, which then
+  // broke the UI: ConversationDetail.tsx gates <MessageAttachments> on
+  // `msg.has_attachments`, so cleared messages stopped rendering their
+  // attachments even though the rows existed in inbox.attachments and
+  // were downloadable.
   //
-  // We do this BEFORE the main loop because if every candidate is in
-  // `alreadyHave`, `toProcess` is empty, and we'd otherwise return
-  // done=false (since scanned > 0) and the UI auto-resume loop would
-  // spin firing empty chunks until MAX_CHUNKS.
-  if (alreadyHave.size > 0) {
-    const alreadyIds = Array.from(alreadyHave);
-    await supabase
-      .from("messages")
-      .update({ has_attachments: false })
-      .in("id", alreadyIds);
-  }
+  // We've removed that bulk clear. The trade-off: future backfill chunks
+  // may re-fetch and re-skip the same already-done messages briefly,
+  // but the soft time budget keeps that bounded and `alreadyBackfilled`
+  // is accumulated as a stat. The flag stays an accurate "this message
+  // has attachments" signal for downstream consumers (UI gates, search,
+  // filtering, etc.) which is what it was always meant to mean.
 
   // 4. Caches (one fetch per account regardless of how many messages we walk).
   const accountCache: Record<string, any> = {};

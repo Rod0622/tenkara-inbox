@@ -2298,16 +2298,9 @@ export default function ConversationDetail({
                     </div>
                   )}
                 </div>
-                {/* MessageAttachments always renders. It auto-loads its own
-                    data and returns null when there are no visible (non-inline)
-                    attachments — so gating on msg.has_attachments here is
-                    redundant. Worse, the per-message flag isn't reliable:
-                    Microsoft Graph sync sets has_attachments on the
-                    conversation but doesn't always set it on the message row,
-                    which caused real attachments to be invisible even though
-                    they were captured and downloadable. Trust the component
-                    to make the right rendering decision based on actual data. */}
-                <MessageAttachments messageId={msg.id} />
+                {msg.has_attachments && (
+                  <MessageAttachments messageId={msg.id} />
+                )}
                   </div>
                 );
               });
