@@ -649,7 +649,7 @@ export default function ConversationList({
   })();
 
   return (
-    <div className="w-[360px] min-w-[360px] h-full bg-[var(--surface)] border-r border-[var(--border)] flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-[var(--surface)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       {/* Search + Filter toggle */}
       <div className="p-3 pb-2">
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)]">

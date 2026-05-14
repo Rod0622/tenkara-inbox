@@ -1691,7 +1691,7 @@ export default function ConversationDetail({
 
   if (!convo) {
     return (
-      <div className="flex-1 flex items-center justify-center flex-col gap-4 text-[var(--text-muted)] bg-[var(--bg)]">
+      <div className="w-full h-full flex items-center justify-center flex-col gap-4 text-[var(--text-muted)] bg-[var(--bg)]">
         <div className="w-16 h-16 rounded-2xl bg-[var(--surface)] flex items-center justify-center">
           <Mail size={24} />
         </div>
@@ -1702,7 +1702,7 @@ export default function ConversationDetail({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-[var(--bg)] overflow-hidden">
       <div className="px-5 py-3 border-b border-[var(--border)] flex flex-col 2xl:flex-row 2xl:items-start gap-3">
         <div className="flex-1 min-w-0">
           {/* Phase 4f: editorial eyebrow — real metadata, not filler */}

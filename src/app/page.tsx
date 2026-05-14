@@ -19,6 +19,7 @@ import ComposeEmail from "@/components/ComposeEmail";
 import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
 import CreateConversation from "@/components/CreateConversation";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { Conversation, TaskStatus } from "@/types";
 
 function parseHashParams() {
@@ -552,133 +553,155 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
-      <Sidebar
-        activeMailbox={activeMailbox}
-        setActiveMailbox={setActiveMailbox}
-        activeView={activeView}
-        setActiveView={setActiveView}
-        activeFolder={activeFolder}
-        setActiveFolder={setActiveFolder}
-        folderSubView={folderSubView}
-        setFolderSubView={setFolderSubView}
-        mailboxes={emailAccounts}
-        conversations={conversations}
-        currentUser={currentUser}
-        taskTodoCount={(() => {
-          // Mirror TaskBoard.getMyStatus: for multi-assignee tasks, use the
-          // current user's personal_status; for single-assignee, use task.status.
-          // Dismissed always counts as dismissed.
-          const myStatus = (task: any): string => {
-            if (task.status === "dismissed") return "dismissed";
-            const assignees = task.assignees || [];
-            if (assignees.length > 1 && currentUser) {
-              const me = assignees.find((a: any) => a.id === currentUser.id);
-              if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
-            }
-            return task.status;
-          };
-          return personalTasks.filter((t) => myStatus(t) === "todo").length;
-        })()}
-        taskInProgressCount={(() => {
-          const myStatus = (task: any): string => {
-            if (task.status === "dismissed") return "dismissed";
-            const assignees = task.assignees || [];
-            if (assignees.length > 1 && currentUser) {
-              const me = assignees.find((a: any) => a.id === currentUser.id);
-              if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
-            }
-            return task.status;
-          };
-          return personalTasks.filter((t) => myStatus(t) === "in_progress").length;
-        })()}
-        mySentCount={mySentConvoIds.size}
-        onMoveToFolder={handleMoveToFolder}
-      />
-
-      {isComposing ? (
-        <ComposeEmail
-          onClose={() => setActiveView("inbox")}
-          onSent={() => {
-            refetch();
-            setActiveView("inbox");
-          }}
-        />
-      ) : isNewConversation ? (
-        <CreateConversation
-          currentUser={currentUser}
-          teamMembers={teamMembers}
-          emailAccounts={emailAccounts}
-          onCreated={(conversationId) => {
-            // Clear hash first to prevent stale navigation
-            window.location.hash = "";
-            refetch();
-            setActiveView("inbox");
-            setActiveConvo(null);
-            // Navigate to the new conversation after data refreshes
-            setTimeout(() => {
-              window.location.hash = "conversation=" + conversationId + "&highlight=true";
-            }, 800);
-          }}
-          onClose={() => {
-            window.location.hash = "";
-            setActiveView("inbox");
-          }}
-        />
-      ) : isTaskView ? (
-        <TaskBoard
-          currentUser={currentUser}
-          teamMembers={teamMembers}
-          onTasksChanged={refetchTasks}
-          autoOpenComposer={activeView === "new-task"}
-          onOpenConversation={openConversationFromTask}
-        />
-      ) : isDraftsView ? (
-        <DraftsPanel
-          currentUser={currentUser}
-          onOpenConversation={(conversationId) => {
-            setActiveView("inbox");
-            window.location.hash = `#conversation=${conversationId}`;
-          }}
-        />
-      ) : (
-        <>
-          <ConversationList
-            conversations={displayConversations}
-            activeConvo={activeConvo}
-            setActiveConvo={setActiveConvo}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            searchScope={searchScope}
-            setSearchScope={setSearchScope}
+    <div className="h-screen w-screen overflow-hidden bg-[#0B0E11] text-[#E6EDF3]">
+      <PanelGroup direction="horizontal" autoSaveId="inbox-layout-v1" className="h-full w-full">
+        {/* ── Panel 1: Sidebar ── */}
+        <Panel defaultSize={14} minSize={10} maxSize={25} order={1} id="sidebar">
+          <Sidebar
             activeMailbox={activeMailbox}
+            setActiveMailbox={setActiveMailbox}
+            activeView={activeView}
+            setActiveView={setActiveView}
             activeFolder={activeFolder}
+            setActiveFolder={setActiveFolder}
             folderSubView={folderSubView}
-            emailAccounts={emailAccounts}
-            folders={folders}
-            teamMembers={teamMembers}
-            onBulkAction={handleBulkAction}
-            searchSnippets={searchSnippets}
-            searchTaskResults={searchTaskResults}
-            onOpenConversation={openConversationFromTask}
-          />
-
-          <ConversationDetail
-            conversation={activeConvo}
+            setFolderSubView={setFolderSubView}
+            mailboxes={emailAccounts}
+            conversations={conversations}
             currentUser={currentUser}
-            teamMembers={teamMembers}
-            onAddNote={actions.addNote}
-            onToggleTask={handleToggleTask}
-            onAddTask={handleAddTask}
-            onUpdateTask={handleUpdateTask}
-            onAssign={handleAssign}
-            onSendReply={actions.sendReply}
+            taskTodoCount={(() => {
+              // Mirror TaskBoard.getMyStatus: for multi-assignee tasks, use the
+              // current user's personal_status; for single-assignee, use task.status.
+              // Dismissed always counts as dismissed.
+              const myStatus = (task: any): string => {
+                if (task.status === "dismissed") return "dismissed";
+                const assignees = task.assignees || [];
+                if (assignees.length > 1 && currentUser) {
+                  const me = assignees.find((a: any) => a.id === currentUser.id);
+                  if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
+                }
+                return task.status;
+              };
+              return personalTasks.filter((t) => myStatus(t) === "todo").length;
+            })()}
+            taskInProgressCount={(() => {
+              const myStatus = (task: any): string => {
+                if (task.status === "dismissed") return "dismissed";
+                const assignees = task.assignees || [];
+                if (assignees.length > 1 && currentUser) {
+                  const me = assignees.find((a: any) => a.id === currentUser.id);
+                  if (me) return me.personal_status || (me.is_done ? "completed" : "todo");
+                }
+                return task.status;
+              };
+              return personalTasks.filter((t) => myStatus(t) === "in_progress").length;
+            })()}
+            mySentCount={mySentConvoIds.size}
             onMoveToFolder={handleMoveToFolder}
-            globalSearchQuery={searchQuery.trim().length >= 2 ? searchQuery : ""}
           />
-        </>
-      )}
+        </Panel>
 
+        <PanelResizeHandle className="resize-handle" />
+
+        {isComposing ? (
+          <Panel defaultSize={86} minSize={50} order={2} id="content-compose">
+            <ComposeEmail
+              onClose={() => setActiveView("inbox")}
+              onSent={() => {
+                refetch();
+                setActiveView("inbox");
+              }}
+            />
+          </Panel>
+        ) : isNewConversation ? (
+          <Panel defaultSize={86} minSize={50} order={2} id="content-new-conversation">
+            <CreateConversation
+              currentUser={currentUser}
+              teamMembers={teamMembers}
+              emailAccounts={emailAccounts}
+              onCreated={(conversationId) => {
+                // Clear hash first to prevent stale navigation
+                window.location.hash = "";
+                refetch();
+                setActiveView("inbox");
+                setActiveConvo(null);
+                // Navigate to the new conversation after data refreshes
+                setTimeout(() => {
+                  window.location.hash = "conversation=" + conversationId + "&highlight=true";
+                }, 800);
+              }}
+              onClose={() => {
+                window.location.hash = "";
+                setActiveView("inbox");
+              }}
+            />
+          </Panel>
+        ) : isTaskView ? (
+          <Panel defaultSize={86} minSize={50} order={2} id="content-tasks">
+            <TaskBoard
+              currentUser={currentUser}
+              teamMembers={teamMembers}
+              onTasksChanged={refetchTasks}
+              autoOpenComposer={activeView === "new-task"}
+              onOpenConversation={openConversationFromTask}
+            />
+          </Panel>
+        ) : isDraftsView ? (
+          <Panel defaultSize={86} minSize={50} order={2} id="content-drafts">
+            <DraftsPanel
+              currentUser={currentUser}
+              onOpenConversation={(conversationId) => {
+                setActiveView("inbox");
+                window.location.hash = `#conversation=${conversationId}`;
+              }}
+            />
+          </Panel>
+        ) : (
+          <>
+            {/* ── Panel 2: ConversationList ── */}
+            <Panel defaultSize={22} minSize={15} maxSize={45} order={2} id="conversation-list">
+              <ConversationList
+                conversations={displayConversations}
+                activeConvo={activeConvo}
+                setActiveConvo={setActiveConvo}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                searchScope={searchScope}
+                setSearchScope={setSearchScope}
+                activeMailbox={activeMailbox}
+                activeFolder={activeFolder}
+                folderSubView={folderSubView}
+                emailAccounts={emailAccounts}
+                folders={folders}
+                teamMembers={teamMembers}
+                onBulkAction={handleBulkAction}
+                searchSnippets={searchSnippets}
+                searchTaskResults={searchTaskResults}
+                onOpenConversation={openConversationFromTask}
+              />
+            </Panel>
+
+            <PanelResizeHandle className="resize-handle" />
+
+            {/* ── Panel 3: ConversationDetail ── */}
+            <Panel defaultSize={64} minSize={30} order={3} id="conversation-detail">
+              <ConversationDetail
+                conversation={activeConvo}
+                currentUser={currentUser}
+                teamMembers={teamMembers}
+                onAddNote={actions.addNote}
+                onToggleTask={handleToggleTask}
+                onAddTask={handleAddTask}
+                onUpdateTask={handleUpdateTask}
+                onAssign={handleAssign}
+                onSendReply={actions.sendReply}
+                onMoveToFolder={handleMoveToFolder}
+                globalSearchQuery={searchQuery.trim().length >= 2 ? searchQuery : ""}
+              />
+            </Panel>
+          </>
+        )}
+      </PanelGroup>
     </div>
   );
 }

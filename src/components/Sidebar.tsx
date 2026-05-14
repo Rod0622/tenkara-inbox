@@ -372,7 +372,7 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-[240px] min-w-[240px] h-full bg-[var(--bg)] border-r border-[var(--border)] flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-[var(--bg)] border-r border-[var(--border)] flex flex-col overflow-hidden">
       <div className="p-4 pb-3 border-b border-[var(--surface-2)]">
   <div className="flex items-center gap-2.5">
     <button

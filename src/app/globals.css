@@ -119,3 +119,29 @@ body {
   background: var(--accent-dim);
   color: var(--text-primary);
 }
+/* Resizable panel handles — invisible until hover (Missive style).
+   react-resizable-panels renders a flex item; we give it a thin hit area
+   that's transparent by default and lights up on hover/drag. */
+.resize-handle {
+  position: relative;
+  width: 4px;
+  background: transparent;
+  cursor: col-resize;
+  transition: background-color 0.15s ease-out;
+  flex-shrink: 0;
+}
+
+.resize-handle:hover,
+.resize-handle[data-resize-handle-active] {
+  background: var(--accent);
+}
+
+/* Wider invisible hit area for easier grabbing */
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
