@@ -811,12 +811,28 @@ export async function POST(req: NextRequest) {
   const candidatesReturned = filtered.length;
   const accountFullyDrained = candidatesReturned < requestedLimit;
   const done = !bailedOnTime && accountFullyDrained;
-  const nextOffset = bailedOnTime
-    ? offsetParam                          // resume same window
-    : offsetParam + candidatesReturned;    // advance past window
+  // Offset advancement strategy:
+  //   • Not bailed: advance past everything we looked at.
+  //   • Bailed with progress: advance past the messages we DID process,
+  //     so next chunk picks up roughly where we left off.
+  //   • Bailed with NO progress: advance past the whole window. Otherwise
+  //     a single slow message at the head of the window can stall the
+  //     loop forever, repeating the same bail every chunk.
+  let nextOffset: number;
+  if (!bailedOnTime) {
+    nextOffset = offsetParam + candidatesReturned;
+  } else if (stats.messagesProcessed > 0) {
+    // alreadyBackfilled messages don't count as "processed" since they
+    // were skipped. Estimate position by how many we got through.
+    nextOffset = offsetParam + stats.alreadyBackfilled + stats.messagesProcessed;
+  } else {
+    // Made no real progress this chunk despite bailing — must be a stuck
+    // message. Skip the entire window to escape.
+    nextOffset = offsetParam + candidatesReturned;
+  }
   const remaining = bailedOnTime
     ? Math.max(0, toProcess.length - stats.messagesProcessed)
-    : (accountFullyDrained ? 0 : -1); // -1 signals "unknown but more likely"
+    : (accountFullyDrained ? 0 : -1);
 
   // Aggregate error reasons so the UI / Vercel log can show WHAT failed,
   // not just how many. Group by the first 120 chars so the IMAP/Graph
