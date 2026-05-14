@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
 // GET /api/drafts — list drafts (optionally filter by conversation_id or author_id)
+//   Special filter: conversation_id=null returns only standalone (compose) drafts
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
   const authorId = req.nextUrl.searchParams.get("author_id");
+  const standaloneOnly = req.nextUrl.searchParams.get("standalone") === "true";
 
   let query = supabase
     .from("email_drafts")
@@ -14,6 +16,7 @@ export async function GET(req: NextRequest) {
 
   if (conversationId) query = query.eq("conversation_id", conversationId);
   if (authorId) query = query.eq("author_id", authorId);
+  if (standaloneOnly) query = query.is("conversation_id", null);
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -21,31 +24,64 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/drafts — create or update a draft
+//   - conversation_id present: reply draft (existing behavior, unique per conversation+author)
+//   - conversation_id absent/null: standalone compose draft (unique per author)
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { conversation_id, email_account_id, author_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, body_text, is_reply, source } = body;
+  const {
+    conversation_id,
+    email_account_id,
+    author_id,
+    to_addresses,
+    cc_addresses,
+    bcc_addresses,
+    subject,
+    body_html,
+    body_text,
+    is_reply,
+    source,
+  } = body;
 
-  if (!conversation_id) {
-    return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
+  // For standalone drafts (no conversation_id), author_id is required to enforce
+  // the partial unique index (one standalone draft per author).
+  if (!conversation_id && !author_id) {
+    return NextResponse.json({ error: "author_id is required for standalone drafts" }, { status: 400 });
   }
 
-  // Check if draft already exists for this conversation + author
-  const { data: existing } = await supabase
+  const computedBodyText =
+    body_text ?? (body_html || "").replace(/<[^>]*>/g, "").slice(0, 5000);
+
+  // Check if a draft already exists for this user
+  //   - With conversation_id: match (conversation_id, author_id)
+  //   - Without conversation_id: match (conversation_id IS NULL, author_id)
+  let existingQuery = supabase
     .from("email_drafts")
     .select("id")
-    .eq("conversation_id", conversation_id)
-    .eq("author_id", author_id || "")
-    .maybeSingle();
+    .eq("author_id", author_id || "");
+
+  if (conversation_id) {
+    existingQuery = existingQuery.eq("conversation_id", conversation_id);
+  } else {
+    existingQuery = existingQuery.is("conversation_id", null);
+  }
+
+  const { data: existing } = await existingQuery.maybeSingle();
 
   if (existing) {
     // Update existing draft
     const { data, error } = await supabase
       .from("email_drafts")
       .update({
-        to_addresses, cc_addresses, bcc_addresses, subject,
-        body_html, body_text: body_text || (body_html || "").replace(/<[^>]*>/g, "").slice(0, 5000),
-        email_account_id, is_reply: is_reply ?? true, source: source || "manual",
+        to_addresses,
+        cc_addresses,
+        bcc_addresses,
+        subject,
+        body_html,
+        body_text: computedBodyText,
+        email_account_id,
+        is_reply: is_reply ?? !!conversation_id,
+        source: source || "manual",
         updated_at: new Date().toISOString(),
       })
       .eq("id", existing.id)
@@ -59,10 +95,17 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from("email_drafts")
     .insert({
-      conversation_id, email_account_id, author_id: author_id || null,
-      to_addresses, cc_addresses, bcc_addresses, subject,
-      body_html, body_text: body_text || (body_html || "").replace(/<[^>]*>/g, "").slice(0, 5000),
-      is_reply: is_reply ?? true, source: source || "manual",
+      conversation_id: conversation_id || null,
+      email_account_id,
+      author_id: author_id || null,
+      to_addresses,
+      cc_addresses,
+      bcc_addresses,
+      subject,
+      body_html,
+      body_text: computedBodyText,
+      is_reply: is_reply ?? !!conversation_id,
+      source: source || "manual",
     })
     .select()
     .single();

@@ -606,6 +606,7 @@ export default function InboxPage() {
         {isComposing ? (
           <Panel defaultSize={86} minSize={50} order={2} id="content-compose">
             <ComposeEmail
+              currentUser={currentUser}
               onClose={() => setActiveView("inbox")}
               onSent={() => {
                 refetch();
@@ -654,6 +655,7 @@ export default function InboxPage() {
                 setActiveView("inbox");
                 window.location.hash = `#conversation=${conversationId}`;
               }}
+              onOpenCompose={() => setActiveView("compose")}
             />
           </Panel>
         ) : (

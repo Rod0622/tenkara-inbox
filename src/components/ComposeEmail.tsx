@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { X, Send, ChevronDown, Paperclip, File, Trash2, FolderOpen } from "lucide-react";
 import { useActions, useEmailAccounts } from "@/lib/hooks";
 import RichTextEditor, { getCleanHtml, htmlToPlainText } from "@/components/RichTextEditor";
 import AIDraftModal from "@/components/AIDraftModal";
+import type { TeamMember } from "@/types";
 
 // Convert plain-text (with \n line breaks and \n\n paragraph breaks) into HTML
 // suitable for setting into a contentEditable. Without this, innerHTML collapses
@@ -29,9 +30,10 @@ interface AttachmentFile {
 interface ComposeEmailProps {
   onClose: () => void;
   onSent?: () => void;
+  currentUser?: TeamMember | null;
 }
 
-export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
+export default function ComposeEmail({ onClose, onSent, currentUser }: ComposeEmailProps) {
   const accounts = useEmailAccounts();
   const { sendEmail } = useActions();
 
@@ -62,9 +64,137 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Draft auto-save state. We persist the user's in-progress compose to
+  // inbox.email_drafts with conversation_id = NULL (standalone draft).
+  // One standalone draft per author (enforced by partial unique index).
+  const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const skipNextAutoSaveRef = useRef(true);
+
   const accountId = selectedAccount || accounts[0]?.id || "";
   const currentAccount = accounts.find((a) => a.id === accountId);
   const accountSignature = currentAccount?.signature_enabled ? currentAccount?.signature : "";
+
+  // Load any existing standalone draft for this user on mount.
+  useEffect(() => {
+    if (!currentUser?.id) { setDraftLoaded(true); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/drafts?author_id=${currentUser.id}&standalone=true`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const draft = (data.drafts || [])[0];
+        if (draft) {
+          setLoadedDraftId(draft.id);
+          if (draft.email_account_id) setSelectedAccount(draft.email_account_id);
+          if (draft.to_addresses) {
+            const toList = String(draft.to_addresses).split(",").map((s: string) => s.trim()).filter(Boolean);
+            setTo(toList);
+          }
+          if (draft.cc_addresses) {
+            const ccList = String(draft.cc_addresses).split(",").map((s: string) => s.trim()).filter(Boolean);
+            setCc(ccList);
+            if (ccList.length > 0) setShowCc(true);
+          }
+          if (draft.bcc_addresses) {
+            const bccList = String(draft.bcc_addresses).split(",").map((s: string) => s.trim()).filter(Boolean);
+            setBcc(bccList);
+            if (bccList.length > 0) setShowBcc(true);
+          }
+          if (draft.subject) setSubject(draft.subject);
+          if (draft.body_html) setBodyHtml(draft.body_html);
+        }
+      } catch { /* silent */ }
+      finally {
+        if (!cancelled) {
+          setDraftLoaded(true);
+          // Allow auto-save to begin once hydration finishes
+          setTimeout(() => { skipNextAutoSaveRef.current = false; }, 100);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
+
+  // Helper: does the compose currently hold any meaningful content?
+  const hasContent = () => {
+    const plain = htmlToPlainText(bodyHtml || "").trim();
+    return (
+      to.length > 0 ||
+      toInput.trim().length > 0 ||
+      cc.length > 0 ||
+      ccInput.trim().length > 0 ||
+      bcc.length > 0 ||
+      bccInput.trim().length > 0 ||
+      subject.trim().length > 0 ||
+      plain.length > 0 ||
+      attachments.length > 0
+    );
+  };
+
+  // Helper: write current compose state to drafts API. Returns saved id or null.
+  const saveDraft = async (): Promise<string | null> => {
+    if (!currentUser?.id) return null;
+    setSavingDraft(true);
+    try {
+      const allTo = [...to, ...(toInput.trim() ? [toInput.trim()] : [])];
+      const allCc = [...cc, ...(ccInput.trim() ? [ccInput.trim()] : [])];
+      const allBcc = [...bcc, ...(bccInput.trim() ? [bccInput.trim()] : [])];
+      const res = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: null,
+          email_account_id: accountId || null,
+          author_id: currentUser.id,
+          to_addresses: allTo.join(", "),
+          cc_addresses: allCc.length > 0 ? allCc.join(", ") : null,
+          bcc_addresses: allBcc.length > 0 ? allBcc.join(", ") : null,
+          subject: subject.trim() || null,
+          body_html: bodyHtml || null,
+          is_reply: false,
+          source: "manual",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.draft?.id) {
+          setLoadedDraftId(data.draft.id);
+          return data.draft.id;
+        }
+      }
+    } catch { /* silent */ }
+    finally { setSavingDraft(false); }
+    return null;
+  };
+
+  // Auto-save: 3-second debounce after any meaningful change.
+  useEffect(() => {
+    if (skipNextAutoSaveRef.current) return;
+    if (!draftLoaded || !currentUser?.id) return;
+    if (!hasContent()) {
+      if (loadedDraftId) {
+        const idToDelete = loadedDraftId;
+        setLoadedDraftId(null);
+        fetch(`/api/drafts?id=${idToDelete}`, { method: "DELETE" }).catch(() => {});
+      }
+      return;
+    }
+    const timer = setTimeout(() => { saveDraft(); }, 3000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [to, toInput, cc, ccInput, bcc, bccInput, subject, bodyHtml, accountId, attachments.length, draftLoaded]);
+
+  // Save-on-close: if there's content, save before closing.
+  const handleClose = async () => {
+    if (hasContent() && currentUser?.id) {
+      await saveDraft();
+    }
+    onClose();
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -249,6 +379,12 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
         return;
       }
 
+      // Delete the standalone draft now that the email was sent.
+      if (loadedDraftId) {
+        fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
+
       onSent?.();
       onClose();
     } catch (err: any) {
@@ -278,7 +414,8 @@ export default function ComposeEmail({ onClose, onSent }: ComposeEmailProps) {
             {sending ? "Sending..." : "Send"}
           </button>
           <button
-            onClick={onClose}
+            onClick={handleClose}
+            title={savingDraft ? "Saving draft..." : "Close (saves to Drafts)"}
             className="w-8 h-8 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] flex items-center justify-center transition-colors"
           >
             <X size={18} />

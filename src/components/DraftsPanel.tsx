@@ -7,9 +7,11 @@ import type { TeamMember } from "@/types";
 export default function DraftsPanel({
   currentUser,
   onOpenConversation,
+  onOpenCompose,
 }: {
   currentUser: TeamMember | null;
   onOpenConversation?: (conversationId: string) => void;
+  onOpenCompose?: () => void;
 }) {
   const [drafts, setDrafts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +74,7 @@ export default function DraftsPanel({
                     {/* Subject + account */}
                     <div className="flex items-center gap-2 mb-1">
                       <div className="text-sm font-medium text-[var(--text-primary)] truncate">
-                        {draft.subject || draft.conversation?.subject || "No subject"}
+                        {draft.subject || draft.conversation?.subject || (draft.conversation_id ? "No subject" : "New email (draft)")}
                       </div>
                       {draft.source === "auto_follow_up" && (
                         <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#F0883E]/10 text-[#F0883E] border border-[#F0883E]/20 shrink-0">
@@ -104,9 +106,15 @@ export default function DraftsPanel({
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => draft.conversation_id && onOpenConversation?.(draft.conversation_id)}
+                      onClick={() => {
+                        if (draft.conversation_id) {
+                          onOpenConversation?.(draft.conversation_id);
+                        } else {
+                          onOpenCompose?.();
+                        }
+                      }}
                       className="p-1.5 rounded-md hover:bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--info)]"
-                      title="Open conversation & edit draft"
+                      title={draft.conversation_id ? "Open conversation & edit draft" : "Open compose & edit draft"}
                     >
                       <ExternalLink size={14} />
                     </button>
