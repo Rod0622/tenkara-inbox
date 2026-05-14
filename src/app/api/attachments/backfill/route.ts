@@ -85,6 +85,7 @@ interface BackfillResponse {
   stats: BackfillStats;
   done: boolean;            // Whether the account has been fully drained
   remaining: number;        // Estimated messages still needing attention
+  nextOffset?: number;      // Cursor for the next chunk (offset-based pagination)
   error?: string;
 }
 
@@ -123,6 +124,7 @@ export async function POST(req: NextRequest) {
 
   const conversationId: string | null = body?.conversation_id || null;
   const accountIdParam: string | null = body?.account_id || null;
+  const offsetParam: number = Math.max(0, parseInt(String(body?.offset || "0"), 10) || 0);
   const requestedLimit: number = Math.min(
     Math.max(parseInt(String(body?.limit || ""), 10) || 200, 1),
     MAX_MESSAGES_PER_CALL
@@ -147,12 +149,19 @@ export async function POST(req: NextRequest) {
   //
   //    Oldest-first so chunked progress moves through the backlog
   //    predictably: each call eats from the same end of the queue.
+  //
+  //    Offset-based pagination: each chunk advances `nextOffset` past
+  //    everything it just looked at — both already-done and processed
+  //    messages. This is critical because we no longer clear
+  //    msg.has_attachments=false to "retire" done messages (that broke
+  //    the UI gate). Without offset pagination, the loop would re-scan
+  //    the same N already-done messages forever and never progress.
   let query = supabase
     .from("messages")
     .select("id, provider_message_id, conversation_id, conversations!inner(email_account_id)")
     .eq("has_attachments", true)
     .order("sent_at", { ascending: true })
-    .limit(requestedLimit);
+    .range(offsetParam, offsetParam + requestedLimit - 1);
 
   if (conversationId) {
     query = query.eq("conversation_id", conversationId);
@@ -775,8 +784,22 @@ export async function POST(req: NextRequest) {
   //   • If we bailed on the soft time budget → not done; resume.
   //   • Otherwise we processed real work this chunk; the next call should
   //     re-query and either find more work or come back empty → not done.
-  const accountFullyDrained = stats.scanned === 0;
+  // With offset-based pagination, "done" means PostgREST returned fewer
+  // candidates than we asked for — that's the only reliable signal that
+  // we've reached the end of the has_attachments=true set. We can NOT use
+  // "stats.scanned === 0" anymore because a chunk full of already-done
+  // messages also has scanned > 0 but did no useful work; the next chunk
+  // must still advance offset to look beyond them.
+  //
+  // bailedOnTime overrides — if we ran out of soft time budget, we should
+  // resume from the same offset next call (not advance, since we may not
+  // have looked at every message in the window).
+  const candidatesReturned = filtered.length;
+  const accountFullyDrained = candidatesReturned < requestedLimit;
   const done = !bailedOnTime && accountFullyDrained;
+  const nextOffset = bailedOnTime
+    ? offsetParam                          // resume same window
+    : offsetParam + candidatesReturned;    // advance past window
   const remaining = bailedOnTime
     ? Math.max(0, toProcess.length - stats.messagesProcessed)
     : (accountFullyDrained ? 0 : -1); // -1 signals "unknown but more likely"
@@ -800,6 +823,8 @@ export async function POST(req: NextRequest) {
   console.log("[backfill] result:", {
     accountIdParam,
     conversationId,
+    offset: offsetParam,
+    nextOffset,
     scanned: stats.scanned,
     messagesProcessed: stats.messagesProcessed,
     uploaded: stats.attachmentsUploaded,
@@ -816,6 +841,7 @@ export async function POST(req: NextRequest) {
     stats,
     done,
     remaining,
+    nextOffset,
     topErrors: topErrorReasons,
   });
   } catch (fatalErr: any) {

@@ -383,6 +383,10 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
     let totalSkipped = 0;
     let totalErrors = 0;
     let chunkIndex = 0;
+    // Server uses offset-based pagination — we track the cursor here and
+    // pass it back next chunk. Each chunk advances past everything it
+    // looked at (already-done OR processed).
+    let nextOffset = 0;
     // Safety cap so a server bug can't trap the user in an infinite loop.
     // 120 chunks × ~245s ≈ 8 hours wall clock — more than enough to drain
     // the largest accounts (Bobber Labs at ~23k attachments) in one click,
@@ -397,7 +401,7 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
           res = await fetch("/api/attachments/backfill", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account_id: accountId, limit: 500 }),
+            body: JSON.stringify({ account_id: accountId, limit: 500, offset: nextOffset }),
           });
         } catch (netErr: any) {
           setBackfillResult((r) => ({ ...r, [accountId]: `Network error: ${netErr?.message || "unknown"} — click again to resume` }));
@@ -448,6 +452,13 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
         totalUploaded += s.attachmentsUploaded || 0;
         totalSkipped += s.attachmentsSkipped || 0;
         totalErrors += (s.errors?.length || 0);
+        // Advance the offset cursor for the next chunk. Server returns
+        // `nextOffset = offset + candidatesReturned` when it advances
+        // past the window, or the same `offset` if it bailed on time
+        // and we should retry the same window.
+        if (typeof data.nextOffset === "number") {
+          nextOffset = data.nextOffset;
+        }
 
         // Surface the most common error reasons so the user can see WHY
         // a chunk failed (rather than just "500 errors"). The API now
