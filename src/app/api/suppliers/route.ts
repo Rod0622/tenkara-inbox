@@ -41,42 +41,51 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ suppliers: [], accounts: accounts || [] });
   }
 
-  // 3. Fetch conversations to derive which accounts each supplier engaged with.
-  //    Two signals, run in parallel:
-  //      A. supplier_contact_id backlink (fast, indexed)
-  //      B. from_email match — but conversations.from_email is stored as-is
-  //         (mixed case), so we fetch all rows and compare case-insensitively
-  //         in JS. We cap at 20k rows which comfortably covers current volume.
+  // 3. Fetch engagement signals to derive which accounts each supplier engages with.
+  //    Two signals run in parallel:
+  //      A. conversations.supplier_contact_id backlink — covers manually-created
+  //         suppliers (via CreateConversation) before any email exchange happens.
+  //      B. response_times.supplier_email + email_account_id — the authoritative
+  //         source. Every supplier hydrated by the score-suppliers cron has rows
+  //         here, and supplier_email is already lowercased on insert.
+  //    response_times can grow large; paginate by 1000 to be safe.
   const supplierIds = suppliers.map((s: any) => s.id);
   const supplierEmails = new Set(
     suppliers.map((s: any) => (s.email || "").toLowerCase()).filter(Boolean)
   );
 
-  const [byIdRes, allConvRes] = await Promise.all([
-    supabase
-      .from("conversations")
-      .select("supplier_contact_id, email_account_id, last_message_at")
-      .in("supplier_contact_id", supplierIds),
-    supabase
-      .from("conversations")
-      .select("from_email, email_account_id, last_message_at")
-      .not("from_email", "is", null)
-      .limit(20000),
-  ]);
-
-  if (byIdRes.error) {
-    return NextResponse.json({ error: byIdRes.error.message }, { status: 500 });
+  // Paginated fetch of response_times (small per-row footprint: 3 columns)
+  const responseTimes: { supplier_email: string; email_account_id: string | null; response_sent_at: string | null }[] = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data: rtBatch, error: rtErr } = await supabase
+        .from("response_times")
+        .select("supplier_email, email_account_id, response_sent_at")
+        .not("supplier_email", "is", null)
+        .range(offset, offset + PAGE - 1);
+      if (rtErr) {
+        return NextResponse.json({ error: rtErr.message }, { status: 500 });
+      }
+      if (!rtBatch || rtBatch.length === 0) break;
+      responseTimes.push(...(rtBatch as any));
+      if (rtBatch.length < PAGE) break;
+      offset += PAGE;
+      // Safety cap
+      if (offset > 100000) break;
+    }
   }
-  if (allConvRes.error) {
-    return NextResponse.json({ error: allConvRes.error.message }, { status: 500 });
-  }
 
-  // Narrow signal B: only keep conversations whose from_email (lowercased)
-  // matches one of our supplier emails.
-  const byEmailRows = (allConvRes.data || []).filter((c: any) => {
-    const e = (c.from_email || "").toLowerCase();
-    return e && supplierEmails.has(e);
-  });
+  // Signal A: conversations with supplier_contact_id backlink
+  const { data: byIdData, error: byIdErr } = await supabase
+    .from("conversations")
+    .select("supplier_contact_id, email_account_id, last_message_at")
+    .in("supplier_contact_id", supplierIds);
+  if (byIdErr) {
+    return NextResponse.json({ error: byIdErr.message }, { status: 500 });
+  }
+  const byIdRes = { data: byIdData };
 
   // 4. Aggregate per supplier — union account ids from both signals.
   type Agg = {
@@ -108,23 +117,24 @@ export async function GET(_req: NextRequest) {
     }
   });
 
-  // Signal B: conversations matched by from_email (case-insensitive) — map back to supplier id
+  // Signal B: response_times rows matched by supplier_email — map back to supplier id
   const emailToSupplierId = new Map<string, string>();
   suppliers.forEach((s: any) => {
     const e = (s.email || "").toLowerCase();
     if (e) emailToSupplierId.set(e, s.id);
   });
-  byEmailRows.forEach((c: any) => {
-    const e = (c.from_email || "").toLowerCase();
+  responseTimes.forEach((r: any) => {
+    const e = (r.supplier_email || "").toLowerCase();
+    if (!e || !supplierEmails.has(e)) return;
     const sid = emailToSupplierId.get(e);
     if (!sid) return;
     const entry = ensure(sid);
-    if (c.email_account_id) entry.accountIds.add(c.email_account_id);
+    if (r.email_account_id) entry.accountIds.add(r.email_account_id);
     if (
-      c.last_message_at &&
-      (!entry.lastEngagementAt || c.last_message_at > entry.lastEngagementAt)
+      r.response_sent_at &&
+      (!entry.lastEngagementAt || r.response_sent_at > entry.lastEngagementAt)
     ) {
-      entry.lastEngagementAt = c.last_message_at;
+      entry.lastEngagementAt = r.response_sent_at;
     }
   });
 
