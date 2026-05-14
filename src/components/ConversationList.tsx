@@ -968,9 +968,24 @@ export default function ConversationList({
                       )}
                     </div>
 
-                    {/* Labels */}
-                    {labels.length > 0 && (
-                      <div className="flex gap-1 flex-wrap">
+                    {/* Labels + assignee chip row.
+                        The assignee chip shows the assignee's first name in
+                        Tenkara gold so users can scan All / Closed / Inbox
+                        and immediately see who owns each thread. Lives in
+                        the same flex row as labels so they wrap together.
+                        Hidden when unassigned (assignee_id null). */}
+                    {(labels.length > 0 || (c as any).assignee) && (
+                      <div className="flex gap-1 flex-wrap items-center">
+                        {(c as any).assignee && (
+                          <span
+                            className="inline-flex items-center text-[10px] leading-none px-1.5 py-0.5 rounded font-medium bg-[var(--accent)]/15 text-[var(--accent)] whitespace-nowrap"
+                            title={`Assigned to ${(c as any).assignee.name || (c as any).assignee.email || "team member"}`}
+                          >
+                            {String((c as any).assignee.name || (c as any).assignee.email || "")
+                              .split(" ")[0]
+                              .slice(0, 20)}
+                          </span>
+                        )}
                         {labels.map((l) => l && (
                           <LabelBadge key={l.id} name={l.name} color={l.color} bgColor={l.bg_color} />
                         ))}
