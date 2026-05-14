@@ -141,7 +141,7 @@ export default function SidebarSuppliersList() {
           )}
 
           {/* Scrollable list */}
-          <div className="max-h-[280px] overflow-y-auto pr-0.5 space-y-0.5">
+          <div className="max-h-[60vh] overflow-y-auto pr-0.5 space-y-0.5">
             {loading && (
               <div className="text-[11px] text-[var(--text-muted)] px-2.5 py-2">Loading…</div>
             )}

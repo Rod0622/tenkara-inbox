@@ -41,29 +41,74 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ suppliers: [], accounts: accounts || [] });
   }
 
-  // 3. Fetch conversations grouped by supplier_contact_id to derive
-  //    which accounts each supplier engaged with + most recent activity.
-  //    We only pull supplier_contact_id, email_account_id, last_message_at.
+  // 3. Fetch conversations grouped by both supplier_contact_id AND from_email.
+  //    A supplier_contact may not have any conversations backlinked to it via
+  //    supplier_contact_id (e.g. cron-hydrated rows from email scoring), so we
+  //    also match by conversations.from_email. We pull both in parallel.
   const supplierIds = suppliers.map((s: any) => s.id);
-  const { data: convos, error: cErr } = await supabase
-    .from("conversations")
-    .select("supplier_contact_id, email_account_id, last_message_at")
-    .in("supplier_contact_id", supplierIds);
-  if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+  const supplierEmails = suppliers
+    .map((s: any) => (s.email || "").toLowerCase())
+    .filter(Boolean);
 
-  // 4. Aggregate per supplier
+  const [byIdRes, byEmailRes] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("supplier_contact_id, email_account_id, last_message_at")
+      .in("supplier_contact_id", supplierIds),
+    supabase
+      .from("conversations")
+      .select("from_email, email_account_id, last_message_at")
+      .in("from_email", supplierEmails),
+  ]);
+
+  if (byIdRes.error) {
+    return NextResponse.json({ error: byIdRes.error.message }, { status: 500 });
+  }
+  if (byEmailRes.error) {
+    return NextResponse.json({ error: byEmailRes.error.message }, { status: 500 });
+  }
+
+  // 4. Aggregate per supplier — union account ids from both signals.
   type Agg = {
     accountIds: Set<string>;
     lastEngagementAt: string | null;
   };
   const byId = new Map<string, Agg>();
-  (convos || []).forEach((c: any) => {
-    if (!c.supplier_contact_id) return;
-    let entry = byId.get(c.supplier_contact_id);
+
+  // Helper: ensure-get an aggregation bucket
+  const ensure = (key: string): Agg => {
+    let entry = byId.get(key);
     if (!entry) {
       entry = { accountIds: new Set<string>(), lastEngagementAt: null };
-      byId.set(c.supplier_contact_id, entry);
+      byId.set(key, entry);
     }
+    return entry;
+  };
+
+  // Signal A: conversations with explicit supplier_contact_id backlink
+  (byIdRes.data || []).forEach((c: any) => {
+    if (!c.supplier_contact_id) return;
+    const entry = ensure(c.supplier_contact_id);
+    if (c.email_account_id) entry.accountIds.add(c.email_account_id);
+    if (
+      c.last_message_at &&
+      (!entry.lastEngagementAt || c.last_message_at > entry.lastEngagementAt)
+    ) {
+      entry.lastEngagementAt = c.last_message_at;
+    }
+  });
+
+  // Signal B: conversations matched by from_email — map back to supplier id
+  const emailToSupplierId = new Map<string, string>();
+  suppliers.forEach((s: any) => {
+    const e = (s.email || "").toLowerCase();
+    if (e) emailToSupplierId.set(e, s.id);
+  });
+  (byEmailRes.data || []).forEach((c: any) => {
+    const e = (c.from_email || "").toLowerCase();
+    const sid = emailToSupplierId.get(e);
+    if (!sid) return;
+    const entry = ensure(sid);
     if (c.email_account_id) entry.accountIds.add(c.email_account_id);
     if (
       c.last_message_at &&
