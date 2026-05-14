@@ -1703,7 +1703,7 @@ export default function ConversationDetail({
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
-      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-wrap items-start gap-3">
+      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-col 2xl:flex-row 2xl:items-start gap-3">
         <div className="flex-1 min-w-0">
           {/* Phase 4f: editorial eyebrow — real metadata, not filler */}
           <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-1 truncate">
@@ -1849,7 +1849,7 @@ export default function ConversationDetail({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap justify-end ml-auto">
+        <div className="flex items-center gap-2 flex-wrap justify-end order-first 2xl:order-none 2xl:shrink-0 2xl:flex-nowrap">
           <AssignDropdown
             currentAssignee={assignee}
             currentUser={currentUser}
