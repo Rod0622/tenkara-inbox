@@ -267,7 +267,14 @@ export async function backfillAttachmentsViaImap(
                       filename: String(a.filename || a.cid || `attachment-${i + 1}`).slice(0, 240),
                       contentType: String(a.contentType || "application/octet-stream"),
                       size: typeof a.size === "number" ? a.size : buf.length,
-                      isInline: a.contentDisposition === "inline" || !!a.cid,
+                      // Disposition is the authoritative signal for "inline."
+                      // A Content-ID alone does NOT mean inline — many email
+                      // clients (especially Outlook/Microsoft Graph) attach
+                      // Content-ID headers to ordinary file attachments
+                      // (PDFs, spreadsheets). Treating those as inline
+                      // causes legitimate downloadable attachments to be
+                      // hidden from the message panel.
+                      isInline: a.contentDisposition === "inline",
                       contentId: a.cid || a.contentId || null,
                       checksum: a.checksum || null,
                       content: buf,

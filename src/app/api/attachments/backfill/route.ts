@@ -350,7 +350,10 @@ export async function POST(req: NextRequest) {
           filename: p.filename || fallbackName,
           contentType: p.mimeType || "application/octet-stream",
           size: typeof p.body?.size === "number" ? p.body.size : buf.length,
-          isInline: disposition.startsWith("inline") || !!contentId,
+          // Disposition is the authoritative signal for "inline." A
+          // Content-ID alone doesn't mean inline — Outlook and Graph
+          // routinely set Content-ID on regular file attachments.
+          isInline: disposition.startsWith("inline"),
           contentId,
           checksum: null,
           content: buf,
