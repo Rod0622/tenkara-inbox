@@ -29,6 +29,7 @@ import {
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
 import SidebarTeamList from "./SidebarTeamList";
+import SidebarSuppliersList from "./SidebarSuppliersList";
 import { useTheme } from "@/lib/theme";
 
 function QuickCreateMenu({
@@ -826,6 +827,9 @@ export default function Sidebar({
           )}
         </div>
       )}
+
+      {/* Suppliers list — collapsible, shows all suppliers grouped by engaged accounts */}
+      <SidebarSuppliersList />
 
       {/* Team list — collapsible, shows all users with OOO status */}
       {currentUser && <SidebarTeamList currentUser={currentUser} />}
