@@ -16,7 +16,6 @@ import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
 import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
-import AISidebar from "@/components/AISidebar";
 import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
 import CreateConversation from "@/components/CreateConversation";
@@ -680,7 +679,6 @@ export default function InboxPage() {
         </>
       )}
 
-      <AISidebar conversation={activeConvo} />
     </div>
   );
 }

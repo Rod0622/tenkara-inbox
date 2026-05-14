@@ -127,15 +127,6 @@ export interface GmailMessage {
   snippet: string;
 }
 
-export interface AiRequest {
-  conversation: Conversation;
-  query: string;
-}
-
-export interface AiResponse {
-  text: string;
-}
-
 export interface ClassificationResult {
   labels: string[];
   department: string;
@@ -230,8 +221,4 @@ export interface ConversationDetailProps {
   onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[], cc?: string, bcc?: string) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
   globalSearchQuery?: string;
-}
-
-export interface AiSidebarProps {
-  conversation: Conversation | null;
 }

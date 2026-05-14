@@ -762,15 +762,6 @@ export function useActions() {
     return res.json();
   };
 
-  const askAi = async (conversation: Conversation, query: string) => {
-    const res = await fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation, query }),
-    });
-    return res.json();
-  };
-
   return {
     addNote,
     addTask,
@@ -780,6 +771,5 @@ export function useActions() {
     sendReply,
     sendEmail,
     syncEmails,
-    askAi,
   };
 }
