@@ -175,7 +175,21 @@ export async function POST(req: NextRequest) {
         const rawBuf = Buffer.from(rawData.raw, "base64url");
         const parsed = await simpleParser(rawBuf);
 
-        const newBodyText = decodeEmailTextPreserveNewlines(parsed.text || "");
+        // Defensive HTML strip on parsed.text. For most emails mailparser
+        // returns clean plaintext, but for malformed HTML emails it can
+        // leak tag fragments through (e.g. <img src=...>). Those then
+        // show as literal text in the UI's in-thread search view, which
+        // bypasses the HTML-rendering branch. Strip + collapse here.
+        const rawText = parsed.text || "";
+        const cleanText = rawText
+          // Drop <script> and <style> blocks entirely
+          .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+          // <br> and </p> become line breaks (preserve paragraph structure)
+          .replace(/<br\s*\/?>/gi, "\n")
+          .replace(/<\/p\s*>/gi, "\n\n")
+          // Strip all remaining tags
+          .replace(/<[^>]+>/g, " ");
+        const newBodyText = decodeEmailTextPreserveNewlines(cleanText);
         const newBodyHtml = typeof parsed.html === "string" ? parsed.html : null;
 
         // Only update if we got something better than what we had.

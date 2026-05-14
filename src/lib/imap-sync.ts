@@ -293,7 +293,17 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   if (rawData.raw) {
                     const rawBuf = Buffer.from(rawData.raw, "base64url");
                     const parsed = await simpleParser(rawBuf);
-                    if (parsed.text) extractedText = parsed.text;
+                    if (parsed.text) {
+                      // Defensive HTML strip — malformed HTML emails can
+                      // leak tag fragments into parsed.text, which then
+                      // render as literal markup in the UI. See same
+                      // strip logic in /api/messages/refresh-body.
+                      extractedText = (parsed.text || "")
+                        .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+                        .replace(/<br\s*\/?>/gi, "\n")
+                        .replace(/<\/p\s*>/gi, "\n\n")
+                        .replace(/<[^>]+>/g, " ");
+                    }
                     if (parsed.html && !bodyHtml) {
                       bodyHtml = typeof parsed.html === "string" ? parsed.html : null;
                     }
@@ -911,7 +921,14 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
         .join(", ")
     : "";
 
-  const bodyText = parsed.text || "";
+  // Defensive HTML strip — see /api/messages/refresh-body for rationale.
+  // Malformed HTML emails can leak tag fragments into parsed.text.
+  const rawBodyText = parsed.text || "";
+  const bodyText = rawBodyText
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p\s*>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ");
   const bodyHtml = parsed.html || "";
   const snippet = bodyText.replace(/\s+/g, " ").trim().slice(0, 200);
 

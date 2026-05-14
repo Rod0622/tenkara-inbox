@@ -566,6 +566,20 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    // ── Synthetic graph-oauth IDs (outbound messages sent via our app) ──
+    // When a user sends via Microsoft Graph through /api/send, we record a
+    // synthetic provider_message_id like "graph-oauth:<unix-timestamp>" as a
+    // placeholder. There's no real Graph message to fetch — Graph would
+    // return Bad Request on every lookup attempt. Skip these silently and
+    // clear has_attachments=false so they drop out of future scans.
+    if (providerMsgId.startsWith("graph-oauth:")) {
+      await supabase
+        .from("messages")
+        .update({ has_attachments: false })
+        .eq("id", msg.id);
+      continue;
+    }
+
     // ── Gmail OAuth (modern API path: "gmail:{msgId}") ──
     if (account.provider === "google_oauth" && providerMsgId.startsWith("gmail:")) {
       const token = await getGmailToken(accountId);
