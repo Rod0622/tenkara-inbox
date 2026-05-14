@@ -41,16 +41,18 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ suppliers: [], accounts: accounts || [] });
   }
 
-  // 3. Fetch conversations grouped by both supplier_contact_id AND from_email.
-  //    A supplier_contact may not have any conversations backlinked to it via
-  //    supplier_contact_id (e.g. cron-hydrated rows from email scoring), so we
-  //    also match by conversations.from_email. We pull both in parallel.
+  // 3. Fetch conversations to derive which accounts each supplier engaged with.
+  //    Two signals, run in parallel:
+  //      A. supplier_contact_id backlink (fast, indexed)
+  //      B. from_email match — but conversations.from_email is stored as-is
+  //         (mixed case), so we fetch all rows and compare case-insensitively
+  //         in JS. We cap at 20k rows which comfortably covers current volume.
   const supplierIds = suppliers.map((s: any) => s.id);
-  const supplierEmails = suppliers
-    .map((s: any) => (s.email || "").toLowerCase())
-    .filter(Boolean);
+  const supplierEmails = new Set(
+    suppliers.map((s: any) => (s.email || "").toLowerCase()).filter(Boolean)
+  );
 
-  const [byIdRes, byEmailRes] = await Promise.all([
+  const [byIdRes, allConvRes] = await Promise.all([
     supabase
       .from("conversations")
       .select("supplier_contact_id, email_account_id, last_message_at")
@@ -58,15 +60,23 @@ export async function GET(_req: NextRequest) {
     supabase
       .from("conversations")
       .select("from_email, email_account_id, last_message_at")
-      .in("from_email", supplierEmails),
+      .not("from_email", "is", null)
+      .limit(20000),
   ]);
 
   if (byIdRes.error) {
     return NextResponse.json({ error: byIdRes.error.message }, { status: 500 });
   }
-  if (byEmailRes.error) {
-    return NextResponse.json({ error: byEmailRes.error.message }, { status: 500 });
+  if (allConvRes.error) {
+    return NextResponse.json({ error: allConvRes.error.message }, { status: 500 });
   }
+
+  // Narrow signal B: only keep conversations whose from_email (lowercased)
+  // matches one of our supplier emails.
+  const byEmailRows = (allConvRes.data || []).filter((c: any) => {
+    const e = (c.from_email || "").toLowerCase();
+    return e && supplierEmails.has(e);
+  });
 
   // 4. Aggregate per supplier — union account ids from both signals.
   type Agg = {
@@ -98,13 +108,13 @@ export async function GET(_req: NextRequest) {
     }
   });
 
-  // Signal B: conversations matched by from_email — map back to supplier id
+  // Signal B: conversations matched by from_email (case-insensitive) — map back to supplier id
   const emailToSupplierId = new Map<string, string>();
   suppliers.forEach((s: any) => {
     const e = (s.email || "").toLowerCase();
     if (e) emailToSupplierId.set(e, s.id);
   });
-  (byEmailRes.data || []).forEach((c: any) => {
+  byEmailRows.forEach((c: any) => {
     const e = (c.from_email || "").toLowerCase();
     const sid = emailToSupplierId.get(e);
     if (!sid) return;
