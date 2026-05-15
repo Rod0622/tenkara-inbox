@@ -1758,32 +1758,69 @@ export default function ConversationDetail({
 
           {/* ── Participants row ── */}
           {convo.from_email !== "internal" && (() => {
+            // Dedup keyed by EMAIL ONLY (not raw display string). Quoted display
+            // names, mixed display names for the same address ('"info" <x>' vs
+            // '"Rove Essentials" <x>'), and weird Foxmail-style quoting were
+            // previously creating duplicate chips for the same person.
             const seen = new Set<string>();
             const participants: { name: string; email: string }[] = [];
+
+            // Strip surrounding single/double quotes and trim whitespace.
+            // Foxmail and some webmail clients wrap addresses in quotes.
+            const stripQuotes = (s: string) =>
+              s.trim().replace(/^["'\s]+|["'\s]+$/g, "");
+
+            // Parse one "raw" recipient part into {name, email}. Returns null
+            // if no email can be extracted at all.
+            const parsePart = (raw: string): { name: string; email: string } | null => {
+              const part = raw.trim();
+              if (!part) return null;
+              // "Name <email@host>" — most common
+              const m = part.match(/^(.*?)\s*<\s*([^<>]+?)\s*>\s*$/);
+              if (m) {
+                const email = stripQuotes(m[2]).toLowerCase();
+                if (!email.includes("@")) return null;
+                let name = stripQuotes(m[1]);
+                // If the display name is just the same email in quotes, use the
+                // local-part as the visible name instead.
+                if (!name || name.toLowerCase() === email) name = email.split("@")[0];
+                return { name, email };
+              }
+              // Bare email — no angle brackets
+              const bare = stripQuotes(part).toLowerCase();
+              if (!bare.includes("@")) return null;
+              return { name: bare.split("@")[0], email: bare };
+            };
+
+            const tryAdd = (raw: string | null | undefined, fallbackName?: string) => {
+              if (!raw) return;
+              for (const piece of raw.split(",")) {
+                const parsed = parsePart(piece);
+                if (!parsed) continue;
+                if (seen.has(parsed.email)) continue;
+                seen.add(parsed.email);
+                participants.push({
+                  name: fallbackName || parsed.name,
+                  email: parsed.email,
+                });
+              }
+            };
+
             for (const msg of (messages || [])) {
-              const addAddr = (raw: string | null | undefined, fallbackName?: string) => {
-                if (!raw) return;
-                for (const part of raw.split(",")) {
-                  const trimmed = part.trim().toLowerCase();
-                  if (!trimmed || seen.has(trimmed)) continue;
-                  seen.add(trimmed);
-                  // Try to extract "Name <email>" format
-                  const match = part.match(/^(.+?)\s*<(.+?)>$/);
-                  if (match) {
-                    participants.push({ name: match[1].trim(), email: match[2].trim().toLowerCase() });
-                  } else {
-                    participants.push({ name: fallbackName || trimmed.split("@")[0], email: trimmed });
-                  }
-                }
-              };
               // From
-              if (msg.from_email && !seen.has(msg.from_email.toLowerCase())) {
-                seen.add(msg.from_email.toLowerCase());
-                participants.push({ name: msg.from_name || msg.from_email.split("@")[0], email: msg.from_email.toLowerCase() });
+              if (msg.from_email) {
+                const fromEmail = msg.from_email.trim().toLowerCase();
+                if (fromEmail && !seen.has(fromEmail)) {
+                  seen.add(fromEmail);
+                  participants.push({
+                    name: msg.from_name || fromEmail.split("@")[0],
+                    email: fromEmail,
+                  });
+                }
               }
               // To + CC
-              addAddr(msg.to_addresses);
-              addAddr(msg.cc_addresses);
+              tryAdd(msg.to_addresses);
+              tryAdd(msg.cc_addresses);
             }
             if (participants.length <= 1) return null;
             const MAX_SHOW = 5;
