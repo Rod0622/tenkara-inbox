@@ -184,9 +184,31 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           await onNewConversationFromSync(nc.id, accountId, isOutbound);
         }
 
-        // Insert message
-        const bodyHtml = email.body?.contentType === "html" ? email.body.content : null;
-        const bodyText = bodyHtml ? bodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 5000) : (email.bodyPreview || "");
+        // Insert message — handle both HTML and plain-text body contentTypes.
+        // Previously this only honored "html" and fell back to bodyPreview
+        // (capped at ~255 chars by Graph), so plain-text emails were truncated.
+        const rawBodyContent: string = email.body?.content || "";
+        const bodyContentType = (email.body?.contentType || "").toLowerCase();
+        const escapeHtml = (s: string) =>
+          s
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+        let bodyHtml: string | null = null;
+        let bodyText: string;
+        if (bodyContentType === "html" && rawBodyContent) {
+          bodyHtml = rawBodyContent;
+          bodyText = rawBodyContent.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 5000);
+        } else if (bodyContentType === "text" && rawBodyContent) {
+          bodyText = rawBodyContent.slice(0, 5000);
+          bodyHtml = "<div style=\"white-space: pre-wrap;\">" + escapeHtml(rawBodyContent) + "</div>";
+        } else {
+          bodyText = email.bodyPreview || "";
+          bodyHtml = null;
+        }
         const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
 

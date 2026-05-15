@@ -381,16 +381,43 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             await onNewConversationFromSync(nc.id, accountId, isOutbound);
           }
 
-          const emailBodyHtml = email.body?.contentType === "html" ? email.body.content : null;
-          // Decode entities in body text. Two cases:
-          //   1. HTML email: we strip tags and collapse whitespace, then
-          //      decode entities (the stripped HTML often contains
-          //      &nbsp; &amp; &#39; etc.).
-          //   2. No HTML: fall back to bodyPreview, which Graph also
-          //      delivers entity-encoded.
-          const rawBodyText = emailBodyHtml
-            ? emailBodyHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
-            : (email.bodyPreview || "");
+          // Body extraction — Graph returns body.contentType as "html" OR "text".
+          // The old code only honored "html" and fell back to bodyPreview (which
+          // Graph caps at ~255 chars) for everything else, so plain-text emails
+          // ended up truncated. Now we handle both formats:
+          //   1. contentType === "html" → store full HTML, derive body_text by
+          //      stripping tags + collapsing whitespace.
+          //   2. contentType === "text" → store full text in body_text. Derive
+          //      a simple HTML by escaping + replacing newlines with <br> so the
+          //      MessageBody renderer can display it as expected.
+          //   3. No body content at all → fall back to bodyPreview (truncated).
+          const rawBodyContent: string = email.body?.content || "";
+          const bodyContentType = (email.body?.contentType || "").toLowerCase();
+          const escapeHtml = (s: string) =>
+            s
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;")
+              .replace(/'/g, "&#39;");
+
+          let emailBodyHtml: string | null = null;
+          let rawBodyText: string;
+          if (bodyContentType === "html" && rawBodyContent) {
+            emailBodyHtml = rawBodyContent;
+            rawBodyText = rawBodyContent.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          } else if (bodyContentType === "text" && rawBodyContent) {
+            // Plain text body — preserve newlines for body_text, build minimal
+            // HTML for the renderer.
+            rawBodyText = rawBodyContent;
+            emailBodyHtml = "<div style=\"white-space: pre-wrap;\">" + escapeHtml(rawBodyContent) + "</div>";
+          } else {
+            // Last resort — Graph's bodyPreview, which is capped at ~255 chars.
+            // This is the OLD behaviour and only fires when the body itself is
+            // genuinely empty or has an unknown contentType.
+            rawBodyText = email.bodyPreview || "";
+            emailBodyHtml = null;
+          }
           const bodyText = decodeEmailTextPreserveNewlines(rawBodyText);
           const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
           const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
