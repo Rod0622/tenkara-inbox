@@ -395,19 +395,60 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
           const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
 
-          const { error: me } = await supabase.from("messages").insert({
-            conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
-            from_name: email.from?.emailAddress?.name || "Unknown",
-            from_email: email.from?.emailAddress?.address || "",
-            to_addresses: toAddr, cc_addresses: ccAddr,
-            subject: email.subject || "(No Subject)",
-            body_text: bodyText.slice(0, 5000),
-            body_html: emailBodyHtml,
-            snippet: bodyText.slice(0, 200),
-            is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
-            sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
-          });
-          if (me) { result.errors.push(me.message); continue; }
+          // Reconcile against locally-stored outbound messages so we don't
+          // create duplicates. /api/send stores the row with a synthetic id
+          // like "graph:<ts>" or "graph-oauth:<ts>" (Graph's sendMail doesn't
+          // expose the InternetMessageId), so we match by content fingerprint:
+          // same conversation, same subject, sent within ±5 minutes, outbound.
+          const msSentAt = email.sentDateTime || email.receivedDateTime || new Date().toISOString();
+          const fromEmailLower = (email.from?.emailAddress?.address || "").toLowerCase();
+          const isOurAccount = fromEmailLower && fromEmailLower === account.email.toLowerCase();
+          let reconciledMsMessageId: string | null = null;
+          if (isOutbound && isOurAccount) {
+            const windowMs = 5 * 60 * 1000;
+            const lo = new Date(new Date(msSentAt).getTime() - windowMs).toISOString();
+            const hi = new Date(new Date(msSentAt).getTime() + windowMs).toISOString();
+            const { data: candidates } = await supabase
+              .from("messages")
+              .select("id, provider_message_id")
+              .eq("conversation_id", conversationId)
+              .eq("is_outbound", true)
+              .eq("subject", email.subject || "(No Subject)")
+              .ilike("from_email", account.email)
+              .gte("sent_at", lo)
+              .lte("sent_at", hi)
+              .limit(5);
+            const local = (candidates || []).find((r: any) =>
+              !String(r.provider_message_id || "").startsWith("ms:"));
+            if (local?.id) {
+              await supabase
+                .from("messages")
+                .update({
+                  provider_message_id: `ms:${msgId}`,
+                  body_html: emailBodyHtml || undefined,
+                  body_text: bodyText.slice(0, 5000) || undefined,
+                  has_attachments: email.hasAttachments || false,
+                })
+                .eq("id", local.id);
+              reconciledMsMessageId = local.id;
+            }
+          }
+
+          if (!reconciledMsMessageId) {
+            const { error: me } = await supabase.from("messages").insert({
+              conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
+              from_name: email.from?.emailAddress?.name || "Unknown",
+              from_email: email.from?.emailAddress?.address || "",
+              to_addresses: toAddr, cc_addresses: ccAddr,
+              subject: email.subject || "(No Subject)",
+              body_text: bodyText.slice(0, 5000),
+              body_html: emailBodyHtml,
+              snippet: bodyText.slice(0, 200),
+              is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
+              sent_at: msSentAt,
+            });
+            if (me) { result.errors.push(me.message); continue; }
+          }
 
           const convoUpdate: any = {
             preview: decodeEmailText(email.bodyPreview || bodyText).slice(0, 200),

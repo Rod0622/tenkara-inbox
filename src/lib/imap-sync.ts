@@ -373,16 +373,94 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               await onNewConversationFromSync(nc.id, accountId, isOutbound);
             }
 
-            const { data: insertedGmailMsg, error: gmailInsertErr } = await supabase.from("messages").insert({
-              conversation_id: conversationId,
-              provider_message_id: `gmail:${msgId}`,
-              from_name: fromName, from_email: fromEmail,
-              to_addresses: toAddresses, cc_addresses: ccAddresses,
-              subject, body_text: bodyText.slice(0, 5000), body_html: bodyHtml,
-              snippet: snippet.slice(0, 200),
-              is_outbound: isOutbound, has_attachments: hasAttachments,
-              sent_at: sentAt,
-            }).select("id").single();
+            // Reconcile against locally-stored outbound messages.
+            // When we send via /api/send, the message is stored locally with
+            // provider_message_id = info.messageId (the RFC822 Message-ID). When
+            // Gmail then syncs it back from the Sent folder, its API id is the
+            // Gmail UID (different value). Without this check we'd insert a
+            // duplicate. If we find a local row matching by Message-ID, we
+            // upgrade its provider_message_id to gmail:<uid> instead of inserting.
+            const rfc822 = (headers["message-id"] || "").trim();
+            let reconciledMessageId: string | null = null;
+
+            // Reconcile attempt #1: exact RFC822 Message-ID match.
+            if (rfc822) {
+              const { data: existingLocal } = await supabase
+                .from("messages")
+                .select("id")
+                .eq("conversation_id", conversationId)
+                .eq("provider_message_id", rfc822)
+                .maybeSingle();
+              if (existingLocal?.id) {
+                await supabase
+                  .from("messages")
+                  .update({
+                    provider_message_id: `gmail:${msgId}`,
+                    body_html: bodyHtml || undefined,
+                    body_text: bodyText.slice(0, 5000) || undefined,
+                    has_attachments: hasAttachments,
+                  })
+                  .eq("id", existingLocal.id);
+                reconciledMessageId = existingLocal.id;
+              }
+            }
+
+            // Reconcile attempt #2: content-fingerprint fallback for outbound
+            // messages whose locally-stored row used a non-RFC822 id (e.g.
+            // "sent:<timestamp>"). Match by (conversation, our-account-as-from,
+            // subject, is_outbound) and sent_at within ±5 minutes of the synced
+            // message. This catches duplicates regardless of the local id format.
+            if (!reconciledMessageId && isOutbound) {
+              const windowMs = 5 * 60 * 1000;
+              const lo = new Date(new Date(sentAt).getTime() - windowMs).toISOString();
+              const hi = new Date(new Date(sentAt).getTime() + windowMs).toISOString();
+              const { data: candidates } = await supabase
+                .from("messages")
+                .select("id, provider_message_id")
+                .eq("conversation_id", conversationId)
+                .eq("is_outbound", true)
+                .eq("subject", subject)
+                .ilike("from_email", account.email)
+                .gte("sent_at", lo)
+                .lte("sent_at", hi)
+                .limit(5);
+              // Prefer a candidate whose provider_message_id does NOT already
+              // start with "gmail:" (i.e. a local synthetic id) — that's the
+              // pre-sync version we want to upgrade.
+              const local = (candidates || []).find((r: any) =>
+                !String(r.provider_message_id || "").startsWith("gmail:"));
+              if (local?.id) {
+                await supabase
+                  .from("messages")
+                  .update({
+                    provider_message_id: `gmail:${msgId}`,
+                    body_html: bodyHtml || undefined,
+                    body_text: bodyText.slice(0, 5000) || undefined,
+                    has_attachments: hasAttachments,
+                  })
+                  .eq("id", local.id);
+                reconciledMessageId = local.id;
+              }
+            }
+
+            let insertedGmailMsg: { id: string } | null = null;
+            let gmailInsertErr: any = null;
+            if (reconciledMessageId) {
+              insertedGmailMsg = { id: reconciledMessageId };
+            } else {
+              const ins = await supabase.from("messages").insert({
+                conversation_id: conversationId,
+                provider_message_id: `gmail:${msgId}`,
+                from_name: fromName, from_email: fromEmail,
+                to_addresses: toAddresses, cc_addresses: ccAddresses,
+                subject, body_text: bodyText.slice(0, 5000), body_html: bodyHtml,
+                snippet: snippet.slice(0, 200),
+                is_outbound: isOutbound, has_attachments: hasAttachments,
+                sent_at: sentAt,
+              }).select("id").single();
+              insertedGmailMsg = ins.data;
+              gmailInsertErr = ins.error;
+            }
 
             if (gmailInsertErr || !insertedGmailMsg) {
               result.errors.push(`Gmail message ${msgId}: ${gmailInsertErr?.message || "insert failed"}`);
