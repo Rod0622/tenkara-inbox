@@ -46,9 +46,56 @@ export async function POST(req: NextRequest) {
       }
 
       accountId = body.account_id || convo.email_account_id;
-      // Use body.to if provided (for internal conversations composing first email)
-      to = body.to || convo.from_email;
       subject = body.subject || `Re: ${convo.subject}`;
+
+      if (body.to) {
+        // Explicit recipient passed by client (Reply All, Forward, edited recipient)
+        to = body.to;
+      } else {
+        // Auto-pick the right recipient. The old code used `convo.from_email`,
+        // which fails for conversations that started outbound — those store our
+        // OWN account email in from_email, causing replies to send to ourselves.
+        // Correct priority:
+        //   1. Latest inbound message → reply to its from_email
+        //   2. Latest outbound message → reply to its first to_addresses (the
+        //      same person we last wrote to)
+        //   3. convo.from_email as last-ditch fallback (legacy behavior)
+        const accountEmailLower = ((await supabase
+          .from("email_accounts")
+          .select("email")
+          .eq("id", accountId)
+          .single()).data?.email || "").toLowerCase();
+
+        const { data: latestInbound } = await supabase
+          .from("messages")
+          .select("from_email, to_addresses, is_outbound, sent_at")
+          .eq("conversation_id", body.conversation_id)
+          .eq("is_outbound", false)
+          .order("sent_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestInbound?.from_email && latestInbound.from_email.toLowerCase() !== accountEmailLower) {
+          to = latestInbound.from_email;
+        } else {
+          // No inbound yet (we started the thread, they haven't replied) —
+          // fall back to whoever we last wrote to.
+          const { data: latestOutbound } = await supabase
+            .from("messages")
+            .select("to_addresses, sent_at")
+            .eq("conversation_id", body.conversation_id)
+            .eq("is_outbound", true)
+            .order("sent_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const firstTo = (latestOutbound?.to_addresses || "").split(",")[0]?.trim();
+          if (firstTo) {
+            to = firstTo;
+          } else {
+            to = convo.from_email; // last-ditch (legacy behavior)
+          }
+        }
+      }
     } else {
       // Compose mode
       accountId = body.account_id;
@@ -279,14 +326,25 @@ export async function POST(req: NextRequest) {
         .ilike("name", "sent")
         .maybeSingle();
 
+      // For outbound-originated conversations, from_email should be the
+      // OTHER PARTY's address (who we're talking to), not our own — this
+      // matches the convention for inbound conversations and lets the reply
+      // route auto-pick the correct recipient. Parse the first recipient out
+      // of `to` (supports "Name <email>" and bare email formats).
+      const stripQ = (s: string) => s.trim().replace(/^["'\s]+|["'\s]+$/g, "");
+      const firstRecipient = String(to || "").split(",")[0]?.trim() || "";
+      const angle = firstRecipient.match(/^(.*?)\s*<\s*([^<>]+?)\s*>\s*$/);
+      const otherPartyEmail = (angle ? stripQ(angle[2]) : stripQ(firstRecipient)).toLowerCase();
+      const otherPartyName = angle ? stripQ(angle[1]) : (otherPartyEmail.split("@")[0] || "");
+
       const { data: newConvo } = await supabase
         .from("conversations")
         .insert({
           email_account_id: accountId,
           thread_id: messageId || "sent:" + Date.now(),
           subject: subject.replace(/^Re:\s*/i, ""),
-          from_name: account.name,
-          from_email: account.email,
+          from_name: otherPartyName || otherPartyEmail,
+          from_email: otherPartyEmail || account.email,
           preview: emailBody.replace(/<[^>]*>/g, "").slice(0, 200),
           is_unread: false,
           status: "open",
