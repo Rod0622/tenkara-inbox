@@ -348,10 +348,12 @@ export default function ConversationDetail({
           const data = await res.json();
           const myDraft = (data.drafts || []).find((d: any) => d.author_id === currentUser.id) || (data.drafts || [])[0];
           if (myDraft) {
+            console.log("[DRAFT-DEBUG] load: found existing draft for convo", convo.id, "draft id", myDraft.id);
             setReplyText(myDraft.body_html || myDraft.body_text || "");
             setLoadedDraftId(myDraft.id);
             setShowReplyEditor(true);
           } else {
+            console.log("[DRAFT-DEBUG] load: no draft for convo", convo.id, "— clearing loadedDraftId");
             setLoadedDraftId(null);
           }
         }
@@ -368,8 +370,11 @@ export default function ConversationDetail({
     if (!plainText || plainText === sigText) {
       // If there was a loaded draft and user cleared the text, delete the draft
       if (loadedDraftId && !plainText) {
+        console.log("[DRAFT-DEBUG] auto-save EMPTY branch: DELETING draft", loadedDraftId, "for convo", convo?.id, "— replyText was:", JSON.stringify(replyText).slice(0, 100));
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+      } else {
+        console.log("[DRAFT-DEBUG] auto-save EMPTY branch: not deleting. loadedDraftId=", loadedDraftId, "plainText empty?", !plainText, "sig-only?", plainText === sigText);
       }
       return;
     }
@@ -391,7 +396,10 @@ export default function ConversationDetail({
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.draft?.id) setLoadedDraftId(data.draft.id);
+          if (data.draft?.id) {
+            console.log("[DRAFT-DEBUG] auto-save: POST succeeded, draft id", data.draft.id, "for convo", convo?.id);
+            setLoadedDraftId(data.draft.id);
+          }
         }
       } catch { /* silent */ }
     }, 3000);
@@ -698,6 +706,7 @@ export default function ConversationDetail({
   }, []);
 
   useEffect(() => {
+    console.log("[DRAFT-DEBUG] convo changed reset effect fired. New convo id:", convo?.id);
     setActiveTab("messages");
     setShowNoteInput(false);
     setShowTaskInput(false);
@@ -1115,6 +1124,7 @@ export default function ConversationDetail({
       setShowReplyBcc(false);
       // Delete draft if one was loaded
       if (loadedDraftId) {
+        console.log("[DRAFT-DEBUG] post-send: DELETING draft", loadedDraftId);
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
       }
@@ -3881,6 +3891,7 @@ export default function ConversationDetail({
                   {loadedDraftId && (
                     <button
                       onClick={async () => {
+                        console.log("[DRAFT-DEBUG] manual discard: DELETING draft", loadedDraftId);
                         await fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
                         setLoadedDraftId(null);
                         setReplyText("");
