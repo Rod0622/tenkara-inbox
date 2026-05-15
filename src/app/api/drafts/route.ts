@@ -69,7 +69,6 @@ export async function POST(req: NextRequest) {
   const { data: existing } = await existingQuery.maybeSingle();
 
   if (existing) {
-    console.log("[DRAFT-DEBUG][API] POST: UPDATING existing draft", existing.id, "for conv", conversation_id || "(standalone)");
     // Update existing draft
     const { data, error } = await supabase
       .from("email_drafts")
@@ -93,7 +92,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Create new draft
-  console.log("[DRAFT-DEBUG][API] POST: CREATING new draft for conv", conversation_id || "(standalone)", "author", author_id);
   const { data, error } = await supabase
     .from("email_drafts")
     .insert({
@@ -121,7 +119,6 @@ export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const id = req.nextUrl.searchParams.get("id");
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
-  console.log("[DRAFT-DEBUG][API] DELETE hit. id=", id, "conversation_id=", conversationId);
 
   if (id) {
     const { error } = await supabase.from("email_drafts").delete().eq("id", id);
