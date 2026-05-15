@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FileEdit, Loader2, Trash2, ExternalLink, Send, Clock } from "lucide-react";
 import type { TeamMember } from "@/types";
 
@@ -29,7 +29,28 @@ export default function DraftsPanel({
     setLoading(false);
   };
 
-  useEffect(() => { fetchDrafts(); }, [currentUser?.id]);
+  // Initial fetch + keep the list fresh:
+  //   - Refetch every 15s while the panel is mounted (mirrors Sidebar counter cadence)
+  //   - Refetch on window focus (covers tab-switch flow)
+  //   Skip refetches while a delete is in flight to avoid optimistic-update flicker.
+  const deletingRef = useRef<string | null>(null);
+  useEffect(() => { deletingRef.current = deleting; }, [deleting]);
+
+  useEffect(() => {
+    fetchDrafts();
+    const interval = setInterval(() => {
+      if (!deletingRef.current) fetchDrafts();
+    }, 15000);
+    const onFocus = () => {
+      if (!deletingRef.current) fetchDrafts();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
 
   const handleDelete = async (id: string) => {
     setDeleting(id);
@@ -40,7 +61,7 @@ export default function DraftsPanel({
     setDeleting(null);
   };
 
-  if (loading) {
+  if (loading && drafts.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
