@@ -128,6 +128,18 @@ export async function GET(req: NextRequest) {
       .eq("email", email)
       .maybeSingle();
 
+    // Fetch contact people for this supplier (humans at the supplier company)
+    let contactPersons: any[] = [];
+    if (supplierContact?.id) {
+      const { data: persons } = await supabase
+        .from("supplier_contact_persons")
+        .select("id, name, title, email, phone, notes, sort_order, created_at, updated_at")
+        .eq("supplier_contact_id", supplierContact.id)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      contactPersons = persons || [];
+    }
+
     // ── Fetch threads from current account ──
     let convoQuery = supabase
       .from("conversations")
@@ -474,6 +486,8 @@ export async function GET(req: NextRequest) {
         name: contactName,
         company: contactCompany,
       },
+      supplier_contact_id: supplierContact?.id || null,
+      contact_persons: contactPersons,
       supplier_hours: supplierContact ? {
         id: supplierContact.id,
         timezone: supplierContact.timezone,
@@ -544,7 +558,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const supabase = createServerClient();
     const body = await req.json();
-    const { supplier_contact_id, email, timezone, work_start, work_end, work_days } = body;
+    const { supplier_contact_id, email, timezone, work_start, work_end, work_days, name, company } = body;
 
     if (!supplier_contact_id && !email) {
       return NextResponse.json({ error: "supplier_contact_id or email required" }, { status: 400 });
@@ -555,6 +569,16 @@ export async function PATCH(req: NextRequest) {
     if (work_start !== undefined) update.work_start = work_start || null;
     if (work_end !== undefined) update.work_end = work_end || null;
     if (work_days !== undefined) update.work_days = work_days || null;
+    if (name !== undefined) {
+      const trimmed = typeof name === "string" ? name.trim() : "";
+      if (!trimmed) {
+        return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
+      }
+      update.name = trimmed;
+    }
+    if (company !== undefined) {
+      update.company = typeof company === "string" ? (company.trim() || null) : null;
+    }
 
     if (Object.keys(update).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });

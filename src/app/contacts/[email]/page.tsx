@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, Globe, ListTodo, Mail, MessageSquare, Save, ShieldAlert, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -41,6 +41,20 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   const [editingHours, setEditingHours] = useState(false);
   const [savingHours, setSavingHours] = useState(false);
   const [hoursForm, setHoursForm] = useState({ timezone: "", work_start: "09:00", work_end: "17:00", work_days: [1,2,3,4,5] as number[] });
+
+  // Supplier name editing
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  // Contact persons CRUD state. We mirror data.contact_persons into local state so
+  // adds/edits/deletes can update instantly without refetching the entire page.
+  const [persons, setPersons] = useState<any[]>([]);
+  const [personFormFor, setPersonFormFor] = useState<string | null>(null); // person id being edited, or "new" for adding
+  const [personForm, setPersonForm] = useState({ name: "", title: "", email: "", phone: "", notes: "" });
+  const [savingPerson, setSavingPerson] = useState(false);
+  const [deletingPersonId, setDeletingPersonId] = useState<string | null>(null);
+
   const account = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("account") || "" : "";
 
   // Override body overflow:hidden from globals.css so this page can scroll
@@ -59,7 +73,12 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
         const res = await fetch(`/api/contact-command-center?${qs}`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || "Failed");
-        if (!c) { setData(json); if (json.supplier_hours) setHoursForm({ timezone: json.supplier_hours.timezone||"", work_start: json.supplier_hours.work_start||"09:00", work_end: json.supplier_hours.work_end||"17:00", work_days: json.supplier_hours.work_days||[1,2,3,4,5] }); }
+        if (!c) {
+          setData(json);
+          if (json.supplier_hours) setHoursForm({ timezone: json.supplier_hours.timezone||"", work_start: json.supplier_hours.work_start||"09:00", work_end: json.supplier_hours.work_end||"17:00", work_days: json.supplier_hours.work_days||[1,2,3,4,5] });
+          setPersons(Array.isArray(json.contact_persons) ? json.contact_persons : []);
+          setNameDraft(json.contact?.name || "");
+        }
       } catch (e: any) { if (!c) setError(e?.message||"Failed"); }
       finally { if (!c) setLoading(false); }
     })();
@@ -70,8 +89,111 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
     if (!data) return; setSavingHours(true);
     try {
       const res = await fetch("/api/contact-command-center", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ supplier_contact_id: data.supplier_hours?.id||null, email: decodedEmail, ...hoursForm }) });
-      if (res.ok) { setEditingHours(false); const qs = new URLSearchParams(); qs.set("email", decodedEmail); if (account) qs.set("account", account); const r2 = await fetch(`/api/contact-command-center?${qs}`, { cache: "no-store" }); const j = await r2.json(); if (r2.ok) setData(j); }
+      if (res.ok) { setEditingHours(false); const qs = new URLSearchParams(); qs.set("email", decodedEmail); if (account) qs.set("account", account); const r2 = await fetch(`/api/contact-command-center?${qs}`, { cache: "no-store" }); const j = await r2.json(); if (r2.ok) { setData(j); setPersons(Array.isArray(j.contact_persons) ? j.contact_persons : []); } }
     } catch (e) { console.error(e); } finally { setSavingHours(false); }
+  };
+
+  const saveName = async () => {
+    if (!data) return;
+    const trimmed = nameDraft.trim();
+    if (!trimmed) return;
+    setSavingName(true);
+    try {
+      const res = await fetch("/api/contact-command-center", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplier_contact_id: data.supplier_contact_id || data.supplier_hours?.id || null,
+          email: decodedEmail,
+          name: trimmed,
+        }),
+      });
+      if (res.ok) {
+        setEditingName(false);
+        // Reflect immediately by patching local data
+        setData((prev: any) => prev ? { ...prev, contact: { ...prev.contact, name: trimmed } } : prev);
+      }
+    } catch (e) { console.error(e); } finally { setSavingName(false); }
+  };
+
+  const openAddPerson = () => {
+    setPersonForm({ name: "", title: "", email: "", phone: "", notes: "" });
+    setPersonFormFor("new");
+  };
+  const openEditPerson = (p: any) => {
+    setPersonForm({
+      name: p.name || "",
+      title: p.title || "",
+      email: p.email || "",
+      phone: p.phone || "",
+      notes: p.notes || "",
+    });
+    setPersonFormFor(p.id);
+  };
+  const cancelPersonForm = () => {
+    setPersonFormFor(null);
+    setPersonForm({ name: "", title: "", email: "", phone: "", notes: "" });
+  };
+  const savePerson = async () => {
+    if (!personForm.name.trim()) return;
+    if (!data?.supplier_contact_id && personFormFor === "new") {
+      // No supplier_contact row yet — refuse to add. The cron must hydrate first,
+      // or the user must create the contact some other way. Surface a friendly error.
+      alert("Cannot add a contact person — this supplier hasn't been registered yet. Try again after the next sync.");
+      return;
+    }
+    setSavingPerson(true);
+    try {
+      if (personFormFor === "new") {
+        const res = await fetch("/api/contact-command-center/persons", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            supplier_contact_id: data.supplier_contact_id,
+            name: personForm.name.trim(),
+            title: personForm.title.trim() || null,
+            email: personForm.email.trim() || null,
+            phone: personForm.phone.trim() || null,
+            notes: personForm.notes.trim() || null,
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.person) setPersons((prev) => [...prev, json.person]);
+          cancelPersonForm();
+        }
+      } else if (personFormFor) {
+        const res = await fetch("/api/contact-command-center/persons", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: personFormFor,
+            name: personForm.name.trim(),
+            title: personForm.title.trim() || null,
+            email: personForm.email.trim() || null,
+            phone: personForm.phone.trim() || null,
+            notes: personForm.notes.trim() || null,
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.person) {
+            setPersons((prev) => prev.map((p) => (p.id === json.person.id ? json.person : p)));
+          }
+          cancelPersonForm();
+        }
+      }
+    } catch (e) { console.error(e); } finally { setSavingPerson(false); }
+  };
+  const deletePerson = async (id: string) => {
+    if (!confirm("Remove this contact person?")) return;
+    setDeletingPersonId(id);
+    try {
+      const res = await fetch(`/api/contact-command-center/persons?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setPersons((prev) => prev.filter((p) => p.id !== id));
+      }
+    } catch (e) { console.error(e); } finally { setDeletingPersonId(null); }
   };
 
   if (loading) return <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]"><div className="mx-auto max-w-7xl px-6 py-10"><div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--text-secondary)]">Loading command center...</div></div></div>;
@@ -128,7 +250,32 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                   </>
                 ) : null}
               </div>
-              <h1 className="text-3xl font-normal font-serif tracking-tight">{contact.name || contact.email}</h1>
+              {!editingName ? (
+                <div className="flex items-center gap-2">
+                  <h1 className="text-3xl font-normal font-serif tracking-tight">{contact.name || contact.email}</h1>
+                  <button onClick={() => { setNameDraft(contact.name || ""); setEditingName(true); }} title="Edit name" className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                    <Edit3 size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                    autoFocus
+                    placeholder="Supplier name"
+                    className="text-3xl font-normal font-serif tracking-tight bg-transparent border-b border-[var(--accent)] outline-none text-[var(--text-primary)] py-0.5 min-w-[280px]"
+                  />
+                  <button onClick={saveName} disabled={savingName || !nameDraft.trim()} title="Save" className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)]/10 disabled:opacity-50">
+                    <Save size={12} /> {savingName ? "Saving…" : "Save"}
+                  </button>
+                  <button onClick={() => setEditingName(false)} title="Cancel" className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
               {contact.company && contact.company !== contact.name && <div className="text-sm text-[var(--info)]">{contact.company}</div>}
               <div className="text-sm text-[var(--text-secondary)]">{contact.email}</div>
             </div>
@@ -173,6 +320,94 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                   <button key={i} onClick={() => setHoursForm(f => ({...f, work_days: f.work_days.includes(i) ? f.work_days.filter(d=>d!==i) : [...f.work_days, i].sort()}))} className={`w-8 h-7 rounded text-[10px] font-semibold transition-all ${hoursForm.work_days.includes(i) ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30" : "bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)]"}`}>{day}</button>
                 ))}</div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Contact People */}
+        <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2"><Users size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Contact People</span><span className="text-[11px] text-[var(--text-muted)]">({persons.length})</span></div>
+            {personFormFor === null && (
+              <button onClick={openAddPerson} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--info)] border border-[var(--info)]/30 hover:bg-[var(--info)]/10">
+                <UserPlus size={11} /> Add
+              </button>
+            )}
+          </div>
+
+          {/* Add/Edit form */}
+          {personFormFor !== null && (
+            <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-[var(--text-muted)] uppercase mb-1 block">Name *</label>
+                  <input type="text" value={personForm.name} onChange={(e) => setPersonForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Jane Smith" className="w-full px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--text-muted)] uppercase mb-1 block">Title</label>
+                  <input type="text" value={personForm.title} onChange={(e) => setPersonForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Account Manager" className="w-full px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--text-muted)] uppercase mb-1 block">Email</label>
+                  <input type="email" value={personForm.email} onChange={(e) => setPersonForm((f) => ({ ...f, email: e.target.value }))} placeholder="email@example.com" className="w-full px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--text-muted)] uppercase mb-1 block">Phone</label>
+                  <input type="tel" value={personForm.phone} onChange={(e) => setPersonForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+1 555 123 4567" className="w-full px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-muted)] uppercase mb-1 block">Notes</label>
+                <textarea value={personForm.notes} onChange={(e) => setPersonForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Anything useful — best time to call, preferred channel, etc." rows={2} className="w-full px-2 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] resize-y" />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button onClick={savePerson} disabled={savingPerson || !personForm.name.trim()} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)]/10 disabled:opacity-50">
+                  <Save size={11} /> {savingPerson ? "Saving…" : (personFormFor === "new" ? "Add" : "Save")}
+                </button>
+                <button onClick={cancelPersonForm} disabled={savingPerson} className="px-3 py-1.5 rounded-lg text-[11px] text-[var(--text-secondary)] border border-[var(--border)]">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Person list */}
+          {persons.length === 0 && personFormFor === null && (
+            <div className="text-xs text-[var(--text-muted)] py-2">No contact people added yet. Click <span className="font-semibold text-[var(--info)]">Add</span> to add one.</div>
+          )}
+          {persons.length > 0 && (
+            <div className="space-y-2">
+              {persons.map((p) => (
+                <div key={p.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <span className="text-sm font-semibold text-[var(--text-primary)]">{p.name}</span>
+                        {p.title && <span className="text-[11px] text-[var(--text-secondary)]">· {p.title}</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[var(--text-secondary)]">
+                        {p.email && (
+                          <span className="inline-flex items-center gap-1"><Mail size={10} className="text-[var(--text-muted)]" /> {p.email}</span>
+                        )}
+                        {p.phone && (
+                          <span className="inline-flex items-center gap-1"><Phone size={10} className="text-[var(--text-muted)]" /> {p.phone}</span>
+                        )}
+                      </div>
+                      {p.notes && (
+                        <div className="text-[11px] text-[var(--text-muted)] mt-1 whitespace-pre-wrap">{p.notes}</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => openEditPerson(p)} title="Edit" className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                        <Edit3 size={12} />
+                      </button>
+                      <button onClick={() => deletePerson(p.id)} disabled={deletingPersonId === p.id} title="Remove" className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--surface)] disabled:opacity-50">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
