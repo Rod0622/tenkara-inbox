@@ -49,8 +49,6 @@ export default function MessageBody({
         const data = await res.json();
         if (cancelled) return;
         const atts: any[] = data.attachments || [];
-        if (atts.length === 0) return;
-
         // Build a normalized map: contentId → attachment_id.
         // Some senders include the brackets in the cid (e.g. "<abc@host>"),
         // others don't — we strip them on both sides to match reliably.
@@ -59,13 +57,18 @@ export default function MessageBody({
         for (const a of atts) {
           if (a.contentId) cidMap.set(norm(a.contentId), a.id);
         }
-        if (cidMap.size === 0) return;
+        // Even if cidMap is empty, we still need to run the rewrite below so
+        // unresolvable cid: references get stripped (instead of erroring).
 
         // Rewrite every `cid:…` URL inside a quoted attribute.
-        // Catches src="cid:foo", src='cid:foo', and similar attrs (xlink:href, etc.)
-        const rewritten = bodyHtml.replace(/(["'])cid:([^"']+)\1/gi, (match, quote, rawCid) => {
+        //   - If we have an attachment with a matching content_id → swap to a real URL
+        //   - If we don't (e.g. Foxmail-generated cids that reference nothing in our
+        //     database) → blank the attribute so the browser doesn't error trying to
+        //     fetch `cid:…`. The image tag becomes a no-op broken-image icon, but
+        //     no network request and no console noise.
+        const rewritten = bodyHtml.replace(/(["'])cid:([^"']+)\1/gi, (_match, quote, rawCid) => {
           const id = cidMap.get(norm(rawCid));
-          if (!id) return match;
+          if (!id) return `${quote}${quote}`;
           const url = `/api/attachments?message_id=${encodeURIComponent(messageId)}&attachment_id=${encodeURIComponent(id)}&inline=1`;
           return `${quote}${url}${quote}`;
         });
