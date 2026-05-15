@@ -337,6 +337,7 @@ export default function ConversationDetail({
   // Current connected account's email address. Used by Reply All to exclude
   // ourselves from the recipient list (don't email yourself).
   const [accountEmail, setAccountEmail] = useState<string>("");
+  const [accountName, setAccountName] = useState<string>("");
   const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
 
   // Check for drafts when conversation loads
@@ -406,11 +407,12 @@ export default function ConversationDetail({
       Promise.resolve().then(() => {
         const sb = createBrowserClient();
         sb.from("email_accounts")
-          .select("email, signature, signature_enabled")
+          .select("name, email, signature, signature_enabled")
           .eq("id", convo.email_account_id)
           .single()
           .then(({ data }: any) => {
             setAccountEmail((data?.email || "").toLowerCase());
+            setAccountName(data?.name || "");
             if (data?.signature_enabled && data?.signature) {
               setReplySignature(data.signature);
             } else {
@@ -420,6 +422,7 @@ export default function ConversationDetail({
       });
     } else {
       setAccountEmail("");
+      setAccountName("");
       setReplySignature("");
     }
   }, [convo?.email_account_id]);
@@ -3816,6 +3819,39 @@ export default function ConversationDetail({
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
+              {/* Reply header: surfaces the From/To/Cc so the sender always knows
+                  WHO they're emailing AS and WHO will receive this reply. The To
+                  here mirrors the same priority the send route uses to pick the
+                  recipient when no explicit `to` is passed (latest inbound's
+                  from_email → latest outbound's first recipient → convo fallback). */}
+              {(() => {
+                const { primaryTo } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
+                const fromDisplay = accountName ? `${accountName} <${accountEmail}>` : accountEmail;
+                return (
+                  <div className="rounded-md bg-[var(--bg)] border border-[var(--border)] px-2.5 py-1.5 text-[11px] leading-snug">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">From</span>
+                      <span className="text-[var(--text-primary)] truncate">{fromDisplay || "—"}</span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">To</span>
+                      <span className="text-[var(--text-primary)] truncate">{primaryTo || "—"}</span>
+                    </div>
+                    {replyCc.trim() && (
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">Cc</span>
+                        <span className="text-[var(--text-primary)] truncate">{replyCc.trim()}</span>
+                      </div>
+                    )}
+                    {replyBcc.trim() && (
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">Bcc</span>
+                        <span className="text-[var(--text-primary)] truncate">{replyBcc.trim()}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {/* Batch 11: Cc / Bcc toggle row */}
               {(!showReplyCc || !showReplyBcc) && (
                 <div className="flex items-center gap-2 text-[10px]">
