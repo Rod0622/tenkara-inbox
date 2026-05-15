@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
   const messageId = req.nextUrl.searchParams.get("message_id");
   const attachmentId = req.nextUrl.searchParams.get("attachment_id");
   const downloadAll = req.nextUrl.searchParams.get("download_all");
+  const inlineMode = req.nextUrl.searchParams.get("inline") === "1";
 
   if (!messageId) {
     return NextResponse.json({ error: "message_id is required" }, { status: 400 });
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
           contentType: r.mime_type || "application/octet-stream",
           size: r.size_bytes || 0,
           isInline: !!r.is_inline,
+          contentId: r.content_id || null,
         })),
       });
     }
@@ -91,7 +93,7 @@ export async function GET(req: NextRequest) {
       return new NextResponse(new Uint8Array(dl.bytes), {
         headers: {
           "Content-Type": row.mime_type || dl.contentType || "application/octet-stream",
-          "Content-Disposition": `attachment; filename="${encodeURIComponent(row.filename)}"`,
+          "Content-Disposition": `${inlineMode ? "inline" : "attachment"}; filename="${encodeURIComponent(row.filename)}"`,
           "Content-Length": String(dl.bytes.length),
         },
       });
