@@ -52,11 +52,23 @@ export default function SidebarSuppliersList() {
     }
   };
 
-  // Lazy-load: only fetch when the panel is first opened
+  // Fetch whenever the panel opens — keeps the list fresh after edits in
+  // the command center (renames, new contact people, etc.). The previous
+  // implementation only fetched once, which left stale names visible until
+  // the page was reloaded.
   useEffect(() => {
-    if (open && suppliers.length === 0 && !loading) {
-      fetchSuppliers();
-    }
+    if (open) fetchSuppliers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Refetch when the window regains focus while the panel is open. This
+  // covers the common flow: user opens a supplier command center in a new
+  // tab, renames the supplier, then switches back to the inbox tab.
+  useEffect(() => {
+    if (!open) return;
+    const onFocus = () => { fetchSuppliers(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -142,7 +154,7 @@ export default function SidebarSuppliersList() {
 
           {/* Scrollable list */}
           <div className="max-h-[60vh] overflow-y-auto pr-0.5 space-y-0.5">
-            {loading && (
+            {loading && suppliers.length === 0 && (
               <div className="text-[11px] text-[var(--text-muted)] px-2.5 py-2">Loading…</div>
             )}
             {!loading && filtered.length === 0 && (
@@ -150,8 +162,7 @@ export default function SidebarSuppliersList() {
                 {suppliers.length === 0 ? "No suppliers yet" : "No matches"}
               </div>
             )}
-            {!loading &&
-              filtered.map((s) => (
+            {filtered.map((s) => (
                 <div
                   key={s.id}
                   className="px-2.5 py-1.5 rounded-md hover:bg-[var(--surface)] transition-colors"
