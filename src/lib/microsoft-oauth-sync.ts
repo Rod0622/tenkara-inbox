@@ -201,7 +201,14 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         let bodyText: string;
         if (bodyContentType === "html" && rawBodyContent) {
           bodyHtml = rawBodyContent;
-          bodyText = rawBodyContent.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 5000);
+          // Strip <style> and <script> tags AND their contents — otherwise
+          // marketing-email CSS rules leak into body_text/snippet/preview.
+          bodyText = rawBodyContent
+            .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 5000);
         } else if (bodyContentType === "text" && rawBodyContent) {
           bodyText = rawBodyContent.slice(0, 5000);
           bodyHtml = "<div style=\"white-space: pre-wrap;\">" + escapeHtml(rawBodyContent) + "</div>";

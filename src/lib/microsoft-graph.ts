@@ -405,7 +405,15 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           let rawBodyText: string;
           if (bodyContentType === "html" && rawBodyContent) {
             emailBodyHtml = rawBodyContent;
-            rawBodyText = rawBodyContent.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+            // Strip <style> and <script> tags AND their contents — otherwise
+            // marketing emails with a giant <style> block at the top leak CSS
+            // rules into body_text/snippet/preview. The "&nbsp;" and similar
+            // entities are decoded downstream by decodeEmailText.
+            rawBodyText = rawBodyContent
+              .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+              .replace(/<[^>]*>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
           } else if (bodyContentType === "text" && rawBodyContent) {
             // Plain text body — preserve newlines for body_text, build minimal
             // HTML for the renderer.
