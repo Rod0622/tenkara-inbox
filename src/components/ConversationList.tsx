@@ -941,15 +941,20 @@ export default function ConversationList({
                     {/* Subject */}
                     <div className={`text-[12.5px] truncate mb-1 flex items-center gap-1 ${c.is_unread ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
                       {/*
-                        Paperclip indicator. Shows when EITHER the
-                        trigger-maintained attachment_count is positive OR
-                        the legacy has_attachments flag is true. Belt and
-                        suspenders: covers backfilled threads (count > 0)
-                        AND newly-arrived messages that haven't had their
-                        attachments captured yet (flag is true even if
-                        count is still 0). Tenkara gold at 13px.
+                        Paperclip indicator. Driven by attachment_count
+                        ONLY — this is the trigger-maintained count of rows
+                        actually present in the attachments table. The
+                        legacy has_attachments boolean is set by sync from
+                        the provider's hasAttachments flag, which is a
+                        false positive for inline-image-only emails
+                        (signatures, marketing templates). Relying on it
+                        was causing clips to appear on conversations that
+                        had no real, downloadable attachments. Tradeoff:
+                        a just-arrived attachment may briefly miss the
+                        clip until the attachment-backfill cron captures
+                        it (usually within minutes).
                       */}
-                      {(((c as any).attachment_count ?? 0) > 0 || (c as any).has_attachments) && (
+                      {((c as any).attachment_count ?? 0) > 0 && (
                         <Paperclip
                           size={13}
                           className="text-[var(--accent)] flex-shrink-0"
