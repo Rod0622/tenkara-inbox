@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, MessageSquare, Send, AtSign, Users } from "lucide-react";
+import { MessageSquare, Send, AtSign, Users, X } from "lucide-react";
 import type { TeamMember } from "@/types";
 import Avatar from "./Avatar";
 
@@ -279,10 +279,13 @@ export default function TeamChat({
     });
   };
 
-  return (
+  // Trigger button (always rendered at the bottom of the conversation pane).
+  // Clicking opens the right-side drawer below — no inline expansion anymore,
+  // because the previous 90px-tall inline panel forced too much scrolling.
+  const triggerButton = (
     <div className="border-t border-[var(--surface-2)] shrink-0">
       <button
-        onClick={() => setIsTeamChatOpen(!isTeamChatOpen)}
+        onClick={() => setIsTeamChatOpen(true)}
         className="w-full px-4 py-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)] uppercase tracking-wider hover:bg-[var(--surface)] transition-colors"
       >
         <MessageSquare size={12} />
@@ -299,112 +302,173 @@ export default function TeamChat({
             {comments.length}
           </span>
         )}
-        <ChevronDown size={12} className={`${myMentionCount > 0 || comments.length > 0 ? "" : "ml-auto"} transition-transform ${isTeamChatOpen ? "rotate-180" : ""}`} />
       </button>
+    </div>
+  );
 
+  return (
+    <>
+      {triggerButton}
+
+      {/* Right-side slide-out drawer. fixed-positioned so it overlays the
+          right portion of the conversation detail without affecting the
+          inline layout. Clicking outside (the backdrop) closes the drawer. */}
       {isTeamChatOpen && (
         <>
-          <div className="h-[90px] overflow-y-auto px-4 py-2">
-            {comments.length === 0 ? (
-              <div className="text-center text-[12px] text-[var(--text-muted)] pt-6">
-                No team discussion yet. Start a conversation about this thread.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {comments.map((comment) => {
-                  const author =
-                    comment.author ||
-                    teamMembers.find((member) => member.id === comment.author_id) ||
-                    null;
+          {/* Backdrop — semi-transparent click-catcher behind the drawer.
+              Pointer-events-auto so clicks register; visually subtle so we
+              don't darken the whole UI like a modal would. */}
+          <div
+            className="fixed inset-0 z-40 bg-black/20"
+            onClick={() => setIsTeamChatOpen(false)}
+            aria-hidden="true"
+          />
 
-                  return (
-                    <div key={comment.id} className="flex items-start gap-2">
-                      {author ? (
-                        <Avatar initials={author.initials} color={author.color} size={20} />
-                      ) : (
-                        <div className="w-5 h-5 rounded-full bg-[#30363D]" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className="text-[11px] font-semibold"
-                            style={{ color: author?.color || "var(--text-primary)" }}
-                          >
-                            {author?.name || "Unknown"}
-                          </span>
-                          <span className="text-[10px] text-[var(--text-muted)]">
-                            {comment.created_at
-                              ? new Date(comment.created_at).toLocaleString()
-                              : ""}
-                          </span>
-                        </div>
-                        <div className="text-[12px] text-[var(--text-primary)] whitespace-pre-wrap">
-                          {renderCommentBody(comment.body || "")}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* Drawer panel. Anchored to the right edge of the viewport, full
+              viewport height. Width caps at 420px on wide screens; on narrow
+              screens it shrinks to nearly the full pane via max-width. */}
+          <aside
+            className="fixed top-0 right-0 bottom-0 z-50 w-full max-w-[420px] bg-[var(--bg)] border-l border-[var(--border)] shadow-2xl shadow-black/40 flex flex-col animate-fade-in"
+            role="dialog"
+            aria-label="Team Chat"
+          >
+            {/* Drawer header — title + close. Sticky-feeling because it's
+                inside a flex column with the message list as flex-1. */}
+            <div className="shrink-0 px-4 py-3 border-b border-[var(--border)] flex items-center gap-2 bg-[var(--surface)]">
+              <MessageSquare size={14} className="text-[var(--text-secondary)]" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-[var(--text-primary)]">Team Chat</div>
+                <div className="text-[10px] text-[var(--text-muted)] truncate">
+                  Internal — not visible to sender
+                </div>
               </div>
-            )}
-          </div>
-
-          <div className="px-4 py-3 border-t border-[var(--surface-2)] relative">
-            {/* Mention picker */}
-            {pickerOpen && pickerCandidates.length > 0 && (
-              <div className="absolute bottom-full left-4 right-4 mb-1 max-h-48 overflow-y-auto rounded-lg bg-[var(--bg)] border border-[var(--border)] shadow-lg z-10">
-                {pickerCandidates.map((entry, idx) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    onMouseDown={(e) => {
-                      // Use mouseDown so we don't lose input focus before the click handler
-                      e.preventDefault();
-                      insertMention(entry);
-                    }}
-                    onMouseEnter={() => setPickerIndex(idx)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[12px] ${
-                      idx === pickerIndex
-                        ? "bg-[#1F2937] text-[var(--text-primary)]"
-                        : "text-[#9CA3AF] hover:bg-[var(--surface)]"
-                    }`}
-                  >
-                    {entry.isEveryone ? (
-                      <Users size={14} className="text-[#FCA5A5]" />
-                    ) : (
-                      <AtSign size={14} className="text-[var(--text-secondary)]" />
-                    )}
-                    <span className={entry.isEveryone ? "font-semibold text-[#FCA5A5]" : ""}>
-                      {entry.isEveryone ? "@everyone" : entry.display}
-                    </span>
-                    {entry.isEveryone && (
-                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">notify all team members</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder="@ Chat with your team... (type @ to mention)"
-                className="flex-1 h-10 rounded-lg bg-[var(--bg)] border border-[var(--border)] px-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#30363D]"
-              />
+              {comments.length > 0 && (
+                <span className="bg-[var(--border)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-full font-bold">
+                  {comments.length}
+                </span>
+              )}
               <button
-                onClick={sendComment}
-                disabled={sending || !input.trim()}
-                className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 flex items-center justify-center"
+                onClick={() => setIsTeamChatOpen(false)}
+                className="w-8 h-8 rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-2)] flex items-center justify-center"
+                aria-label="Close Team Chat"
+                title="Close"
               >
-                <Send size={14} />
+                <X size={16} />
               </button>
             </div>
-          </div>
+
+            {/* Scrollable message list. flex-1 means it takes all available
+                vertical space between the header and the input footer. */}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {comments.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-center text-[12px] text-[var(--text-muted)] px-6">
+                  No team discussion yet. Start a conversation about this thread.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {comments.map((comment, idx) => {
+                    const author =
+                      comment.author ||
+                      teamMembers.find((member) => member.id === comment.author_id) ||
+                      null;
+                    // Visual divider between consecutive messages (Rod's
+                    // "break line" request). Hidden above the first message.
+                    return (
+                      <div key={comment.id}>
+                        {idx > 0 && (
+                          <div className="border-t border-[var(--border)]/40 my-3" />
+                        )}
+                        <div className="flex items-start gap-2">
+                          {author ? (
+                            <Avatar initials={author.initials} color={author.color} size={24} />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-[#30363D]" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span
+                                className="text-[12px] font-semibold"
+                                style={{ color: author?.color || "var(--text-primary)" }}
+                              >
+                                {author?.name || "Unknown"}
+                              </span>
+                              <span className="text-[10px] text-[var(--text-muted)]">
+                                {comment.created_at
+                                  ? new Date(comment.created_at).toLocaleString()
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="text-[13px] text-[var(--text-primary)] whitespace-pre-wrap break-words leading-relaxed">
+                              {renderCommentBody(comment.body || "")}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Input footer — pinned to the bottom of the drawer. */}
+            <div className="shrink-0 px-4 py-3 border-t border-[var(--border)] relative bg-[var(--surface)]">
+              {pickerOpen && pickerCandidates.length > 0 && (
+                <div className="absolute bottom-full left-4 right-4 mb-1 max-h-48 overflow-y-auto rounded-lg bg-[var(--bg)] border border-[var(--border)] shadow-lg z-10">
+                  {pickerCandidates.map((entry, idx) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        insertMention(entry);
+                      }}
+                      onMouseEnter={() => setPickerIndex(idx)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[12px] ${
+                        idx === pickerIndex
+                          ? "bg-[#1F2937] text-[var(--text-primary)]"
+                          : "text-[#9CA3AF] hover:bg-[var(--surface)]"
+                      }`}
+                    >
+                      {entry.isEveryone ? (
+                        <Users size={14} className="text-[#FCA5A5]" />
+                      ) : (
+                        <AtSign size={14} className="text-[var(--text-secondary)]" />
+                      )}
+                      <span className={entry.isEveryone ? "font-semibold text-[#FCA5A5]" : ""}>
+                        {entry.isEveryone ? "@everyone" : entry.display}
+                      </span>
+                      {entry.isEveryone && (
+                        <span className="ml-auto text-[10px] text-[var(--text-secondary)]">
+                          notify all team members
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder="@ Chat with your team... (type @ to mention)"
+                  className="flex-1 h-10 rounded-lg bg-[var(--bg)] border border-[var(--border)] px-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#30363D]"
+                />
+                <button
+                  onClick={sendComment}
+                  disabled={sending || !input.trim()}
+                  className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 flex items-center justify-center"
+                  title="Send"
+                >
+                  <Send size={14} />
+                </button>
+              </div>
+            </div>
+          </aside>
         </>
       )}
-    </div>
+    </>
   );
 }
