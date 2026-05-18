@@ -150,17 +150,29 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json();
 
   const noteId = body.note_id || body.noteId;
-  // message_id can be null (detach) or a string (attach). undefined is rejected.
-  if (!noteId || body.message_id === undefined) {
+  if (!noteId) {
+    return NextResponse.json({ error: "note_id is required" }, { status: 400 });
+  }
+
+  // PATCH supports three independent updates:
+  //   - message_id  (attach/detach to a specific message — null = detach)
+  //   - text        (edit body)
+  //   - title       (edit title — empty string clears it)
+  // At least one must be present. Backward compat: existing callers pass
+  // only message_id and still work.
+  const hasMessageId = body.message_id !== undefined;
+  const hasText = typeof body.text === "string";
+  const hasTitle = typeof body.title === "string";
+
+  if (!hasMessageId && !hasText && !hasTitle) {
     return NextResponse.json(
-      { error: "note_id and message_id (string or null) are required" },
+      { error: "Pass message_id, text, or title to update" },
       { status: 400 }
     );
   }
-  const messageId: string | null = body.message_id || null;
 
   // Look up the note so we know which conversation it belongs to,
-  // then verify the new message_id is part of that same conversation.
+  // then verify any new message_id is part of that same conversation.
   const { data: existingNote } = await supabase
     .from("notes")
     .select("id, conversation_id")
@@ -171,23 +183,42 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Note not found" }, { status: 404 });
   }
 
-  if (messageId) {
-    const { data: msg } = await supabase
-      .from("messages")
-      .select("id, conversation_id")
-      .eq("id", messageId)
-      .maybeSingle();
-    if (!msg || msg.conversation_id !== existingNote.conversation_id) {
-      return NextResponse.json(
-        { error: "message_id does not belong to this note's conversation" },
-        { status: 400 }
-      );
+  const update: Record<string, any> = {};
+
+  if (hasMessageId) {
+    const messageId: string | null = body.message_id || null;
+    if (messageId) {
+      const { data: msg } = await supabase
+        .from("messages")
+        .select("id, conversation_id")
+        .eq("id", messageId)
+        .maybeSingle();
+      if (!msg || msg.conversation_id !== existingNote.conversation_id) {
+        return NextResponse.json(
+          { error: "message_id does not belong to this note's conversation" },
+          { status: 400 }
+        );
+      }
     }
+    update.message_id = messageId;
+  }
+
+  if (hasText) {
+    const trimmed = String(body.text).trim();
+    if (!trimmed) {
+      return NextResponse.json({ error: "text cannot be empty" }, { status: 400 });
+    }
+    update.text = trimmed;
+  }
+
+  if (hasTitle) {
+    // Title may be empty string (clear the title) but otherwise we trim.
+    update.title = String(body.title).trim();
   }
 
   const { data: note, error } = await supabase
     .from("notes")
-    .update({ message_id: messageId })
+    .update(update)
     .eq("id", noteId)
     .select("*, author:team_members(*)")
     .single();
@@ -197,4 +228,25 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ note });
+}
+
+// DELETE /api/conversations/notes?note_id=xxx
+// Removes a note. Permissive: any team member can delete any note (matches
+// how tasks work). If we later want author-only or admin-only restrictions,
+// add the check here against the session user.
+export async function DELETE(req: NextRequest) {
+  const supabase = createServerClient();
+  const noteId = req.nextUrl.searchParams.get("note_id") || req.nextUrl.searchParams.get("id");
+
+  if (!noteId) {
+    return NextResponse.json({ error: "note_id is required" }, { status: 400 });
+  }
+
+  const { error } = await supabase.from("notes").delete().eq("id", noteId);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }

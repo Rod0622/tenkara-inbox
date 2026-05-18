@@ -443,6 +443,13 @@ export default function ConversationDetail({
   const [attachingNoteId, setAttachingNoteId] = useState<string | null>(null);
   // Loading state during retroactive attach/detach
   const [attachingPending, setAttachingPending] = useState<string | null>(null);
+  // Note editing — which note is in inline edit mode + its draft text/title +
+  // save-in-flight flag + delete-in-flight flag.
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [editingNoteTitle, setEditingNoteTitle] = useState("");
+  const [savingNoteEdit, setSavingNoteEdit] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [showTaskInput, setShowTaskInput] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -821,6 +828,59 @@ export default function ConversationDetail({
       await refetchDetail();
     } finally {
       setAttachingPending(null);
+    }
+  };
+
+  // Note edit/delete helpers — added in the "you can edit your own notes now" turn.
+  const startEditingNote = (note: any) => {
+    setEditingNoteId(note.id);
+    setEditingNoteText(note.text || "");
+    setEditingNoteTitle(note.title || "");
+  };
+  const cancelEditingNote = () => {
+    setEditingNoteId(null);
+    setEditingNoteText("");
+    setEditingNoteTitle("");
+  };
+  const saveEditedNote = async () => {
+    if (!editingNoteId) return;
+    const trimmed = editingNoteText.trim();
+    if (!trimmed) return;
+    setSavingNoteEdit(true);
+    try {
+      const res = await fetch("/api/conversations/notes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          note_id: editingNoteId,
+          text: trimmed,
+          title: editingNoteTitle.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || "Failed to save note");
+        return;
+      }
+      cancelEditingNote();
+      await refetchDetail();
+    } finally {
+      setSavingNoteEdit(false);
+    }
+  };
+  const deleteNote = async (noteId: string) => {
+    if (!confirm("Delete this note? This can't be undone.")) return;
+    setDeletingNoteId(noteId);
+    try {
+      const res = await fetch(`/api/conversations/notes?note_id=${noteId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || "Failed to delete note");
+        return;
+      }
+      await refetchDetail();
+    } finally {
+      setDeletingNoteId(null);
     }
   };
 
@@ -2646,13 +2706,72 @@ export default function ConversationDetail({
                       </span>
                     </div>
                   </div>
-                  <div className="text-[13px] text-[var(--text-secondary)] whitespace-pre-wrap">{note.text}</div>
+                  {editingNoteId === note.id ? (
+                    // Inline edit mode — title + textarea + save/cancel
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={editingNoteTitle}
+                        onChange={(e) => setEditingNoteTitle(e.target.value)}
+                        placeholder="Title (optional)"
+                        className="w-full px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
+                      />
+                      <textarea
+                        value={editingNoteText}
+                        onChange={(e) => setEditingNoteText(e.target.value)}
+                        rows={4}
+                        placeholder="Note text"
+                        className="w-full px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[13px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent)] resize-y"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={saveEditedNote}
+                          disabled={savingNoteEdit || !editingNoteText.trim()}
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold hover:bg-[var(--accent-strong)] disabled:opacity-50"
+                        >
+                          {savingNoteEdit ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={cancelEditingNote}
+                          disabled={savingNoteEdit}
+                          className="px-3 py-1 rounded-md border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)] disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[13px] text-[var(--text-secondary)] whitespace-pre-wrap">{note.text}</div>
+                  )}
 
                   {/* Retroactive attach/detach controls */}
                   {/* Retroactive attach/detach controls. The "Attach/Change message"
                       button drops the user into selection mode in the Messages tab,
                       same as the new-note flow — much easier than picking from a dropdown. */}
-                  <div className="mt-3 pt-2 border-t border-[var(--border)]/50 flex items-center justify-end gap-2">
+                  <div className="mt-3 pt-2 border-t border-[var(--border)]/50 flex items-center justify-end gap-2 flex-wrap">
+                    {/* Edit + Delete — hidden while this note is already in edit mode */}
+                    {editingNoteId !== note.id && (
+                      <>
+                        <button
+                          onClick={() => startEditingNote(note)}
+                          disabled={isPending || deletingNoteId === note.id}
+                          title="Edit note"
+                          className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--info)] disabled:opacity-40"
+                        >
+                          <Pencil size={10} />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteNote(note.id)}
+                          disabled={isPending || deletingNoteId === note.id}
+                          title="Delete note"
+                          className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-40"
+                        >
+                          <Trash2 size={10} />
+                          {deletingNoteId === note.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </>
+                    )}
                     {attachedMessage && (
                       <button
                         onClick={() => handleAttachNoteToMessage(note.id, null)}
