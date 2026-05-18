@@ -41,30 +41,24 @@ const PHASE_COLOR: Record<number, string> = {
   4: "var(--highlight)",
 };
 
-// Brands we send FROM. Per Rod (2026-05-15), include all 5 even though we
-// only have email accounts for 3 today — future-proof and the AI's system
-// prompt already names all 5 as "we ARE these brands".
-const FROM_OPTIONS = [
-  "Tenkara",
-  "Bobber Labs",
-  "Rove Essentials",
-  "NutriPro Group",
-  "PharmaLabs, LLC",
-];
-
-// Map a Tenkara email_accounts.name to the brand name to use in the email
-// signature / voice. "Operations" is the account name for Tenkara emails,
-// so we rewrite it to "Tenkara". The match is case-insensitive and tolerant
-// of small DB renames (e.g. "Operations Mailbox" still maps to Tenkara).
+// Resolve the FROM org from the conversation's email account name.
+// Rod's decision (2026-05-15): no dropdown — auto-capture is less error-prone.
+// "Operations" is Tenkara's account name, so we rewrite it. Other accounts
+// use their name verbatim (case preserved). Fuzzy keyword matching makes
+// this resilient to small DB renames.
 function accountNameToOrg(accountName: string | undefined | null): string {
   if (!accountName) return "Tenkara";
-  const n = accountName.toLowerCase();
+  const trimmed = accountName.trim();
+  if (!trimmed) return "Tenkara";
+  const n = trimmed.toLowerCase();
+  if (n.includes("operations") || n.includes("tenkara")) return "Tenkara";
   if (n.includes("bobber")) return "Bobber Labs";
   if (n.includes("rove")) return "Rove Essentials";
   if (n.includes("nutripro") || n.includes("nutri pro")) return "NutriPro Group";
-  if (n.includes("pharmalab") || n.includes("pharma lab")) return "PharmaLabs, LLC";
-  if (n.includes("operations") || n.includes("tenkara")) return "Tenkara";
-  return "Tenkara";
+  if (n.includes("pharmalab") || n.includes("pharma lab")) return "Pharmalab Enterprises";
+  if (n.includes("vita")) return "Vita Organica";
+  // Unknown account name — use it verbatim. The AI will sign as that name.
+  return trimmed;
 }
 
 interface Props {
@@ -76,10 +70,9 @@ interface Props {
   initialEmailSubject?: string;
   initialIncomingMessage?: string;
   // Pass EITHER:
-  //   - organizationName (a literal brand like "Bobber Labs")
-  //   - accountName (the conversation's email_accounts.name like "Bobber Labs"
-  //                  or "Operations" — we'll map it to the right brand)
-  // Both are optional; if neither is set, we default to Tenkara.
+  //   - organizationName (a literal brand like "Bobber Labs") — explicit override
+  //   - accountName      (the conversation's email_accounts.name — we map it)
+  // organizationName wins if both are passed. Defaults to Tenkara if neither.
   organizationName?: string;
   accountName?: string;
   // Called when user clicks Insert — receives the generated text
@@ -97,17 +90,11 @@ export default function AIDraftModal({
   accountName,
   onInsert,
 }: Props) {
-  // Resolved default for the FROM field:
-  //   1. explicit organizationName prop wins (e.g. caller already mapped)
-  //   2. else derive from accountName via accountNameToOrg
-  //   3. else "Tenkara"
-  const defaultOrg = organizationName || accountNameToOrg(accountName);
-  // The form's CURRENT org selection. Editable via the FROM dropdown.
-  const [orgName, setOrgName] = useState<string>(defaultOrg);
-  // Custom org name (typed by user when they pick "Custom..." from dropdown)
-  const [customOrgName, setCustomOrgName] = useState<string>("");
-  // Whether "Custom" is the active selection.
-  const [isCustomOrg, setIsCustomOrg] = useState<boolean>(false);
+  // Resolve the FROM org once, when the modal opens. No user-editable
+  // dropdown — Rod explicitly requested auto-capture to remove the choice
+  // and reduce mistakes. If you need to override, change the conversation's
+  // email account or pass `organizationName` from the caller.
+  const resolvedOrg = organizationName || accountNameToOrg(accountName);
   // ── Form state ─────────────────────────────────────────────────────────────
   const [supplierCompany, setSupplierCompany] = useState(initialSupplierCompany);
   const [contactName, setContactName] = useState(initialContactName);
@@ -136,11 +123,8 @@ export default function AIDraftModal({
     if (open) {
       setSupplierCompany(initialSupplierCompany);
       setContactName(initialContactName);
-      // Reset FROM to whatever the conversation says, in case the user
-      // opened the modal from a different conversation than last time.
-      setOrgName(defaultOrg);
-      setIsCustomOrg(false);
-      setCustomOrgName("");
+      // FROM is recomputed from props on every render — see resolvedOrg above —
+      // so nothing to reset here for the brand voice.
       setEmailSubject(initialEmailSubject);
       setIncomingMessage(initialIncomingMessage);
       setError("");
@@ -212,10 +196,8 @@ export default function AIDraftModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Resolved FROM value: trimmed custom text if user picked Custom,
-          // otherwise the dropdown choice. Falls back to "Tenkara" if Custom
-          // was selected but the input was left empty.
-          organizationName: (isCustomOrg ? customOrgName.trim() : orgName) || "Tenkara",
+          // Auto-captured FROM org (account name → brand mapping above).
+          organizationName: resolvedOrg,
           supplierCompany,
           contactName,
           emailSubject,
@@ -283,41 +265,21 @@ export default function AIDraftModal({
 
         {/* Body — scrollable */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* FROM — which brand should the AI write as? Auto-filled from the
-              conversation's email account; the user can override or pick Custom. */}
+          {/* FROM — read-only badge showing which brand the AI will write as.
+              Auto-captured from the conversation's email account (no dropdown —
+              Rod's call: less work + less chance of picking the wrong one). */}
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] block mb-1">
               From
             </label>
-            <select
-              value={isCustomOrg ? "__custom__" : orgName}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "__custom__") {
-                  setIsCustomOrg(true);
-                  // Keep the previously-typed custom value, or seed with the
-                  // current orgName so the input isn't blank.
-                  if (!customOrgName) setCustomOrgName(orgName);
-                } else {
-                  setIsCustomOrg(false);
-                  setOrgName(v);
-                }
-              }}
-              className="w-full px-2.5 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+            <div
+              className="w-full px-2.5 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] flex items-center gap-2"
+              title="Auto-captured from the email account this conversation uses"
             >
-              {FROM_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-              <option value="__custom__">Custom…</option>
-            </select>
-            {isCustomOrg && (
-              <input
-                value={customOrgName}
-                onChange={(e) => setCustomOrgName(e.target.value)}
-                placeholder="Enter organization name"
-                className="mt-1.5 w-full px-2.5 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
-              />
-            )}
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" />
+              <span className="font-medium">{resolvedOrg}</span>
+              <span className="text-[10px] text-[var(--text-muted)] ml-auto">auto</span>
+            </div>
           </div>
 
           {/* Auto-filled context fields */}
