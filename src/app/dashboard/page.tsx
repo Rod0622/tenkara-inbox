@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Loader2, Users, CheckCircle2, AlertTriangle,
   ListTodo, Mail, CalendarClock, Send, ChevronDown, X,
-  ExternalLink, Inbox, Eye, Download, FileSpreadsheet, FileJson, FileText
+  ExternalLink, Inbox, Eye, Download, FileSpreadsheet, FileJson, FileText,
+  UserMinus, Trash2, Clock
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 import {
@@ -79,7 +80,7 @@ interface SentEmail {
   from_email: string;
 }
 
-type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export";
+type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export" | "removals";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -188,6 +189,18 @@ export default function DashboardPage() {
   const [taskFilterUser, setTaskFilterUser] = useState<string | null>(null);
   const [dashTaskSearch, setDashTaskSearch] = useState("");
 
+  // ── Task Removals audit (admin-only "Removals" tab) ──────────────────
+  // Data shape mirrors GET /api/admin/task-removals: { rows, summary }.
+  // Filters: date range (preset window 7/30/90/all) + user filter +
+  // sole-only toggle. Re-fetched whenever any filter changes.
+  const [removals, setRemovals] = useState<any[]>([]);
+  const [removalSummary, setRemovalSummary] = useState<any>(null);
+  const [removalsLoading, setRemovalsLoading] = useState(false);
+  const [removalsWindow, setRemovalsWindow] = useState<"7d" | "30d" | "90d" | "all">("30d");
+  const [removalsUserFilter, setRemovalsUserFilter] = useState<string | null>(null);
+  const [removalsSoleOnly, setRemovalsSoleOnly] = useState(false);
+  const [removalsSearch, setRemovalsSearch] = useState("");
+
   // SLA/KPI metrics
   const [slaData, setSlaData] = useState<any>(null);
   const [slaLoading, setSlaLoading] = useState(false);
@@ -205,6 +218,7 @@ export default function DashboardPage() {
   // Load SLA data when switching to SLA tab or when dates change
   useEffect(() => {
     if (viewMode === "sla") loadSlaData();
+    if (viewMode === "removals") loadRemovals();
   }, [viewMode, dateFrom, dateTo]);
 
   async function loadSlaData() {
@@ -730,6 +744,60 @@ export default function DashboardPage() {
 
   const selectedUser = userStats.find((u) => u.id === selectedUserId);
 
+  // Loader for the Removals audit tab. Builds query params from current
+  // filter state and hits /api/admin/task-removals (admin-gated).
+  const loadRemovals = useCallback(async () => {
+    const myId = (session as any)?.teamMember?.id;
+    if (!myId) return;
+    setRemovalsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("actor_id", myId);
+      // Date window — translate the preset into a "since" param.
+      const now = new Date();
+      if (removalsWindow !== "all") {
+        const days = removalsWindow === "7d" ? 7 : removalsWindow === "30d" ? 30 : 90;
+        const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+        params.set("since", since.toISOString());
+      }
+      if (removalsUserFilter) params.set("removed_by", removalsUserFilter);
+      if (removalsSoleOnly) params.set("sole_only", "true");
+      const res = await fetch(`/api/admin/task-removals?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok) {
+        setRemovals(json.rows || []);
+        setRemovalSummary(json.summary || null);
+      } else {
+        console.error("Failed to load removals:", json?.error);
+        setRemovals([]);
+        setRemovalSummary(null);
+      }
+    } catch (e) {
+      console.error("loadRemovals error:", e);
+      setRemovals([]);
+      setRemovalSummary(null);
+    } finally {
+      setRemovalsLoading(false);
+    }
+  }, [session, removalsWindow, removalsUserFilter, removalsSoleOnly]);
+
+  // Refetch whenever filters change while on the Removals tab.
+  useEffect(() => {
+    if (viewMode === "removals") loadRemovals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, removalsWindow, removalsUserFilter, removalsSoleOnly]);
+
+  // Client-side search filter on top of server-fetched rows.
+  const filteredRemovals = useMemo(() => {
+    const q = removalsSearch.trim().toLowerCase();
+    if (!q) return removals;
+    return removals.filter((r: any) =>
+      (r.reason || "").toLowerCase().includes(q) ||
+      (r.task_text || "").toLowerCase().includes(q) ||
+      (r.remover?.name || "").toLowerCase().includes(q)
+    );
+  }, [removals, removalsSearch]);
+
   if (status === "loading" || loading) {
     return <div className="h-screen w-screen flex items-center justify-center bg-[var(--bg)]"><Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" /></div>;
   }
@@ -793,6 +861,7 @@ export default function DashboardPage() {
           { id: "critical", label: "Critical Tasks (" + criticalTasks.length + ")" },
           { id: "all-tasks", label: "All Tasks (" + allTasks.length + ")" },
           { id: "sla", label: "SLA / Response Times" },
+          { id: "removals", label: "Removals" },
           { id: "export", label: "Export Data" },
         ] as { id: ViewMode; label: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => { setViewMode(tab.id); setSelectedUserId(null); }}
@@ -1350,6 +1419,207 @@ export default function DashboardPage() {
         )}
 
         {/* ── EXPORT DATA ─── */}
+        {/* ── REMOVALS AUDIT ── */}
+        {viewMode === "removals" && (
+          <div className="space-y-4">
+            {/* Summary strip */}
+            <div className="grid grid-cols-4 gap-3">
+              <SummaryCard
+                icon={<UserMinus size={14} />}
+                label="Total Removals"
+                value={removalSummary?.total || 0}
+                color="var(--warning)"
+              />
+              <SummaryCard
+                icon={<Trash2 size={14} />}
+                label="Sole-Assignee (task removed)"
+                value={removalSummary?.sole || 0}
+                color="var(--danger)"
+              />
+              <SummaryCard
+                icon={<Clock size={14} />}
+                label="Last 7 Days"
+                value={removalSummary?.in_window || 0}
+                color="var(--info)"
+              />
+              <SummaryCard
+                icon={<AlertTriangle size={14} />}
+                label="Short Reasons (≤10 chars)"
+                value={removalSummary?.short_reason || 0}
+                sub="Possible abuse signal"
+                color="var(--danger)"
+              />
+            </div>
+
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-[var(--text-muted)]">Window:</span>
+              {(["7d", "30d", "90d", "all"] as const).map((w) => (
+                <FilterPill
+                  key={w}
+                  active={removalsWindow === w}
+                  onClick={() => setRemovalsWindow(w)}
+                  label={w === "all" ? "All time" : "Last " + w}
+                />
+              ))}
+              <span className="text-xs text-[var(--text-muted)] ml-2">User:</span>
+              <FilterPill
+                active={!removalsUserFilter}
+                onClick={() => setRemovalsUserFilter(null)}
+                label="All"
+              />
+              {(removalSummary?.by_user || []).slice(0, 8).map((u: any) => (
+                <FilterPill
+                  key={u.id}
+                  active={removalsUserFilter === u.id}
+                  onClick={() => setRemovalsUserFilter(removalsUserFilter === u.id ? null : u.id)}
+                  label={u.name.split(" ")[0] + " (" + u.count + ")"}
+                />
+              ))}
+              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] ml-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={removalsSoleOnly}
+                  onChange={(e) => setRemovalsSoleOnly(e.target.checked)}
+                  className="accent-[var(--accent)]"
+                />
+                Sole-assignee only
+              </label>
+              <div className="ml-auto flex items-center gap-2">
+                <input
+                  value={removalsSearch}
+                  onChange={(e) => setRemovalsSearch(e.target.value)}
+                  placeholder="Search reason, task, user..."
+                  className="w-64 pl-3 pr-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    // CSV export of the currently-filtered rows.
+                    const headers = ["removed_at","remover","task_text","reason","was_sole_assignee","task_status","conversation_id"];
+                    const escape = (v: any) => {
+                      const s = v == null ? "" : String(v);
+                      // Quote if contains comma, quote, or newline; double internal quotes.
+                      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+                    };
+                    const lines = [headers.join(",")];
+                    for (const r of filteredRemovals) {
+                      lines.push([
+                        r.removed_at || "",
+                        r.remover?.name || "",
+                        r.task_text || "",
+                        r.reason || "",
+                        r.was_sole_assignee ? "yes" : "no",
+                        r.task_status || "",
+                        r.conversation_id || "",
+                      ].map(escape).join(","));
+                    }
+                    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `task-removals-${new Date().toISOString().slice(0, 10)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
+
+            {/* Removals list */}
+            {removalsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--accent)]" />
+              </div>
+            ) : filteredRemovals.length === 0 ? (
+              <Empty text="No removals match these filters" />
+            ) : (
+              <div className="space-y-2">
+                {filteredRemovals.map((r: any) => {
+                  const isShortReason = (r.reason || "").trim().length <= 10;
+                  return (
+                    <div
+                      key={r.id}
+                      className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"
+                    >
+                      <div className="flex items-start gap-3">
+                        {/* Avatar of the remover */}
+                        {r.remover ? (
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-[var(--bg)] shrink-0"
+                            style={{ background: r.remover.color }}
+                            title={r.remover.name}
+                          >
+                            {r.remover.initials}
+                          </div>
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-[var(--border)] shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          {/* Header row: name + when + tags */}
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="text-sm font-semibold text-[var(--text-primary)]">
+                              {r.remover?.name || "Unknown user"}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-muted)]">
+                              {r.removed_at ? new Date(r.removed_at).toLocaleString() : ""}
+                            </span>
+                            {r.was_sole_assignee && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[rgba(248,81,73,0.10)] text-[var(--danger)] font-bold">
+                                Task removed (sole assignee)
+                              </span>
+                            )}
+                            {!r.was_sole_assignee && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--border)] text-[var(--text-secondary)] font-bold">
+                                Left task
+                              </span>
+                            )}
+                            {isShortReason && (
+                              <span
+                                title="Short reason — possible abuse signal"
+                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-[rgba(240,136,62,0.10)] text-[var(--warning)] font-bold"
+                              >
+                                Short reason
+                              </span>
+                            )}
+                          </div>
+                          {/* Task snapshot text */}
+                          <div className="text-[12px] text-[var(--text-secondary)] mb-1.5 truncate">
+                            {r.task_text || <span className="italic">No task text saved</span>}
+                          </div>
+                          {/* Reason block */}
+                          <div className="rounded bg-[var(--bg)] border border-[var(--border)] px-2 py-1.5">
+                            <span className="text-[10px] text-[var(--text-muted)] font-semibold uppercase tracking-wider mr-1">
+                              Reason:
+                            </span>
+                            <span className="text-[12px] text-[var(--text-primary)]">
+                              {r.reason || <span className="italic text-[var(--text-muted)]">(empty)</span>}
+                            </span>
+                          </div>
+                        </div>
+                        {/* Jump-to-conversation link */}
+                        {r.conversation_id && (
+                          <a
+                            href={`/#conversation=${r.conversation_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"
+                          >
+                            <ExternalLink size={11} /> Thread
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {viewMode === "export" && (
           <ExportPanel dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} />
         )}
