@@ -38,13 +38,22 @@ function normalizeTask(task: any): Task {
 
   // For multi-assignee tasks: status is driven by per-user completion
   let effectiveStatus: string;
-  if (assignees.length > 1) {
+  // Terminal task-level statuses override assignee aggregation. The task's
+  // status column is the source of truth for "dismissed" (and "completed"
+  // when the DB explicitly says so). Without this guard, a multi-assignee
+  // dismissed task with one assignee still marked as in_progress would
+  // be displayed as "in_progress" — which is exactly the bug Rod reported.
+  if (task?.status === "dismissed") {
+    effectiveStatus = "dismissed";
+  } else if (task?.status === "completed" || task?.is_done) {
+    effectiveStatus = "completed";
+  } else if (assignees.length > 1) {
     const allDone = assignees.every((a: any) => a.is_done);
     const anyDone = assignees.some((a: any) => a.is_done);
-    effectiveStatus = allDone ? "completed" : anyDone ? "in_progress" : (task?.status === "completed" ? "todo" : (task?.status || "todo"));
+    effectiveStatus = allDone ? "completed" : anyDone ? "in_progress" : (task?.status || "todo");
   } else {
     const allAssigneesDone = assignees.length === 1 && assignees[0].is_done;
-    effectiveStatus = task?.status === "completed" || task?.is_done || allAssigneesDone ? "completed" : (task?.status || "todo");
+    effectiveStatus = allAssigneesDone ? "completed" : (task?.status || "todo");
   }
 
   return {
@@ -360,6 +369,24 @@ export async function PATCH(req: NextRequest) {
     if (status) {
       update.status = status;
       update.is_done = status === "completed";
+
+      // Dismiss-specific fields. The UI sends dismiss_reason + dismissed_by
+      // alongside status="dismissed"; previously these were silently dropped.
+      if (status === "dismissed") {
+        if (typeof body.dismiss_reason === "string") {
+          update.dismiss_reason = body.dismiss_reason.trim();
+        }
+        if (body.dismissed_by !== undefined) {
+          update.dismissed_by = body.dismissed_by || null;
+        }
+        update.dismissed_at = new Date().toISOString();
+      } else {
+        // Status moved AWAY from dismissed (reopen, complete, etc.) — clear
+        // the dismiss fields so the "Dismissed: <reason>" banner stops showing.
+        update.dismiss_reason = null;
+        update.dismissed_by = null;
+        update.dismissed_at = null;
+      }
     }
 
     if (dueDate !== undefined) {
