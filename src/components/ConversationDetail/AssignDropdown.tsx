@@ -89,49 +89,58 @@ export default function AssignDropdown({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
-          <div className="px-3 py-2 border-b border-[var(--border)]">
+        // Panel container — flex column with a hard height cap so the inner
+        // member list can scroll instead of growing off-screen. With 22+
+        // teammates the previous unbounded list overflowed the viewport.
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 flex flex-col max-h-[360px]">
+          {/* Static header — stays visible while the list below scrolls. */}
+          <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
             <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Assign to team member
             </div>
           </div>
 
-          {currentAssignee && (
-            <button
-              onClick={() => handleAssign(null)}
-              className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--danger)] hover:bg-[var(--border)]"
-            >
-              <X size={14} />
-              Unassign
-            </button>
-          )}
+          {/* Scrollable member list. Unassign is INCLUDED in the scroll area
+              (instead of being above the list) so the header is the only
+              pinned region — keeps the layout simple. */}
+          <div className="overflow-y-auto py-1">
+            {currentAssignee && (
+              <button
+                onClick={() => handleAssign(null)}
+                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--danger)] hover:bg-[var(--border)]"
+              >
+                <X size={14} />
+                Unassign
+              </button>
+            )}
 
-          {teamMembers
-            .filter((m) => m.is_active !== false)
-            .map((member) => {
-              const active = currentAssignee?.id === member.id;
-              return (
-                <button
-                  key={member.id}
-                  onClick={() => handleAssign(member.id)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[var(--border)] ${
-                    active ? "text-[var(--accent)]" : "text-[var(--text-primary)]"
-                  }`}
-                >
-                  <Avatar initials={member.initials} color={member.color} size={20} />
-                  <div className="flex-1 text-left">
-                    <div className="font-medium">
-                      {member.name}
-                      {member.id === currentUser?.id && (
-                        <span className="text-[10px] text-[var(--text-muted)] ml-1">(me)</span>
-                      )}
+            {teamMembers
+              .filter((m) => m.is_active !== false)
+              .map((member) => {
+                const active = currentAssignee?.id === member.id;
+                return (
+                  <button
+                    key={member.id}
+                    onClick={() => handleAssign(member.id)}
+                    className={`flex items-center gap-2 w-full px-3 py-2 text-[12px] hover:bg-[var(--border)] ${
+                      active ? "text-[var(--accent)]" : "text-[var(--text-primary)]"
+                    }`}
+                  >
+                    <Avatar initials={member.initials} color={member.color} size={20} />
+                    <div className="flex-1 text-left">
+                      <div className="font-medium">
+                        {member.name}
+                        {member.id === currentUser?.id && (
+                          <span className="text-[10px] text-[var(--text-muted)] ml-1">(me)</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-muted)]">{member.department}</div>
                     </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">{member.department}</div>
-                  </div>
-                  {active && <Check size={14} className="text-[var(--accent)]" />}
-                </button>
-              );
-            })}
+                    {active && <Check size={14} className="text-[var(--accent)]" />}
+                  </button>
+                );
+              })}
+          </div>
         </div>
       )}
     </div>
