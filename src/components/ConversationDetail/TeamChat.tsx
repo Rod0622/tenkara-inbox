@@ -69,7 +69,7 @@ export default function TeamChat({
   // Mentions that have been confirmed (selected from the picker) for this in-progress comment
   const [mentions, setMentions] = useState<MentionEntry[]>([]);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchComments = async () => {
     try {
@@ -115,7 +115,7 @@ export default function TeamChat({
   }, [pickerFilter, teamMembers]);
 
   // When input changes, decide whether to open/update/close the picker
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
 
@@ -183,7 +183,7 @@ export default function TeamChat({
     }, 0);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (pickerOpen && pickerCandidates.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -447,19 +447,23 @@ export default function TeamChat({
                 </div>
               )}
 
-              <div className="flex items-center gap-2">
-                <input
+              <div className="flex items-end gap-2">
+                {/* Textarea (not input) — Enter sends, Shift+Enter inserts a
+                    newline. Single-line <input> elements can't render line
+                    breaks at all, so multi-line drafts were impossible. */}
+                <textarea
                   ref={inputRef}
                   value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
-                  placeholder="@ Chat with your team... (type @ to mention)"
-                  className="flex-1 h-10 rounded-lg bg-[var(--bg)] border border-[var(--border)] px-3 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#30363D]"
+                  placeholder="@ Chat with your team... (type @ to mention, Shift+Enter for new line)"
+                  rows={1}
+                  className="flex-1 max-h-32 min-h-[40px] rounded-lg bg-[var(--bg)] border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#30363D] resize-none leading-snug"
                 />
                 <button
                   onClick={sendComment}
                   disabled={sending || !input.trim()}
-                  className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 flex items-center justify-center"
+                  className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 flex items-center justify-center shrink-0"
                   title="Send"
                 >
                   <Send size={14} />
