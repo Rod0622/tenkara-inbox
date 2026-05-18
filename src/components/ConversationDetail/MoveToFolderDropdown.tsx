@@ -7,14 +7,23 @@ import { useFolders } from "@/lib/hooks";
 export default function MoveToFolderDropdown({
   conversationId,
   currentFolderId,
+  accountId,
   onMove,
 }: {
   conversationId: string;
   currentFolderId: string | null;
+  // Restrict the list to this account's folders. Cross-account moves don't
+  // make sense (different mailbox, different permissions, would orphan the
+  // conversation). If accountId is empty/null we defensively show all
+  // folders rather than break the UI.
+  accountId?: string | null;
   onMove: (conversationIds: string[], folderId: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const allFolders = useFolders();
+  const folders = accountId
+    ? allFolders.filter((f: any) => f.email_account_id === accountId)
+    : allFolders;
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,7 +58,7 @@ export default function MoveToFolderDropdown({
             </div>
           </div>
 
-          {allFolders.map((folder) => {
+          {folders.map((folder) => {
             const active = folder.id === currentFolderId;
             return (
               <button

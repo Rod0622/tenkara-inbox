@@ -1951,6 +1951,7 @@ export default function ConversationDetail({
               <MoveToFolderDropdown
                 conversationId={convo.id}
                 currentFolderId={convo.folder_id}
+                accountId={convo.email_account_id}
                 onMove={onMoveToFolder}
               />
             )}
