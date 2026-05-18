@@ -4575,7 +4575,7 @@ export default function ConversationDetail({
             latestInbound.snippet || "";
           return String(raw).trim();
         })()}
-        organizationName="Tenkara"
+        accountName={accountName}
         onInsert={(text) => {
           // Convert plain-text (with \n line breaks) into HTML that contentEditable
           // will render correctly. Setting innerHTML with raw \n collapses them to

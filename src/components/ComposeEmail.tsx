@@ -754,7 +754,7 @@ export default function ComposeEmail({ onClose, onSent, currentUser }: ComposeEm
         initialContactName=""
         initialEmailSubject={subject || ""}
         initialIncomingMessage=""
-        organizationName="Tenkara"
+        accountName={currentAccount?.name || ""}
         onInsert={(text) => {
           const htmlToInsert = plainTextToHtml(text);
           if (bodyHtml && bodyHtml.trim()) {
