@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, GitMerge, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -10,25 +10,178 @@ function safeDecode(v: string) { try { return decodeURIComponent(v); } catch { r
 function fmtDt(v?: string|null) { if (!v) return "Unknown"; const d=new Date(v); return Number.isNaN(d.getTime()) ? "Unknown" : d.toLocaleString(); }
 function fmtRel(v?: string|null) { if (!v) return ""; const h=Math.floor((Date.now()-new Date(v).getTime())/(1e3*3600)); if (h<1) return "just now"; if (h<24) return h+"h ago"; return Math.floor(h/24)+"d ago"; }
 
-function ThreadCard({ thread, showAccount }: { thread: any; showAccount?: boolean }) {
-  const href = `/#conversation=${thread.id}&mailbox=${thread.email_account_id||""}&folder=${thread.folder_id||""}`;
+function ThreadCard({
+  thread,
+  showAccount,
+  allThreads,
+  onMergeSuccess,
+}: {
+  thread: any;
+  showAccount?: boolean;
+  // Every thread visible on the supplier page; used to build the merge
+  // picker. Pass an empty array to disable merging.
+  allThreads?: any[];
+  // Called after a successful merge so the parent can refetch and remove
+  // the merged thread from the list.
+  onMergeSuccess?: () => void;
+}) {
+  const href = `/#conversation=${thread.id}&mailbox=${thread.email_account_id || ""}&folder=${thread.folder_id || ""}`;
+
+  // Merge picker state (per-row). Picker shows other same-account threads
+  // from this supplier so the user can pick the destination (primary).
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [merging, setMerging] = useState(false);
+
+  // Candidates = same supplier (we're on the supplier page) + same account
+  // + not the source row + not already merged into something else.
+  const mergeCandidates = useMemo(() => {
+    if (!allThreads || allThreads.length === 0) return [];
+    return allThreads.filter(
+      (t: any) =>
+        t.id !== thread.id &&
+        t.email_account_id === thread.email_account_id &&
+        !t.merged_into
+    );
+  }, [allThreads, thread.id, thread.email_account_id]);
+
+  const canMerge = mergeCandidates.length > 0;
+
+  const handleMerge = async (primaryId: string) => {
+    if (
+      !confirm(
+        "Merge this thread into the selected one?\n\n" +
+          "All messages, tasks, notes, and activities will be moved to the " +
+          "destination thread. This can be undone later from the destination " +
+          "thread's Related Threads tab."
+      )
+    ) {
+      return;
+    }
+    setMerging(true);
+    try {
+      const res = await fetch("/api/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primary_id: primaryId,
+          merge_ids: [thread.id],
+          // actor_id intentionally omitted here — the supplier page doesn't
+          // have a session user in scope. Activity logs will show null actor
+          // for merges initiated from this surface.
+        }),
+      });
+      if (res.ok) {
+        setPickerOpen(false);
+        onMergeSuccess?.();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Merge failed: " + (err.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      alert("Merge failed: " + (e?.message || "Unknown error"));
+    } finally {
+      setMerging(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             {thread.is_unread && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />}
-            <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{thread.subject || "(No subject)"}</div>
+            <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+              {thread.subject || "(No subject)"}
+            </div>
           </div>
-          <div className="text-[11px] text-[var(--text-secondary)] mb-1.5 truncate">{thread.preview || "No preview"}</div>
+          <div className="text-[11px] text-[var(--text-secondary)] mb-1.5 truncate">
+            {thread.preview || "No preview"}
+          </div>
           <div className="flex flex-wrap gap-1.5 text-[10px]">
-            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">{thread.status || "open"}</span>
-            {showAccount && thread.account_name && <span className="rounded-full border border-[#BC8CFF]/20 bg-[rgba(188,140,255,0.08)] px-2 py-0.5 text-[#BC8CFF]">{thread.account_name}</span>}
-            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">{fmtRel(thread.last_message_at)}</span>
+            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              {thread.status || "open"}
+            </span>
+            {showAccount && thread.account_name && (
+              <span className="rounded-full border border-[#BC8CFF]/20 bg-[rgba(188,140,255,0.08)] px-2 py-0.5 text-[#BC8CFF]">
+                {thread.account_name}
+              </span>
+            )}
+            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              {fmtRel(thread.last_message_at)}
+            </span>
           </div>
         </div>
-        <a href={href} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"><ExternalLink size={11} /> Open</a>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* Merge button — only shown when there's at least one valid
+              same-account candidate. Disabled while a merge is in flight. */}
+          {allThreads && (
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              disabled={!canMerge || merging}
+              title={
+                canMerge
+                  ? "Merge this thread into another thread for this supplier"
+                  : "No same-account threads available to merge with"
+              }
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <GitMerge size={11} />
+              {merging ? "Merging…" : "Merge into…"}
+            </button>
+          )}
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"
+          >
+            <ExternalLink size={11} /> Open
+          </a>
+        </div>
       </div>
+
+      {/* Merge picker — collapsible panel showing same-account thread
+          candidates. Click a candidate to merge this thread INTO it. */}
+      {pickerOpen && canMerge && (
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2.5">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              Merge into which thread?
+            </div>
+            <button
+              onClick={() => setPickerOpen(false)}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              aria-label="Cancel"
+            >
+              <X size={12} />
+            </button>
+          </div>
+          <div className="max-h-60 overflow-y-auto space-y-1.5">
+            {mergeCandidates.map((cand: any) => (
+              <button
+                key={cand.id}
+                type="button"
+                onClick={() => handleMerge(cand.id)}
+                disabled={merging}
+                className="w-full text-left rounded-md border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] disabled:opacity-50 px-2.5 py-2"
+              >
+                <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                  {cand.subject || "(No subject)"}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+                  <span>{cand.status || "open"}</span>
+                  <span>·</span>
+                  <span>{fmtRel(cand.last_message_at)}</span>
+                  {cand.preview && (
+                    <span className="truncate max-w-[260px]">· {cand.preview}</span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -63,26 +216,26 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
     return () => { document.body.style.overflow = ""; };
   }, []);
 
+  // Reusable page data fetch — also called after merges so the list refreshes.
+  const refetchPage = async () => {
+    if (!decodedEmail) { setError("Missing email"); setLoading(false); return; }
+    try {
+      setLoading(true); setError(null);
+      const qs = new URLSearchParams(); qs.set("email", decodedEmail); if (account) qs.set("account", account);
+      const res = await fetch(`/api/contact-command-center?${qs}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed");
+      setData(json);
+      if (json.supplier_hours) setHoursForm({ timezone: json.supplier_hours.timezone||"", work_start: json.supplier_hours.work_start||"09:00", work_end: json.supplier_hours.work_end||"17:00", work_days: json.supplier_hours.work_days||[1,2,3,4,5] });
+      setPersons(Array.isArray(json.contact_persons) ? json.contact_persons : []);
+      setNameDraft(json.contact?.name || "");
+    } catch (e: any) { setError(e?.message||"Failed"); }
+    finally { setLoading(false); }
+  };
+
   useEffect(() => {
-    let c = false;
-    (async () => {
-      if (!decodedEmail) { setError("Missing email"); setLoading(false); return; }
-      try {
-        setLoading(true); setError(null);
-        const qs = new URLSearchParams(); qs.set("email", decodedEmail); if (account) qs.set("account", account);
-        const res = await fetch(`/api/contact-command-center?${qs}`, { cache: "no-store" });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || "Failed");
-        if (!c) {
-          setData(json);
-          if (json.supplier_hours) setHoursForm({ timezone: json.supplier_hours.timezone||"", work_start: json.supplier_hours.work_start||"09:00", work_end: json.supplier_hours.work_end||"17:00", work_days: json.supplier_hours.work_days||[1,2,3,4,5] });
-          setPersons(Array.isArray(json.contact_persons) ? json.contact_persons : []);
-          setNameDraft(json.contact?.name || "");
-        }
-      } catch (e: any) { if (!c) setError(e?.message||"Failed"); }
-      finally { if (!c) setLoading(false); }
-    })();
-    return () => { c = true; };
+    refetchPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decodedEmail, account]);
 
   const saveHours = async () => {
@@ -200,6 +353,15 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   if (error || !data) return <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]"><div className="mx-auto max-w-5xl px-6 py-10"><div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6"><AlertTriangle className="text-[#F87171] mb-2" size={20} /><div className="text-lg font-semibold text-[#F87171]">Unable to load</div><div className="mt-2 text-sm text-[var(--text-secondary)]">{error}</div><Link href="/" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-semibold text-[var(--info)] hover:bg-[var(--surface-2)]"><ArrowLeft size={16} /> Back</Link></div></div></div>;
 
   const { contact, summary, threads, cross_account_threads=[], domain_threads=[], domain_contacts=[], tasks, notes, thread_summaries, supplier_hours, responsiveness, responsiveness_summary } = data;
+  // Combined list of threads visible on this page. Passed to each ThreadCard
+  // so its merge picker can find same-account candidates. The picker itself
+  // filters strictly to same email_account_id, so cross-account threads
+  // can't accidentally be picked as merge targets.
+  const allMergeThreads: any[] = [
+    ...(threads || []),
+    ...(cross_account_threads || []),
+    ...(domain_threads || []),
+  ];
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
   const dismissedTasks = tasks.filter((t: any) => t.status === "dismissed");
@@ -499,14 +661,14 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             {/* This Account Threads */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-4 flex items-center gap-2"><Mail size={16} className="text-[var(--info)]" /><span className="text-sm font-semibold">Related Threads — This Account ({threads.length})</span></div>
-              <div className="space-y-2">{threads.length === 0 ? <div className="text-sm text-[var(--text-secondary)]">No related threads in this account.</div> : threads.map((t: any) => <ThreadCard key={t.id} thread={t} />)}</div>
+              <div className="space-y-2">{threads.length === 0 ? <div className="text-sm text-[var(--text-secondary)]">No related threads in this account.</div> : threads.map((t: any) => <ThreadCard key={t.id} thread={t} allThreads={allMergeThreads} onMergeSuccess={refetchPage} />)}</div>
             </section>
 
             {/* Cross-Account Threads */}
             {cross_account_threads.length > 0 && (
               <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <div className="mb-4 flex items-center gap-2"><Globe size={16} className="text-[#BC8CFF]" /><span className="text-sm font-semibold">Related Threads — Other Accounts ({cross_account_threads.length})</span></div>
-                <div className="space-y-2">{cross_account_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount />)}</div>
+                <div className="space-y-2">{cross_account_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount allThreads={allMergeThreads} onMergeSuccess={refetchPage} />)}</div>
               </section>
             )}
 
@@ -527,7 +689,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                     ))}
                   </div>
                 )}
-                <div className="space-y-2">{domain_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount />)}</div>
+                <div className="space-y-2">{domain_threads.map((t: any) => <ThreadCard key={t.id} thread={t} showAccount allThreads={allMergeThreads} onMergeSuccess={refetchPage} />)}</div>
               </section>
             )}
 
