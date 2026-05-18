@@ -318,7 +318,11 @@ export default function TaskBoard({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[var(--bg)]">
+    // h-full (not flex-1) — TaskBoard sits inside a <Panel> from
+    // react-resizable-panels, which is NOT a flex container, so flex-1 didn't
+    // give the inner div a constrained height and the scroll silently broke.
+    // h-full takes the Panel's full computed height regardless of layout mode.
+    <div className="h-full overflow-y-auto bg-[var(--bg)]">
       <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-6 gap-4">
           <div>

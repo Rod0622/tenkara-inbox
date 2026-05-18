@@ -63,14 +63,16 @@ export default function DraftsPanel({
 
   if (loading && drafts.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[var(--bg)]">
+    // h-full (not flex-1) — DraftsPanel sits inside a <Panel>, see TaskBoard
+    // comment for explanation. Without this the panel doesn't scroll.
+    <div className="h-full overflow-y-auto bg-[var(--bg)]">
       <div className="max-w-3xl mx-auto p-6">
         <div className="flex items-center gap-3 mb-6">
           <FileEdit size={22} className="text-[var(--info)]" />

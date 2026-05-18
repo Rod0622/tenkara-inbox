@@ -126,7 +126,9 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-1">
+      {/* Constrain to ~3 rows so a long label list doesn't make the filter
+          panel taller than the conversation list. Scrolls inside this box. */}
+      <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-1">
         {labels.map((label) => {
           const isActive = (filters.labelIds || []).includes(label.id);
           // Batch 8: show "Parent / Child" if this label has a parent
