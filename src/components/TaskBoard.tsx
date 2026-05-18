@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Trash2,
   User2,
+  UserMinus,
   Search,
   ClipboardCheck,
 } from "lucide-react";
@@ -817,30 +818,46 @@ function TaskCard({
               )}
             </div>
           ) : (
-            task.status !== "completed" && !task.is_done && (
+            task.status !== "completed" && !task.is_done && currentUser && (
               <button
                 type="button"
                 onClick={async () => {
-                  const reason = prompt("Why is this task no longer needed?\n(e.g., supplier responded via email, issue resolved, duplicate task)");
+                  // Is the caller the sole assignee on this task? If so the
+                  // task will be soft-deleted (removed from the board). If
+                  // not, only the caller is removed and the task continues.
+                  const callerIsAssigned = assignees.some((a: any) => a.id === currentUser.id);
+                  if (!callerIsAssigned) {
+                    alert("You're not assigned to this task.");
+                    return;
+                  }
+                  const willSoleDelete = assignees.length <= 1;
+                  const promptText = willSoleDelete
+                    ? "You're the only assignee. Removing yourself will remove this task from the board.\n\nWhy are you removing this task?\n(e.g., supplier already responded, duplicate, no longer relevant)"
+                    : `Remove yourself from this task? The other ${assignees.length - 1} assignee${assignees.length - 1 === 1 ? "" : "s"} will continue.\n\nWhy are you removing yourself?\n(e.g., not the right owner, already handled by someone else)`;
+                  const reason = prompt(promptText);
                   if (!reason || !reason.trim()) return;
                   try {
-                    await fetch("/api/tasks", {
-                      method: "PATCH",
+                    const res = await fetch("/api/tasks/remove-me", {
+                      method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
                         task_id: task.id,
-                        status: "dismissed",
-                        dismiss_reason: reason.trim(),
-                        dismissed_by: currentUser?.id || null,
+                        removed_by: currentUser.id,
+                        reason: reason.trim(),
                       }),
                     });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      alert("Could not remove you from this task: " + (err.error || res.status));
+                      return;
+                    }
                     onRefetch?.();
                   } catch (e) { console.error(e); }
                 }}
                 className="text-[var(--text-secondary)] hover:text-[var(--warning)] transition-colors"
-                title="Dismiss — no longer needed"
+                title="Remove me from this task"
               >
-                <Ban size={14} />
+                <UserMinus size={14} />
               </button>
             )
           )}

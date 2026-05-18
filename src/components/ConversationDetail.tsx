@@ -36,6 +36,7 @@ import {
   Tag,
   Trash2,
   User,
+  UserMinus,
   Users,
   X,
   ClipboardCheck,
@@ -3366,30 +3367,51 @@ export default function ConversationDetail({
                         <RotateCcw size={13} />
                       </button>
                     ) : (
-                      task.status !== "completed" && !task.is_done && (
+                      task.status !== "completed" && !task.is_done && currentUser && (
                         <button
                           onClick={async () => {
-                            const reason = prompt("Why is this task no longer needed?\n(e.g., supplier responded via email, issue resolved, duplicate task)");
+                            const callerIsAssigned = assignees.some((a: any) => a.id === currentUser.id);
+                            if (!callerIsAssigned) {
+                              alert("You're not assigned to this task.");
+                              return;
+                            }
+                            const willSoleDelete = assignees.length <= 1;
+                            const promptText = willSoleDelete
+                              ? "You're the only assignee. Removing yourself will remove this task from the board.\n\nWhy are you removing this task?\n(e.g., supplier already responded, duplicate, no longer relevant)"
+                              : `Remove yourself from this task? The other ${assignees.length - 1} assignee${assignees.length - 1 === 1 ? "" : "s"} will continue.\n\nWhy are you removing yourself?\n(e.g., not the right owner, already handled by someone else)`;
+                            const reason = prompt(promptText);
                             if (!reason || !reason.trim()) return;
                             try {
-                              await fetch("/api/tasks", {
-                                method: "PATCH",
+                              const res = await fetch("/api/tasks/remove-me", {
+                                method: "POST",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({
                                   task_id: task.id,
-                                  status: "dismissed",
-                                  dismiss_reason: reason.trim(),
-                                  dismissed_by: currentUser?.id || null,
+                                  removed_by: currentUser.id,
+                                  reason: reason.trim(),
                                 }),
                               });
-                              if (convo) await onAddNote(convo.id, `🚫 Task dismissed: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}`);
+                              if (!res.ok) {
+                                const err = await res.json().catch(() => ({}));
+                                alert("Could not remove you from this task: " + (err.error || res.status));
+                                return;
+                              }
+                              // Add a thread note for context. Wording differs
+                              // based on whether the whole task was removed
+                              // or only the current user.
+                              if (convo) {
+                                const noteBody = willSoleDelete
+                                  ? `🗑️ Task removed: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}`
+                                  : `👋 Removed self from task: "${task.text.slice(0, 50)}"\nReason: ${reason.trim()}`;
+                                await onAddNote(convo.id, noteBody);
+                              }
                               await refetchDetail();
                             } catch (e) { console.error(e); }
                           }}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-[rgba(240,136,62,0.08)] opacity-0 group-hover/task:opacity-100 transition-all mt-0.5 shrink-0"
-                          title="Dismiss — no longer needed"
+                          title="Remove me from this task"
                         >
-                          <Ban size={13} />
+                          <UserMinus size={13} />
                         </button>
                       )
                     )}

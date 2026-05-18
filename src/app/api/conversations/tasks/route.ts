@@ -100,6 +100,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
     .select(
       "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), task_assignees(team_member_id, is_done, completed_at, status, team_member:team_members!task_assignees_team_member_id_fkey(*)), category:task_categories(*)"
     )
+    .is("deleted_at", null) // hide soft-deleted tasks (Remove-me action)
     .order("created_at", { ascending: false });
 
   if (!primary.error) {
@@ -115,6 +116,7 @@ async function selectAllTasks(supabase: any): Promise<Task[]> {
     .select(
       "*, assignee:team_members!tasks_assignee_id_fkey(*), conversation:conversations(id, subject, from_name, from_email), category:task_categories(*)"
     )
+    .is("deleted_at", null) // hide soft-deleted tasks (Remove-me action)
     .order("created_at", { ascending: false });
 
   if (fallback.error) {
