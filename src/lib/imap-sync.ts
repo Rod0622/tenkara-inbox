@@ -7,6 +7,7 @@ import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { mergeConversation } from "@/lib/merge-conversations";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -412,8 +413,69 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             const rfc822 = (headers["message-id"] || "").trim();
             let reconciledMessageId: string | null = null;
 
-            // Reconcile attempt #1: exact RFC822 Message-ID match.
-            if (rfc822) {
+            // Reconcile attempt #0: GLOBAL RFC822 Message-ID match across the
+            // account. If a local outbound row exists with this Message-ID in
+            // a DIFFERENT conversation than the one we just subject-matched,
+            // that means /api/send created its own conversation (with a slightly
+            // different subject) and sync's subject-match landed on yet another
+            // one — i.e., we have a duplicate. Merge the two so the thread is
+            // unified, then proceed in the canonical conversation.
+            //
+            // The canonical (primary) conversation is the one /api/send
+            // created — it has the FULL outbound message context (recipients,
+            // attachments, drafts, activity). The conversation found by
+            // subject-match (which only has the inbound side so far) becomes
+            // the duplicate to merge in.
+            if (rfc822 && conversationId) {
+              const { data: globalExisting } = await supabase
+                .from("messages")
+                .select("id, conversation_id, conversation:conversations(email_account_id)")
+                .eq("provider_message_id", rfc822)
+                .limit(5);
+              const sameAccountMatch = (globalExisting || []).find((r: any) =>
+                r?.conversation?.email_account_id === accountId
+              );
+              if (sameAccountMatch && sameAccountMatch.conversation_id !== conversationId) {
+                // The local outbound row lives in a different conversation.
+                // Treat that conversation as canonical (it has the send-side
+                // context); merge the subject-matched conversation into it.
+                try {
+                  const mergeRes = await mergeConversation(
+                    supabase,
+                    sameAccountMatch.conversation_id, // primary
+                    conversationId,                   // duplicate (subject-match result)
+                    null                              // system-initiated, no actor
+                  );
+                  if (mergeRes.success) {
+                    // Continue work in the canonical conversation. All
+                    // subsequent inserts/updates target that one.
+                    conversationId = sameAccountMatch.conversation_id;
+                    reconciledMessageId = sameAccountMatch.id;
+                    // Upgrade the local outbound row's provider_message_id
+                    // to the Gmail UID now that we've matched it.
+                    await supabase
+                      .from("messages")
+                      .update({
+                        provider_message_id: `gmail:${msgId}`,
+                        body_html: bodyHtml || undefined,
+                        body_text: bodyText.slice(0, 5000) || undefined,
+                        has_attachments: hasAttachments,
+                      })
+                      .eq("id", sameAccountMatch.id);
+                  } else if (mergeRes.error) {
+                    console.warn(`[sync-merge] could not merge ${conversationId} -> ${sameAccountMatch.conversation_id}: ${mergeRes.error}`);
+                  }
+                } catch (mergeErr: any) {
+                  console.error(`[sync-merge] exception: ${mergeErr?.message}`);
+                }
+              }
+            }
+
+            // Reconcile attempt #1: exact RFC822 Message-ID match within
+            // the current conversation. Only runs if attempt #0 didn't
+            // already reconcile (which would happen when the local outbound
+            // was in a different conversation that we just merged).
+            if (!reconciledMessageId && rfc822) {
               const { data: existingLocal } = await supabase
                 .from("messages")
                 .select("id")
