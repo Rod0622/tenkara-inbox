@@ -139,13 +139,20 @@ export async function POST(req: NextRequest) {
       .replace(/border-top:\s*1px solid #1E242C;?\s*/g, "")
       .replace(/border-top:\s*1px solid #ddd;?\s*/g, "");
 
-    // ── NUCLEAR HTML CLEANUP for email clients ──
+    // ── HTML CLEANUP for email clients ──
     // Gmail clips emails > 102KB. The RTE contenteditable injects Tailwind CSS
     // variables on EVERY element (~2KB each), making even simple emails huge.
-    // Solution: strip ALL style attributes, then rebuild clean minimal styles.
+    // Solution: strip style attributes from most tags, but PRESERVE inline
+    // styles on <img> (so signature image width / height stays intact) and
+    // on tables (we re-add minimal table styles below either way).
 
-    // Step 1: Strip ALL style attributes (removes ~95% of bloat)
-    finalBody = finalBody.replace(/\s*style="[^"]*"/g, "");
+    // Step 1: Strip style="..." from every tag EXCEPT <img>. The negative
+    // lookbehind on "<img" lets the image's inline width/height survive.
+    // (Bug fix: the previous blanket strip was nuking signature image sizes.)
+    finalBody = finalBody.replace(
+      /<(?!img\b)([a-zA-Z][a-zA-Z0-9]*)([^>]*?)\s+style="[^"]*"([^>]*)>/g,
+      "<$1$2$3>"
+    );
 
     // Step 2: Strip data attributes
     finalBody = finalBody.replace(/\s*data-[a-z-]+="[^"]*"/g, "");

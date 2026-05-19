@@ -190,17 +190,25 @@ export default function RichTextEditor({
     }
   }, [value, signature, initialized, autoFocus]);
 
-  // Update content when value changes externally (e.g., template insertion)
+  // Update content when value changes externally (e.g., template insertion,
+  // or the caller resets to "" after sending a reply).
   const lastExternalValue = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (initialized && editorRef.current && value !== undefined && value !== lastExternalValue.current) {
-      // Only update if the new value differs from what's in the editor
       if (editorRef.current.innerHTML !== value) {
-        editorRef.current.innerHTML = value;
+        // Special case: caller is wiping to empty (post-send reset). If a
+        // signature is configured, an "empty" reply isn't really empty — it
+        // means "signature only", matching what the user sees on the FIRST
+        // reply. Without this, subsequent replies have no signature.
+        if (value === "" && signature) {
+          editorRef.current.innerHTML = buildSignatureBlockHtml(signature);
+        } else {
+          editorRef.current.innerHTML = value;
+        }
       }
       lastExternalValue.current = value;
     }
-  }, [value, initialized]);
+  }, [value, initialized, signature]);
 
   // Emit changes
   const handleInput = useCallback(() => {
