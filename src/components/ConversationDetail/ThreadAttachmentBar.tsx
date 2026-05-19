@@ -8,6 +8,10 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [allAttachments, setAllAttachments] = useState<{ messageId: string; fromName: string; attachments: any[] }[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Track whether the API returned any rows AT ALL (inline or not). Used
+  // to distinguish "truly missing (pre-capture)" from "only inline images"
+  // — the latter is normal for emails with signature logos.
+  const [hadAnyRows, setHadAnyRows] = useState(false);
   // Auto-expand once attachments load — user asked to skip the manual click step.
   const [expanded, setExpanded] = useState(true);
   const [savingToDrive, setSavingToDrive] = useState(false);
@@ -26,6 +30,7 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   useEffect(() => {
     setAllAttachments([]);
     setLoaded(false);
+    setHadAnyRows(false);
     setExpanded(true);
     setDriveResult(null);
     if (messagesWithAttachments.length === 0) return;
@@ -34,12 +39,15 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     (async () => {
       setLoading(true);
       const results: { messageId: string; fromName: string; attachments: any[] }[] = [];
+      let anyRows = false;
       for (const msg of messagesWithAttachments) {
         if (cancelled) return;
         try {
           const res = await fetch(`/api/attachments?message_id=${msg.id}`);
           const data = await res.json();
-          const nonInline = (data.attachments || []).filter((a: any) => !a.isInline);
+          const all = data.attachments || [];
+          if (all.length > 0) anyRows = true;
+          const nonInline = all.filter((a: any) => !a.isInline);
           if (nonInline.length > 0) {
             results.push({ messageId: msg.id, fromName: msg.from_name || "Unknown", attachments: nonInline });
           }
@@ -47,6 +55,7 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
       }
       if (cancelled) return;
       setAllAttachments(results);
+      setHadAnyRows(anyRows);
       setLoaded(true);
       setLoading(false);
     })();
@@ -60,11 +69,18 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
 
   const totalCount = allAttachments.reduce((sum, g) => sum + g.attachments.length, 0);
 
-  // After load: if the API returned ZERO non-inline attachments across every
-  // message-with-attachments-flag, that's the "pre-capture" case (e.g. messages
-  // synced before the storage migration). Show a helpful explainer instead of
-  // a misleading "0 attachments" header.
-  const isPreCapture = loaded && totalCount === 0 && messagesWithAttachments.length > 0;
+  // After load: TRUE pre-capture means the API returned zero rows of any
+  // kind across all message-with-attachments-flag messages. We previously
+  // checked totalCount (non-inline only), which incorrectly flagged any
+  // signature-logo-only thread as "missing" because those are all inline.
+  // Now we require BOTH:
+  //   • API returned no rows (hadAnyRows is false)
+  //   • At least one message claims has_attachments=true
+  // For the inline-only case (rows exist but all are inline), we render
+  // nothing — the inline images already render inside the message body
+  // via the cid: resolver, so there's no separate tray to show.
+  const isPreCapture = loaded && !hadAnyRows && messagesWithAttachments.length > 0;
+  const isOnlyInline = loaded && hadAnyRows && totalCount === 0;
 
   const downloadAtt = async (messageId: string, attId: string, name: string) => {
     try {
@@ -178,6 +194,13 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   // Pre-capture explainer — these messages were flagged has_attachments=true
   // during an earlier sync, before we stored the actual bytes. Direct the user
   // to the Backfill button in Settings.
+  // Inline-only thread (e.g., signature logos only) — render nothing. The
+  // inline images already render inside the message body via the cid:
+  // resolver, so there's nothing useful to show in a download tray.
+  if (isOnlyInline) {
+    return null;
+  }
+
   if (isPreCapture) {
     return (
       <div className="mb-3 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2.5 flex items-center gap-2">
