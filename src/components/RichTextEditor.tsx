@@ -587,7 +587,7 @@ export default function RichTextEditor({
             setTimeout(() => setHoveredTable(null), 200);
           }}
           data-placeholder={placeholder}
-          className="px-4 py-3 text-[13.5px] text-[var(--text-primary)] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--text-muted)] empty:before:pointer-events-none"
+          className="px-4 py-3 text-[13.5px] text-[var(--text-primary)] leading-relaxed outline-none overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-[var(--text-muted)] empty:before:pointer-events-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_ul_ul]:list-[circle] [&_ul_ul_ul]:list-[square]"
           style={{
             minHeight: compact ? 80 : minHeight,
             maxHeight: compact ? 300 : 500,
