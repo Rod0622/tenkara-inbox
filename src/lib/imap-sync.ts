@@ -387,6 +387,10 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 // uses today.
                 status: isSpam ? "spam" : "open",
                 last_message_at: sentAt,
+                // Seed last_inbound_at when the FIRST message of a brand-new
+                // conversation is inbound — otherwise the conversation would
+                // misclassify as Sent until the next inbound reply arrives.
+                last_inbound_at: !isOutbound ? sentAt : null,
               }).select("id").single();
               if (ce) continue;
               conversationId = nc.id;
@@ -592,11 +596,19 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               }
             }
 
-            await supabase.from("conversations").update({
+            // Build the conversation update. For INBOUND messages we ALSO
+            // set last_inbound_at — this is what flips a previously-outbound
+            // conversation back into the Inbox view. The sidebar's isOutbound
+            // check treats `last_inbound_at IS NULL` as "still sent-only".
+            const convoUpdate: any = {
               preview: snippet.slice(0, 200),
               last_message_at: sentAt,
               is_unread: !isOutbound,
-            }).eq("id", conversationId);
+            };
+            if (!isOutbound) {
+              convoUpdate.last_inbound_at = sentAt;
+            }
+            await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
 
             result.newMessages++;
             processedCount++;

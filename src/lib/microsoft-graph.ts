@@ -362,6 +362,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           // Create conversation
           if (!conversationId) {
             const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+            const inboundTs = email.receivedDateTime || new Date().toISOString();
             const { data: nc, error: ce } = await supabase.from("conversations").insert({
               email_account_id: accountId,
               thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
@@ -370,7 +371,9 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               from_email: email.from?.emailAddress?.address || "",
               preview: decodeEmailText(email.bodyPreview || "").slice(0, 200),
               is_unread: !isOutbound, status: "open",
-              last_message_at: email.receivedDateTime || new Date().toISOString(),
+              last_message_at: inboundTs,
+              // Seed last_inbound_at for new INBOUND conversations.
+              last_inbound_at: !isOutbound ? inboundTs : null,
             }).select("id").single();
             if (ce) { result.errors.push(ce.message); continue; }
             conversationId = nc.id;
@@ -490,6 +493,12 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             last_message_at: email.receivedDateTime || new Date().toISOString(),
             is_unread: !isOutbound,
           };
+          // For INBOUND messages, set last_inbound_at so the conversation
+          // moves out of Sent and into Inbox (sidebar's isOutbound treats
+          // `last_inbound_at IS NULL` as "still sent-only").
+          if (!isOutbound) {
+            convoUpdate.last_inbound_at = email.receivedDateTime || new Date().toISOString();
+          }
           if (email.hasAttachments) convoUpdate.has_attachments = true;
 
           await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);

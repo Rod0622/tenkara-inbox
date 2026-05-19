@@ -271,7 +271,12 @@ export default function Sidebar({
   };
 
   const accountEmails = new Set(mailboxes.map((a: any) => a.email?.toLowerCase()));
-  const isOutbound = (c: any) => accountEmails.has(c.from_email?.toLowerCase());
+  // Outbound-only: started by us AND no inbound reply has arrived.
+  // Once any counterparty replies, last_inbound_at gets set by the sync and
+  // the conversation flips into the Inbox view. Previously this was a
+  // permanent classification based on the FIRST message only.
+  const isOutbound = (c: any) =>
+    accountEmails.has(c.from_email?.toLowerCase()) && !c.last_inbound_at;
 
   const myConvos = conversations.filter(
     (c) => c.assignee_id === currentUser?.id
