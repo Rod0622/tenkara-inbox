@@ -161,9 +161,19 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           ? new Date(account.last_sync_at)
           : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })();
         const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
-        const query = `after:${afterEpoch}`;
+        // `in:anywhere -in:trash` — by default Gmail's API excludes Spam and
+        // Trash. That meant legitimate emails Gmail mis-classified as spam
+        // (e.g., supplier auto-responders with token-style From addresses)
+        // never reached Tenkara. We now include everything except Trash, and
+        // route SPAM-labeled messages to Tenkara's Spam folder so users can
+        // review them rather than lose them silently.
+        const query = `after:${afterEpoch} in:anywhere -in:trash`;
 
-        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=25`;
+        // maxResults=100 (was 25). When an account has been stale for hours
+        // or days (e.g., starved by the cron loop's time budget), 25 was not
+        // enough to catch up in a single pass. The existence-check below
+        // skips already-synced IDs cheaply, so over-fetching is safe.
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`;
         const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
         if (!listRes.ok) {
           const err = await listRes.json().catch(() => ({}));
@@ -335,13 +345,21 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               extractedText || htmlStrippedText || snippet
             );
 
-            // Check Gmail labels for category filtering
+            // Check Gmail labels.
+            //   SPAM      → captured but routed to Tenkara's Spam folder (status="spam")
+            //   PROMOS/   → skipped entirely (Tenkara is B2B sourcing — promos are noise)
+            //   SOCIAL/   →
+            //   UPDATES/  →
+            //   FORUMS/   →
             const labels: string[] = msgData.labelIds || [];
+            const isSpam = labels.some((l: string) => l === "SPAM" || l.toLowerCase() === "spam");
             const isPromotions = labels.some((l: string) => l.toLowerCase().includes("promotions") || l === "CATEGORY_PROMOTIONS");
             const isSocial = labels.some((l: string) => l.toLowerCase().includes("social") || l === "CATEGORY_SOCIAL");
             const isUpdates = labels.some((l: string) => l.toLowerCase().includes("updates") || l === "CATEGORY_UPDATES");
             const isForums = labels.some((l: string) => l.toLowerCase().includes("forums") || l === "CATEGORY_FORUMS");
-            if (isPromotions || isSocial || isUpdates || isForums) continue;
+            // SPAM check wins — we want spam captured even if Gmail also flagged
+            // it as a category. Otherwise apply the category skip as before.
+            if (!isSpam && (isPromotions || isSocial || isUpdates || isForums)) continue;
 
             // Thread into conversation
             const cleanSubject = subject.replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
@@ -361,7 +379,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 subject: cleanSubject || "(No Subject)",
                 from_name: fromName, from_email: fromEmail,
                 preview: snippet.slice(0, 200),
-                is_unread: !isOutbound, status: "open",
+                is_unread: !isOutbound,
+                // Spam-flagged messages create conversations with status="spam"
+                // so they show up in Tenkara's virtual Spam folder rather than
+                // the user's main inbox. Same column the "Mark as spam" button
+                // uses today.
+                status: isSpam ? "spam" : "open",
                 last_message_at: sentAt,
               }).select("id").single();
               if (ce) continue;
