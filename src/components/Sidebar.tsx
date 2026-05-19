@@ -155,6 +155,12 @@ export default function Sidebar({
   const [newFolderName, setNewFolderName] = useState("");
   const [folderMenuOpen, setFolderMenuOpen] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  // ── Folder-reorder drag state ──────────────────────────────────────
+  // Separate from dragOverFolder (which highlights a folder when a
+  // CONVERSATION is being dropped INTO it). When a folder ROW itself is the
+  // drag source (for reordering), we use these:
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [reorderTargetId, setReorderTargetId] = useState<string | null>(null);
   const [draftsCount, setDraftsCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -355,21 +361,106 @@ export default function Sidebar({
   const handleDragOver = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    setDragOverFolder(folderId);
+    // If a folder is being dragged (not a conversation), light up the
+    // reorder target. Otherwise show the conversation-drop highlight.
+    if (draggedFolderId) {
+      setReorderTargetId(folderId);
+    } else {
+      setDragOverFolder(folderId);
+    }
   };
 
   const handleDragLeave = () => {
     setDragOverFolder(null);
+    setReorderTargetId(null);
   };
 
   const handleDrop = async (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
     setDragOverFolder(null);
+    setReorderTargetId(null);
+
+    // FOLDER REORDER PATH — when a folder row was the drag source.
+    // The drag source records its id in text/folder-id and the
+    // email_account_id in text/folder-account. We only allow drops within
+    // the SAME account.
+    const draggedId = e.dataTransfer.getData("text/folder-id");
+    if (draggedId) {
+      setDraggedFolderId(null);
+      // No-op when dropping onto itself.
+      if (draggedId === folderId) return;
+      const draggedAccount = e.dataTransfer.getData("text/folder-account");
+      // Look up the target's account from local state.
+      const target = folders.find((f) => f.id === folderId);
+      if (!target) return;
+      if (draggedAccount && target.email_account_id !== draggedAccount) {
+        // Cross-account drop silently ignored.
+        return;
+      }
+
+      // Compute new ordering: pull the dragged folder out of its current
+      // position and insert it BEFORE the drop target. Renumber sort_order
+      // from 0..N for this account so values stay clean.
+      const accountId = target.email_account_id;
+      const accountFolders = folders
+        .filter((f) => f.email_account_id === accountId)
+        .sort((a, b) => a.sort_order - b.sort_order);
+      const draggedIdx = accountFolders.findIndex((f) => f.id === draggedId);
+      const targetIdx = accountFolders.findIndex((f) => f.id === folderId);
+      if (draggedIdx === -1 || targetIdx === -1) return;
+      const reordered = [...accountFolders];
+      const [moved] = reordered.splice(draggedIdx, 1);
+      // If dragged was BEFORE target, after removal target index shifts down by 1.
+      const insertAt = draggedIdx < targetIdx ? targetIdx - 1 : targetIdx;
+      reordered.splice(insertAt, 0, moved);
+      const reorderedWithOrders = reordered.map((f, i) => ({ ...f, sort_order: i }));
+
+      // Optimistic local update — sidebar reflects the new order immediately.
+      setFolders((prev) => {
+        const otherAccountFolders = prev.filter((f) => f.email_account_id !== accountId);
+        return [...otherAccountFolders, ...reorderedWithOrders];
+      });
+
+      // Persist to the server. On failure, refetch from authoritative source.
+      try {
+        const res = await fetch("/api/folders", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: reorderedWithOrders.map((f) => ({ id: f.id, sort_order: f.sort_order })),
+          }),
+        });
+        if (!res.ok) {
+          console.error("Folder reorder failed:", await res.text());
+          await fetchFolders();
+        }
+      } catch (err) {
+        console.error("Folder reorder error:", err);
+        await fetchFolders();
+      }
+      return;
+    }
+
+    // CONVERSATION DROP PATH — pre-existing behavior unchanged.
     const conversationIds = e.dataTransfer.getData("text/conversation-ids");
     if (conversationIds && onMoveToFolder) {
       const ids = JSON.parse(conversationIds);
       await onMoveToFolder(ids, folderId);
     }
+  };
+
+  // onDragStart handler for folder rows. Records the folder being dragged
+  // so handleDrop on the target can identify it as a reorder operation.
+  const handleFolderDragStart = (e: React.DragEvent, folder: any) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/folder-id", folder.id);
+    e.dataTransfer.setData("text/folder-account", folder.email_account_id);
+    setDraggedFolderId(folder.id);
+  };
+
+  const handleFolderDragEnd = () => {
+    setDraggedFolderId(null);
+    setReorderTargetId(null);
   };
 
   return (
@@ -659,12 +750,22 @@ export default function Sidebar({
 
                           <button
                             onClick={handleFolderClick}
+                            // Folder reorder drag — the button itself is the drag
+                            // handle (whole-row dragging). Drop handler distinguishes
+                            // by dataTransfer mimetype.
+                            draggable
+                            onDragStart={(e) => handleFolderDragStart(e, folder)}
+                            onDragEnd={handleFolderDragEnd}
                             onDragOver={(e) => handleDragOver(e, folder.id)}
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, folder.id)}
                             className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all flex-1 min-w-0 text-left ${
-                              dragOverFolder === folder.id
+                              reorderTargetId === folder.id && draggedFolderId && draggedFolderId !== folder.id
+                                ? "bg-[rgba(96,165,250,0.15)] border-t-2 border-t-[var(--info)] border-x border-b border-x-transparent border-b-transparent"
+                                : dragOverFolder === folder.id
                                 ? "bg-[rgba(74,222,128,0.15)] border border-[var(--accent)] border-dashed"
+                                : draggedFolderId === folder.id
+                                ? "opacity-50"
                                 : isFolderActive && folderSubView === "unassigned"
                                   ? "bg-[var(--border)] text-[var(--text-primary)]"
                                   : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"

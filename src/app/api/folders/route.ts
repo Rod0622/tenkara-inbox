@@ -113,3 +113,92 @@ export async function DELETE(req: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
+
+/**
+ * PATCH /api/folders
+ *
+ * Bulk-update folder sort_order values for drag-and-drop reordering in the
+ * sidebar. The client sends an array of { id, sort_order } pairs that
+ * represent the new order; we apply them in a single round-trip using
+ * upsert (each row keyed by id, only sort_order changes).
+ *
+ * Same-account constraint: every folder in the items array must belong to
+ * the same email_account_id. We enforce this server-side because a drop
+ * across account boundaries would mix folders illegally.
+ *
+ * Request:
+ *   { items: [{ id: string, sort_order: number }, ...] }
+ *
+ * Response 200: { ok: true, updated: number }
+ * Response 400 on bad input, 500 on DB errors.
+ */
+export async function PATCH(req: NextRequest) {
+  const supabase = createServerClient();
+  const body = await req.json().catch(() => ({}));
+  const items = Array.isArray(body.items) ? body.items : null;
+
+  if (!items || items.length === 0) {
+    return NextResponse.json(
+      { error: "items[] is required (each with { id, sort_order })" },
+      { status: 400 }
+    );
+  }
+
+  // Basic shape validation
+  for (const it of items) {
+    if (!it || typeof it.id !== "string" || typeof it.sort_order !== "number") {
+      return NextResponse.json(
+        { error: "Each item needs id (string) and sort_order (number)" },
+        { status: 400 }
+      );
+    }
+  }
+
+  // Verify all rows belong to the SAME email_account_id. We fetch the
+  // current folders by id and check email_account_id is uniform — this
+  // blocks cross-account reorders (e.g., a malicious client trying to
+  // mix folder ids from different accounts in one payload).
+  const ids = items.map((i: any) => i.id);
+  const { data: existing, error: fetchErr } = await supabase
+    .from("folders")
+    .select("id, email_account_id")
+    .in("id", ids);
+
+  if (fetchErr) {
+    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  }
+  if (!existing || existing.length !== items.length) {
+    return NextResponse.json(
+      { error: "One or more folder ids not found" },
+      { status: 404 }
+    );
+  }
+  const distinctAccounts = new Set(existing.map((f: any) => f.email_account_id));
+  if (distinctAccounts.size !== 1) {
+    return NextResponse.json(
+      { error: "All folders must belong to the same account" },
+      { status: 400 }
+    );
+  }
+
+  // Apply sort_order updates. We do them sequentially rather than one
+  // big upsert because Supabase upsert requires the full row payload to
+  // avoid touching unrelated columns. Sequential updates keep the change
+  // surface to sort_order only.
+  let updated = 0;
+  for (const it of items) {
+    const { error: updErr } = await supabase
+      .from("folders")
+      .update({ sort_order: it.sort_order })
+      .eq("id", it.id);
+    if (updErr) {
+      return NextResponse.json(
+        { error: `Update failed for folder ${it.id}: ${updErr.message}` },
+        { status: 500 }
+      );
+    }
+    updated++;
+  }
+
+  return NextResponse.json({ ok: true, updated });
+}
