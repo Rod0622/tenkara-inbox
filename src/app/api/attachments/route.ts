@@ -58,56 +58,54 @@ export async function GET(req: NextRequest) {
 
   // 1. Try our own Storage-backed attachments first.
   //
-  // Keep the .schema("inbox") chain — the old working code had it and
-  // worked fine. Removing it didn't fix the 1-of-4 row issue, so the bug
-  // is elsewhere. Adding server-side debug logging to find out what's
-  // really happening.
-  const { data: ownRows, error: ownErr } = await supabase
-    .schema("inbox")
-    .from("attachments")
-    .select("id, filename, mime_type, size_bytes, is_inline, content_id, storage_path")
-    .eq("message_id", messageId);
-
-  // ── DEBUG LOGGING ──────────────────────────────────────────────────
-  // Logs every fetch so we can verify on Vercel logs whether the DB is
-  // actually returning all rows or just one. Remove once root cause is
-  // understood.
-  if (ownErr) {
-    console.error("[attachments-debug] ownErr:", ownErr);
-  } else {
-    console.log("[attachments-debug] message_id:", messageId,
-      "rows returned:", Array.isArray(ownRows) ? ownRows.length : "non-array",
-      "ids:", Array.isArray(ownRows) ? ownRows.map((r: any) => r.id).join(",") : "n/a",
-      "filenames:", Array.isArray(ownRows) ? ownRows.map((r: any) => r.filename).join(" | ") : "n/a"
-    );
-  }
-
-  // ── EXTRA DEBUG: bypass Supabase JS SDK and call PostgREST directly
-  // to see whether the bug is in the SDK or in PostgREST/the DB itself.
-  // This only logs for one specific message we know has 4 rows; quick
-  // diagnostic and easy to remove.
-  if (messageId === "f98397ce-1e25-4f52-9e14-a41488e1e79b") {
-    try {
-      const rawRes = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments?message_id=eq.${messageId}&select=id,filename`,
-        {
-          headers: {
-            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
-            "Accept-Profile": "inbox",
-            Prefer: "count=exact",
-          },
-        }
-      );
-      const rawText = await rawRes.text();
-      console.log("[attachments-debug-raw] status:", rawRes.status,
-        "content-range:", rawRes.headers.get("content-range"),
-        "body:", rawText.slice(0, 500));
-    } catch (e: any) {
-      console.error("[attachments-debug-raw] error:", e?.message);
+  // IMPORTANT — DO NOT USE THE SUPABASE JS SDK FOR THIS QUERY.
+  //
+  // Through experimentation we confirmed that calling:
+  //   supabase.schema("inbox").from("attachments").select(...).eq("message_id", X)
+  // on a serverClient that's already pinned to schema "inbox" via
+  // db.schema returns only ONE row even when the DB has multiple. We
+  // proved this by running:
+  //   1. The same query in Supabase SQL Editor → 4 rows
+  //   2. The same query via supabase JS SDK in this route → 1 row
+  //   3. A raw fetch to PostgREST with identical headers → 4 rows
+  // So the bug is in the SDK layer, not the DB and not PostgREST.
+  //
+  // The workaround: call PostgREST directly via fetch using the service
+  // role key and Accept-Profile header. This bypasses the SDK entirely
+  // and returns all rows correctly. Behavior is identical to what the
+  // SDK was supposed to do.
+  type AttachmentRow = {
+    id: string;
+    filename: string;
+    mime_type: string | null;
+    size_bytes: number | null;
+    is_inline: boolean;
+    content_id: string | null;
+    storage_path: string;
+  };
+  let ownRows: AttachmentRow[] | null = null;
+  let ownErr: { message: string } | null = null;
+  try {
+    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
+      `?message_id=eq.${encodeURIComponent(messageId)}` +
+      `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
+    const rawRes = await fetch(url, {
+      headers: {
+        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
+        // Tell PostgREST which schema this request targets. Service role
+        // keys have access to all schemas — Accept-Profile picks "inbox".
+        "Accept-Profile": "inbox",
+      },
+    });
+    if (!rawRes.ok) {
+      ownErr = { message: `PostgREST status ${rawRes.status}: ${await rawRes.text()}` };
+    } else {
+      ownRows = await rawRes.json();
     }
+  } catch (e: any) {
+    ownErr = { message: e?.message || "fetch failed" };
   }
-  // ───────────────────────────────────────────────────────────────────
 
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
 
