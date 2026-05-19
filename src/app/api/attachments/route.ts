@@ -57,16 +57,31 @@ export async function GET(req: NextRequest) {
   }
 
   // 1. Try our own Storage-backed attachments first.
-  // NOTE: do NOT chain `.schema("inbox")` here. The createServerClient
-  // factory already pins the default schema to "inbox" via db.schema.
-  // Adding a redundant `.schema("inbox")` call caused PostgREST to return
-  // partial result sets (1 row instead of 4) — likely a header-order quirk
-  // in the Supabase JS SDK when chaining schema on an already-schema-pinned
-  // client. The query below uses the default schema cleanly.
+  //
+  // Keep the .schema("inbox") chain — the old working code had it and
+  // worked fine. Removing it didn't fix the 1-of-4 row issue, so the bug
+  // is elsewhere. Adding server-side debug logging to find out what's
+  // really happening.
   const { data: ownRows, error: ownErr } = await supabase
+    .schema("inbox")
     .from("attachments")
     .select("id, filename, mime_type, size_bytes, is_inline, content_id, storage_path")
     .eq("message_id", messageId);
+
+  // ── DEBUG LOGGING ──────────────────────────────────────────────────
+  // Logs every fetch so we can verify on Vercel logs whether the DB is
+  // actually returning all rows or just one. Remove once root cause is
+  // understood.
+  if (ownErr) {
+    console.error("[attachments-debug] ownErr:", ownErr);
+  } else {
+    console.log("[attachments-debug] message_id:", messageId,
+      "rows returned:", Array.isArray(ownRows) ? ownRows.length : "non-array",
+      "ids:", Array.isArray(ownRows) ? ownRows.map((r: any) => r.id).join(",") : "n/a",
+      "filenames:", Array.isArray(ownRows) ? ownRows.map((r: any) => r.filename).join(" | ") : "n/a"
+    );
+  }
+  // ───────────────────────────────────────────────────────────────────
 
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
 
