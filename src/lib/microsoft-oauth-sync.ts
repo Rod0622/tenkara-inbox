@@ -1,5 +1,6 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -147,7 +148,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
         // Thread by subject
         if (!conversationId) {
-          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+          const subj = cleanSubjectFn(email.subject || "");
           if (subj) {
             const { data: m } = await supabase.from("conversations").select("id")
               .eq("email_account_id", accountId).eq("subject", subj)
@@ -159,7 +160,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
         // Create conversation
         if (!conversationId) {
-          const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+          const subj = cleanSubjectFn(email.subject || "") || "(No Subject)";
           const { data: nc, error: ce } = await supabase.from("conversations").insert({
             email_account_id: accountId,
             thread_id: email.conversationId ? "ms:" + email.conversationId : "ms:" + email.id,

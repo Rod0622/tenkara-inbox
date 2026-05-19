@@ -1,6 +1,7 @@
 import { createServerClient } from "@/lib/supabase";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
+import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -349,7 +350,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
 
           // Thread by subject
           if (!conversationId) {
-            const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+            const subj = cleanSubjectFn(email.subject || "");
             if (subj) {
               const { data: m } = await supabase.from("conversations").select("id")
                 .eq("email_account_id", accountId).eq("subject", subj)
@@ -361,7 +362,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
 
           // Create conversation
           if (!conversationId) {
-            const subj = (email.subject || "").replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim() || "(No Subject)";
+            const subj = cleanSubjectFn(email.subject || "") || "(No Subject)";
             const inboundTs = email.receivedDateTime || new Date().toISOString();
             const { data: nc, error: ce } = await supabase.from("conversations").insert({
               email_account_id: accountId,

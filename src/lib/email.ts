@@ -208,11 +208,41 @@ export function computeThreadKey(
   // If replying to something, use that as thread key
   if (inReplyTo) return inReplyTo;
   // Otherwise, normalize subject as thread key
-  const normalizedSubject = subject
-    .replace(/^(Re|Fwd|Fw):\s*/gi, "")
-    .trim()
-    .toLowerCase();
+  const normalizedSubject = cleanSubject(subject).toLowerCase();
   return `subject:${normalizedSubject}`;
+}
+
+/**
+ * cleanSubject — strip ALL leading reply/forward prefixes recursively.
+ *
+ * Email subjects accumulate prefixes through reply chains:
+ *   "Inquiry for X"             — original
+ *   "Re: Inquiry for X"         — first reply
+ *   "Re: Re: Inquiry for X"     — counter-reply (some clients)
+ *   "Fw: Re: Inquiry for X"     — forwarded reply
+ *   "Fwd: Re: Re: Inquiry for X" — etc.
+ *
+ * A SINGLE-PASS strip would leave "Re: Re: ..." or "Fw: Re: ..." behind,
+ * which then doesn't match the canonical subject. That's why we kept
+ * seeing duplicate conversations: sync used a single-pass strip, /api/send
+ * used a different (Re:-only) strip, and they produced different keys.
+ *
+ * Recursive strip handles every layered case. Also normalizes numbered
+ * prefixes some mailers add — e.g. "Re[2]:" — for parity with sync's
+ * older regex on line 1217.
+ */
+export function cleanSubject(raw: string): string {
+  if (!raw) return "";
+  let s = String(raw);
+  const prefixRe = /^(Re|Fwd|Fw|RE|FW|FWD)(\[\d+\])?:\s*/i;
+  // Loop in case of multiple stacked prefixes ("Re: Fwd: Re: ...").
+  // Bounded at 20 iterations to defend against pathological input.
+  for (let i = 0; i < 20; i++) {
+    const next = s.replace(prefixRe, "");
+    if (next === s) break;
+    s = next;
+  }
+  return s.trim();
 }
 
 // ── Get mailbox credentials from Supabase ────────────

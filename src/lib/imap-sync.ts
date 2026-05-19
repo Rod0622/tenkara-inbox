@@ -6,6 +6,7 @@ import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
+import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -363,7 +364,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             if (!isSpam && isPromotions) continue;
 
             // Thread into conversation
-            const cleanSubject = subject.replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+            const cleanSubject = cleanSubjectFn(subject);
             let conversationId: string | null = null;
 
             if (cleanSubject) {
@@ -1212,10 +1213,10 @@ async function findOrCreateConversation(
 
 // ── Helpers ──────────────────────────────────────────
 function normalizeSubject(subject: string): string {
-  return subject
-    .replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "")
-    .replace(/^(Re|Fwd|Fw|RE|FW|FWD)\[\d+\]:\s*/gi, "")
-    .trim();
+  // Delegate to the canonical helper in @/lib/email. Previously this was
+  // a single-pass strip that left "Re: Re: ..." chains intact, which
+  // contributed to duplicate-conversation bugs.
+  return cleanSubjectFn(subject);
 }
 
 function isOutbound(fromEmail: string, accountEmail: string): boolean {

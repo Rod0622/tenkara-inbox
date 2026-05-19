@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { refreshGoogleToken } from "@/lib/google-oauth";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
+import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 
 export async function POST(req: NextRequest) {
   try {
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
             );
 
             // Thread into conversation by subject (same heuristic as sync).
-            const cleanSubject = subject.replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
+            const cleanSubject = cleanSubjectFn(subject);
             let conversationId: string | null = null;
             if (cleanSubject) {
               const { data: c } = await supabase

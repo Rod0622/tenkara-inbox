@@ -4,6 +4,7 @@ import nodemailer from "nodemailer";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { sendGraphEmail } from "@/lib/microsoft-graph";
 import { notifyWatchers } from "@/lib/notifications";
+import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
 
@@ -349,7 +350,7 @@ export async function POST(req: NextRequest) {
         .insert({
           email_account_id: accountId,
           thread_id: messageId || "sent:" + Date.now(),
-          subject: subject.replace(/^Re:\s*/i, ""),
+          subject: cleanSubjectFn(subject),
           from_name: otherPartyName || otherPartyEmail,
           from_email: otherPartyEmail || account.email,
           preview: emailBody.replace(/<[^>]*>/g, "").slice(0, 200),
