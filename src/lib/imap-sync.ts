@@ -346,20 +346,21 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             );
 
             // Check Gmail labels.
-            //   SPAM      → captured but routed to Tenkara's Spam folder (status="spam")
-            //   PROMOS/   → skipped entirely (Tenkara is B2B sourcing — promos are noise)
-            //   SOCIAL/   →
-            //   UPDATES/  →
-            //   FORUMS/   →
+            //   SPAM       → captured but routed to Tenkara's Spam folder (status="spam")
+            //   PROMOTIONS → skipped (marketing noise)
+            //   UPDATES    → CAPTURED (Rod's call: transactional emails like
+            //                  supplier auto-responders from tenderapp.com /
+            //                  Alibaba RFQ confirmations / order tracking are
+            //                  business-critical. Previous filter was dropping
+            //                  these silently — the PureBulk inquiry confirmations
+            //                  that never showed up were CATEGORY_UPDATES.)
+            //   SOCIAL     → CAPTURED (rare in B2B but harmless)
+            //   FORUMS     → CAPTURED (rare in B2B but harmless)
             const labels: string[] = msgData.labelIds || [];
             const isSpam = labels.some((l: string) => l === "SPAM" || l.toLowerCase() === "spam");
             const isPromotions = labels.some((l: string) => l.toLowerCase().includes("promotions") || l === "CATEGORY_PROMOTIONS");
-            const isSocial = labels.some((l: string) => l.toLowerCase().includes("social") || l === "CATEGORY_SOCIAL");
-            const isUpdates = labels.some((l: string) => l.toLowerCase().includes("updates") || l === "CATEGORY_UPDATES");
-            const isForums = labels.some((l: string) => l.toLowerCase().includes("forums") || l === "CATEGORY_FORUMS");
-            // SPAM check wins — we want spam captured even if Gmail also flagged
-            // it as a category. Otherwise apply the category skip as before.
-            if (!isSpam && (isPromotions || isSocial || isUpdates || isForums)) continue;
+            // SPAM wins — capture spam-flagged messages even if also Promotional.
+            if (!isSpam && isPromotions) continue;
 
             // Thread into conversation
             const cleanSubject = subject.replace(/^(Re|Fwd|Fw|RE|FW|FWD):\s*/gi, "").trim();
