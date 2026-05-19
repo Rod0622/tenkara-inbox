@@ -57,8 +57,13 @@ export async function GET(req: NextRequest) {
   }
 
   // 1. Try our own Storage-backed attachments first.
+  // NOTE: do NOT chain `.schema("inbox")` here. The createServerClient
+  // factory already pins the default schema to "inbox" via db.schema.
+  // Adding a redundant `.schema("inbox")` call caused PostgREST to return
+  // partial result sets (1 row instead of 4) — likely a header-order quirk
+  // in the Supabase JS SDK when chaining schema on an already-schema-pinned
+  // client. The query below uses the default schema cleanly.
   const { data: ownRows, error: ownErr } = await supabase
-    .schema("inbox")
     .from("attachments")
     .select("id, filename, mime_type, size_bytes, is_inline, content_id, storage_path")
     .eq("message_id", messageId);
