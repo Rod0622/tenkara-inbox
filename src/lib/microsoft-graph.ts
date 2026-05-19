@@ -497,10 +497,10 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           // moves out of Sent and into Inbox.
           if (!isOutbound) {
             convoUpdate.last_inbound_at = email.receivedDateTime || new Date().toISOString();
-            // Also clear folder_id if the conversation is sitting in the
-            // system Sent folder — /api/send pins it there at creation;
-            // an inbound reply should liberate it back to Inbox. Custom
-            // folder placements are NOT touched.
+            // If the conversation is currently in the system Sent folder,
+            // move it to the account's Inbox folder. We can't use NULL here
+            // because ConversationList's strict filter would hide it.
+            // Custom folder placements are NOT touched.
             const { data: convoRow } = await supabase
               .from("conversations")
               .select("folder_id, folder:folders(is_system, name)")
@@ -511,7 +511,18 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               folder && folder.is_system === true &&
               String(folder.name || "").toLowerCase() === "sent";
             if (isInSentSystemFolder) {
-              convoUpdate.folder_id = null;
+              const { data: inboxFolder } = await supabase
+                .from("folders")
+                .select("id")
+                .eq("email_account_id", accountId)
+                .eq("is_system", true)
+                .ilike("name", "inbox")
+                .maybeSingle();
+              if (inboxFolder?.id) {
+                convoUpdate.folder_id = inboxFolder.id;
+              } else {
+                convoUpdate.folder_id = null;
+              }
             }
           }
           if (email.hasAttachments) convoUpdate.has_attachments = true;

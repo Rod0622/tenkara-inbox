@@ -608,10 +608,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             if (!isOutbound) {
               convoUpdate.last_inbound_at = sentAt;
               // If the conversation is currently sitting in the system Sent
-              // folder (because /api/send put it there), move it back into
-              // the inbox by clearing folder_id. The conversation list shows
-              // folder_id=null rows in Inbox. Custom folder placements are
-              // NOT touched — only the Sent system folder triggers the move.
+              // folder (because /api/send put it there), move it to the
+              // account's INBOX folder. We can't just set folder_id=null —
+              // ConversationList's unassigned-view filter requires a strict
+              // `folder_id === activeFolder` match, and rows with NULL get
+              // rejected even though page.tsx's filter would accept them.
+              // Custom folder placements are NOT touched.
               const { data: convoRow } = await supabase
                 .from("conversations")
                 .select("folder_id, folder:folders(is_system, name)")
@@ -622,7 +624,22 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 folder && folder.is_system === true &&
                 String(folder.name || "").toLowerCase() === "sent";
               if (isInSentSystemFolder) {
-                convoUpdate.folder_id = null;
+                // Look up this account's Inbox folder id.
+                const { data: inboxFolder } = await supabase
+                  .from("folders")
+                  .select("id")
+                  .eq("email_account_id", accountId)
+                  .eq("is_system", true)
+                  .ilike("name", "inbox")
+                  .maybeSingle();
+                if (inboxFolder?.id) {
+                  convoUpdate.folder_id = inboxFolder.id;
+                } else {
+                  // No Inbox folder for this account (shouldn't happen,
+                  // but fail safe: clear folder_id rather than leaving
+                  // it stuck in Sent).
+                  convoUpdate.folder_id = null;
+                }
               }
             }
             await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
