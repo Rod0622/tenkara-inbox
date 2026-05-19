@@ -81,6 +81,32 @@ export async function GET(req: NextRequest) {
       "filenames:", Array.isArray(ownRows) ? ownRows.map((r: any) => r.filename).join(" | ") : "n/a"
     );
   }
+
+  // ── EXTRA DEBUG: bypass Supabase JS SDK and call PostgREST directly
+  // to see whether the bug is in the SDK or in PostgREST/the DB itself.
+  // This only logs for one specific message we know has 4 rows; quick
+  // diagnostic and easy to remove.
+  if (messageId === "f98397ce-1e25-4f52-9e14-a41488e1e79b") {
+    try {
+      const rawRes = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments?message_id=eq.${messageId}&select=id,filename`,
+        {
+          headers: {
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
+            "Accept-Profile": "inbox",
+            Prefer: "count=exact",
+          },
+        }
+      );
+      const rawText = await rawRes.text();
+      console.log("[attachments-debug-raw] status:", rawRes.status,
+        "content-range:", rawRes.headers.get("content-range"),
+        "body:", rawText.slice(0, 500));
+    } catch (e: any) {
+      console.error("[attachments-debug-raw] error:", e?.message);
+    }
+  }
   // ───────────────────────────────────────────────────────────────────
 
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
