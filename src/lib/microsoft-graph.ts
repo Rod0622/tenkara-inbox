@@ -494,10 +494,25 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             is_unread: !isOutbound,
           };
           // For INBOUND messages, set last_inbound_at so the conversation
-          // moves out of Sent and into Inbox (sidebar's isOutbound treats
-          // `last_inbound_at IS NULL` as "still sent-only").
+          // moves out of Sent and into Inbox.
           if (!isOutbound) {
             convoUpdate.last_inbound_at = email.receivedDateTime || new Date().toISOString();
+            // Also clear folder_id if the conversation is sitting in the
+            // system Sent folder — /api/send pins it there at creation;
+            // an inbound reply should liberate it back to Inbox. Custom
+            // folder placements are NOT touched.
+            const { data: convoRow } = await supabase
+              .from("conversations")
+              .select("folder_id, folder:folders(is_system, name)")
+              .eq("id", conversationId)
+              .maybeSingle();
+            const folder: any = (convoRow as any)?.folder;
+            const isInSentSystemFolder =
+              folder && folder.is_system === true &&
+              String(folder.name || "").toLowerCase() === "sent";
+            if (isInSentSystemFolder) {
+              convoUpdate.folder_id = null;
+            }
           }
           if (email.hasAttachments) convoUpdate.has_attachments = true;
 

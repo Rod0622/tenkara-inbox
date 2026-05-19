@@ -607,6 +607,23 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             };
             if (!isOutbound) {
               convoUpdate.last_inbound_at = sentAt;
+              // If the conversation is currently sitting in the system Sent
+              // folder (because /api/send put it there), move it back into
+              // the inbox by clearing folder_id. The conversation list shows
+              // folder_id=null rows in Inbox. Custom folder placements are
+              // NOT touched — only the Sent system folder triggers the move.
+              const { data: convoRow } = await supabase
+                .from("conversations")
+                .select("folder_id, folder:folders(is_system, name)")
+                .eq("id", conversationId)
+                .maybeSingle();
+              const folder: any = (convoRow as any)?.folder;
+              const isInSentSystemFolder =
+                folder && folder.is_system === true &&
+                String(folder.name || "").toLowerCase() === "sent";
+              if (isInSentSystemFolder) {
+                convoUpdate.folder_id = null;
+              }
             }
             await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
 
