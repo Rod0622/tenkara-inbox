@@ -394,7 +394,11 @@ export default function ComposeEmail({ onClose, onSent, currentUser }: ComposeEm
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--bg)] overflow-hidden">
+    // h-full (not flex-1) — ComposeEmail sits inside a <Panel> from
+    // react-resizable-panels, which is NOT a flex container, so flex-1 left
+    // the root with no constrained height and the inner overflow-y-auto
+    // had nothing to scroll against. Same pattern as TaskBoard/DraftsPanel.
+    <div className="h-full flex flex-col bg-[var(--bg)] overflow-hidden">
       {/* Header */}
       <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
         <div className="text-base font-bold text-[var(--text-primary)] tracking-tight">
