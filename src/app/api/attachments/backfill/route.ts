@@ -210,12 +210,39 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Bulk-fetch which messages already have attachment rows so we can skip.
+  //
+  // IMPORTANT — DO NOT USE THE SUPABASE JS SDK FOR THIS QUERY.
+  // The SDK returns partial result sets (e.g. 1 row instead of N) when
+  // querying the inbox.attachments table on a schema-pinned server client.
+  // We documented this in src/app/api/attachments/route.ts. The workaround
+  // is a raw PostgREST fetch with Accept-Profile: inbox. Same fix here.
   const messageIds = filtered.map((m: any) => m.id);
-  const { data: existingRows } = await supabase
-    .schema("inbox")
-    .from("attachments")
-    .select("message_id")
-    .in("message_id", messageIds);
+  let existingRows: { message_id: string }[] | null = null;
+  if (messageIds.length > 0) {
+    // PostgREST's IN filter syntax: message_id=in.(uuid1,uuid2,...)
+    // Wrap each id in quotes — UUID parsing is forgiving without quotes,
+    // but quoted values are safer against any future schema changes.
+    const idList = messageIds.map((id: string) => `"${id}"`).join(",");
+    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
+      `?message_id=in.(${idList})` +
+      `&select=message_id`;
+    try {
+      const rawRes = await fetch(url, {
+        headers: {
+          apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
+          "Accept-Profile": "inbox",
+        },
+      });
+      if (rawRes.ok) {
+        existingRows = await rawRes.json();
+      } else {
+        console.error("[backfill] existing-rows fetch failed:", rawRes.status, await rawRes.text());
+      }
+    } catch (e: any) {
+      console.error("[backfill] existing-rows fetch exception:", e?.message);
+    }
+  }
 
   const alreadyHave = new Set<string>((existingRows || []).map((r: any) => r.message_id));
   stats.alreadyBackfilled = alreadyHave.size;
