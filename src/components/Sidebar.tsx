@@ -690,60 +690,47 @@ export default function Sidebar({
 
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[var(--border)] mt-0.5 mb-1">
-                  {/* Per-account "Drafts" virtual entry — clicking opens the
-                      DraftsPanel filtered to this account, showing drafts
-                      from ALL team members (not just the current user). The
-                      same draft row also appears in each author's personal
-                      Drafts at the top of the sidebar; this is a second view
-                      of the same data, not a duplicate row. */}
-                  {(() => {
-                    const isAcctDraftsActive =
-                      activeView === "account-drafts" &&
-                      activeMailbox === mb.id &&
-                      !activeFolder;
-                    return (
-                      <button
-                        onClick={() => {
-                          window.location.hash = "";
-                          setActiveView("account-drafts");
-                          setActiveMailbox(mb.id);
-                          setActiveFolder(null);
-                        }}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all w-full text-left ${
-                          isAcctDraftsActive
-                            ? "bg-[var(--border)] text-[var(--text-primary)]"
-                            : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
-                        }`}
-                        title="Team-shared drafts on this account"
-                      >
-                        <FileEdit size={12} className="shrink-0 text-[var(--text-muted)]" />
-                        <span className="flex-1 truncate">Drafts</span>
-                      </button>
-                    );
-                  })()}
-
                   {accountFolders.map((folder) => {
                     const folderNameLower = String(folder.name || "").toLowerCase();
                     const isSystemInbox = folder.is_system && folder.name === "Inbox";
                     const isSystemTrash = folder.is_system && folderNameLower === "trash";
                     const isSystemSpam = folder.is_system && folderNameLower === "spam";
+                    // Drafts folder is repurposed: instead of showing
+                    // conversations whose folder_id matches, clicking it
+                    // opens the team-shared per-account DraftsPanel, which
+                    // shows all drafts (any author) on this email account.
+                    // Detected by name to avoid breaking existing rows in
+                    // the folders table.
+                    const isSystemDrafts = folder.is_system && folderNameLower === "drafts";
                     const isFolderExpanded = expandedFolders.has(folder.id);
 
                     // Active = currently selected. Inbox is special-cased: when nothing is
                     // explicitly chosen but the account is active, Inbox is the implied folder.
-                    const isFolderActive = isSystemInbox
+                    // Drafts is special-cased: it's active when the account-drafts view is
+                    // showing for this account (since clicking Drafts switches views entirely
+                    // rather than just setting activeFolder).
+                    const isFolderActive = isSystemDrafts
+                      ? activeView === "account-drafts" && activeMailbox === mb.id && !activeFolder
+                      : isSystemInbox
                       ? activeMailbox === mb.id && (!activeFolder || activeFolder === folder.id)
                       : activeFolder === folder.id;
 
                     // Counts mirror what clicking the folder NAME would show:
-                    // unassigned + status appropriate to the folder type.
-                    let folderConvos;
+                    // unassigned + status appropriate to the folder type. Drafts uses a
+                    // hidden count (drawn from the team's drafts on this account) rather
+                    // than conversation rows.
+                    let folderConvos: any[];
                     if (isSystemInbox) {
                       folderConvos = unassignedConvos.filter((c) => !c.folder_id || c.folder_id === folder.id);
                     } else if (isSystemTrash) {
                       folderConvos = mbConvos.filter((c: any) => c.status === "trash" && !c.assignee_id);
                     } else if (isSystemSpam) {
                       folderConvos = mbConvos.filter((c: any) => c.status === "spam" && !c.assignee_id);
+                    } else if (isSystemDrafts) {
+                      // Don't compute conversation-based counts for Drafts — the count
+                      // we surface is the draft-record count from the account-drafts
+                      // API, fetched separately. Pass an empty list here.
+                      folderConvos = [];
                     } else {
                       folderConvos = mbConvos.filter((c) =>
                         c.folder_id === folder.id &&
@@ -757,6 +744,14 @@ export default function Sidebar({
 
                     const handleFolderClick = () => {
                       window.location.hash = "";
+                      if (isSystemDrafts) {
+                        // Repurposed: open the team-shared drafts panel for this
+                        // account rather than the conversation list.
+                        setActiveView("account-drafts");
+                        setActiveMailbox(mb.id);
+                        setActiveFolder(null);
+                        return;
+                      }
                       setActiveFolder(folder.id);
                       setActiveMailbox(mb.id);
                       setActiveView("inbox");
