@@ -4076,7 +4076,7 @@ export default function ConversationDetail({
       </div>
 
       {!isReviewTab && (
-        <div className="px-4 py-2 border-t border-[var(--surface-2)] shrink-0">
+        <div className="px-4 py-2 border-t border-[var(--surface-2)] shrink-0 flex flex-col max-h-[70vh]">
           {!showReplyEditor ? (
             <div className="flex gap-2">
               <button
@@ -4094,7 +4094,13 @@ export default function ConversationDetail({
               </button>
             </div>
           ) : (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 min-h-0 flex-1">
+              {/* Scrollable inner region. When the reply form content (headers,
+                  Cc/Bcc, RichTextEditor, attachments) grows past viewport — or
+                  the user zooms in — this section becomes vertically scrollable
+                  so the user can reach all fields. The Send/Collapse footer
+                  below remains pinned and always visible. */}
+              <div className="flex flex-col gap-1.5 overflow-y-auto pr-1 flex-1 min-h-0">
               {/* Reply header: surfaces the From/To/Cc so the sender always knows
                   WHO they're emailing AS and WHO will receive this reply. The To
                   here mirrors the same priority the send route uses to pick the
@@ -4228,7 +4234,11 @@ export default function ConversationDetail({
                   ))}
                 </div>
               )}
-              <div className="flex justify-between items-center">
+              </div>
+              {/* Pinned footer row — stays visible regardless of how much
+                  scrollable content is above it. Holds Collapse, Discard
+                  draft, Reply All, and Send. */}
+              <div className="flex justify-between items-center shrink-0 pt-1.5 border-t border-[var(--surface-2)]">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); setReplyCc(""); setReplyBcc(""); setShowReplyCc(false); setShowReplyBcc(false); }}
