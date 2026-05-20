@@ -2372,7 +2372,7 @@ export default function ConversationDetail({
       <div
         ref={messagesScrollRef}
         className={`${
-          isReviewTab ? "flex-1 overflow-hidden px-5 py-4" : "flex-1 overflow-y-auto px-5 py-4"
+          isReviewTab ? "flex-1 min-h-0 overflow-hidden px-5 py-4" : "flex-1 min-h-0 overflow-y-auto px-5 py-4"
         }`}
       >
         {activeTab === "messages" && (
@@ -4076,7 +4076,10 @@ export default function ConversationDetail({
       </div>
 
       {!isReviewTab && (
-        <div className="px-4 py-2 border-t border-[var(--surface-2)] shrink-0 flex flex-col max-h-[70vh]">
+        <div className={showReplyEditor
+          ? "px-4 py-2 border-t border-[var(--surface-2)] flex flex-col min-h-0 flex-shrink basis-auto max-h-[60vh]"
+          : "px-4 py-2 border-t border-[var(--surface-2)] shrink-0"
+        }>
           {!showReplyEditor ? (
             <div className="flex gap-2">
               <button
