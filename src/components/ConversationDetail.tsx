@@ -236,6 +236,12 @@ export default function ConversationDetail({
   globalSearchQuery,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
+  // Editable To and Subject for the inline reply. Auto-populated when the
+  // reply editor opens (To = auto-picked recipient, Subject = "Re: <convo subject>")
+  // but the user can override either before sending. Both are passed to
+  // /api/send and saved on the draft.
+  const [replyTo, setReplyTo] = useState("");
+  const [replySubject, setReplySubject] = useState("");
   // Batch 11: cc/bcc on the main reply editor (mirrors the inline-compose pattern)
   const [replyCc, setReplyCc] = useState("");
   const [replyBcc, setReplyBcc] = useState("");
@@ -352,6 +358,12 @@ export default function ConversationDetail({
           const myDraft = (data.drafts || []).find((d: any) => d.author_id === currentUser.id) || (data.drafts || [])[0];
           if (myDraft) {
             setReplyText(myDraft.body_html || myDraft.body_text || "");
+            // Preload edited To/Subject from the draft if they were customized
+            // last time. Empty values fall back to the auto-init effect below.
+            if (myDraft.to_addresses) setReplyTo(myDraft.to_addresses);
+            if (myDraft.subject) setReplySubject(myDraft.subject);
+            if (myDraft.cc_addresses) { setReplyCc(myDraft.cc_addresses); setShowReplyCc(true); }
+            if (myDraft.bcc_addresses) { setReplyBcc(myDraft.bcc_addresses); setShowReplyBcc(true); }
             setLoadedDraftId(myDraft.id);
             setShowReplyEditor(true);
           } else {
@@ -385,8 +397,10 @@ export default function ConversationDetail({
             conversation_id: convo.id,
             email_account_id: convo.email_account_id,
             author_id: currentUser.id,
-            to_addresses: convo.from_email,
-            subject: `Re: ${convo.subject}`,
+            to_addresses: replyTo || convo.from_email,
+            cc_addresses: replyCc.trim() || undefined,
+            bcc_addresses: replyBcc.trim() || undefined,
+            subject: replySubject || `Re: ${convo.subject}`,
             body_html: replyText,
             is_reply: true,
             source: "manual",
@@ -399,7 +413,7 @@ export default function ConversationDetail({
       } catch { /* silent */ }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [replyText, convo?.id, showReplyEditor]);
+  }, [replyText, replyTo, replySubject, replyCc, replyBcc, convo?.id, showReplyEditor]);
 
   // (Modal auto-save effect moved further down — see "Auto-save Reply modal
   // draft" below — to be declared AFTER the modal state.)
@@ -623,6 +637,27 @@ export default function ConversationDetail({
         });
     });
   }, [convo?.id, convo?.from_email]);
+
+  // Auto-init To/Subject for the inline reply editor when it opens.
+  // Runs only when both are still empty AND the editor just opened OR
+  // conversation just changed. Drafts that pre-populated To/Subject win
+  // because they set replyTo/replySubject before this effect runs.
+  useEffect(() => {
+    if (!convo || !showReplyEditor) return;
+    if (!replyTo) {
+      const { primaryTo } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
+      if (primaryTo) setReplyTo(primaryTo);
+    }
+    if (!replySubject) {
+      const base = (convo.subject || "").trim();
+      const prefixed = base.match(/^re:\s*/i) ? base : `Re: ${base}`;
+      setReplySubject(prefixed);
+    }
+  // intentionally excluding replyTo / replySubject from deps — we only want
+  // to set defaults when the editor opens / convo changes, not loop on the
+  // setters we just called.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReplyEditor, convo?.id, messages.length, accountEmail]);
 
   // Re-scroll when messages load
   useEffect(() => {
@@ -1247,17 +1282,23 @@ export default function ConversationDetail({
     setSending(true);
     try {
       // Batch 11: pass cc/bcc through. The hook → /api/send already supports them.
+      // Inline reply: pass the user-edited To and Subject too — both are
+      // editable in the reply header. /api/send respects them when isReply.
       await onSendReply(
         convo.id,
         replyText,
         replyAttachments.length > 0 ? replyAttachments : undefined,
         replyCc.trim() || undefined,
         replyBcc.trim() || undefined,
+        replyTo.trim() || undefined,
+        replySubject.trim() || undefined,
       );
       setReplyText("");
       setReplyAttachments([]);
       setReplyCc("");
       setReplyBcc("");
+      setReplyTo("");
+      setReplySubject("");
       setShowReplyCc(false);
       setShowReplyBcc(false);
       // Delete draft if one was loaded
@@ -4148,33 +4189,51 @@ export default function ConversationDetail({
                   so the user can reach all fields. The Send/Collapse footer
                   below remains pinned and always visible. */}
               <div className="flex flex-col gap-1.5 overflow-y-auto pr-1 flex-1 min-h-0">
-              {/* Reply header: surfaces the From/To/Cc so the sender always knows
-                  WHO they're emailing AS and WHO will receive this reply. The To
-                  here mirrors the same priority the send route uses to pick the
-                  recipient when no explicit `to` is passed (latest inbound's
-                  from_email → latest outbound's first recipient → convo fallback). */}
+              {/* Reply header: From, editable To, editable Subject, plus Cc/Bcc
+                  display when present. From stays read-only because it's tied
+                  to the email_account we send from (changing it would mean
+                  switching accounts, which isn't supported inline). To and
+                  Subject are editable so users can correct an auto-picked
+                  recipient or tweak the subject before sending. */}
               {(() => {
-                const { primaryTo } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
                 const fromDisplay = accountName ? `${accountName} <${accountEmail}>` : accountEmail;
                 return (
                   <div className="rounded-md bg-[var(--bg)] border border-[var(--border)] px-2.5 py-1.5 text-[11px] leading-snug">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">From</span>
+                      <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-12 shrink-0">From</span>
                       <span className="text-[var(--text-primary)] truncate">{fromDisplay || "—"}</span>
                     </div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">To</span>
-                      <span className="text-[var(--text-primary)] truncate">{primaryTo || "—"}</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <label htmlFor="reply-to-input" className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-12 shrink-0 cursor-text">To</label>
+                      <input
+                        id="reply-to-input"
+                        type="text"
+                        value={replyTo}
+                        onChange={(e) => setReplyTo(e.target.value)}
+                        placeholder="recipient@example.com"
+                        className="flex-1 min-w-0 bg-transparent outline-none border-none text-[var(--text-primary)] text-[11px] py-0.5"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <label htmlFor="reply-subject-input" className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-12 shrink-0 cursor-text">Subject</label>
+                      <input
+                        id="reply-subject-input"
+                        type="text"
+                        value={replySubject}
+                        onChange={(e) => setReplySubject(e.target.value)}
+                        placeholder={convo.subject ? `Re: ${convo.subject}` : "Subject"}
+                        className="flex-1 min-w-0 bg-transparent outline-none border-none text-[var(--text-primary)] text-[11px] py-0.5"
+                      />
                     </div>
                     {replyCc.trim() && (
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">Cc</span>
+                      <div className="flex items-baseline gap-2 mt-0.5">
+                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-12 shrink-0">Cc</span>
                         <span className="text-[var(--text-primary)] truncate">{replyCc.trim()}</span>
                       </div>
                     )}
                     {replyBcc.trim() && (
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-8 shrink-0">Bcc</span>
+                      <div className="flex items-baseline gap-2 mt-0.5">
+                        <span className="text-[var(--text-muted)] font-semibold uppercase tracking-wider w-12 shrink-0">Bcc</span>
                         <span className="text-[var(--text-primary)] truncate">{replyBcc.trim()}</span>
                       </div>
                     )}
@@ -4288,7 +4347,7 @@ export default function ConversationDetail({
               <div className="flex justify-between items-center shrink-0 pt-1.5 border-t border-[var(--surface-2)]">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); setReplyCc(""); setReplyBcc(""); setShowReplyCc(false); setShowReplyBcc(false); }}
+                    onClick={() => { setShowReplyEditor(false); setReplyText(""); setReplyAttachments([]); setReplyCc(""); setReplyBcc(""); setReplyTo(""); setReplySubject(""); setShowReplyCc(false); setShowReplyBcc(false); }}
                     className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                   >
                     Collapse

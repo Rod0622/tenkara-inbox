@@ -729,6 +729,8 @@ export function useActions() {
     attachments?: { name: string; type: string; data: string }[],
     cc?: string,
     bcc?: string,
+    to?: string,
+    subject?: string,
   ) => {
     const res = await fetch("/api/send", {
       method: "POST",
@@ -739,6 +741,11 @@ export function useActions() {
         attachments: attachments || undefined,
         cc: cc || undefined,
         bcc: bcc || undefined,
+        // Override To/Subject if the caller edited them in the inline
+        // reply header. /api/send respects body.to and body.subject when
+        // conversation_id is present; otherwise it auto-picks.
+        to: to || undefined,
+        subject: subject || undefined,
         actor_id: currentUserId,
       }),
     });
