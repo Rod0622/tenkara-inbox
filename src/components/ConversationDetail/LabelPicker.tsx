@@ -64,64 +64,68 @@ export default function LabelPicker({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
-          <div className="px-3 py-2 border-b border-[var(--border)]">
+        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1 flex flex-col max-h-[360px]">
+          <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
             <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Toggle labels
             </div>
           </div>
 
-          {/* Batch 8: render with two-level nesting (parent → children) */}
-          {(() => {
-            // Build top-level + children map
-            const topLevel = allLabels.filter((l: any) => !l.parent_label_id);
-            const childrenByParent = new Map<string, any[]>();
-            for (const l of allLabels as any[]) {
-              if (l.parent_label_id) {
-                const arr = childrenByParent.get(l.parent_label_id) || [];
-                arr.push(l);
-                childrenByParent.set(l.parent_label_id, arr);
+          {/* Scrollable list of labels. max-h on the wrapper + overflow on this
+              inner container means the header stays pinned while labels scroll. */}
+          <div className="flex-1 overflow-y-auto py-1">
+            {/* Batch 8: render with two-level nesting (parent → children) */}
+            {(() => {
+              // Build top-level + children map
+              const topLevel = allLabels.filter((l: any) => !l.parent_label_id);
+              const childrenByParent = new Map<string, any[]>();
+              for (const l of allLabels as any[]) {
+                if (l.parent_label_id) {
+                  const arr = childrenByParent.get(l.parent_label_id) || [];
+                  arr.push(l);
+                  childrenByParent.set(l.parent_label_id, arr);
+                }
               }
-            }
 
-            const renderRow = (label: any, isChild: boolean) => {
-              const active = localLabelIds.has(label.id);
-              return (
-                <button
-                  key={label.id}
-                  onClick={() => toggleLabel(label.id)}
-                  className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[var(--border)] ${isChild ? "pl-6" : ""}`}
-                >
-                  <div
-                    className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
-                      active ? "border-transparent" : "border-[var(--text-muted)]"
-                    }`}
-                    style={active ? { background: label.color } : {}}
+              const renderRow = (label: any, isChild: boolean) => {
+                const active = localLabelIds.has(label.id);
+                return (
+                  <button
+                    key={label.id}
+                    onClick={() => toggleLabel(label.id)}
+                    className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[var(--border)] ${isChild ? "pl-6" : ""}`}
                   >
-                    {active && <Check size={10} className="text-[var(--bg)]" />}
-                  </div>
-                  {isChild && <span className="text-[var(--text-muted)] text-[10px] select-none">└</span>}
-                  <span className="w-2 h-2 rounded-full" style={{ background: label.color }} />
-                  <span className={active ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"}>
-                    {label.name}
-                  </span>
-                </button>
-              );
-            };
+                    <div
+                      className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
+                        active ? "border-transparent" : "border-[var(--text-muted)]"
+                      }`}
+                      style={active ? { background: label.color } : {}}
+                    >
+                      {active && <Check size={10} className="text-[var(--bg)]" />}
+                    </div>
+                    {isChild && <span className="text-[var(--text-muted)] text-[10px] select-none">└</span>}
+                    <span className="w-2 h-2 rounded-full" style={{ background: label.color }} />
+                    <span className={active ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"}>
+                      {label.name}
+                    </span>
+                  </button>
+                );
+              };
 
-            return topLevel.map((parent: any) => (
-              <div key={parent.id}>
-                {renderRow(parent, false)}
-                {(childrenByParent.get(parent.id) || []).map((child) => renderRow(child, true))}
+              return topLevel.map((parent: any) => (
+                <div key={parent.id}>
+                  {renderRow(parent, false)}
+                  {(childrenByParent.get(parent.id) || []).map((child) => renderRow(child, true))}
+                </div>
+              ));
+            })()}
+
+            {allLabels.length === 0 && (
+              <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">
+                No labels yet
               </div>
-            ));
-          })()}
-
-          {allLabels.length === 0 && (
-            <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">
-              No labels yet
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

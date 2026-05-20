@@ -401,6 +401,9 @@ export default function ConversationDetail({
     return () => clearTimeout(timer);
   }, [replyText, convo?.id, showReplyEditor]);
 
+  // (Modal auto-save effect moved further down — see "Auto-save Reply modal
+  // draft" below — to be declared AFTER the modal state.)
+
   // Fetch account signature for replies. Also pulls the account's email so
   // Reply All can exclude it from recipient lists (otherwise we'd email ourselves).
   useEffect(() => {
@@ -510,8 +513,77 @@ export default function ConversationDetail({
   // restores it without re-walking the messages array.
   const [replyModalReplyAll, setReplyModalReplyAll] = useState(false);
   const [replyModalReplyAllCcList, setReplyModalReplyAllCcList] = useState<string[]>([]);
+  // Draft persistence for the Reply modal. Shares the same email_drafts row
+  // as the inline reply (one draft per conversation+author) so a single
+  // in-progress reply isn't fragmented across two UIs. When the modal opens,
+  // we preload from the inline reply's loadedDraftId (if any). Body changes
+  // auto-save after 3 sec pause. Close (Cancel/X) does a synchronous save.
+  // Send deletes the draft.
+  const replyModalAutoSaveSkipRef = useRef(true);
   const [trashingConversation, setTrashingConversation] = useState(false);
   const [markingSpam, setMarkingSpam] = useState(false);
+
+  // Auto-save Reply modal draft when user stops typing for 3 seconds.
+  // Mirrors the inline reply auto-save above. Both UIs share the same
+  // email_drafts row (one per conversation+author), so writes here update
+  // the same record the inline reply preloads from.
+  useEffect(() => {
+    if (!convo?.id || !currentUser?.id || !showReplyModal) return;
+    // Skip the very first tick after opening — the body was just preloaded
+    // and writing it again would be a wasted round-trip.
+    if (replyModalAutoSaveSkipRef.current) {
+      replyModalAutoSaveSkipRef.current = false;
+      return;
+    }
+    const plainText = (replyModalBody || "").replace(/<[^>]*>/g, "").trim();
+    // Empty body → delete the draft if one exists, then skip.
+    if (!plainText) {
+      if (loadedDraftId) {
+        fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: convo.id,
+            email_account_id: convo.email_account_id,
+            author_id: currentUser.id,
+            to_addresses: replyModalTo,
+            cc_addresses: replyModalCc,
+            bcc_addresses: replyModalBcc,
+            subject: replyModalSubject,
+            body_html: replyModalBody,
+            is_reply: true,
+            source: "manual",
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.draft?.id) {
+            setLoadedDraftId(data.draft.id);
+            // Mirror the body into the inline-reply state so closing the
+            // modal hands the draft back seamlessly.
+            setReplyText(replyModalBody);
+          }
+        }
+      } catch { /* silent */ }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [
+    replyModalBody,
+    replyModalTo,
+    replyModalCc,
+    replyModalBcc,
+    replyModalSubject,
+    convo?.id,
+    currentUser?.id,
+    showReplyModal,
+  ]);
 
   const {
     notes,
@@ -1225,7 +1297,14 @@ export default function ConversationDetail({
     setReplyModalCc("");
     setReplyModalBcc("");
     setReplyModalSubject(replySubject);
-    setReplyModalBody("");
+    // Preload draft body from the inline reply's loadedDraftId, which is
+    // populated when the conversation loads. Both UIs share the same draft
+    // row (one draft per conversation+author). If there's no current draft,
+    // body stays empty.
+    setReplyModalBody(replyText || "");
+    // Skip the next auto-save tick so opening the modal doesn't immediately
+    // re-save the preloaded body (would be a no-op write, but still wasteful).
+    replyModalAutoSaveSkipRef.current = true;
     setShowReplyModal(true);
   };
 
@@ -1271,12 +1350,67 @@ export default function ConversationDetail({
       setReplyModalBcc("");
       setReplyModalSubject("");
       setReplyModalBody("");
+      // Successful send → delete the draft (we just persisted it as a real
+      // message). Also clear the inline reply state since they share storage.
+      if (loadedDraftId) {
+        fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
+      setReplyText("");
     } catch (error: any) {
       console.error("Reply (modal) failed:", error);
       alert(error?.message || "Failed to send reply");
     } finally {
       setReplyModalSending(false);
     }
+  };
+
+  // Close the Reply modal. If there's content, save it as a draft FIRST
+  // (synchronously) so the user doesn't lose work on close. Mirrors the
+  // body into the inline reply state so the same draft is offered when
+  // they next open the conversation. Empty body → delete any existing draft.
+  const handleCloseReplyModal = async () => {
+    setShowReplyModal(false);
+    if (!convo?.id || !currentUser?.id) {
+      // Edge case: missing state; just close.
+      return;
+    }
+    const plainText = (replyModalBody || "").replace(/<[^>]*>/g, "").trim();
+    if (!plainText) {
+      // Empty close → delete existing draft (if any), clear inline reply too.
+      if (loadedDraftId) {
+        await fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
+        setLoadedDraftId(null);
+      }
+      setReplyText("");
+      return;
+    }
+    // Non-empty close → save the draft synchronously before exiting.
+    try {
+      const res = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          email_account_id: convo.email_account_id,
+          author_id: currentUser.id,
+          to_addresses: replyModalTo,
+          cc_addresses: replyModalCc,
+          bcc_addresses: replyModalBcc,
+          subject: replyModalSubject,
+          body_html: replyModalBody,
+          is_reply: true,
+          source: "manual",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.draft?.id) setLoadedDraftId(data.draft.id);
+      }
+    } catch { /* silent */ }
+    // Hand the draft body off to the inline reply state so it's
+    // available there next time the user opens the conversation.
+    setReplyText(replyModalBody);
   };
 
   const handleOpenForward = () => {
@@ -4407,7 +4541,7 @@ export default function ConversationDetail({
               </div>
               <button
                 type="button"
-                onClick={() => setShowReplyModal(false)}
+                onClick={handleCloseReplyModal}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
                 title="Close"
               >
@@ -4528,7 +4662,7 @@ export default function ConversationDetail({
             <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-4 shrink-0 bg-[var(--surface)]">
               <button
                 type="button"
-                onClick={() => setShowReplyModal(false)}
+                onClick={handleCloseReplyModal}
                 className="px-3 py-2 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-2)]"
               >
                 Cancel
