@@ -1,21 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
-// GET /api/drafts — list drafts (optionally filter by conversation_id or author_id)
-//   Special filter: conversation_id=null returns only standalone (compose) drafts
+// GET /api/drafts — list drafts.
+// Filters (all optional, combinable):
+//   conversation_id   — drafts for a specific conversation
+//   conversation_id=null with standalone=true — standalone (compose) drafts
+//   author_id         — drafts authored by a specific user (used for personal Drafts view)
+//   email_account_id  — drafts on a specific email account (used for the per-account
+//                       "Drafts" folder in the sidebar, which shows the TEAM's drafts
+//                       on that account regardless of author)
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
   const authorId = req.nextUrl.searchParams.get("author_id");
+  const emailAccountId = req.nextUrl.searchParams.get("email_account_id");
   const standaloneOnly = req.nextUrl.searchParams.get("standalone") === "true";
 
   let query = supabase
     .from("email_drafts")
-    .select("*, conversation:conversations(id, subject, from_name, from_email, email_account_id), account:email_accounts(id, name, email)")
+    .select(`
+      *,
+      conversation:conversations(id, subject, from_name, from_email, email_account_id),
+      account:email_accounts(id, name, email),
+      author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
+    `)
     .order("updated_at", { ascending: false });
 
   if (conversationId) query = query.eq("conversation_id", conversationId);
   if (authorId) query = query.eq("author_id", authorId);
+  if (emailAccountId) query = query.eq("email_account_id", emailAccountId);
   if (standaloneOnly) query = query.is("conversation_id", null);
 
   const { data, error } = await query;

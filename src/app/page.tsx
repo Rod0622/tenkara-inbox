@@ -195,6 +195,10 @@ export default function InboxPage() {
 
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
   const isDraftsView = activeView === "drafts" && !activeMailbox && !activeFolder;
+  // Per-account "Drafts" virtual folder — selected when the user clicks the
+  // Drafts row under an account in the sidebar. Shows ALL team members'
+  // drafts on that account.
+  const isAccountDraftsView = activeView === "account-drafts" && !!activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
   const displayConversations = useMemo(() => {
@@ -651,6 +655,21 @@ export default function InboxPage() {
           <Panel defaultSize={86} minSize={50} order={2} id="content-drafts">
             <DraftsPanel
               currentUser={currentUser}
+              onOpenConversation={(conversationId) => {
+                setActiveView("inbox");
+                window.location.hash = `#conversation=${conversationId}`;
+              }}
+              onOpenCompose={() => setActiveView("compose")}
+            />
+          </Panel>
+        ) : isAccountDraftsView ? (
+          // Per-account Drafts view — same panel, scoped to one email account
+          // and showing drafts from ALL team members.
+          <Panel defaultSize={86} minSize={50} order={2} id="content-account-drafts">
+            <DraftsPanel
+              currentUser={currentUser}
+              emailAccountId={activeMailbox}
+              emailAccountName={emailAccounts.find((a: any) => a.id === activeMailbox)?.name || null}
               onOpenConversation={(conversationId) => {
                 setActiveView("inbox");
                 window.location.hash = `#conversation=${conversationId}`;

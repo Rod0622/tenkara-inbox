@@ -6,10 +6,17 @@ import type { TeamMember } from "@/types";
 
 export default function DraftsPanel({
   currentUser,
+  emailAccountId,
+  emailAccountName,
   onOpenConversation,
   onOpenCompose,
 }: {
   currentUser: TeamMember | null;
+  // When set, the panel shows ALL drafts on that email account (regardless of
+  // author) — i.e., the team-shared per-account Drafts folder.
+  // When unset, it shows the current user's PERSONAL drafts.
+  emailAccountId?: string | null;
+  emailAccountName?: string | null;
   onOpenConversation?: (conversationId: string) => void;
   onOpenCompose?: () => void;
 }) {
@@ -17,10 +24,18 @@ export default function DraftsPanel({
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  // Mode is determined by which prop is set. Per-account view trumps personal.
+  const isAccountView = !!emailAccountId;
+
   const fetchDrafts = async () => {
-    if (!currentUser?.id) return;
+    // Personal view needs currentUser; account view needs emailAccountId.
+    if (!isAccountView && !currentUser?.id) return;
+    if (isAccountView && !emailAccountId) return;
     try {
-      const res = await fetch(`/api/drafts?author_id=${currentUser.id}`);
+      const url = isAccountView
+        ? `/api/drafts?email_account_id=${emailAccountId}`
+        : `/api/drafts?author_id=${currentUser!.id}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setDrafts(data.drafts || []);
@@ -37,6 +52,7 @@ export default function DraftsPanel({
   useEffect(() => { deletingRef.current = deleting; }, [deleting]);
 
   useEffect(() => {
+    setLoading(true);
     fetchDrafts();
     const interval = setInterval(() => {
       if (!deletingRef.current) fetchDrafts();
@@ -50,7 +66,7 @@ export default function DraftsPanel({
       window.removeEventListener("focus", onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id]);
+  }, [currentUser?.id, emailAccountId]);
 
   const handleDelete = async (id: string) => {
     setDeleting(id);
@@ -77,8 +93,13 @@ export default function DraftsPanel({
         <div className="flex items-center gap-3 mb-6">
           <FileEdit size={22} className="text-[var(--info)]" />
           <div>
-            <h1 className="text-xl font-bold text-[var(--text-primary)]">Drafts</h1>
-            <p className="text-xs text-[var(--text-secondary)]">{drafts.length} draft{drafts.length !== 1 ? "s" : ""}</p>
+            <h1 className="text-xl font-bold text-[var(--text-primary)]">
+              {isAccountView ? (emailAccountName ? `${emailAccountName} · Drafts` : "Drafts") : "Drafts"}
+            </h1>
+            <p className="text-xs text-[var(--text-secondary)]">
+              {drafts.length} draft{drafts.length !== 1 ? "s" : ""}
+              {isAccountView && " · team-shared"}
+            </p>
           </div>
         </div>
 
@@ -106,11 +127,24 @@ export default function DraftsPanel({
                       )}
                     </div>
 
-                    {/* To + account */}
-                    <div className="text-[11px] text-[var(--text-secondary)] mb-1.5">
-                      To: {draft.to_addresses || draft.conversation?.from_email || "—"}
+                    {/* To + account + author */}
+                    <div className="text-[11px] text-[var(--text-secondary)] mb-1.5 flex items-center gap-1.5 flex-wrap">
+                      <span>To: {draft.to_addresses || draft.conversation?.from_email || "—"}</span>
                       {draft.account && (
                         <span className="text-[var(--text-muted)]"> · via {draft.account.name || draft.account.email}</span>
+                      )}
+                      {isAccountView && draft.author && (
+                        <span
+                          className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold"
+                          style={{
+                            background: (draft.author.color || "#666") + "22",
+                            color: draft.author.color || "var(--text-secondary)",
+                          }}
+                          title={`Drafted by ${draft.author.name}`}
+                        >
+                          <span>{draft.author.initials || draft.author.name?.[0]}</span>
+                          <span>{draft.author.name}</span>
+                        </span>
                       )}
                     </div>
 

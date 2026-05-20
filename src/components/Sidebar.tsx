@@ -690,6 +690,38 @@ export default function Sidebar({
 
               {isExpanded && (
                 <div className="ml-5 pl-2 border-l border-[var(--border)] mt-0.5 mb-1">
+                  {/* Per-account "Drafts" virtual entry — clicking opens the
+                      DraftsPanel filtered to this account, showing drafts
+                      from ALL team members (not just the current user). The
+                      same draft row also appears in each author's personal
+                      Drafts at the top of the sidebar; this is a second view
+                      of the same data, not a duplicate row. */}
+                  {(() => {
+                    const isAcctDraftsActive =
+                      activeView === "account-drafts" &&
+                      activeMailbox === mb.id &&
+                      !activeFolder;
+                    return (
+                      <button
+                        onClick={() => {
+                          window.location.hash = "";
+                          setActiveView("account-drafts");
+                          setActiveMailbox(mb.id);
+                          setActiveFolder(null);
+                        }}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[12px] font-medium transition-all w-full text-left ${
+                          isAcctDraftsActive
+                            ? "bg-[var(--border)] text-[var(--text-primary)]"
+                            : "text-[var(--text-secondary)] hover:bg-[var(--surface)]"
+                        }`}
+                        title="Team-shared drafts on this account"
+                      >
+                        <FileEdit size={12} className="shrink-0 text-[var(--text-muted)]" />
+                        <span className="flex-1 truncate">Drafts</span>
+                      </button>
+                    );
+                  })()}
+
                   {accountFolders.map((folder) => {
                     const folderNameLower = String(folder.name || "").toLowerCase();
                     const isSystemInbox = folder.is_system && folder.name === "Inbox";
