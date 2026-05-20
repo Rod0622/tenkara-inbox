@@ -441,6 +441,9 @@ export default function ConversationDetail({
   const [pickingMessageFor, setPickingMessageFor] = useState<"creating" | string | null>(null);
   // When set, briefly highlight the note with this id (after navigating from a marker)
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | null>(null);
+  // Tracks which participant email was just copied to clipboard, so the
+  // badge can flash a "Copied!" confirmation briefly.
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   // Notes by id → DOM element, used to scroll-to-note when clicking a marker
   const noteRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Which note is currently in the "pick a message to attach" mode (for retroactive attaching)
@@ -2027,16 +2030,57 @@ export default function ConversationDetail({
             return (
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 <Users size={11} className="text-[var(--text-muted)] shrink-0" />
-                {shown.map((p, i) => (
-                  <span key={p.email} title={`${p.name} <${p.email}>`}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[10px] text-[var(--text-secondary)] max-w-[160px] truncate">
-                    <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
-                      style={{ background: i === 0 ? "var(--info)" : i === 1 ? "var(--accent)" : i === 2 ? "#BC8CFF" : i === 3 ? "var(--warning)" : "var(--highlight)" }}>
-                      {(p.name || "?").slice(0, 2).toUpperCase()}
-                    </span>
-                    <span className="truncate">{p.name || p.email}</span>
-                  </span>
-                ))}
+                {shown.map((p, i) => {
+                  const wasCopied = copiedEmail === p.email;
+                  const handleCopy = async () => {
+                    try {
+                      await navigator.clipboard.writeText(p.email);
+                      setCopiedEmail(p.email);
+                      // Clear feedback after 1.5s.
+                      setTimeout(() => {
+                        setCopiedEmail((cur) => (cur === p.email ? null : cur));
+                      }, 1500);
+                    } catch {
+                      // Clipboard API can fail in older browsers or insecure
+                      // contexts. Fall back to a hidden textarea + execCommand.
+                      try {
+                        const ta = document.createElement("textarea");
+                        ta.value = p.email;
+                        ta.style.position = "fixed";
+                        ta.style.opacity = "0";
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(ta);
+                        setCopiedEmail(p.email);
+                        setTimeout(() => {
+                          setCopiedEmail((cur) => (cur === p.email ? null : cur));
+                        }, 1500);
+                      } catch { /* give up silently */ }
+                    }
+                  };
+                  return (
+                    <button
+                      key={p.email}
+                      type="button"
+                      onClick={handleCopy}
+                      title={wasCopied ? "Copied!" : `Click to copy ${p.email}`}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] max-w-[160px] truncate transition-colors ${
+                        wasCopied
+                          ? "bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]"
+                          : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:border-[var(--accent)]/40 cursor-pointer"
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
+                        style={{ background: i === 0 ? "var(--info)" : i === 1 ? "var(--accent)" : i === 2 ? "#BC8CFF" : i === 3 ? "var(--warning)" : "var(--highlight)" }}>
+                        {(p.name || "?").slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="truncate">
+                        {wasCopied ? "Copied!" : (p.name || p.email)}
+                      </span>
+                    </button>
+                  );
+                })}
                 {extra > 0 && (
                   <span className="text-[10px] text-[var(--text-muted)]">+{extra} more</span>
                 )}
