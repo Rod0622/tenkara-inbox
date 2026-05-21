@@ -19,6 +19,7 @@ import ComposeEmail from "@/components/ComposeEmail";
 import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
 import CreateConversation from "@/components/CreateConversation";
+import QuickCallModal from "@/components/QuickCallModal";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { Conversation, TaskStatus } from "@/types";
 
@@ -63,6 +64,9 @@ export default function InboxPage() {
   const [searchSnippets, setSearchSnippets] = useState<Record<string, string>>({});
   const [searchTaskResults, setSearchTaskResults] = useState<any[]>([]);
   const searchTimerRef = useRef<any>(null);
+
+  // QuickCallModal — opened from the sidebar QuickActions dropdown
+  const [showCallModal, setShowCallModal] = useState(false);
 
   const { conversations, refetch } = useConversations(activeMailbox);
 
@@ -602,6 +606,7 @@ export default function InboxPage() {
             })()}
             mySentCount={mySentConvoIds.size}
             onMoveToFolder={handleMoveToFolder}
+            onMakeCall={() => setShowCallModal(true)}
           />
         </Panel>
 
@@ -723,6 +728,23 @@ export default function InboxPage() {
           </>
         )}
       </PanelGroup>
+
+      {/* Quick call modal — triggered from QuickActions dropdown in sidebar */}
+      <QuickCallModal
+        isOpen={showCallModal}
+        onClose={() => setShowCallModal(false)}
+        onCallPlaced={(stub) => {
+          // If the stub was linked to a conversation, navigate there so the
+          // stub call entry is immediately visible in the timeline.
+          if (stub?.conversation_id) {
+            const target = conversations.find((c) => c.id === stub.conversation_id);
+            if (target) {
+              setActiveConvo(target);
+              setActiveView("inbox");
+            }
+          }
+        }}
+      />
     </div>
   );
 }

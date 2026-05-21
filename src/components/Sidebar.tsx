@@ -25,6 +25,7 @@ import {
   Eye,
   Sun,
   Moon,
+  Phone,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -36,10 +37,12 @@ function QuickCreateMenu({
   onCompose,
   onNewTask,
   onNewConversation,
+  onMakeCall,
 }: {
   onCompose: () => void;
   onNewTask: () => void;
   onNewConversation: () => void;
+  onMakeCall?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -114,6 +117,19 @@ function QuickCreateMenu({
               Create conversation
             </button>
 
+            {onMakeCall && (
+              <button
+                onClick={() => {
+                  onMakeCall();
+                  setOpen(false);
+                }}
+                className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
+              >
+                <Phone size={14} className="text-[var(--info)]" />
+                Make a call
+              </button>
+            )}
+
             <Link
               href="/settings"
               className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
@@ -145,6 +161,7 @@ export default function Sidebar({
   taskInProgressCount = 0,
   mySentCount: mySentCountProp,
   onMoveToFolder,
+  onMakeCall,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -524,6 +541,7 @@ export default function Sidebar({
         setActiveMailbox(null);
         setActiveFolder(null);
       }}
+      onMakeCall={onMakeCall}
     />
   </div>
 </div>

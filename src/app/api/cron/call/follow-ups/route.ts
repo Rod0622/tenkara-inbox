@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
     processed: 0,
     redials_created: 0,
     escalated: 0,
+    stubs_canceled: 0,
     errors: [] as string[],
   };
 
@@ -65,11 +66,10 @@ export async function GET(req: NextRequest) {
     if (dueErr) {
       return NextResponse.json({ error: dueErr.message, duration_ms: Date.now() - startTime }, { status: 500 });
     }
-    if (!dueRows || dueRows.length === 0) {
-      return NextResponse.json({ message: "No follow-ups due", ...results, duration_ms: Date.now() - startTime });
-    }
+    // (No early return on empty dueRows — we still want to run stub cleanup
+    //  at the bottom of this try block.)
 
-    for (const row of dueRows as any[]) {
+    for (const row of (dueRows || []) as any[]) {
       try {
         results.processed++;
 
@@ -204,6 +204,30 @@ export async function GET(req: NextRequest) {
       } catch (rowErr: any) {
         results.errors.push(`row ${row.id}: ${rowErr?.message || String(rowErr)}`);
       }
+    }
+
+    // ── Stub cleanup pass ──────────────────────────────
+    // Cancel any stub rows that have been "ringing" for >10 min with no
+    // matching webhook arrival (user clicked Call but never dialed, or the
+    // webhook failed to merge for some reason). Sets status='canceled' so
+    // the timeline UI shows them as not-actually-placed.
+    try {
+      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: cleaned, error: cleanErr } = await supabase
+        .from("quo_call_logs")
+        .update({ status: "canceled", outcome: "no_answer" })
+        .eq("is_stub", true)
+        .eq("status", "ringing")
+        .lte("started_at", tenMinAgo)
+        .select("id");
+
+      if (cleanErr) {
+        results.errors.push(`stub cleanup: ${cleanErr.message}`);
+      } else {
+        results.stubs_canceled = (cleaned || []).length;
+      }
+    } catch (cleanErr: any) {
+      results.errors.push(`stub cleanup crashed: ${cleanErr?.message || String(cleanErr)}`);
     }
 
     return NextResponse.json({ ...results, duration_ms: Date.now() - startTime });

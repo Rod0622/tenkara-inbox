@@ -233,6 +233,76 @@ export async function upsertCallFromEvent(
     raw_event: rawEvent,
   };
 
+  // ── Stub-merge check (Path A) ─────────────────────────
+  // If this is an outbound call, look for a recent stub row that the user
+  // created via the QuickCallModal. Match on (workspace_phone, participant_phone,
+  // direction=outbound, is_stub=true, started within last 5 minutes). If found,
+  // UPDATE the stub in place (preserving the pre-linked conversation_id +
+  // supplier_contact_id that the user picked) instead of inserting a new row.
+  //
+  // We only attempt merge for outbound calls — inbound calls never have stubs.
+  if (row.direction === "outbound" && workspacePhone && participantPhone) {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: stubs } = await supabase
+      .from("quo_call_logs")
+      .select("id, conversation_id, supplier_contact_id, supplier_contact_person_id")
+      .eq("is_stub", true)
+      .eq("direction", "outbound")
+      .eq("workspace_phone", workspacePhone)
+      .eq("participant_phone", participantPhone)
+      .gte("started_at", fiveMinAgo)
+      .order("started_at", { ascending: true })  // earliest unmatched first
+      .limit(1);
+
+    const stub: any = stubs && stubs.length > 0 ? stubs[0] : null;
+    if (stub) {
+      // Merge: update the stub row with real-call data. Preserve any
+      // pre-linked supplier/conversation that the user chose — don't let
+      // re-running phone matching overwrite their manual selection unless
+      // we'd otherwise have nothing.
+      const mergeRow = {
+        ...row,
+        conversation_id: stub.conversation_id || row.conversation_id,
+        supplier_contact_id: stub.supplier_contact_id || row.supplier_contact_id,
+        supplier_contact_person_id: stub.supplier_contact_person_id || row.supplier_contact_person_id,
+        is_stub: false,
+      };
+      const { data: updated, error: updErr } = await supabase
+        .from("quo_call_logs")
+        .update(mergeRow)
+        .eq("id", stub.id)
+        .select("*")
+        .single();
+
+      if (updErr) {
+        console.error("[quo-webhook] stub merge failed:", updErr.message);
+        // Fall through to normal upsert below
+      } else {
+        // Activity log for the now-completed call (similar to regular path)
+        const finalStates = new Set(["completed", "missed", "no_answer", "voicemail", "busy", "failed", "canceled"]);
+        const finalConvId = mergeRow.conversation_id;
+        if (finalConvId && finalStates.has(row.status)) {
+          await supabase.from("activity_log").insert({
+            conversation_id: finalConvId,
+            actor_id: teamMemberId,
+            action: "quo_call_logged",
+            details: {
+              quo_call_id: quoCallId,
+              direction: row.direction,
+              status: row.status,
+              outcome: row.outcome,
+              duration_seconds: row.duration_seconds,
+              participant_phone: participantPhone,
+              merged_from_stub: true,
+            },
+          });
+        }
+        return updated;
+      }
+    }
+  }
+  // ── End stub-merge block ──────────────────────────────
+
   // Upsert by quo_call_id.
   const { data, error } = await supabase
     .from("quo_call_logs")

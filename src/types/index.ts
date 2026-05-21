@@ -251,6 +251,7 @@ export interface SidebarProps {
   taskInProgressCount?: number;
   mySentCount?: number;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
+  onMakeCall?: () => void;
 }
 
 export interface ConversationListProps {
