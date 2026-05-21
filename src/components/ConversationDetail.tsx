@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   Circle,
+  Copy,
   Download,
   ExternalLink,
   Eye,
@@ -24,6 +25,7 @@ import {
   Loader2,
   Mail,
   MessageSquare,
+  MoreHorizontal,
   Paperclip,
   Phone,
   Pencil,
@@ -540,6 +542,27 @@ export default function ConversationDetail({
   const [trashingConversation, setTrashingConversation] = useState(false);
   const [markingSpam, setMarkingSpam] = useState(false);
 
+  // Subject inline-edit state. The header subject becomes editable when the
+  // user clicks it. Saved via /api/conversations/subject on Enter or blur.
+  const [editingSubject, setEditingSubject] = useState(false);
+  const [subjectDraft, setSubjectDraft] = useState("");
+  const [savingSubject, setSavingSubject] = useState(false);
+
+  // Overflow (⋯) menu on the conversation header. Holds the Copy Link
+  // action — and is the natural home for future secondary actions that
+  // shouldn't crowd the primary toolbar.
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [copiedConversationLink, setCopiedConversationLink] = useState(false);
+
+  // Merge-by-link: lets the user paste a conversation URL and merge that
+  // conversation INTO the current one. Complements the existing related-thread
+  // picker (which only surfaces same-supplier threads). Useful when you want
+  // to consolidate two threads with different participants.
+  const [showMergeLinkModal, setShowMergeLinkModal] = useState(false);
+  const [mergeLinkInput, setMergeLinkInput] = useState("");
+  const [mergeLinkError, setMergeLinkError] = useState<string | null>(null);
+  const [mergeLinkBusy, setMergeLinkBusy] = useState(false);
+
   // Auto-save Reply modal draft when user stops typing for 3 seconds.
   // Mirrors the inline reply auto-save above. Both UIs share the same
   // email_drafts row (one per conversation+author), so writes here update
@@ -756,6 +779,135 @@ export default function ConversationDetail({
       }
     } catch (e: any) { alert("Unmerge failed: " + e.message); }
     setUnmergingId(null);
+  };
+
+  // ── Subject inline edit ────────────────────────────────────────────────
+  const startEditingSubject = () => {
+    setSubjectDraft(convo?.subject || "");
+    setEditingSubject(true);
+  };
+
+  const cancelEditingSubject = () => {
+    setEditingSubject(false);
+    setSubjectDraft("");
+  };
+
+  const saveSubject = async () => {
+    if (!convo?.id) return;
+    const trimmed = subjectDraft.trim();
+    if (!trimmed) {
+      // Empty subject — cancel rather than save (we don't allow blank).
+      cancelEditingSubject();
+      return;
+    }
+    if (trimmed === (convo.subject || "").trim()) {
+      // No change — just exit edit mode.
+      cancelEditingSubject();
+      return;
+    }
+    setSavingSubject(true);
+    try {
+      const res = await fetch("/api/conversations/subject", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: convo.id,
+          subject: trimmed,
+          actor_id: currentUser?.id,
+        }),
+      });
+      if (res.ok) {
+        // Refetch so the header (and reply auto-init) pick up the new subject.
+        await refetchDetail();
+        cancelEditingSubject();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("Could not rename: " + (err.error || res.statusText));
+      }
+    } catch (e: any) {
+      alert("Could not rename: " + (e?.message || "network error"));
+    }
+    setSavingSubject(false);
+  };
+
+  // ── Copy conversation link ─────────────────────────────────────────────
+  // Builds a hash-based URL the team can share. Anyone with access to this
+  // conversation can paste it back into the merge-link dialog or open the
+  // conversation directly.
+  const copyConversationLink = async () => {
+    if (!convo?.id) return;
+    const url = `${window.location.origin}/?conversation=${convo.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Fallback for older browsers / insecure contexts
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { /* give up */ }
+    }
+    setCopiedConversationLink(true);
+    setTimeout(() => setCopiedConversationLink(false), 1500);
+    setShowOverflowMenu(false);
+  };
+
+  // ── Merge by pasting a link ────────────────────────────────────────────
+  // Accepts any URL/hash/ID that contains a UUID and merges that conversation
+  // INTO the current one. The same /api/merge endpoint as the picker.
+  const extractConversationIdFromLink = (input: string): string | null => {
+    if (!input) return null;
+    // Match a UUIDv4-ish pattern anywhere in the input
+    const match = input.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    );
+    return match ? match[0].toLowerCase() : null;
+  };
+
+  const handleMergeByLink = async () => {
+    if (!convo?.id) return;
+    setMergeLinkError(null);
+    const sourceId = extractConversationIdFromLink(mergeLinkInput);
+    if (!sourceId) {
+      setMergeLinkError("Couldn't find a conversation ID in that link. Paste a conversation URL or its ID.");
+      return;
+    }
+    if (sourceId === convo.id) {
+      setMergeLinkError("That's this same conversation. Pick a different one to merge in.");
+      return;
+    }
+    if (!confirm(`Merge that conversation into this one?\n\nAll its messages, tasks, notes, and activity will be moved here. The other conversation will become a merged shell and can be unmerged later from Related Threads.`)) {
+      return;
+    }
+    setMergeLinkBusy(true);
+    try {
+      const res = await fetch("/api/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primary_id: convo.id,
+          merge_ids: [sourceId],
+          actor_id: currentUser?.id,
+        }),
+      });
+      if (res.ok) {
+        await refetchDetail();
+        setMergeDataLoaded(false);
+        setShowMergeLinkModal(false);
+        setMergeLinkInput("");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setMergeLinkError(err.error || "Merge failed");
+      }
+    } catch (e: any) {
+      setMergeLinkError(e?.message || "Network error");
+    }
+    setMergeLinkBusy(false);
   };
 
   const {
@@ -1968,7 +2120,37 @@ export default function ConversationDetail({
             )}
           </div>
           <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
-            {convo.subject}
+            {editingSubject ? (
+              <input
+                type="text"
+                value={subjectDraft}
+                onChange={(e) => setSubjectDraft(e.target.value)}
+                onBlur={saveSubject}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    saveSubject();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelEditingSubject();
+                  }
+                }}
+                disabled={savingSubject}
+                autoFocus
+                className="w-full bg-transparent border-b border-[var(--accent)] outline-none text-xl font-normal font-serif text-[var(--text-primary)] tracking-tight disabled:opacity-50"
+                placeholder="Enter subject"
+                maxLength={500}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={startEditingSubject}
+                title="Click to rename"
+                className="text-left w-full truncate hover:bg-[var(--surface-2)] rounded px-1 -mx-1 transition-colors cursor-text"
+              >
+                {convo.subject || <span className="text-[var(--text-muted)] italic">(no subject)</span>}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap text-xs">
             <span className="text-[var(--text-secondary)]">{convo.from_name}</span>
@@ -2423,6 +2605,58 @@ export default function ConversationDetail({
                 <Trash2 size={16} />
               )}
             </button>
+
+            {/* Overflow (⋯) menu — secondary actions. Currently houses
+                "Copy link" and "Merge by link". A click outside the menu
+                closes it; menu items close it themselves after firing. */}
+            <div className="relative">
+              <button
+                onClick={() => setShowOverflowMenu((v) => !v)}
+                title="More actions"
+                className="w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] flex items-center justify-center hover:bg-[var(--surface-2)]"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {showOverflowMenu && (
+                <>
+                  {/* Backdrop to close on outside click */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowOverflowMenu(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 py-1">
+                    <button
+                      onClick={copyConversationLink}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] text-left"
+                    >
+                      {copiedConversationLink ? (
+                        <>
+                          <Check size={13} className="text-[var(--accent)]" />
+                          <span className="text-[var(--accent)]">Link copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={13} className="text-[var(--text-secondary)]" />
+                          <span>Copy conversation link</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        setMergeLinkInput("");
+                        setMergeLinkError(null);
+                        setShowMergeLinkModal(true);
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] text-left"
+                    >
+                      <GitMerge size={13} className="text-[var(--text-secondary)]" />
+                      <span>Merge another conversation by link</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -4796,6 +5030,84 @@ export default function ConversationDetail({
               >
                 <Send size={14} />
                 {replyModalSending ? "Sending..." : "Send Reply"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge-by-link modal */}
+      {showMergeLinkModal && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={() => !mergeLinkBusy && setShowMergeLinkModal(false)}
+        >
+          <div
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl w-full max-w-lg overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)] shrink-0">
+              <div className="flex items-center gap-2">
+                <GitMerge size={18} className="text-[var(--info)]" />
+                <span className="text-sm font-semibold text-[var(--text-primary)]">
+                  Merge by link
+                </span>
+              </div>
+              <button
+                onClick={() => !mergeLinkBusy && setShowMergeLinkModal(false)}
+                disabled={mergeLinkBusy}
+                className="p-1 rounded-md hover:bg-[var(--border)] text-[var(--text-secondary)] disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-[12px] text-[var(--text-secondary)] leading-relaxed">
+                Paste a conversation link (or just its ID). That conversation will
+                be merged INTO this one — its messages, tasks, notes, and activity
+                will move here, and the source becomes a merged shell that can be
+                unmerged later from Related Threads.
+              </p>
+              <div>
+                <label className="block text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
+                  Conversation link or ID
+                </label>
+                <input
+                  type="text"
+                  value={mergeLinkInput}
+                  onChange={(e) => { setMergeLinkInput(e.target.value); setMergeLinkError(null); }}
+                  placeholder="https://app.tenkara.com/?conversation=abc-123... or paste the ID"
+                  autoFocus
+                  disabled={mergeLinkBusy}
+                  className="w-full px-3 py-2 text-[12px] rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50 font-mono"
+                />
+                {mergeLinkError && (
+                  <div className="mt-2 text-[11px] text-[var(--danger)]">{mergeLinkError}</div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-3.5 shrink-0 bg-[var(--surface)]">
+              <button
+                type="button"
+                onClick={() => setShowMergeLinkModal(false)}
+                disabled={mergeLinkBusy}
+                className="px-3 py-2 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-2)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleMergeByLink}
+                disabled={mergeLinkBusy || !mergeLinkInput.trim()}
+                className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--bg)] font-semibold text-sm hover:bg-[var(--accent-strong)] disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {mergeLinkBusy && <Loader2 size={14} className="animate-spin" />}
+                {mergeLinkBusy ? "Merging..." : "Merge"}
               </button>
             </div>
           </div>

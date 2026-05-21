@@ -2,7 +2,7 @@
 
 import {
   Bookmark, CheckCircle, Circle, Clock, Eye, Flag, FolderOpen,
-  GitBranch, GitMerge, Mail, MessageSquare, Plus, Send, Tag,
+  GitBranch, GitMerge, Mail, MessageSquare, Pencil, Plus, Send, Tag,
   Trash2, User, Palette, ClipboardList,
 } from "lucide-react";
 import type { TeamMember } from "@/types";
@@ -63,6 +63,7 @@ const ACTION_MAP: Record<string, { label: string; color: string; icon: any }> = 
   conversation_created: { label: "Conversation created", color: "var(--info)", icon: Mail },
   status_changed: { label: "Status changed", color: "#A371F7", icon: Flag },
   moved_to_folder: { label: "Moved to folder", color: "var(--info)", icon: FolderOpen },
+  subject_renamed: { label: "Subject renamed", color: "var(--info)", icon: Pencil },
 
   // Labels
   label_added: { label: "Label added", color: "#BC8CFF", icon: Tag },
@@ -159,6 +160,19 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
       if (!text) return null;
       const trimmed = String(text).length > 80 ? String(text).slice(0, 80) + "…" : text;
       return <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>;
+    }
+    case "subject_renamed": {
+      const oldS = details.old_subject;
+      const newS = details.new_subject;
+      if (!newS) return null;
+      const t = (s: string) => String(s).length > 50 ? String(s).slice(0, 50) + "…" : s;
+      return (
+        <span>
+          {oldS && <span className="text-[var(--text-secondary)] italic">"{t(oldS)}"</span>}
+          {oldS && <span className="text-[var(--text-muted)] mx-1">→</span>}
+          <span className="text-[var(--text-primary)] font-medium italic">"{t(newS)}"</span>
+        </span>
+      );
     }
     case "note_added":
     case "note_created": {
