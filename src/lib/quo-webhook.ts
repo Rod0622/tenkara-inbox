@@ -11,6 +11,23 @@
 //
 // Reference: https://www.quo.com/docs/mdx/guides/webhooks
 //            (Verifying webhook signatures section)
+//
+// PAYLOAD SHAPE (v3+, observed live):
+//   data.object = {
+//     id: "AC...",
+//     to:   "+1...",          // E.164 destination
+//     from: "+1...",          // E.164 source
+//     direction: "outgoing" | "incoming",
+//     status: "completed" | "no-answer" | "ringing" | "voicemail" | ...,
+//     userId: "US...",
+//     phoneNumberId: "PN...",
+//     createdAt: ISO8601,
+//     answeredAt: ISO8601 | null,
+//     completedAt: ISO8601 | null,
+//     voicemail: { url, transcript } | null,
+//     conversationId: "CN..." (Quo's internal grouping, not our DB),
+//     media: [],
+//   }
 
 import { createHmac, timingSafeEqual } from "crypto";
 import { createServerClient } from "@/lib/supabase";
@@ -86,7 +103,7 @@ interface QuoCallEvent {
 
 // Map a raw Quo status string to our enum.
 function mapStatus(quoStatus: string | null | undefined): string {
-  const s = (quoStatus || "").toLowerCase();
+  const s = (quoStatus || "").toLowerCase().replace(/-/g, "_");
   switch (s) {
     case "ringing":
     case "in_progress":
@@ -99,37 +116,23 @@ function mapStatus(quoStatus: string | null | undefined): string {
     case "forwarded":
     case "voicemail":
       return s;
-    case "no-answer":
-      return "no_answer";
-    case "in-progress":
-      return "in_progress";
     default:
       return "completed";
   }
 }
 
-function mapOutcome(call: any): string {
-  const status = (call?.status || "").toLowerCase();
-  if (status === "completed" && (call?.duration || 0) > 0) return "answered";
-  if (status === "missed") return "no_answer";
-  if (status === "no_answer" || status === "no-answer") return "no_answer";
+function mapOutcome(call: any, durationSeconds: number | null): string {
+  const status = (call?.status || "").toLowerCase().replace(/-/g, "_");
+  if (call?.voicemail) return "voicemail";
   if (status === "voicemail") return "voicemail";
+  if (status === "missed" || status === "no_answer") return "no_answer";
   if (status === "busy" || status === "declined") return "declined";
-  return "unknown";
-}
-
-// Pull the participant phone (the non-workspace number). Quo's "participants"
-// array on a call event includes both workspace and external. We prefer the
-// non-workspace one, falling back to participants[0].
-function extractParticipantPhone(call: any, workspacePhone?: string | null): string | null {
-  const parts: string[] = Array.isArray(call?.participants) ? call.participants : [];
-  if (parts.length === 0) return null;
-  const workspaceE164 = normalizeE164(workspacePhone);
-  for (const p of parts) {
-    const pn = normalizeE164(p);
-    if (pn && pn !== workspaceE164) return pn;
+  if (status === "completed" && durationSeconds !== null && durationSeconds > 0 && call?.answeredAt) {
+    return "answered";
   }
-  return normalizeE164(parts[0]);
+  // Completed but unanswered (answeredAt is null and duration is 0/null) = no_answer
+  if (status === "completed" && !call?.answeredAt) return "no_answer";
+  return "unknown";
 }
 
 // Map a Quo `direction` value. Quo uses "incoming" / "outgoing".
@@ -137,6 +140,51 @@ function mapDirection(d: string | null | undefined): "inbound" | "outbound" {
   const s = (d || "").toLowerCase();
   if (s === "incoming" || s === "inbound") return "inbound";
   return "outbound";
+}
+
+// Extract the external (participant) phone number from a Quo call object.
+//
+// Quo's call event payload has `from` and `to` E.164 strings. For:
+//   - outgoing calls: workspace number is `from`, external is `to`
+//   - incoming calls: workspace number is `to`,   external is `from`
+//
+// Returns { participant, workspace } in E.164 form. Either can be null if Quo
+// omitted the field for any reason.
+function extractPhones(call: any): { participant: string | null; workspace: string | null } {
+  const from = normalizeE164(call?.from);
+  const to = normalizeE164(call?.to);
+  const dir = mapDirection(call?.direction);
+
+  if (dir === "outbound") {
+    return { participant: to, workspace: from };
+  } else {
+    return { participant: from, workspace: to };
+  }
+}
+
+// Compute call duration in seconds from the call object's timestamps.
+// Priority:
+//   1. call.duration (if present and numeric — used by older payloads)
+//   2. completedAt - answeredAt (true talk time)
+//   3. completedAt - createdAt (total elapsed including ringing) — fallback
+// Returns null if not computable.
+function extractDuration(call: any): number | null {
+  if (typeof call?.duration === "number" && call.duration >= 0) {
+    return Math.round(call.duration);
+  }
+  const completedAt = call?.completedAt ? new Date(call.completedAt).getTime() : NaN;
+  if (!Number.isFinite(completedAt)) return null;
+
+  const answeredAt = call?.answeredAt ? new Date(call.answeredAt).getTime() : NaN;
+  if (Number.isFinite(answeredAt) && answeredAt <= completedAt) {
+    return Math.max(0, Math.round((completedAt - answeredAt) / 1000));
+  }
+
+  const createdAt = call?.createdAt ? new Date(call.createdAt).getTime() : NaN;
+  if (Number.isFinite(createdAt) && createdAt <= completedAt) {
+    return Math.max(0, Math.round((completedAt - createdAt) / 1000));
+  }
+  return null;
 }
 
 // Insert or update a quo_call_logs row from a Quo event payload's `call` object.
@@ -155,8 +203,11 @@ export async function upsertCallFromEvent(
     return null;
   }
 
-  // Phone matching
-  const participantPhone = extractParticipantPhone(call);
+  // Extract phones using the real payload shape (from/to + direction)
+  const { participant: participantPhone, workspace: workspacePhone } = extractPhones(call);
+  const durationSeconds = extractDuration(call);
+
+  // Phone matching — find supplier from the EXTERNAL phone number
   const match = await matchPhoneToSupplier(participantPhone);
   const teamMemberId = await matchQuoUserToTeamMember(call?.userId || null);
 
@@ -168,11 +219,12 @@ export async function upsertCallFromEvent(
     team_member_id: teamMemberId,
     direction: mapDirection(call?.direction),
     status: mapStatus(call?.status),
-    outcome: mapOutcome(call),
+    outcome: mapOutcome(call, durationSeconds),
     participant_phone: participantPhone,
+    workspace_phone: workspacePhone,
     quo_phone_number_id: call?.phoneNumberId || null,
     quo_user_id: call?.userId || null,
-    duration_seconds: typeof call?.duration === "number" ? call.duration : null,
+    duration_seconds: durationSeconds,
     started_at: call?.createdAt || null,
     answered_at: call?.answeredAt || null,
     ended_at: call?.completedAt || null,
@@ -181,8 +233,7 @@ export async function upsertCallFromEvent(
     raw_event: rawEvent,
   };
 
-  // Upsert by quo_call_id. ON CONFLICT updates everything *except* fields we've
-  // already populated from later events (recording, voicemail, summary).
+  // Upsert by quo_call_id.
   const { data, error } = await supabase
     .from("quo_call_logs")
     .upsert(row, { onConflict: "quo_call_id" })
@@ -194,9 +245,7 @@ export async function upsertCallFromEvent(
     throw new Error(error.message);
   }
 
-  // Activity log: only on insert OR status transition to a final state.
-  // We can't easily tell insert vs update from upsert; we log only when there's
-  // a conversation_id and the call is in a "complete" state.
+  // Activity log: only when call is in a final state AND we matched a conversation.
   const finalStates = new Set(["completed", "missed", "no_answer", "voicemail", "busy", "failed", "canceled"]);
   if (match.conversation_id && finalStates.has(row.status)) {
     await supabase.from("activity_log").insert({
