@@ -3,7 +3,7 @@
 import {
   Bookmark, CheckCircle, Circle, Clock, Eye, Flag, FolderOpen,
   GitBranch, GitMerge, Mail, MessageSquare, Pencil, Plus, Send, Tag,
-  Trash2, User, Palette, ClipboardList,
+  Trash2, User, Palette, ClipboardList, Phone, PhoneMissed, BellRing,
 } from "lucide-react";
 import type { TeamMember } from "@/types";
 import Avatar from "./Avatar";
@@ -100,6 +100,14 @@ const ACTION_MAP: Record<string, { label: string; color: string; icon: any }> = 
   viewed: { label: "Viewed", color: "var(--info)", icon: Eye },
   starred: { label: "Starred", color: "var(--highlight)", icon: Bookmark },
   unstarred: { label: "Unstarred", color: "var(--text-secondary)", icon: Bookmark },
+
+  // Quo (call integration)
+  quo_call_logged: { label: "Call logged", color: "var(--accent)", icon: Phone },
+  quo_call_linked: { label: "Call linked", color: "var(--info)", icon: Phone },
+  quo_call_followup_set: { label: "Call follow-up set", color: "var(--highlight)", icon: BellRing },
+  quo_call_followup_canceled: { label: "Call follow-up canceled", color: "var(--text-secondary)", icon: BellRing },
+  quo_call_followup_redial: { label: "Redial reminder fired", color: "var(--highlight)", icon: Phone },
+  quo_call_followup_escalated: { label: "Call follow-up escalated", color: "var(--danger)", icon: PhoneMissed },
 };
 
 // ─── Detail rendering (Q2-B) ──────────────────────────────────
@@ -216,6 +224,34 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
       if (!subject) return null;
       const trimmed = String(subject).length > 60 ? String(subject).slice(0, 60) + "…" : subject;
       return <span>: <span className="text-[var(--text-primary)]">{trimmed}</span></span>;
+    }
+    case "quo_call_logged":
+    case "quo_call_linked": {
+      const dir = details.direction;
+      const phone = details.participant_phone;
+      const outcome = details.outcome;
+      const supplier = details.supplier_name;
+      const person = details.person_name;
+      const parts: string[] = [];
+      if (dir) parts.push(dir);
+      if (outcome && outcome !== "answered") parts.push(`(${outcome})`);
+      if (person) parts.push(`with ${person}`);
+      else if (supplier) parts.push(`with ${supplier}`);
+      else if (phone) parts.push(`from ${phone}`);
+      if (parts.length === 0) return null;
+      return <span className="text-[var(--text-primary)]">{parts.join(" ")}</span>;
+    }
+    case "quo_call_followup_redial": {
+      const attempt = details.attempt;
+      const max = details.max_attempts;
+      if (!attempt) return null;
+      return <span>attempt <span className="text-[var(--text-primary)] font-medium">{attempt}{max ? ` of ${max}` : ""}</span></span>;
+    }
+    case "quo_call_followup_escalated": {
+      const ac = details.attempt_count;
+      const mx = details.max_attempts;
+      if (ac === undefined && mx === undefined) return null;
+      return <span>after <span className="text-[var(--text-primary)] font-medium">{ac}{mx ? ` of ${mx}` : ""}</span> attempts</span>;
     }
     default:
       return null;

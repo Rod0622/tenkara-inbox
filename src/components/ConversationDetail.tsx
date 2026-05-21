@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   AlarmClock,
   Archive,
@@ -74,6 +74,7 @@ import ThreadAttachmentBar from "./ConversationDetail/ThreadAttachmentBar";
 import MessageAttachments from "./ConversationDetail/MessageAttachments";
 import MessageBody from "./ConversationDetail/MessageBody";
 import WatchToggle from "./WatchToggle";
+import CallTimelineEntry, { type CallEntry } from "./ConversationDetail/CallTimelineEntry";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
@@ -632,6 +633,83 @@ export default function ConversationDetail({
     activities,
     refetch: refetchDetail,
   } = useConversationDetail(convo?.id || null);
+
+  // ── Quo calls linked to this conversation ────────────────
+  // Fetched separately from useConversationDetail to keep blast radius small.
+  // Returns hydrated call rows (with supplier/person/member names) plus a
+  // Set of call IDs that currently have an active follow-up.
+  const [calls, setCalls] = useState<CallEntry[]>([]);
+  const [activeFollowUps, setActiveFollowUps] = useState<Set<string>>(new Set());
+
+  const refetchCalls = useCallback(async () => {
+    if (!convo?.id) {
+      setCalls([]);
+      setActiveFollowUps(new Set());
+      return;
+    }
+    try {
+      const res = await fetch(`/api/calls?conversation_id=${convo.id}&limit=100`);
+      if (!res.ok) {
+        setCalls([]);
+        setActiveFollowUps(new Set());
+        return;
+      }
+      const data = await res.json();
+      setCalls(Array.isArray(data.calls) ? data.calls : []);
+      setActiveFollowUps(new Set(Array.isArray(data.active_follow_ups) ? data.active_follow_ups : []));
+    } catch {
+      setCalls([]);
+      setActiveFollowUps(new Set());
+    }
+  }, [convo?.id]);
+
+  useEffect(() => {
+    refetchCalls();
+  }, [refetchCalls]);
+
+  // Generate a draft email from a call and pre-fill the inline composer.
+  // Doesn't send — just populates the reply text. User can then edit and
+  // hit Send. Falls back gracefully if the call has no AI summary (Starter
+  // plan on non-Sona calls).
+  const handleDraftFromCall = useCallback(async (callId: string) => {
+    try {
+      const res = await fetch("/api/calls/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ call_id: callId, tone: "professional" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert("Failed to generate draft: " + (data?.error || "unknown"));
+        return;
+      }
+      // Drop the draft into the reply composer + open it
+      setReplyText(data.body || "");
+      setReplySubject(data.subject || "");
+      setShowReplyEditor(true);
+    } catch (e: any) {
+      alert("Draft failed: " + (e?.message || "network error"));
+    }
+  }, []);
+
+  // Toggle a follow-up (redial reminder) for a call. POST to create, DELETE to cancel.
+  // Refetches after each change so the bell icon updates.
+  const handleToggleCallFollowUp = useCallback(async (callId: string, enable: boolean) => {
+    try {
+      const res = await fetch(`/api/calls/${callId}/follow-up`, {
+        method: enable ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: enable ? JSON.stringify({}) : undefined,
+      });
+      if (!res.ok && res.status !== 409) {
+        const data = await res.json().catch(() => ({}));
+        alert("Failed to update follow-up: " + (data?.error || res.statusText));
+      }
+      await refetchCalls();
+    } catch (e: any) {
+      alert("Follow-up toggle failed: " + (e?.message || "network error"));
+    }
+  }, [refetchCalls]);
 
   // Auto-activate thread search when coming from global search
   useEffect(() => {
@@ -2778,7 +2856,45 @@ export default function ConversationDetail({
               let globalMatchIdx = 0;
               const searchQ = threadSearch.trim().toLowerCase();
 
-              return messages.map((msg: any, idx: number) => {
+              // ── Merge messages and Quo calls chronologically ──
+              // Messages and calls are sorted ascending by their effective timestamp.
+              // We render them in order, using <CallTimelineEntry> for calls and the
+              // existing message render block for messages. Message-specific concerns
+              // like "first message" (drop cap) and global match counting still use
+              // the message's position WITHIN messages (idx), not the merged index.
+              type Item =
+                | { kind: "message"; m: any; idx: number; t: number }
+                | { kind: "call"; c: CallEntry; t: number };
+
+              const msgItems: Item[] = (messages || []).map((m: any, idx: number) => ({
+                kind: "message" as const,
+                m,
+                idx,
+                t: new Date(m.sent_at || m.created_at || 0).getTime() || 0,
+              }));
+              const callItems: Item[] = (calls || []).map((c) => ({
+                kind: "call" as const,
+                c,
+                t: new Date(c.started_at || c.created_at || 0).getTime() || 0,
+              }));
+              const timelineItems: Item[] = [...msgItems, ...callItems].sort((a, b) => a.t - b.t);
+
+              return timelineItems.map((item) => {
+                // ── Call entry ──
+                if (item.kind === "call") {
+                  return (
+                    <CallTimelineEntry
+                      key={`call-${item.c.id}`}
+                      call={item.c}
+                      onDraft={handleDraftFromCall}
+                      onToggleFollowUp={handleToggleCallFollowUp}
+                      hasFollowUp={activeFollowUps.has(item.c.id)}
+                    />
+                  );
+                }
+                // ── Message entry (existing logic) ──
+                const msg = item.m;
+                const idx = item.idx;
                 const bodyText = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ") : "") || msg.snippet || "";
                 const matchCountInMsg = searchQ ? (bodyText.toLowerCase().split(searchQ).length - 1) : 0;
                 const msgStartIdx = globalMatchIdx;
@@ -2870,7 +2986,7 @@ export default function ConversationDetail({
               });
             })()}
 
-            {messages.length === 0 && (
+            {messages.length === 0 && calls.length === 0 && (
               <div className="text-center py-10">
                 {convo.from_email === "internal" ? (
                   <div className="space-y-3">

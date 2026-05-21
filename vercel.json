@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/score-suppliers",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/call-follow-ups",
+      "schedule": "*/30 * * * *"
     }
   ],
   "functions": {
@@ -31,6 +35,9 @@
       "maxDuration": 30
     },
     "src/app/api/cron/score-suppliers/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/call-follow-ups/route.ts": {
       "maxDuration": 60
     }
   }
