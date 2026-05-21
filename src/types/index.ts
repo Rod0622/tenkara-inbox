@@ -173,6 +173,68 @@ export interface Folder {
   parent_folder_id: string | null;
 }
 
+// ── Quo integration ──────────────────────────────────
+export type QuoCallDirection = "inbound" | "outbound";
+
+export type QuoCallStatus =
+  | "ringing"
+  | "in_progress"
+  | "completed"
+  | "missed"
+  | "no_answer"
+  | "busy"
+  | "failed"
+  | "canceled"
+  | "voicemail"
+  | "forwarded";
+
+export type QuoCallOutcome =
+  | "answered"
+  | "voicemail"
+  | "no_answer"
+  | "declined"
+  | "unknown";
+
+export interface QuoCallLog {
+  id: string;
+  quo_call_id: string;
+  conversation_id: string | null;
+  supplier_contact_id: string | null;
+  supplier_contact_person_id: string | null;
+  team_member_id: string | null;
+  direction: QuoCallDirection;
+  status: QuoCallStatus;
+  outcome: QuoCallOutcome | null;
+  participant_phone: string | null;
+  quo_phone_number_id: string | null;
+  quo_user_id: string | null;
+  duration_seconds: number | null;
+  started_at: string | null;
+  answered_at: string | null;
+  ended_at: string | null;
+  recording_url: string | null;
+  voicemail_url: string | null;
+  voicemail_transcript: string | null;
+  ai_summary: string | null;
+  ai_next_steps: string[] | null;
+  transcript: any | null;
+  created_at: string;
+}
+
+export interface IntegrationStatus {
+  connected: boolean;
+  is_active: boolean;
+  apiKeyMask?: string | null;
+  webhookSecretMask?: string | null;
+  phoneNumberId?: string | null;
+  last_event_at?: string | null;
+  total_events_received?: number;
+  consecutive_errors?: number;
+  last_error_at?: string | null;
+  last_error_message?: string | null;
+  callCount?: number;
+}
+
 export interface SidebarProps {
   activeMailbox: string | null;
   setActiveMailbox: (id: string | null) => void;

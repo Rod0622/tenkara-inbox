@@ -1,6 +1,7 @@
 "use client";
 
 import KaraAssistant from "@/components/KaraAssistant";
+import IntegrationsTab from "@/components/settings/IntegrationsTab";
 import { useState, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { redirect } from "next/navigation";
@@ -9,7 +10,7 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText, Plug
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -57,6 +58,7 @@ const TABS = [
   { id: "forms", label: "Forms", icon: ClipboardCheck },
   { id: "templates", label: "Email Templates", icon: FileSignature },
   { id: "kara", label: "Kara (AI Assistant)", icon: Sparkles },
+  { id: "integrations", label: "Integrations", icon: Plug },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -122,6 +124,7 @@ export default function SettingsPage() {
         {activeTab === "forms" && <FormsTab />}
         {activeTab === "templates" && <EmailTemplatesTab />}
         {activeTab === "kara" && <KaraTab />}
+        {activeTab === "integrations" && <IntegrationsTab />}
       </div>
 
       {/* Connect Email Modal */}
