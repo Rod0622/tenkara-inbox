@@ -43,12 +43,23 @@ export default function QuickCallModal({
   isOpen,
   onClose,
   onCallPlaced,
+  conversationContext,
 }: {
   isOpen: boolean;
   onClose: () => void;
   // Called after stub row is created. Receives the stub object. Caller can
   // navigate to the conversation, refetch state, etc.
   onCallPlaced?: (stub: any) => void;
+  // When the modal is opened from inside a conversation, pass this so we can
+  // pre-fill supplier + phone + auto-link the stub to the conversation.
+  conversationContext?: {
+    conversation_id: string;
+    supplier_contact_id: string | null;
+    // Display-only: the conversation's subject + sender, so the modal header
+    // can show "Calling about: <subject>" instead of a generic title.
+    subject?: string | null;
+    from_name?: string | null;
+  } | null;
 }) {
   const [phoneNumbers, setPhoneNumbers] = useState<QuoPhoneNumber[]>([]);
   const [selectedFromId, setSelectedFromId] = useState<string>("");
@@ -57,6 +68,9 @@ export default function QuickCallModal({
   const [supplierResults, setSupplierResults] = useState<SupplierSearchResult[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierSearchResult | null>(null);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+  // Contact persons attached to the selected supplier (when in conversation context)
+  const [persons, setPersons] = useState<Array<{ id: string; name: string; phone: string | null; title: string | null }>>([]);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -103,10 +117,63 @@ export default function QuickCallModal({
       setSupplierResults([]);
       setSelectedSupplier(null);
       setShowSupplierDropdown(false);
+      setPersons([]);
+      setSelectedPersonId(null);
       setError(null);
       setSuccess(null);
     }
   }, [isOpen]);
+
+  // ── Conversation-context pre-load ────────────────────────
+  // When opened from inside a conversation that has a supplier_contact_id,
+  // fetch that supplier + its full contact persons list, pre-select the
+  // supplier, and auto-fill the phone with the primary contact person.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!conversationContext?.supplier_contact_id) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/suppliers/search?id=${encodeURIComponent(conversationContext.supplier_contact_id!)}`
+        );
+        const data = await res.json();
+        if (cancelled || !res.ok || !data?.supplier) return;
+
+        const s = data.supplier;
+        // Shape into SupplierSearchResult format used by selectedSupplier
+        const result: SupplierSearchResult = {
+          id: s.id,
+          name: s.name,
+          email: s.email,
+          company: s.company,
+          last_exchange_at: s.last_exchange_at,
+          open_conversation_count: s.open_conversation_count || 0,
+          // Pre-link the stub to THIS conversation, not the supplier's "most recent"
+          most_recent_open_conversation_id: conversationContext.conversation_id,
+          primary_contact_person: s.primary_contact_person || null,
+        };
+        setSelectedSupplier(result);
+        setSupplierQuery(s.name);
+
+        const allPersons = (data.persons || []) as any[];
+        setPersons(allPersons);
+
+        // Pick primary (first person with phone, by sort_order)
+        const primary = allPersons.find((p: any) => p.phone) || null;
+        if (primary) {
+          setSelectedPersonId(primary.id);
+          setToPhone(primary.phone);
+        }
+      } catch (e: any) {
+        // Non-fatal — user can still search/type manually
+        console.warn("[QuickCallModal] preload failed:", e?.message);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [isOpen, conversationContext?.supplier_contact_id, conversationContext?.conversation_id]);
 
   // ── Supplier autocomplete (debounced) ───────────────────
   useEffect(() => {
@@ -133,7 +200,7 @@ export default function QuickCallModal({
     };
   }, [supplierQuery, isOpen, selectedSupplier]);
 
-  const selectSupplier = (s: SupplierSearchResult) => {
+  const selectSupplier = async (s: SupplierSearchResult) => {
     setSelectedSupplier(s);
     setSupplierQuery(s.name);
     setShowSupplierDropdown(false);
@@ -141,12 +208,37 @@ export default function QuickCallModal({
     if (!toPhone && s.primary_contact_person?.phone) {
       setToPhone(s.primary_contact_person.phone);
     }
+    // Also fetch the full persons list (so the person picker can show them).
+    // Best-effort; non-fatal on failure.
+    try {
+      const res = await fetch(`/api/suppliers/search?id=${encodeURIComponent(s.id)}`);
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.persons)) {
+        setPersons(data.persons);
+        // Pre-select the primary if not already
+        const primary = data.persons.find((p: any) => p.phone);
+        if (primary && !selectedPersonId) {
+          setSelectedPersonId(primary.id);
+        }
+      }
+    } catch { /* swallow */ }
   };
 
   const clearSupplier = () => {
     setSelectedSupplier(null);
     setSupplierQuery("");
     setShowSupplierDropdown(false);
+    setPersons([]);
+    setSelectedPersonId(null);
+  };
+
+  // Pick a different contact person (only meaningful when persons.length > 1).
+  // Updates the phone field to that person's phone.
+  const selectPerson = (personId: string) => {
+    const p = persons.find((p) => p.id === personId);
+    if (!p) return;
+    setSelectedPersonId(personId);
+    if (p.phone) setToPhone(p.phone);
   };
 
   const handleDial = async () => {
@@ -169,8 +261,18 @@ export default function QuickCallModal({
       };
       if (selectedSupplier) {
         body.supplier_contact_id = selectedSupplier.id;
-        body.supplier_contact_person_id = selectedSupplier.primary_contact_person?.id || null;
-        body.conversation_id = selectedSupplier.most_recent_open_conversation_id;
+        // Prefer the user-picked person over the supplier's primary; fall back
+        // to the primary when no explicit pick.
+        body.supplier_contact_person_id =
+          selectedPersonId || selectedSupplier.primary_contact_person?.id || null;
+        // When opened from inside a conversation, ALWAYS pin the stub to THAT
+        // conversation, even if the supplier has multiple open threads.
+        body.conversation_id =
+          conversationContext?.conversation_id ||
+          selectedSupplier.most_recent_open_conversation_id;
+      } else if (conversationContext) {
+        // No supplier selected but we have a conversation — pin to it anyway
+        body.conversation_id = conversationContext.conversation_id;
       }
       const res = await fetch("/api/calls/dial", {
         method: "POST",
@@ -218,9 +320,15 @@ export default function QuickCallModal({
             <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/12 flex items-center justify-center">
               <Phone size={15} className="text-[var(--accent)]" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Make a call</h2>
-              <p className="text-[10px] text-[var(--text-muted)]">via Quo</p>
+              {conversationContext?.subject ? (
+                <p className="text-[10px] text-[var(--text-muted)] truncate max-w-[240px]">
+                  re: {conversationContext.subject}
+                </p>
+              ) : (
+                <p className="text-[10px] text-[var(--text-muted)]">via Quo</p>
+              )}
             </div>
           </div>
           <button
@@ -350,6 +458,32 @@ export default function QuickCallModal({
               )}
             </div>
 
+            {/* Contact person picker — shown when supplier has multiple contact persons */}
+            {persons.length > 1 && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
+                  Contact person
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedPersonId || ""}
+                    onChange={(e) => selectPerson(e.target.value)}
+                    className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors"
+                  >
+                    <option value="">— Choose person —</option>
+                    {persons.map((p) => (
+                      <option key={p.id} value={p.id} disabled={!p.phone}>
+                        {p.name}
+                        {p.title ? ` — ${p.title}` : ""}
+                        {p.phone ? ` · ${p.phone}` : " · (no phone)"}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                </div>
+              </div>
+            )}
+
             {/* Phone number */}
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
@@ -362,7 +496,12 @@ export default function QuickCallModal({
                 placeholder="+1 555 123 4567"
                 className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] font-mono outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
               />
-              {selectedSupplier?.most_recent_open_conversation_id && (
+              {conversationContext?.conversation_id ? (
+                <p className="text-[10px] text-[var(--accent)] mt-1 inline-flex items-center gap-1">
+                  <Check size={10} />
+                  Will be logged on this conversation
+                </p>
+              ) : selectedSupplier?.most_recent_open_conversation_id && (
                 <p className="text-[10px] text-[var(--accent)] mt-1 inline-flex items-center gap-1">
                   <Check size={10} />
                   Will be logged on this supplier's most recent open conversation

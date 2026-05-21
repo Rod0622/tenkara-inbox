@@ -28,6 +28,7 @@ import {
   MoreHorizontal,
   Paperclip,
   Phone,
+  PhoneOutgoing,
   Pencil,
   Plus,
   Reply,
@@ -75,6 +76,7 @@ import MessageAttachments from "./ConversationDetail/MessageAttachments";
 import MessageBody from "./ConversationDetail/MessageBody";
 import WatchToggle from "./WatchToggle";
 import CallTimelineEntry, { type CallEntry } from "./ConversationDetail/CallTimelineEntry";
+import QuickCallModal from "./QuickCallModal";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
@@ -640,6 +642,9 @@ export default function ConversationDetail({
   // Set of call IDs that currently have an active follow-up.
   const [calls, setCalls] = useState<CallEntry[]>([]);
   const [activeFollowUps, setActiveFollowUps] = useState<Set<string>>(new Set());
+  // QuickCallModal opened from the toolbar Dial button (separate from the
+  // sidebar's "Make a call" — this one always pre-links to the current conv).
+  const [showDialModal, setShowDialModal] = useState(false);
 
   const refetchCalls = useCallback(async () => {
     if (!convo?.id) {
@@ -2454,6 +2459,16 @@ export default function ConversationDetail({
             taskCategories={taskCategories}
             onRefetch={refetchDetail}
           />
+
+          {/* Dial — opens QuickCallModal pre-filled with this conversation's supplier */}
+          <button
+            onClick={() => setShowDialModal(true)}
+            title="Dial this supplier via Quo"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--info)] hover:bg-[var(--surface-2)] transition-all"
+          >
+            <PhoneOutgoing size={12} />
+            Dial
+          </button>
 
           <StatusDropdown
             conversationId={convo.id}
@@ -5311,6 +5326,27 @@ export default function ConversationDetail({
             }
             setShowReplyEditor(true);
           }
+        }}
+      />
+
+      {/* Dial modal — pre-filled with this conversation's context */}
+      <QuickCallModal
+        isOpen={showDialModal}
+        onClose={() => setShowDialModal(false)}
+        conversationContext={
+          convo
+            ? {
+                conversation_id: convo.id,
+                supplier_contact_id: (convo as any).supplier_contact_id || null,
+                subject: convo.subject || null,
+                from_name: convo.from_name || null,
+              }
+            : null
+        }
+        onCallPlaced={() => {
+          // We're already inside this conversation. Refetch calls so the new
+          // stub timeline entry appears immediately.
+          refetchCalls();
         }}
       />
 
