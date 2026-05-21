@@ -58,6 +58,28 @@ async function getAccessToken(): Promise<string> {
   return data.access_token;
 }
 
+// ── resolveDriveId ──────────────────────────────────
+// Given a folder ID, return the ID of the Shared Drive it lives in (or null
+// if the folder is in My Drive). The Drive API doesn't reliably list a
+// folder's contents in a Shared Drive unless the query includes driveId,
+// corpora=drive, and supportsAllDrives. So when our config gives us a
+// folder ID but no driveId, we look up the folder's metadata to discover
+// which Shared Drive it belongs to.
+async function resolveDriveId(folderId: string, token: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${DRIVE_API}/files/${folderId}?supportsAllDrives=true&fields=driveId,id,parents`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    // driveId is present iff this file/folder is on a Shared Drive
+    return data.driveId || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── GET /api/drive — List shared drives, folders, or files ──
 export async function GET(req: NextRequest) {
   const action = req.nextUrl.searchParams.get("action") || "drives";
@@ -139,9 +161,18 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "folders") {
-      // List folders within a drive or folder
+      // List folders within a drive or folder.
+      // If we only have a folderId, look up its parent Shared Drive (if any)
+      // so we can include driveId + corpora=drive in the query. This is
+      // required by Drive API for reliable listing of folder contents on
+      // Shared Drives.
       const parentId = folderId || driveId;
       if (!parentId) return NextResponse.json({ error: "drive_id or folder_id required" }, { status: 400 });
+
+      let effectiveDriveId = driveId;
+      if (!effectiveDriveId && folderId) {
+        effectiveDriveId = await resolveDriveId(folderId, token);
+      }
 
       const query = `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
       const params = new URLSearchParams({
@@ -149,7 +180,9 @@ export async function GET(req: NextRequest) {
         fields: "files(id,name,mimeType)",
         orderBy: "name",
         pageSize: "100",
-        ...(driveId ? { driveId, includeItemsFromAllDrives: "true", supportsAllDrives: "true", corpora: "drive" } : { supportsAllDrives: "true", includeItemsFromAllDrives: "true" }),
+        supportsAllDrives: "true",
+        includeItemsFromAllDrives: "true",
+        ...(effectiveDriveId ? { driveId: effectiveDriveId, corpora: "drive" } : {}),
       });
 
       const res = await fetch(`${DRIVE_API}/files?${params}`, {
@@ -166,9 +199,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "files") {
-      // List files in a folder (for "Insert from Drive")
+      // List files in a folder (for "Insert from Drive").
+      // Same Shared Drive treatment as the folders action above.
       const parentId = folderId || driveId;
       if (!parentId) return NextResponse.json({ error: "drive_id or folder_id required" }, { status: 400 });
+
+      let effectiveDriveId = driveId;
+      if (!effectiveDriveId && folderId) {
+        effectiveDriveId = await resolveDriveId(folderId, token);
+      }
 
       const query = `'${parentId}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false`;
       const params = new URLSearchParams({
@@ -176,7 +215,9 @@ export async function GET(req: NextRequest) {
         fields: "files(id,name,mimeType,size,webViewLink,thumbnailLink,iconLink)",
         orderBy: "modifiedTime desc",
         pageSize: "50",
-        ...(driveId ? { driveId, includeItemsFromAllDrives: "true", supportsAllDrives: "true", corpora: "drive" } : { supportsAllDrives: "true", includeItemsFromAllDrives: "true" }),
+        supportsAllDrives: "true",
+        includeItemsFromAllDrives: "true",
+        ...(effectiveDriveId ? { driveId: effectiveDriveId, corpora: "drive" } : {}),
       });
 
       const res = await fetch(`${DRIVE_API}/files?${params}`, {
