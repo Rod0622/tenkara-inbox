@@ -179,6 +179,7 @@ export default function Sidebar({
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [reorderTargetId, setReorderTargetId] = useState<string | null>(null);
   const [draftsCount, setDraftsCount] = useState(0);
+  const [callFollowUpsCount, setCallFollowUpsCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -207,6 +208,17 @@ export default function Sidebar({
         // Fetch drafts count
         const draftsRes = await fetch(`/api/drafts?author_id=${currentUser.id}`);
         if (draftsRes.ok) { const d = await draftsRes.json(); setDraftsCount((d.drafts || []).length); }
+
+        // Fetch active call follow-ups count (drives the badge on the "Calls"
+        // sidebar entry). Uses the same /api/calls/all endpoint, filtered to
+        // has_follow_up=true so we only count actionable ones.
+        try {
+          const fuRes = await fetch("/api/calls/all?has_follow_up=true&range=all&limit=200");
+          if (fuRes.ok) {
+            const fu = await fuRes.json();
+            setCallFollowUpsCount(fu.stats?.total_filtered || 0);
+          }
+        } catch (_e) { /* non-fatal */ }
 
         // Check for due follow-up reminders
         await fetch("/api/reminders?user_id=" + currentUser.id + "&check_due=true");
@@ -600,6 +612,7 @@ export default function Sidebar({
         {[
           { id: "inbox", label: "Inbox", icon: Inbox, count: myTotalCount, unread: myUnreadCount },
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskTodoCount + taskInProgressCount, unread: 0 },
+          { id: "calls", label: "Calls", icon: Phone, count: callFollowUpsCount, unread: 0 },
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
