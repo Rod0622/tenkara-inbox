@@ -315,6 +315,19 @@ export default function ConversationDetail({
     matchRefs.current = [];
   }, [convo?.id]);
 
+  // Scroll to top (newest message) on conversation open.
+  // With descending sort, the newest message is at the top of the timeline,
+  // so this lands the user on the most recent content.
+  useEffect(() => {
+    if (!convo?.id) return;
+    // Small timeout so the messages have a chance to render
+    const t = setTimeout(() => {
+      const container = messagesScrollRef.current;
+      if (container) container.scrollTop = 0;
+    }, 50);
+    return () => clearTimeout(t);
+  }, [convo?.id]);
+
   // Fetch existing reminder for this conversation
   useEffect(() => {
     if (!convo?.id || !currentUser?.id) { setActiveReminder(null); return; }
@@ -529,6 +542,20 @@ export default function ConversationDetail({
   const [replyModalSubject, setReplyModalSubject] = useState("");
   const [replyModalBody, setReplyModalBody] = useState("");
   const [replyModalSending, setReplyModalSending] = useState(false);
+  // FROM account selection. Defaults to the conversation's email_account_id.
+  // The "sendable" endpoint returns the conversation's account + any others
+  // this user has account_access.can_send=true on.
+  const [replyModalFromAccountId, setReplyModalFromAccountId] = useState<string | null>(null);
+  const [replyModalSendableAccounts, setReplyModalSendableAccounts] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    icon: string | null;
+    color: string | null;
+    signature: string | null;
+    signature_enabled: boolean;
+    is_conversation_account: boolean;
+  }>>([]);
   // Reply All toggle for the top-bar Reply modal. When enabled, To stays as
   // the primary sender and Cc auto-fills with the rest of the participants.
   // We remember the computed Cc list separately so toggling off then back on
@@ -627,6 +654,92 @@ export default function ConversationDetail({
     currentUser?.id,
     showReplyModal,
   ]);
+
+  // Fetch the list of email_accounts this user can send FROM in this
+  // conversation. Returns the conversation's original account plus any others
+  // with explicit account_access.can_send=true. Re-runs when the modal opens
+  // (so a fresh ACL is loaded every time) and when the conversation changes.
+  useEffect(() => {
+    if (!showReplyModal || !convo?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/email-accounts/sendable?conversation_id=${convo.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const accounts = data.accounts || [];
+        setReplyModalSendableAccounts(accounts);
+        // Default the FROM to the conversation's original account.
+        const defaultAcct =
+          accounts.find((a: any) => a.is_conversation_account) ||
+          accounts[0] ||
+          null;
+        if (defaultAcct && !replyModalFromAccountId) {
+          setReplyModalFromAccountId(defaultAcct.id);
+        }
+      } catch (e: any) {
+        console.warn("[reply-modal] sendable accounts fetch failed:", e?.message);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReplyModal, convo?.id]);
+
+  // Helper: swap the signature in the modal body when the FROM account changes.
+  // We try to remove the OLD account's signature (looking for distinctive text
+  // from it) and prepend the NEW account's signature. If we can't cleanly find
+  // the old one to remove, we just append the new one and let the user clean up.
+  // Returns the new body string.
+  const swapSignatureInBody = useCallback((
+    currentBody: string,
+    oldAccount: { signature: string | null; signature_enabled: boolean } | null,
+    newAccount: { signature: string | null; signature_enabled: boolean } | null,
+  ): string => {
+    let body = currentBody || "";
+    // Try to remove the old signature, if any. Use a "distinctive snippet"
+    // strategy — pull a chunk of the old signature's plain text and search.
+    if (oldAccount?.signature_enabled && oldAccount?.signature) {
+      const oldSig = oldAccount.signature;
+      // Find oldSig as a whole HTML chunk first
+      const wrapperIdx = body.lastIndexOf(
+        '<div style="padding-top: 8px; margin-top: 8px;">' + oldSig + '</div>'
+      );
+      if (wrapperIdx >= 0) {
+        // Strip the wrapper + the optional <br> before it
+        let cut = wrapperIdx;
+        const beforeBr = body.slice(0, cut).match(/<br\s*\/?>\s*$/i);
+        if (beforeBr) cut = body.length - body.slice(0, cut).length - beforeBr[0].length + (body.length - body.slice(0, cut).length);
+        body = body.slice(0, wrapperIdx) + body.slice(wrapperIdx + ('<div style="padding-top: 8px; margin-top: 8px;">' + oldSig + '</div>').length);
+        body = body.replace(/<br\s*\/?>\s*$/i, "");
+      } else if (body.endsWith(oldSig)) {
+        body = body.slice(0, body.length - oldSig.length);
+      } else {
+        // Fallback: try a plain-text distinctive snippet match
+        const oldPlain = oldSig.replace(/<[^>]*>/g, "").trim();
+        const snippet = oldPlain.slice(0, Math.min(40, oldPlain.length));
+        if (snippet.length >= 10 && body.includes(snippet)) {
+          // We can't safely remove an HTML fragment from a plain-text snippet
+          // match. Leave the old signature in place — user can edit manually.
+        }
+      }
+    }
+    // Append the new signature
+    if (newAccount?.signature_enabled && newAccount?.signature) {
+      body = body.replace(/\s+$/, ""); // trim trailing whitespace
+      body = body + '<br><div style="padding-top: 8px; margin-top: 8px;">' + newAccount.signature + '</div>';
+    }
+    return body;
+  }, []);
+
+  // When the user picks a different FROM, swap the signature in the body.
+  const handleFromAccountChange = useCallback((newAccountId: string) => {
+    const oldAcct = replyModalSendableAccounts.find((a) => a.id === replyModalFromAccountId) || null;
+    const newAcct = replyModalSendableAccounts.find((a) => a.id === newAccountId) || null;
+    setReplyModalFromAccountId(newAccountId);
+    if (oldAcct?.id === newAcct?.id) return;
+    setReplyModalBody((prev) => swapSignatureInBody(prev, oldAcct, newAcct));
+  }, [replyModalFromAccountId, replyModalSendableAccounts, swapSignatureInBody]);
 
   const {
     notes,
@@ -1606,7 +1719,9 @@ export default function ConversationDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: convo.id,
-          account_id: convo.email_account_id,
+          // Use the FROM dropdown selection, falling back to the conversation's
+          // original account if the dropdown hasn't loaded yet for any reason.
+          account_id: replyModalFromAccountId || convo.email_account_id,
           to: replyModalTo.trim(),
           cc: replyModalCc.trim(),
           bcc: replyModalBcc.trim(),
@@ -1629,6 +1744,8 @@ export default function ConversationDetail({
       setReplyModalBcc("");
       setReplyModalSubject("");
       setReplyModalBody("");
+      setReplyModalFromAccountId(null);
+      setReplyModalSendableAccounts([]);
       // Successful send → delete the draft (we just persisted it as a real
       // message). Also clear the inline reply state since they share storage.
       if (loadedDraftId) {
@@ -2872,11 +2989,11 @@ export default function ConversationDetail({
               const searchQ = threadSearch.trim().toLowerCase();
 
               // ── Merge messages and Quo calls chronologically ──
-              // Messages and calls are sorted ascending by their effective timestamp.
-              // We render them in order, using <CallTimelineEntry> for calls and the
-              // existing message render block for messages. Message-specific concerns
-              // like "first message" (drop cap) and global match counting still use
-              // the message's position WITHIN messages (idx), not the merged index.
+              // Sorted DESCENDING by timestamp (newest first, oldest last) per
+              // the user preference. Drop-cap still attaches to the ORIGINAL
+              // first message (idx === 0 within messages), which now appears
+              // visually at the bottom — the drop cap marks "where the
+              // conversation started," not "what you see first."
               type Item =
                 | { kind: "message"; m: any; idx: number; t: number }
                 | { kind: "call"; c: CallEntry; t: number };
@@ -2892,7 +3009,7 @@ export default function ConversationDetail({
                 c,
                 t: new Date(c.started_at || c.created_at || 0).getTime() || 0,
               }));
-              const timelineItems: Item[] = [...msgItems, ...callItems].sort((a, b) => a.t - b.t);
+              const timelineItems: Item[] = [...msgItems, ...callItems].sort((a, b) => b.t - a.t);
 
               return timelineItems.map((item) => {
                 // ── Call entry ──
@@ -5083,6 +5200,39 @@ export default function ConversationDetail({
                   </button>
                 </div>
               )}
+
+              {/* FROM account picker. Always shown so the user knows which
+                  account they're sending from. The dropdown is functional only
+                  when there are 2+ sendable accounts; otherwise read-only. */}
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">From</label>
+                {replyModalSendableAccounts.length > 1 ? (
+                  <select
+                    value={replyModalFromAccountId || ""}
+                    onChange={(e) => handleFromAccountChange(e.target.value)}
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+                  >
+                    {replyModalSendableAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.icon ? `${a.icon} ` : ""}{a.name} &lt;{a.email}&gt;
+                        {a.is_conversation_account ? " · original thread account" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                    {(() => {
+                      const a = replyModalSendableAccounts[0];
+                      if (!a) return <span className="italic text-[var(--text-muted)]">Loading…</span>;
+                      return (
+                        <span>
+                          {a.icon ? `${a.icon} ` : ""}{a.name} &lt;{a.email}&gt;
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">To</label>
