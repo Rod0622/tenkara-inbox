@@ -62,11 +62,21 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
 
   // ── Drive picker state ────────────────────────────────
   const [showThreadDrivePicker, setShowThreadDrivePicker] = useState(false);
+  // Two-step modal: 1 = pick attachments + rename, 2 = pick destination
+  const [modalStep, setModalStep] = useState<1 | 2>(1);
   const [driveSelections, setDriveSelections] = useState<AttSelection[]>([]);
   const [bulkPrefix, setBulkPrefix] = useState("");
   const [bulkFind, setBulkFind] = useState("");
   const [bulkReplace, setBulkReplace] = useState("");
   const [showBulkControls, setShowBulkControls] = useState(false);
+
+  // Drive picker mode: either "direct" (a DEFAULT_FOLDER_ID env var is set,
+  // and we land inside that folder) or "picker" (no default — user has to
+  // pick a shared drive first, then navigate folders inside it).
+  const [driveMode, setDriveMode] = useState<"direct" | "picker" | null>(null);
+  const [drives, setDrives] = useState<any[]>([]);
+  const [selectedDrive, setSelectedDrive] = useState<any>(null);
+  const [loadingDrives, setLoadingDrives] = useState(false);
 
   const [threadFolders, setThreadFolders] = useState<any[]>([]);
   const [threadFolderPath, setThreadFolderPath] = useState<{ id: string; name: string }[]>([]);
@@ -186,20 +196,59 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     setBulkReplace("");
     setShowBulkControls(false);
     setShowThreadDrivePicker(true);
+    setModalStep(1);
     setDriveResult(null);
     setThreadFolders([]);
     setThreadFolderPath([]);
+    setDriveMode(null);
+    setDrives([]);
+    setSelectedDrive(null);
+    setThreadDefaultFolderId(null);
+    // Don't kick off the destination fetch until the user clicks Next →
+    // (Step 2). Reduces unnecessary network when user cancels in Step 1.
+  };
+
+  // Called when the user clicks "Next →" to move from Step 1 to Step 2.
+  // Lazily fetches the drive config + initial folder list / drives list.
+  const goToStep2 = async () => {
+    setModalStep(2);
+    // If we already loaded once (user went back to Step 1 then forward again),
+    // skip the network roundtrip.
+    if (driveMode) return;
     setThreadLoadingFolders(true);
     try {
       const configRes = await fetch("/api/drive?action=config");
       const config = await configRes.json();
       if (config.mode === "direct" && config.folderId) {
+        setDriveMode("direct");
         setThreadDefaultFolderId(config.folderId);
-        setThreadFolderPath([{ id: config.folderId, name: "Training Files" }]);
+        setThreadFolderPath([{ id: config.folderId, name: config.folderName || "Configured folder" }]);
         const res = await fetch(`/api/drive?action=folders&folder_id=${config.folderId}`);
         const data = await res.json();
         setThreadFolders(data.folders || []);
+      } else {
+        setDriveMode("picker");
+        setLoadingDrives(true);
+        const res = await fetch("/api/drive?action=drives");
+        const data = await res.json();
+        setDrives(data.drives || []);
+        setLoadingDrives(false);
       }
+    } catch (e) {
+      console.error("[ThreadAttachmentBar] destination load failed:", e);
+    }
+    setThreadLoadingFolders(false);
+  };
+
+  // Picker mode: user picks a shared drive at the top level.
+  const selectDriveForUpload = async (drive: any) => {
+    setSelectedDrive(drive);
+    setThreadFolderPath([]);
+    setThreadLoadingFolders(true);
+    try {
+      const res = await fetch(`/api/drive?action=folders&drive_id=${drive.id}`);
+      const data = await res.json();
+      setThreadFolders(data.folders || []);
     } catch (e) { console.error(e); }
     setThreadLoadingFolders(false);
   };
@@ -208,7 +257,9 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     setThreadFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
     setThreadLoadingFolders(true);
     try {
-      const res = await fetch(`/api/drive?action=folders&folder_id=${folder.id}`);
+      // Pass drive_id only in picker mode (the API supports either form)
+      const driveParam = driveMode === "picker" && selectedDrive ? `&drive_id=${selectedDrive.id}` : "";
+      const res = await fetch(`/api/drive?action=folders&folder_id=${folder.id}${driveParam}`);
       const data = await res.json();
       setThreadFolders(data.folders || []);
     } catch (e) { console.error(e); }
@@ -216,14 +267,34 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   };
 
   const navigateThreadPath = async (index: number) => {
-    const newPath = index < 0 ? [{ id: threadDefaultFolderId!, name: "Training Files" }] : threadFolderPath.slice(0, index + 1);
+    // index = -1 means "back to root":
+    //   - direct mode: back to the configured folder
+    //   - picker mode: back to the drive root
+    let newPath: { id: string; name: string }[];
+    if (index < 0) {
+      if (driveMode === "direct" && threadDefaultFolderId) {
+        newPath = [{ id: threadDefaultFolderId, name: "Configured folder" }];
+      } else {
+        newPath = [];
+      }
+    } else {
+      newPath = threadFolderPath.slice(0, index + 1);
+    }
     setThreadFolderPath(newPath);
     setThreadLoadingFolders(true);
     try {
-      const fId = newPath[newPath.length - 1].id;
-      const res = await fetch(`/api/drive?action=folders&folder_id=${fId}`);
-      const data = await res.json();
-      setThreadFolders(data.folders || []);
+      const fId = newPath[newPath.length - 1]?.id;
+      const driveParam = driveMode === "picker" && selectedDrive ? `&drive_id=${selectedDrive.id}` : "";
+      if (fId) {
+        const res = await fetch(`/api/drive?action=folders&folder_id=${fId}${driveParam}`);
+        const data = await res.json();
+        setThreadFolders(data.folders || []);
+      } else if (driveMode === "picker" && selectedDrive) {
+        // Back to drive root in picker mode
+        const res = await fetch(`/api/drive?action=folders&drive_id=${selectedDrive.id}`);
+        const data = await res.json();
+        setThreadFolders(data.folders || []);
+      }
     } catch (e) { console.error(e); }
     setThreadLoadingFolders(false);
   };
@@ -282,8 +353,14 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
 
   // ── Upload ────────────────────────────────────────────
   const saveToDrive = async () => {
+    // Resolve destination folder. In direct mode: folder at top of breadcrumb.
+    // In picker mode: same, but if no folder was opened yet, fall back to the
+    // drive root (which the API treats as null folderId + driveId).
     const folderId = threadFolderPath.length > 0 ? threadFolderPath[threadFolderPath.length - 1].id : threadDefaultFolderId;
-    if (!folderId) return;
+    if (!folderId && !(driveMode === "picker" && selectedDrive)) {
+      setDriveResult("Error: Choose a destination folder first");
+      return;
+    }
     const checked = driveSelections.filter((r) => r.checked);
     if (checked.length === 0) {
       setDriveResult("Error: Select at least one file");
@@ -296,16 +373,22 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
     try {
       for (const row of checked) {
         const finalName = withRestoredExt((row.rename || row.originalName).trim() || row.originalName, row.originalName);
+        const body: any = {
+          action: "upload_attachment",
+          messageId: row.messageId,
+          attachmentId: row.attachmentId,
+          fileName: finalName,
+          folderId,
+        };
+        // Picker mode also sends driveId so the API can scope the upload
+        // to the right shared drive (matches MessageAttachments behavior).
+        if (driveMode === "picker" && selectedDrive) {
+          body.driveId = selectedDrive.id;
+        }
         const res = await fetch("/api/drive", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "upload_attachment",
-            messageId: row.messageId,
-            attachmentId: row.attachmentId,
-            fileName: finalName,
-            folderId,
-          }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (data.success) saved++;
@@ -416,7 +499,10 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
         </div>
       )}
 
-      {/* Thread Drive Picker Modal */}
+      {/* Thread Drive Picker Modal — two-step layout.
+          Step 1: pick attachments + rename (+ bulk controls)
+          Step 2: pick destination (direct mode → folders only;
+                  picker mode → drives → folders) */}
       {showThreadDrivePicker && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -426,11 +512,14 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
             className="w-full max-w-2xl max-h-[90vh] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Header with step indicator */}
             <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between shrink-0">
               <div>
                 <div className="text-sm font-bold text-[var(--text-primary)]">Save to Google Drive</div>
-                <div className="text-[10px] text-[var(--text-muted)]">
-                  Pick attachments, rename if needed, then choose a folder.
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5 flex items-center gap-1.5">
+                  <span className={modalStep === 1 ? "font-semibold text-[var(--accent)]" : ""}>1. Pick files</span>
+                  <span className="text-[var(--text-muted)]">→</span>
+                  <span className={modalStep === 2 ? "font-semibold text-[var(--accent)]" : ""}>2. Choose destination</span>
                 </div>
               </div>
               <button
@@ -441,9 +530,9 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* ── Attachments selection list ── */}
-              <div>
+            {/* Step 1: file selection + rename */}
+            {modalStep === 1 && (
+              <div className="flex-1 overflow-y-auto p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
                     Files ({checkedCount} of {totalSel})
@@ -528,12 +617,9 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                   </div>
                 )}
 
-                {/* Per-attachment rows. Grouped subtly by sender (the small
-                    label appears once, then the rows beneath it). */}
+                {/* Per-attachment rows, grouped by sender */}
                 <div className="space-y-1.5">
                   {(() => {
-                    // Group sequentially for display so we can render a sender
-                    // label once per group while keeping rows in flat order.
                     const rendered: React.ReactNode[] = [];
                     let lastFrom: string | null = null;
                     for (const row of driveSelections) {
@@ -599,61 +685,115 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                   Tip: file extensions are auto-restored on save if you remove them.
                 </div>
               </div>
+            )}
 
-              {/* ── Folder picker ── */}
-              <div className="border-t border-[var(--border)] pt-3">
+            {/* Step 2: destination */}
+            {modalStep === 2 && (
+              <div className="flex-1 overflow-y-auto p-4">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
                   Destination
                 </div>
-                {threadFolderPath.length > 0 && (
-                  <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
-                    {threadFolderPath.map((fp, i) => (
-                      <span key={fp.id} className="flex items-center gap-1">
-                        {i > 0 && <span className="text-[var(--text-muted)]">/</span>}
-                        <button onClick={() => navigateThreadPath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {threadLoadingFolders ? (
-                  <div className="text-center py-4 text-[var(--text-muted)] text-[12px]">Loading...</div>
+
+                {/* Picker mode: drives list first, then folders after a drive is picked */}
+                {driveMode === "picker" && !selectedDrive ? (
+                  <>
+                    <div className="text-[11px] text-[var(--text-muted)] mb-2">Select a Shared Drive:</div>
+                    {loadingDrives ? (
+                      <div className="text-center py-6 text-[var(--text-muted)] text-[12px]">Loading drives...</div>
+                    ) : drives.length === 0 ? (
+                      <div className="text-center py-6 text-[var(--text-muted)] text-[12px]">
+                        No shared drives found. Make sure the service account has access.
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {drives.map((d) => (
+                          <button
+                            key={d.id}
+                            onClick={() => selectDriveForUpload(d)}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg hover:bg-[var(--border)] text-left transition-colors"
+                          >
+                            <FolderOpen size={16} className="text-[var(--warning)]" />
+                            <span className="text-[12px] text-[var(--text-primary)] font-medium">{d.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="space-y-0.5">
-                    {threadFolders.map((f) => (
-                      <button
-                        key={f.id}
-                        onClick={() => openThreadFolder(f)}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors"
-                      >
-                        <FolderOpen size={14} className="text-[var(--warning)]" />
-                        <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
-                      </button>
-                    ))}
-                    <button
-                      onClick={async () => {
-                        const name = prompt("New folder name:");
-                        if (!name?.trim()) return;
-                        const parentId = threadFolderPath.length > 0 ? threadFolderPath[threadFolderPath.length - 1].id : null;
-                        if (!parentId) return;
-                        try {
-                          const res = await fetch("/api/drive", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ action: "create_folder", folderName: name.trim(), parentFolderId: parentId }),
-                          });
-                          const data = await res.json();
-                          if (data.success) setThreadFolders((prev) => [...prev, { id: data.folder.id, name: data.folder.name }]);
-                        } catch (e) { console.error(e); }
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] border border-dashed border-[var(--border)] mt-1"
-                    >
-                      <Plus size={14} className="text-[var(--accent)]" />
-                      <span className="text-[12px] text-[var(--accent)] font-medium">New Folder</span>
-                    </button>
-                  </div>
+                  <>
+                    {/* Breadcrumbs */}
+                    <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                      {driveMode === "picker" && selectedDrive && (
+                        <>
+                          <button
+                            onClick={() => { setSelectedDrive(null); setThreadFolderPath([]); setThreadFolders([]); }}
+                            className="text-[var(--info)] hover:underline"
+                          >
+                            Drives
+                          </button>
+                          <span className="text-[var(--text-muted)]">/</span>
+                          <button
+                            onClick={() => navigateThreadPath(-1)}
+                            className="text-[var(--info)] hover:underline"
+                          >
+                            {selectedDrive.name}
+                          </button>
+                        </>
+                      )}
+                      {threadFolderPath.map((fp, i) => (
+                        <span key={fp.id} className="flex items-center gap-1">
+                          {(i > 0 || (driveMode === "picker" && selectedDrive)) && <span className="text-[var(--text-muted)]">/</span>}
+                          <button onClick={() => navigateThreadPath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
+                        </span>
+                      ))}
+                    </div>
+
+                    {threadLoadingFolders ? (
+                      <div className="text-center py-4 text-[var(--text-muted)] text-[12px]">Loading folders...</div>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {threadFolders.map((f) => (
+                          <button
+                            key={f.id}
+                            onClick={() => openThreadFolder(f)}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors"
+                          >
+                            <FolderOpen size={14} className="text-[var(--warning)]" />
+                            <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
+                          </button>
+                        ))}
+                        <button
+                          onClick={async () => {
+                            const name = prompt("New folder name:");
+                            if (!name?.trim()) return;
+                            const parentId = threadFolderPath.length > 0
+                              ? threadFolderPath[threadFolderPath.length - 1].id
+                              : (driveMode === "picker" && selectedDrive ? selectedDrive.id : null);
+                            if (!parentId) return;
+                            try {
+                              const res = await fetch("/api/drive", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "create_folder", folderName: name.trim(), parentFolderId: parentId }),
+                              });
+                              const data = await res.json();
+                              if (data.success) setThreadFolders((prev) => [...prev, { id: data.folder.id, name: data.folder.name }]);
+                            } catch (e) { console.error(e); }
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] border border-dashed border-[var(--border)] mt-1"
+                        >
+                          <Plus size={14} className="text-[var(--accent)]" />
+                          <span className="text-[12px] text-[var(--accent)] font-medium">New Folder</span>
+                        </button>
+                        {threadFolders.length === 0 && !threadLoadingFolders && (
+                          <div className="text-[11px] text-[var(--text-muted)] py-1">No subfolders here yet.</div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-            </div>
+            )}
 
             {driveResult && (
               <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-[11px] shrink-0 ${driveResult.startsWith("Error") ? "bg-[rgba(248,81,73,0.1)] text-[var(--danger)]" : "bg-[rgba(74,222,128,0.1)] text-[var(--accent)]"}`}>
@@ -661,19 +801,56 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
               </div>
             )}
 
-            <div className="px-4 py-3 border-t border-[var(--border)] flex justify-between items-center shrink-0">
-              <div className="text-[10px] text-[var(--text-muted)]">
-                Saving {checkedCount === 1 ? "1 file" : `${checkedCount} files`} to:{" "}
-                {threadFolderPath.map((p) => p.name).join(" / ") || "..."}
-              </div>
-              <button
-                onClick={saveToDrive}
-                disabled={savingToDrive || checkedCount === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold disabled:opacity-50"
-              >
-                <ExternalLink size={12} />
-                {savingToDrive ? "Uploading..." : `Save ${checkedCount === 1 ? "file" : `${checkedCount} files`}`}
-              </button>
+            {/* Footer with step-specific buttons */}
+            <div className="px-4 py-3 border-t border-[var(--border)] flex justify-between items-center shrink-0 gap-3">
+              {modalStep === 1 ? (
+                <>
+                  <button
+                    onClick={() => setShowThreadDrivePicker(false)}
+                    className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] px-3 py-1.5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={goToStep2}
+                    disabled={checkedCount === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold disabled:opacity-50"
+                  >
+                    Next: Choose folder →
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setModalStep(1)}
+                    className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] px-3 py-1.5"
+                  >
+                    ← Back
+                  </button>
+                  <div className="text-[10px] text-[var(--text-muted)] flex-1 text-right pr-2 truncate">
+                    {(() => {
+                      const parts: string[] = [];
+                      if (driveMode === "picker" && selectedDrive) parts.push(selectedDrive.name);
+                      parts.push(...threadFolderPath.map((p) => p.name));
+                      const dest = parts.length > 0 ? parts.join(" / ") : "(no folder picked)";
+                      return `Saving ${checkedCount === 1 ? "1 file" : `${checkedCount} files`} to: ${dest}`;
+                    })()}
+                  </div>
+                  <button
+                    onClick={saveToDrive}
+                    disabled={
+                      savingToDrive ||
+                      checkedCount === 0 ||
+                      (driveMode === "picker" && !selectedDrive) ||
+                      (threadFolderPath.length === 0 && !(driveMode === "picker" && selectedDrive))
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold disabled:opacity-50"
+                  >
+                    <ExternalLink size={12} />
+                    {savingToDrive ? "Uploading..." : `Save ${checkedCount === 1 ? "file" : `${checkedCount} files`}`}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
