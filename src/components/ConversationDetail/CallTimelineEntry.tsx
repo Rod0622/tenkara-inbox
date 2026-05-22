@@ -37,11 +37,19 @@ type CallEntry = {
   supplier_contact_id: string | null;
   supplier_contact_person_id: string | null;
   team_member_id: string | null;
+  attributed_team_member_id?: string | null;
+  line_type?: "private" | "shared" | "unknown" | null;
+  is_stub?: boolean;
   created_at?: string | null;
   // Optional hydrated lookups (computed at fetch time in ConversationDetail)
   supplier_name?: string | null;
   person_name?: string | null;
   team_member_name?: string | null;
+  attributed_team_member_name?: string | null;
+  line_display_name?: string | null;
+  email_account_name?: string | null;
+  email_account_icon?: string | null;
+  email_account_color?: string | null;
 };
 
 function formatDuration(sec: number | null): string {
@@ -173,10 +181,46 @@ export default function CallTimelineEntry({
             <span title={call.started_at || undefined} className="font-mono text-[10px]">
               {formatTimestamp(call.started_at)}
             </span>
-            {call.team_member_name && (
+            {(call.attributed_team_member_name || call.team_member_name) && (
               <>
                 <span className="text-[var(--text-muted)]">·</span>
-                <span className="text-[10px]">by {call.team_member_name}</span>
+                <span className="text-[10px]">
+                  by {call.attributed_team_member_name || call.team_member_name}
+                  {call.attributed_team_member_name &&
+                    call.team_member_name &&
+                    call.attributed_team_member_name !== call.team_member_name && (
+                      <span className="text-[var(--text-muted)]"> (ans. {call.team_member_name})</span>
+                    )}
+                </span>
+              </>
+            )}
+            {/* Email-account / line-group chip — for shared lines linked to a brand */}
+            {call.email_account_name && (
+              <>
+                <span className="text-[var(--text-muted)]">·</span>
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{
+                    background: `color-mix(in srgb, ${call.email_account_color || "var(--text-muted)"} 14%, transparent)`,
+                    color: call.email_account_color || "var(--text-secondary)",
+                  }}
+                  title={`Line: ${call.line_display_name || ""}`}
+                >
+                  {call.email_account_icon && <span>{call.email_account_icon}</span>}
+                  {call.email_account_name}
+                </span>
+              </>
+            )}
+            {/* Private-line indicator (no email account but classified as private) */}
+            {!call.email_account_name && call.line_type === "private" && call.line_display_name && (
+              <>
+                <span className="text-[var(--text-muted)]">·</span>
+                <span
+                  className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)]"
+                  title={`Private line: ${call.line_display_name}`}
+                >
+                  Direct
+                </span>
               </>
             )}
           </div>

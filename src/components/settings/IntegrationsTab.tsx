@@ -21,6 +21,9 @@ import {
   Users,
   UserCheck,
   Sparkles,
+  Wand2,
+  User,
+  Mail,
 } from "lucide-react";
 
 interface QuoStatus {
@@ -409,6 +412,9 @@ function QuoCard() {
       {/* Quo user → team member mapping */}
       {status?.connected && <QuoUserMapping />}
 
+      {/* Quo phone lines → email_accounts + line type */}
+      {status?.connected && <QuoPhoneLines />}
+
       {/* Webhook setup help */}
       <details className="mt-5 text-xs">
         <summary className="cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
@@ -735,6 +741,368 @@ function QuoUserMapping() {
             >
               {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
               Save mappings
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────
+// QuoPhoneLines — classify Quo phone numbers as private/shared,
+// link shared lines to email_accounts, link private lines to owners.
+// ────────────────────────────────────────────────────────────
+
+interface QuoPhoneLineView {
+  quo_phone_number_id: string;
+  number: string | null;
+  display_name: string | null;
+  line_id: string | null;
+  line_type: "private" | "shared" | "unknown" | null;
+  email_account_id: string | null;
+  primary_owner_team_member_id: string | null;
+  is_active: boolean;
+  notes: string | null;
+  suggested_line_type: "private" | "shared" | "unknown";
+  suggested_email_account_id: string | null;
+  suggested_owner_team_member_id: string | null;
+  suggested_owner_email: string | null;
+}
+
+interface EmailAccountOption {
+  id: string;
+  name: string;
+  email: string;
+  icon: string | null;
+  color: string | null;
+}
+
+interface TeamMemberOpt {
+  id: string;
+  name: string;
+  email: string;
+  initials: string;
+  color: string;
+}
+
+type LinesDraft = Record<string, {
+  line_type: "private" | "shared" | "unknown";
+  email_account_id: string | null;
+  primary_owner_team_member_id: string | null;
+}>;
+
+function QuoPhoneLines() {
+  const [loading, setLoading] = useState(true);
+  const [lines, setLines] = useState<QuoPhoneLineView[]>([]);
+  const [accounts, setAccounts] = useState<EmailAccountOption[]>([]);
+  const [members, setMembers] = useState<TeamMemberOpt[]>([]);
+  const [draft, setDraft] = useState<LinesDraft>({});
+  const [saving, setSaving] = useState(false);
+  const [autoClassifying, setAutoClassifying] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/integrations/quo/lines");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load");
+      const linesList: QuoPhoneLineView[] = data.lines || [];
+      setLines(linesList);
+      setAccounts(data.email_accounts || []);
+      setMembers(data.team_members || []);
+      // Seed draft from current saved state
+      const seed: LinesDraft = {};
+      for (const l of linesList) {
+        seed[l.quo_phone_number_id] = {
+          line_type: l.line_type || "unknown",
+          email_account_id: l.email_account_id,
+          primary_owner_team_member_id: l.primary_owner_team_member_id,
+        };
+      }
+      setDraft(seed);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const setLineField = (
+    quoPnId: string,
+    field: "line_type" | "email_account_id" | "primary_owner_team_member_id",
+    value: any
+  ) => {
+    setDraft((d) => {
+      const existing = d[quoPnId] || {
+        line_type: "unknown",
+        email_account_id: null,
+        primary_owner_team_member_id: null,
+      };
+      const next = { ...existing, [field]: value };
+      // Mutually exclusive: shared lines clear owner; private lines clear email_account
+      if (field === "line_type") {
+        if (value === "shared") next.primary_owner_team_member_id = null;
+        if (value === "private") next.email_account_id = null;
+      }
+      return { ...d, [quoPnId]: next };
+    });
+    setSaved(false);
+  };
+
+  const applySuggestion = (l: QuoPhoneLineView) => {
+    setDraft((d) => ({
+      ...d,
+      [l.quo_phone_number_id]: {
+        line_type: l.suggested_line_type,
+        email_account_id: l.suggested_line_type === "shared" ? l.suggested_email_account_id : null,
+        primary_owner_team_member_id:
+          l.suggested_line_type === "private" ? l.suggested_owner_team_member_id : null,
+      },
+    }));
+    setSaved(false);
+  };
+
+  const handleAutoClassifyAll = async () => {
+    if (!confirm("Run auto-classification on all unclassified lines? Existing classifications will be kept.")) return;
+    setAutoClassifying(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/integrations/quo/lines/auto-classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overwrite: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Auto-classify failed");
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Auto-classify failed");
+    } finally {
+      setAutoClassifying(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const payload = Object.entries(draft).map(([quoPnId, vals]) => ({
+        quo_phone_number_id: quoPnId,
+        line_type: vals.line_type,
+        email_account_id: vals.email_account_id,
+        primary_owner_team_member_id: vals.primary_owner_team_member_id,
+      }));
+      const res = await fetch("/api/integrations/quo/lines", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lines: payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Save failed");
+      setSaved(true);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasUnsavedChanges = (() => {
+    for (const l of lines) {
+      const d = draft[l.quo_phone_number_id];
+      if (!d) continue;
+      if (d.line_type !== (l.line_type || "unknown")) return true;
+      if ((d.email_account_id || null) !== (l.email_account_id || null)) return true;
+      if ((d.primary_owner_team_member_id || null) !== (l.primary_owner_team_member_id || null)) return true;
+    }
+    return false;
+  })();
+
+  const classifiedCount = lines.filter((l) => l.line_type && l.line_type !== "unknown").length;
+  const totalLines = lines.length;
+
+  return (
+    <div className="mt-6 pt-5 border-t border-[var(--border)]">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/12 flex items-center justify-center shrink-0">
+            <Phone size={15} className="text-[var(--accent)]" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
+              Phone lines
+            </h3>
+            <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+              Classify each Quo number as a personal direct line or a shared brand line. Shared lines can link to email accounts so calls show the right brand badge.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-mono text-[var(--text-muted)]">
+            {classifiedCount} of {totalLines} classified
+          </span>
+          <button
+            onClick={handleAutoClassifyAll}
+            disabled={autoClassifying || loading}
+            title="Auto-classify lines that aren't yet classified"
+            className="px-2 py-1 rounded-md border border-[var(--border)] text-[11px] text-[var(--highlight)] hover:bg-[var(--highlight)]/10 disabled:opacity-40 flex items-center gap-1"
+          >
+            {autoClassifying ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}
+            Auto-classify
+          </button>
+          <button
+            onClick={load}
+            disabled={loading}
+            title="Refresh lines"
+            className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] disabled:opacity-40"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-6 flex justify-center">
+          <Loader2 size={18} className="animate-spin text-[var(--accent)]" />
+        </div>
+      ) : error ? (
+        <div className="px-3 py-2 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-xs text-[var(--danger)] flex items-start gap-2">
+          <AlertCircle size={13} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : lines.length === 0 ? (
+        <div className="px-3 py-6 rounded-lg bg-[var(--bg)] border border-dashed border-[var(--border)] text-center">
+          <p className="text-[12px] text-[var(--text-secondary)]">No Quo lines found. Test connection first.</p>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+                <tr>
+                  <th className="text-left px-3 py-2 w-[250px]">Line</th>
+                  <th className="text-left px-3 py-2 w-[110px]">Type</th>
+                  <th className="text-left px-3 py-2">Link to</th>
+                  <th className="text-right px-3 py-2 w-[60px]"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {lines.map((l) => {
+                  const d = draft[l.quo_phone_number_id] || {
+                    line_type: "unknown" as const,
+                    email_account_id: null,
+                    primary_owner_team_member_id: null,
+                  };
+                  const hasSuggestion =
+                    !l.line_type &&
+                    l.suggested_line_type !== "unknown" &&
+                    (l.suggested_email_account_id || l.suggested_owner_team_member_id);
+
+                  return (
+                    <tr key={l.quo_phone_number_id} className="hover:bg-[var(--bg)]/40">
+                      <td className="px-3 py-2.5 align-top">
+                        <div className="flex flex-col">
+                          <span className="text-[var(--text-primary)] font-medium text-[12px]">
+                            {l.display_name || "(no name)"}
+                          </span>
+                          <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                            {l.number || l.quo_phone_number_id}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 align-top">
+                        <select
+                          value={d.line_type}
+                          onChange={(e) => setLineField(l.quo_phone_number_id, "line_type", e.target.value)}
+                          className="w-full px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                        >
+                          <option value="unknown">— Unknown —</option>
+                          <option value="shared">Shared</option>
+                          <option value="private">Private</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-2.5 align-top">
+                        {d.line_type === "shared" ? (
+                          <div className="flex items-center gap-1.5">
+                            <Mail size={11} className="text-[var(--text-muted)] shrink-0" />
+                            <select
+                              value={d.email_account_id || ""}
+                              onChange={(e) => setLineField(l.quo_phone_number_id, "email_account_id", e.target.value || null)}
+                              className="flex-1 min-w-0 px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                            >
+                              <option value="">— No email account —</option>
+                              {accounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.icon ? `${a.icon} ` : ""}{a.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : d.line_type === "private" ? (
+                          <div className="flex items-center gap-1.5">
+                            <User size={11} className="text-[var(--text-muted)] shrink-0" />
+                            <select
+                              value={d.primary_owner_team_member_id || ""}
+                              onChange={(e) => setLineField(l.quo_phone_number_id, "primary_owner_team_member_id", e.target.value || null)}
+                              className="flex-1 min-w-0 px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                            >
+                              <option value="">— No owner —</option>
+                              {members.map((m) => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-[var(--text-muted)] italic">Pick a type first</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 align-top text-right">
+                        {hasSuggestion && (
+                          <button
+                            onClick={() => applySuggestion(l)}
+                            title="Apply auto-classification suggestion"
+                            className="p-1 rounded text-[var(--highlight)] hover:bg-[var(--highlight)]/10"
+                          >
+                            <Sparkles size={12} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 mt-3">
+            <div className="text-[10px] text-[var(--text-muted)]">
+              {hasUnsavedChanges ? (
+                <span className="text-[var(--warning)]">Unsaved changes</span>
+              ) : saved ? (
+                <span className="text-[var(--accent)] inline-flex items-center gap-1">
+                  <Check size={11} /> Saved
+                </span>
+              ) : (
+                <>Forward-only — existing calls keep their classification (or NULL).</>
+              )}
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving || !hasUnsavedChanges}
+              className="px-3 py-1.5 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold hover:bg-[var(--accent-strong)] disabled:opacity-40 flex items-center gap-1.5"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              Save lines
             </button>
           </div>
         </>

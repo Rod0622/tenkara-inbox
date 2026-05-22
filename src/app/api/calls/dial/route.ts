@@ -92,18 +92,50 @@ export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const nowIso = new Date().toISOString();
 
+  // ── Line lookup + attribution (per Q3 rule) ─────────
+  // If the chosen "Call from" line is classified, populate line fields on the
+  // stub. For shared lines, attribute to the conversation's assignee if any;
+  // otherwise to the dialer themselves.
+  let quoPhoneLineId: string | null = null;
+  let lineType: string | null = null;
+  let attributedTeamMemberId: string | null = session.teamMember.id;
+
+  if (fromPhoneNumberId) {
+    const { data: line } = await supabase
+      .from("quo_phone_lines")
+      .select("id, line_type")
+      .eq("quo_phone_number_id", fromPhoneNumberId)
+      .maybeSingle();
+    if (line) {
+      quoPhoneLineId = (line as any).id;
+      lineType = (line as any).line_type;
+      if (lineType === "shared" && conversationId) {
+        const { data: convo } = await supabase
+          .from("conversations")
+          .select("assignee_id")
+          .eq("id", conversationId)
+          .maybeSingle();
+        const assigneeId = (convo as any)?.assignee_id || null;
+        if (assigneeId) attributedTeamMemberId = assigneeId;
+      }
+    }
+  }
+
   const stubRow: Record<string, any> = {
     quo_call_id: stubQuoId,
     conversation_id: conversationId,
     supplier_contact_id: supplierContactId,
     supplier_contact_person_id: supplierContactPersonId,
     team_member_id: session.teamMember.id,
+    attributed_team_member_id: attributedTeamMemberId,
     direction: "outbound",
     status: "ringing",
     outcome: null,
     participant_phone: toPhone,
     workspace_phone: fromPhone,
     quo_phone_number_id: fromPhoneNumberId,
+    quo_phone_line_id: quoPhoneLineId,
+    line_type: lineType,
     quo_user_id: null,
     duration_seconds: null,
     started_at: nowIso,

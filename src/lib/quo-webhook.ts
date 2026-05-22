@@ -187,6 +187,65 @@ function extractDuration(call: any): number | null {
   return null;
 }
 
+// Look up the saved quo_phone_lines row for a given phoneNumberId. Returns
+// null if no row exists (e.g. admin hasn't classified lines yet). Also
+// returns null if phoneNumberId is missing.
+async function lookupQuoPhoneLine(phoneNumberId: string | null | undefined): Promise<{
+  id: string;
+  line_type: "private" | "shared" | "unknown";
+  email_account_id: string | null;
+  primary_owner_team_member_id: string | null;
+} | null> {
+  if (!phoneNumberId) return null;
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("quo_phone_lines")
+    .select("id, line_type, email_account_id, primary_owner_team_member_id")
+    .eq("quo_phone_number_id", phoneNumberId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[quo-webhook] line lookup failed:", error.message);
+    return null;
+  }
+  return (data as any) || null;
+}
+
+// Resolve attributed_team_member_id based on the Q3 attribution rule:
+//   - For SHARED lines with a matched conversation that has an assignee →
+//     attribute to that assignee.
+//   - For SHARED lines with no matched conversation OR no assignee → fall
+//     back to who answered (team_member_id).
+//   - For PRIVATE / UNKNOWN / NULL lines → always who answered.
+//
+// All inputs may be null. Returns null if nothing resolves.
+async function resolveAttributedTeamMember(args: {
+  lineType: "private" | "shared" | "unknown" | null;
+  conversationId: string | null;
+  whoAnsweredId: string | null;
+}): Promise<string | null> {
+  const { lineType, conversationId, whoAnsweredId } = args;
+
+  // Private / unknown / null line → always who answered
+  if (lineType !== "shared") return whoAnsweredId;
+
+  // Shared line + a matched conversation → check its assignee
+  if (conversationId) {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("conversations")
+      .select("assignee_id")
+      .eq("id", conversationId)
+      .maybeSingle();
+    if (error) {
+      console.warn("[quo-webhook] conversation lookup failed:", error.message);
+    }
+    const assigneeId = (data as any)?.assignee_id || null;
+    if (assigneeId) return assigneeId;
+  }
+  // Fallback: who answered
+  return whoAnsweredId;
+}
+
 // Insert or update a quo_call_logs row from a Quo event payload's `call` object.
 // Returns the inserted/updated row.
 export async function upsertCallFromEvent(
@@ -211,18 +270,33 @@ export async function upsertCallFromEvent(
   const match = await matchPhoneToSupplier(participantPhone);
   const teamMemberId = await matchQuoUserToTeamMember(call?.userId || null);
 
+  // Line classification — find the quo_phone_lines row for this workspace line.
+  // If admin hasn't classified yet, this is null and the call still logs fine.
+  const phoneLine = await lookupQuoPhoneLine(call?.phoneNumberId || null);
+
+  // Attribution per Q3 rule. teamMemberId = who answered; attributedTeamMemberId
+  // = who the call should "count toward" (thread assignee for shared lines).
+  const attributedTeamMemberId = await resolveAttributedTeamMember({
+    lineType: phoneLine?.line_type || null,
+    conversationId: match.conversation_id,
+    whoAnsweredId: teamMemberId,
+  });
+
   const row: Record<string, any> = {
     quo_call_id: quoCallId,
     conversation_id: match.conversation_id,
     supplier_contact_id: match.supplier_contact_id,
     supplier_contact_person_id: match.supplier_contact_person_id,
     team_member_id: teamMemberId,
+    attributed_team_member_id: attributedTeamMemberId,
     direction: mapDirection(call?.direction),
     status: mapStatus(call?.status),
     outcome: mapOutcome(call, durationSeconds),
     participant_phone: participantPhone,
     workspace_phone: workspacePhone,
     quo_phone_number_id: call?.phoneNumberId || null,
+    quo_phone_line_id: phoneLine?.id || null,
+    line_type: phoneLine?.line_type || null,
     quo_user_id: call?.userId || null,
     duration_seconds: durationSeconds,
     started_at: call?.createdAt || null,
