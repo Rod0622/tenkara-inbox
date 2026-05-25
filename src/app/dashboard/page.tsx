@@ -2409,6 +2409,8 @@ function OffboardedUsersPanel({ onJump }: { onJump: (viewMode: string) => void }
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reassignTarget, setReassignTarget] = useState<OffboardedUser | null>(null);
+  // When set, render the per-user drill-down detail view instead of the list
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -2427,6 +2429,27 @@ function OffboardedUsersPanel({ onJump }: { onJump: (viewMode: string) => void }
   };
 
   useEffect(() => { load(); }, []);
+
+  // Detail view branch — render this instead of the list when a user is selected
+  if (selectedUserId) {
+    const selectedUser = users.find((u) => u.id === selectedUserId);
+    return (
+      <OffboardedUserDetailView
+        userId={selectedUserId}
+        userName={selectedUser?.name || "Unknown user"}
+        userInitials={selectedUser?.initials || "?"}
+        userColor={selectedUser?.color || "var(--text-muted)"}
+        userEmail={selectedUser?.email || ""}
+        counts={selectedUser?.counts}
+        activeMembers={activeMembers}
+        onBack={() => { setSelectedUserId(null); load(); }}
+        onBulkReassign={() => {
+          // Open the existing bulk modal for the speed case
+          if (selectedUser) setReassignTarget(selectedUser);
+        }}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -2511,16 +2534,24 @@ function OffboardedUsersPanel({ onJump }: { onJump: (viewMode: string) => void }
                   <CountCell n={c.drafts} highlight={false} muted />
                   <CountCell n={c.unread_notifications} highlight={false} muted />
                   <td className="px-4 py-3 align-middle text-right">
-                    {hasActionable || c.drafts > 0 || c.unread_notifications > 0 ? (
+                    <div className="inline-flex items-center gap-1.5 justify-end">
                       <button
-                        onClick={() => setReassignTarget(u)}
-                        className="px-2.5 py-1 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold hover:bg-[var(--accent-strong)]"
+                        onClick={() => setSelectedUserId(u.id)}
+                        className="px-2.5 py-1 rounded-md border border-[var(--border)] text-[var(--text-secondary)] text-[11px] font-medium hover:bg-[var(--bg)]"
                       >
-                        Reassign
+                        View
                       </button>
-                    ) : (
-                      <span className="text-[10px] text-[var(--text-muted)] italic">No outstanding work</span>
-                    )}
+                      {hasActionable || c.drafts > 0 || c.unread_notifications > 0 ? (
+                        <button
+                          onClick={() => setReassignTarget(u)}
+                          className="px-2.5 py-1 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold hover:bg-[var(--accent-strong)]"
+                        >
+                          Reassign all
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-[var(--text-muted)] italic">No outstanding work</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -2906,5 +2937,1050 @@ function ResultRow({
         {ok ? detail : error}
       </span>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// OffboardedUserDetailView — per-user drill-down with tabs
+// ─────────────────────────────────────────────────────────
+
+type DetailTab = "conversations" | "tasks" | "follow_ups" | "watchers" | "drafts";
+
+function OffboardedUserDetailView({
+  userId,
+  userName,
+  userInitials,
+  userColor,
+  userEmail,
+  counts,
+  activeMembers,
+  onBack,
+  onBulkReassign,
+}: {
+  userId: string;
+  userName: string;
+  userInitials: string;
+  userColor: string;
+  userEmail: string;
+  counts: OffboardedUser["counts"] | undefined;
+  activeMembers: ActiveMember[];
+  onBack: () => void;
+  onBulkReassign: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<DetailTab>("conversations");
+
+  return (
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] text-[11px] font-medium hover:bg-[var(--bg)] inline-flex items-center gap-1"
+          >
+            <ArrowLeft size={11} />
+            Back to list
+          </button>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-[var(--bg)] opacity-60"
+              style={{ background: userColor }}
+            >
+              {userInitials}
+            </span>
+            <div>
+              <div className="text-[14px] font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                <span className="line-through opacity-70">{userName}</span>
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--text-muted)]/15 text-[var(--text-muted)]">
+                  Deactivated
+                </span>
+              </div>
+              <div className="text-[10px] text-[var(--text-muted)] font-mono">{userEmail}</div>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onBulkReassign}
+          className="px-3 py-1.5 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold hover:opacity-90"
+        >
+          Reassign everything →
+        </button>
+      </div>
+
+      {/* Tab strip */}
+      <div className="flex items-center gap-1 border-b border-[var(--border)] -mb-px overflow-x-auto">
+        <DetailTabButton
+          active={activeTab === "conversations"}
+          onClick={() => setActiveTab("conversations")}
+          label="Conversations"
+          count={counts?.conversations ?? 0}
+        />
+        <DetailTabButton
+          active={activeTab === "tasks"}
+          onClick={() => setActiveTab("tasks")}
+          label="Open Tasks"
+          count={counts?.open_tasks ?? 0}
+        />
+        <DetailTabButton
+          active={activeTab === "follow_ups"}
+          onClick={() => setActiveTab("follow_ups")}
+          label="Call Follow-ups"
+          count={counts?.active_follow_ups ?? 0}
+        />
+        <DetailTabButton
+          active={activeTab === "watchers"}
+          onClick={() => setActiveTab("watchers")}
+          label="Watchers"
+          count={counts?.watched_threads ?? 0}
+        />
+        <DetailTabButton
+          active={activeTab === "drafts"}
+          onClick={() => setActiveTab("drafts")}
+          label="Drafts"
+          count={counts?.drafts ?? 0}
+        />
+      </div>
+
+      {/* Tab content */}
+      <div className="pt-2">
+        {activeTab === "conversations" && <ConversationsTab userId={userId} activeMembers={activeMembers} />}
+        {activeTab === "tasks" && <TasksTab userId={userId} activeMembers={activeMembers} />}
+        {activeTab === "follow_ups" && <FollowUpsTab userId={userId} activeMembers={activeMembers} />}
+        {activeTab === "watchers" && <WatchersTab userId={userId} activeMembers={activeMembers} />}
+        {activeTab === "drafts" && <DraftsTab userId={userId} />}
+      </div>
+    </div>
+  );
+}
+
+function DetailTabButton({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-2 text-[11px] font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+        active
+          ? "border-[var(--accent)] text-[var(--text-primary)]"
+          : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+      }`}
+    >
+      {label}
+      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono ${
+        active ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-[var(--border)] text-[var(--text-muted)]"
+      }`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Generic tab plumbing — search box + sort dropdown +
+// selection state + bulk action bar.
+// ─────────────────────────────────────────────────────────
+
+function useListLoader<T extends { id: string }>(
+  userId: string,
+  category: string,
+  q: string,
+  sort: string,
+) {
+  const [items, setItems] = useState<T[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ category, q, sort, limit: "200" });
+        const res = await fetch(`/api/admin/offboarded-users/${userId}/items?${params.toString()}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data?.error || "Failed to load");
+        setItems((data.items || []) as T[]);
+        setTotal(data.total || 0);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, category, q, sort, refreshKey]);
+
+  const refresh = () => setRefreshKey((k) => k + 1);
+  return { items, total, loading, error, refresh };
+}
+
+function SelectionToolbar({
+  count,
+  onClearSelection,
+  children,
+}: {
+  count: number;
+  onClearSelection: () => void;
+  children: React.ReactNode;
+}) {
+  if (count === 0) return null;
+  return (
+    <div className="sticky top-0 z-10 -mx-1 px-3 py-2 mb-2 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-[11px] text-[var(--text-primary)]">
+        <span className="font-semibold">{count} selected</span>
+        <button onClick={onClearSelection} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] underline">
+          Clear
+        </button>
+      </div>
+      <div className="flex items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+function SearchAndSort({
+  q,
+  setQ,
+  sort,
+  setSort,
+  sortOptions,
+  totalLabel,
+}: {
+  q: string;
+  setQ: (v: string) => void;
+  sort: string;
+  setSort: (v: string) => void;
+  sortOptions: Array<{ value: string; label: string }>;
+  totalLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <input
+        type="text"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search…"
+        className="flex-1 px-2.5 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
+      />
+      <select
+        value={sort}
+        onChange={(e) => setSort(e.target.value)}
+        className="px-2 py-1.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+      >
+        {sortOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      <span className="text-[10px] text-[var(--text-muted)] font-mono whitespace-nowrap">{totalLabel}</span>
+    </div>
+  );
+}
+
+function MemberPicker({
+  value,
+  onChange,
+  activeMembers,
+  placeholder = "— Pick team member —",
+  className = "",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  activeMembers: ActiveMember[];
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`px-2 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${className}`}
+    >
+      <option value="">{placeholder}</option>
+      {activeMembers.map((m) => (
+        <option key={m.id} value={m.id}>{m.name}</option>
+      ))}
+    </select>
+  );
+}
+
+async function postAction(userId: string, body: any): Promise<{ ok: boolean; applied: number; error?: string }> {
+  try {
+    const res = await fetch(`/api/admin/offboarded-users/${userId}/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, applied: 0, error: data?.error || "Action failed" };
+    return { ok: true, applied: data.applied || 0 };
+  } catch (e: any) {
+    return { ok: false, applied: 0, error: e?.message || "Action failed" };
+  }
+}
+
+function fmtRelative(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const now = Date.now();
+  const diff = Math.floor((now - d.getTime()) / 60000);
+  if (diff < 60) return `${diff}m ago`;
+  if (diff < 60 * 24) return `${Math.floor(diff / 60)}h ago`;
+  if (diff < 60 * 24 * 30) return `${Math.floor(diff / (60 * 24))}d ago`;
+  return d.toLocaleDateString();
+}
+
+// ─────────────────────────────────────────────────────────
+// ConversationsTab
+// ─────────────────────────────────────────────────────────
+
+function ConversationsTab({ userId, activeMembers }: { userId: string; activeMembers: ActiveMember[] }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("default");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [working, setWorking] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { items, total, loading, error, refresh } = useListLoader<any>(userId, "conversations", q, sort);
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items.map((i: any) => i.id)));
+  };
+
+  const doBulk = async (action: "reassign_conversations" | "unassign_conversations") => {
+    if (selected.size === 0) return;
+    if (action === "reassign_conversations" && !bulkTarget) {
+      setMsg("Pick a target team member first");
+      return;
+    }
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, {
+      action,
+      item_ids: Array.from(selected),
+      to_user_id: action === "reassign_conversations" ? bulkTarget : null,
+    });
+    setWorking(false);
+    if (r.ok) {
+      setMsg(`${action === "unassign_conversations" ? "Sent to team inbox" : "Reassigned"}: ${r.applied} conversation${r.applied === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      refresh();
+    } else {
+      setMsg(`Error: ${r.error}`);
+    }
+  };
+
+  const doSingle = async (id: string, action: "reassign_conversations" | "unassign_conversations", targetId?: string) => {
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action, item_ids: [id], to_user_id: targetId || null });
+    setWorking(false);
+    if (r.ok) refresh();
+    else setMsg(`Error: ${r.error}`);
+  };
+
+  return (
+    <div>
+      <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
+        sortOptions={[
+          { value: "default", label: "Newest message first" },
+          { value: "last_message_at_asc", label: "Oldest message first" },
+          { value: "subject", label: "Subject A → Z" },
+        ]}
+        totalLabel={`Showing ${items.length} of ${total}`}
+      />
+
+      <SelectionToolbar count={selected.size} onClearSelection={() => setSelected(new Set())}>
+        <MemberPicker value={bulkTarget} onChange={setBulkTarget} activeMembers={activeMembers} />
+        <button
+          onClick={() => doBulk("reassign_conversations")}
+          disabled={working || !bulkTarget}
+          className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--accent)] text-[var(--bg)] disabled:opacity-50"
+        >
+          Reassign selected
+        </button>
+        <button
+          onClick={() => doBulk("unassign_conversations")}
+          disabled={working}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg)] disabled:opacity-50"
+        >
+          ↩ Send to team inbox
+        </button>
+      </SelectionToolbar>
+
+      {msg && (
+        <div className={`mb-2 px-2 py-1.5 rounded text-[11px] ${msg.startsWith("Error") ? "bg-[var(--danger)]/10 text-[var(--danger)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? <TabLoading /> : error ? <TabError msg={error} /> : items.length === 0 ? (
+        <TabEmpty msg="No assigned conversations." />
+      ) : (
+        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+              <tr>
+                <th className="text-left px-3 py-2 w-[40px]">
+                  <input type="checkbox" checked={items.length > 0 && selected.size === items.length}
+                    onChange={toggleAll} className="cursor-pointer" />
+                </th>
+                <th className="text-left px-3 py-2">Subject</th>
+                <th className="text-left px-3 py-2 w-[140px]">Account</th>
+                <th className="text-left px-3 py-2 w-[120px]">Last message</th>
+                <th className="text-right px-3 py-2 w-[140px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {items.map((c: any) => (
+                <ConversationRow key={c.id}
+                  conversation={c}
+                  selected={selected.has(c.id)}
+                  onToggle={() => toggle(c.id)}
+                  activeMembers={activeMembers}
+                  onReassign={(target) => doSingle(c.id, "reassign_conversations", target)}
+                  onUnassign={() => doSingle(c.id, "unassign_conversations")}
+                  working={working}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConversationRow({
+  conversation, selected, onToggle, activeMembers, onReassign, onUnassign, working,
+}: {
+  conversation: any;
+  selected: boolean;
+  onToggle: () => void;
+  activeMembers: ActiveMember[];
+  onReassign: (targetId: string) => void;
+  onUnassign: () => void;
+  working: boolean;
+}) {
+  const [rowTarget, setRowTarget] = useState("");
+  const c = conversation;
+  return (
+    <tr className="hover:bg-[var(--bg)]/40">
+      <td className="px-3 py-2.5 align-top">
+        <input type="checkbox" checked={selected} onChange={onToggle} className="cursor-pointer mt-0.5" />
+      </td>
+      <td className="px-3 py-2.5 align-top">
+        <div className="text-[12px] font-medium text-[var(--text-primary)] truncate max-w-[400px]">{c.subject}</div>
+        {c.from_name && <div className="text-[10px] text-[var(--text-muted)] truncate">from {c.from_name}</div>}
+        {c.preview && <div className="text-[10px] text-[var(--text-muted)] truncate max-w-[400px]">{c.preview}</div>}
+      </td>
+      <td className="px-3 py-2.5 align-top">
+        {c.email_account_name && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{
+              background: `color-mix(in srgb, ${c.email_account_color || "var(--text-muted)"} 14%, transparent)`,
+              color: c.email_account_color || "var(--text-secondary)",
+            }}>
+            {c.email_account_icon && <span>{c.email_account_icon}</span>}
+            {c.email_account_name}
+          </span>
+        )}
+      </td>
+      <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)]">
+        {fmtRelative(c.last_message_at)}
+      </td>
+      <td className="px-3 py-2.5 align-top">
+        <div className="flex items-center gap-1 justify-end">
+          <select
+            value={rowTarget}
+            onChange={(e) => { setRowTarget(e.target.value); if (e.target.value) onReassign(e.target.value); }}
+            disabled={working}
+            className="px-1.5 py-1 rounded text-[10px] bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] outline-none"
+          >
+            <option value="">Reassign to…</option>
+            {activeMembers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <button
+            onClick={onUnassign}
+            disabled={working}
+            title="Send back to team inbox (unassign)"
+            className="px-1.5 py-1 rounded text-[10px] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg)] disabled:opacity-50"
+          >
+            ↩
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// TasksTab
+// ─────────────────────────────────────────────────────────
+
+function TasksTab({ userId, activeMembers }: { userId: string; activeMembers: ActiveMember[] }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("default");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [working, setWorking] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { items, total, loading, error, refresh } = useListLoader<any>(userId, "tasks", q, sort);
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items.map((i: any) => i.id)));
+  };
+
+  const doBulk = async (action: "reassign_tasks" | "unassign_tasks") => {
+    if (selected.size === 0) return;
+    if (action === "reassign_tasks" && !bulkTarget) { setMsg("Pick a target team member first"); return; }
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, {
+      action,
+      item_ids: Array.from(selected),
+      to_user_id: action === "reassign_tasks" ? bulkTarget : null,
+    });
+    setWorking(false);
+    if (r.ok) {
+      setMsg(`${action === "unassign_tasks" ? "Unassigned" : "Reassigned"}: ${r.applied} task${r.applied === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      refresh();
+    } else setMsg(`Error: ${r.error}`);
+  };
+
+  const doSingle = async (id: string, action: "reassign_tasks" | "unassign_tasks", targetId?: string) => {
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action, item_ids: [id], to_user_id: targetId || null });
+    setWorking(false);
+    if (r.ok) refresh();
+    else setMsg(`Error: ${r.error}`);
+  };
+
+  return (
+    <div>
+      <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
+        sortOptions={[
+          { value: "default", label: "Due date (soonest)" },
+          { value: "due_date_desc", label: "Due date (latest)" },
+          { value: "created_at", label: "Newest first" },
+        ]}
+        totalLabel={`Showing ${items.length} of ${total}`}
+      />
+
+      <SelectionToolbar count={selected.size} onClearSelection={() => setSelected(new Set())}>
+        <MemberPicker value={bulkTarget} onChange={setBulkTarget} activeMembers={activeMembers} />
+        <button onClick={() => doBulk("reassign_tasks")} disabled={working || !bulkTarget}
+          className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--accent)] text-[var(--bg)] disabled:opacity-50">
+          Reassign selected
+        </button>
+        <button onClick={() => doBulk("unassign_tasks")} disabled={working}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg)] disabled:opacity-50">
+          Just remove from tasks
+        </button>
+      </SelectionToolbar>
+
+      {msg && (
+        <div className={`mb-2 px-2 py-1.5 rounded text-[11px] ${msg.startsWith("Error") ? "bg-[var(--danger)]/10 text-[var(--danger)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? <TabLoading /> : error ? <TabError msg={error} /> : items.length === 0 ? (
+        <TabEmpty msg="No open tasks assigned." />
+      ) : (
+        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+              <tr>
+                <th className="text-left px-3 py-2 w-[40px]">
+                  <input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={toggleAll} />
+                </th>
+                <th className="text-left px-3 py-2">Task</th>
+                <th className="text-left px-3 py-2 w-[120px]">Status</th>
+                <th className="text-left px-3 py-2 w-[120px]">Due</th>
+                <th className="text-left px-3 py-2 w-[130px]">Also assigned to</th>
+                <th className="text-right px-3 py-2 w-[140px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {items.map((t: any) => {
+                const isOverdue = t.due_date && new Date(t.due_date) < new Date() && t.status !== "completed";
+                return (
+                  <tr key={t.id} className="hover:bg-[var(--bg)]/40">
+                    <td className="px-3 py-2.5 align-top">
+                      <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} className="mt-0.5" />
+                    </td>
+                    <td className="px-3 py-2.5 align-top">
+                      <div className="text-[12px] text-[var(--text-primary)] line-clamp-2">{t.text}</div>
+                    </td>
+                    <td className="px-3 py-2.5 align-top">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        t.status === "in_progress" ? "bg-[var(--highlight)]/15 text-[var(--highlight)]" :
+                        "bg-[var(--info)]/15 text-[var(--info)]"
+                      }`}>
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 align-top">
+                      {t.due_date ? (
+                        <span className={`text-[10px] font-mono ${isOverdue ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}>
+                          {new Date(t.due_date).toLocaleDateString()}{t.due_time ? ` ${t.due_time}` : ""}
+                        </span>
+                      ) : <span className="text-[10px] text-[var(--text-muted)] italic">no due date</span>}
+                    </td>
+                    <td className="px-3 py-2.5 align-top">
+                      {t.co_assignees && t.co_assignees.length > 0 ? (
+                        <div className="flex -space-x-1">
+                          {t.co_assignees.slice(0, 3).map((m: any) => (
+                            <span key={m.id} title={m.name}
+                              className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)] border border-[var(--surface)]"
+                              style={{ background: m.color || "var(--text-muted)" }}>
+                              {m.initials}
+                            </span>
+                          ))}
+                        </div>
+                      ) : <span className="text-[10px] text-[var(--text-muted)] italic">solo</span>}
+                    </td>
+                    <td className="px-3 py-2.5 align-top">
+                      <div className="flex items-center gap-1 justify-end">
+                        <RowReassignSelect activeMembers={activeMembers} onPick={(id) => doSingle(t.id, "reassign_tasks", id)} disabled={working} />
+                        <button onClick={() => doSingle(t.id, "unassign_tasks")} disabled={working}
+                          title="Remove from this task (no replacement)"
+                          className="px-1.5 py-1 rounded text-[10px] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg)] disabled:opacity-50">
+                          ×
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Re-usable inline reassign select for table rows
+function RowReassignSelect({ activeMembers, onPick, disabled }: { activeMembers: ActiveMember[]; onPick: (id: string) => void; disabled: boolean }) {
+  return (
+    <select
+      onChange={(e) => { if (e.target.value) { onPick(e.target.value); e.target.value = ""; } }}
+      disabled={disabled}
+      className="px-1.5 py-1 rounded text-[10px] bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] outline-none"
+    >
+      <option value="">Reassign to…</option>
+      {activeMembers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+    </select>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// FollowUpsTab
+// ─────────────────────────────────────────────────────────
+
+function FollowUpsTab({ userId, activeMembers }: { userId: string; activeMembers: ActiveMember[] }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("default");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [working, setWorking] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { items, total, loading, error, refresh } = useListLoader<any>(userId, "follow_ups", q, sort);
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items.map((i: any) => i.id)));
+  };
+
+  const doBulk = async (action: "reassign_follow_ups" | "cancel_follow_ups") => {
+    if (selected.size === 0) return;
+    if (action === "reassign_follow_ups" && !bulkTarget) { setMsg("Pick a target team member first"); return; }
+    if (action === "cancel_follow_ups" && !confirm(`Cancel ${selected.size} follow-up${selected.size === 1 ? "" : "s"}? This deletes the follow-up rows.`)) return;
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, {
+      action,
+      item_ids: Array.from(selected),
+      to_user_id: action === "reassign_follow_ups" ? bulkTarget : null,
+    });
+    setWorking(false);
+    if (r.ok) {
+      setMsg(`${action === "cancel_follow_ups" ? "Cancelled" : "Reassigned"}: ${r.applied} follow-up${r.applied === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      refresh();
+    } else setMsg(`Error: ${r.error}`);
+  };
+
+  const doSingle = async (id: string, action: "reassign_follow_ups" | "cancel_follow_ups", targetId?: string) => {
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action, item_ids: [id], to_user_id: targetId || null });
+    setWorking(false);
+    if (r.ok) refresh();
+    else setMsg(`Error: ${r.error}`);
+  };
+
+  return (
+    <div>
+      <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
+        sortOptions={[
+          { value: "default", label: "Next attempt (soonest)" },
+          { value: "created_at_desc", label: "Newest first" },
+        ]}
+        totalLabel={`Showing ${items.length} of ${total}`}
+      />
+
+      <SelectionToolbar count={selected.size} onClearSelection={() => setSelected(new Set())}>
+        <MemberPicker value={bulkTarget} onChange={setBulkTarget} activeMembers={activeMembers} />
+        <button onClick={() => doBulk("reassign_follow_ups")} disabled={working || !bulkTarget}
+          className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--accent)] text-[var(--bg)] disabled:opacity-50">
+          Reassign selected
+        </button>
+        <button onClick={() => doBulk("cancel_follow_ups")} disabled={working}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/8 disabled:opacity-50">
+          Cancel follow-ups
+        </button>
+      </SelectionToolbar>
+
+      {msg && (
+        <div className={`mb-2 px-2 py-1.5 rounded text-[11px] ${msg.startsWith("Error") ? "bg-[var(--danger)]/10 text-[var(--danger)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? <TabLoading /> : error ? <TabError msg={error} /> : items.length === 0 ? (
+        <TabEmpty msg="No active call follow-ups." />
+      ) : (
+        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+              <tr>
+                <th className="text-left px-3 py-2 w-[40px]">
+                  <input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={toggleAll} />
+                </th>
+                <th className="text-left px-3 py-2">Supplier / Caller</th>
+                <th className="text-left px-3 py-2 w-[110px]">Status</th>
+                <th className="text-left px-3 py-2 w-[120px]">Next attempt</th>
+                <th className="text-right px-3 py-2 w-[140px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {items.map((f: any) => (
+                <tr key={f.id} className="hover:bg-[var(--bg)]/40">
+                  <td className="px-3 py-2.5 align-top">
+                    <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} className="mt-0.5" />
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="text-[12px] font-medium text-[var(--text-primary)]">
+                      {f.supplier_name || f.person_name || <span className="italic text-[var(--text-muted)]">Unknown</span>}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] font-mono">{f.participant_phone || "—"}</div>
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--info)]/15 text-[var(--info)]">
+                      {f.status} · attempt {f.attempt_count || 1}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)] font-mono">
+                    {fmtRelative(f.next_attempt_after)}
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="flex items-center gap-1 justify-end">
+                      <RowReassignSelect activeMembers={activeMembers} onPick={(id) => doSingle(f.id, "reassign_follow_ups", id)} disabled={working} />
+                      <button onClick={() => { if (confirm("Cancel this follow-up?")) doSingle(f.id, "cancel_follow_ups"); }} disabled={working}
+                        title="Cancel follow-up (delete)"
+                        className="px-1.5 py-1 rounded text-[10px] border border-[var(--danger)]/30 text-[var(--danger)] hover:bg-[var(--danger)]/8 disabled:opacity-50">
+                        Cancel
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// WatchersTab
+// ─────────────────────────────────────────────────────────
+
+function WatchersTab({ userId, activeMembers }: { userId: string; activeMembers: ActiveMember[] }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("default");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [working, setWorking] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { items, total, loading, error, refresh } = useListLoader<any>(userId, "watchers", q, sort);
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items.map((i: any) => i.id)));
+  };
+
+  const doBulk = async (action: "transfer_watchers" | "delete_watchers") => {
+    if (selected.size === 0) return;
+    if (action === "transfer_watchers" && !bulkTarget) { setMsg("Pick a target team member first"); return; }
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, {
+      action,
+      item_ids: Array.from(selected),
+      to_user_id: action === "transfer_watchers" ? bulkTarget : null,
+    });
+    setWorking(false);
+    if (r.ok) {
+      setMsg(`${action === "delete_watchers" ? "Deleted" : "Transferred"}: ${r.applied} watcher row${r.applied === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      refresh();
+    } else setMsg(`Error: ${r.error}`);
+  };
+
+  const doSingle = async (id: string, action: "transfer_watchers" | "delete_watchers", targetId?: string) => {
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action, item_ids: [id], to_user_id: targetId || null });
+    setWorking(false);
+    if (r.ok) refresh();
+    else setMsg(`Error: ${r.error}`);
+  };
+
+  return (
+    <div>
+      <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
+        sortOptions={[
+          { value: "default", label: "Recently watched first" },
+          { value: "created_at_asc", label: "Oldest first" },
+        ]}
+        totalLabel={`Showing ${items.length} of ${total}`}
+      />
+
+      <SelectionToolbar count={selected.size} onClearSelection={() => setSelected(new Set())}>
+        <MemberPicker value={bulkTarget} onChange={setBulkTarget} activeMembers={activeMembers} />
+        <button onClick={() => doBulk("transfer_watchers")} disabled={working || !bulkTarget}
+          className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--accent)] text-[var(--bg)] disabled:opacity-50">
+          Transfer to target
+        </button>
+        <button onClick={() => doBulk("delete_watchers")} disabled={working}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg)] disabled:opacity-50">
+          Delete watcher rows
+        </button>
+      </SelectionToolbar>
+
+      {msg && (
+        <div className={`mb-2 px-2 py-1.5 rounded text-[11px] ${msg.startsWith("Error") ? "bg-[var(--danger)]/10 text-[var(--danger)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? <TabLoading /> : error ? <TabError msg={error} /> : items.length === 0 ? (
+        <TabEmpty msg="No watched conversations." />
+      ) : (
+        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+              <tr>
+                <th className="text-left px-3 py-2 w-[40px]">
+                  <input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={toggleAll} />
+                </th>
+                <th className="text-left px-3 py-2">Conversation</th>
+                <th className="text-left px-3 py-2 w-[140px]">Account</th>
+                <th className="text-left px-3 py-2 w-[100px]">Watched</th>
+                <th className="text-right px-3 py-2 w-[160px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {items.map((w: any) => (
+                <tr key={w.id} className="hover:bg-[var(--bg)]/40">
+                  <td className="px-3 py-2.5 align-top">
+                    <input type="checkbox" checked={selected.has(w.id)} onChange={() => toggle(w.id)} className="mt-0.5" />
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="text-[12px] font-medium text-[var(--text-primary)] truncate max-w-[400px]">{w.subject}</div>
+                    {w.preview && <div className="text-[10px] text-[var(--text-muted)] truncate max-w-[400px]">{w.preview}</div>}
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    {w.email_account_name && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{
+                          background: `color-mix(in srgb, ${w.email_account_color || "var(--text-muted)"} 14%, transparent)`,
+                          color: w.email_account_color || "var(--text-secondary)",
+                        }}>
+                        {w.email_account_icon && <span>{w.email_account_icon}</span>}
+                        {w.email_account_name}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)]">{fmtRelative(w.created_at)}</td>
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="flex items-center gap-1 justify-end">
+                      <RowReassignSelect activeMembers={activeMembers} onPick={(id) => doSingle(w.id, "transfer_watchers", id)} disabled={working} />
+                      <button onClick={() => doSingle(w.id, "delete_watchers")} disabled={working}
+                        title="Delete this watch entry"
+                        className="px-1.5 py-1 rounded text-[10px] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg)] disabled:opacity-50">
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// DraftsTab
+// ─────────────────────────────────────────────────────────
+
+function DraftsTab({ userId }: { userId: string }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("default");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [working, setWorking] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { items, total, loading, error, refresh } = useListLoader<any>(userId, "drafts", q, sort);
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (selected.size === items.length) setSelected(new Set());
+    else setSelected(new Set(items.map((i: any) => i.id)));
+  };
+
+  const doBulkDelete = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`Delete ${selected.size} draft${selected.size === 1 ? "" : "s"}? This is permanent.`)) return;
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action: "delete_drafts", item_ids: Array.from(selected) });
+    setWorking(false);
+    if (r.ok) {
+      setMsg(`Deleted ${r.applied} draft${r.applied === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      refresh();
+    } else setMsg(`Error: ${r.error}`);
+  };
+
+  const doSingleDelete = async (id: string) => {
+    if (!confirm("Delete this draft?")) return;
+    setWorking(true);
+    setMsg(null);
+    const r = await postAction(userId, { action: "delete_drafts", item_ids: [id] });
+    setWorking(false);
+    if (r.ok) refresh();
+    else setMsg(`Error: ${r.error}`);
+  };
+
+  return (
+    <div>
+      <div className="text-[10px] text-[var(--text-muted)] mb-2">
+        Drafts have personal voice and aren't transferable. You can review and delete the ones you don't want to keep.
+      </div>
+
+      <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
+        sortOptions={[
+          { value: "default", label: "Most recent first" },
+          { value: "updated_at_asc", label: "Oldest first" },
+        ]}
+        totalLabel={`Showing ${items.length} of ${total}`}
+      />
+
+      <SelectionToolbar count={selected.size} onClearSelection={() => setSelected(new Set())}>
+        <button onClick={doBulkDelete} disabled={working}
+          className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--danger)] text-[var(--bg)] disabled:opacity-50">
+          Delete selected
+        </button>
+      </SelectionToolbar>
+
+      {msg && (
+        <div className={`mb-2 px-2 py-1.5 rounded text-[11px] ${msg.startsWith("Error") ? "bg-[var(--danger)]/10 text-[var(--danger)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
+          {msg}
+        </div>
+      )}
+
+      {loading ? <TabLoading /> : error ? <TabError msg={error} /> : items.length === 0 ? (
+        <TabEmpty msg="No drafts." />
+      ) : (
+        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+              <tr>
+                <th className="text-left px-3 py-2 w-[40px]">
+                  <input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={toggleAll} />
+                </th>
+                <th className="text-left px-3 py-2">Subject</th>
+                <th className="text-left px-3 py-2">To</th>
+                <th className="text-left px-3 py-2 w-[110px]">Updated</th>
+                <th className="text-right px-3 py-2 w-[80px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {items.map((d: any) => (
+                <tr key={d.id} className="hover:bg-[var(--bg)]/40">
+                  <td className="px-3 py-2.5 align-top">
+                    <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} className="mt-0.5" />
+                  </td>
+                  <td className="px-3 py-2.5 align-top">
+                    <div className="text-[12px] font-medium text-[var(--text-primary)] truncate max-w-[300px]">{d.subject}</div>
+                  </td>
+                  <td className="px-3 py-2.5 align-top text-[11px] text-[var(--text-secondary)] truncate max-w-[260px] font-mono">
+                    {d.to_addresses || <span className="italic text-[var(--text-muted)]">no recipients</span>}
+                  </td>
+                  <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)] font-mono">{fmtRelative(d.updated_at)}</td>
+                  <td className="px-3 py-2.5 align-top text-right">
+                    <button onClick={() => doSingleDelete(d.id)} disabled={working}
+                      className="px-1.5 py-1 rounded text-[10px] border border-[var(--danger)]/30 text-[var(--danger)] hover:bg-[var(--danger)]/8 disabled:opacity-50">
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Tab utility components
+// ─────────────────────────────────────────────────────────
+
+function TabLoading() {
+  return (
+    <div className="py-8 flex items-center justify-center text-[var(--text-muted)] text-[11px]">
+      <Loader2 size={14} className="animate-spin mr-2" /> Loading…
+    </div>
+  );
+}
+
+function TabError({ msg }: { msg: string }) {
+  return (
+    <div className="px-3 py-2 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-[11px] text-[var(--danger)] flex items-start gap-2">
+      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+      <span>{msg}</span>
+    </div>
+  );
+}
+
+function TabEmpty({ msg }: { msg: string }) {
+  return (
+    <div className="py-12 text-center text-[var(--text-muted)] text-[12px]">{msg}</div>
   );
 }
