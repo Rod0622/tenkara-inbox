@@ -862,6 +862,34 @@ export default function ConversationDetail({
     return parent ? `${parent.name} / ${label.name}` : label.name || "";
   };
 
+  // Sort label badges into a consistent hierarchy:
+  //   1. The email account's own label (e.g. "Bobber Labs") — always leftmost
+  //   2. Other top-level labels (parent_label_id IS NULL), alphabetical
+  //   3. Child labels (parent_label_id IS NOT NULL), sorted by parent then child
+  // This gives users a predictable read order: "where it lives → categories →
+  // subcategories" instead of whatever order Postgres happened to return.
+  const sortLabelsForBadges = (labels: any[]): any[] => {
+    const acctName = (accountName || "").trim().toLowerCase();
+    const priority = (cl: any): number => {
+      const lbl = cl?.label;
+      if (!lbl) return 9;
+      const isAccountLabel = acctName && (lbl.name || "").trim().toLowerCase() === acctName;
+      if (isAccountLabel) return 0;
+      if (!lbl.parent_label_id) return 1; // top-level
+      return 2; // child
+    };
+    return [...labels].sort((a, b) => {
+      const pa = priority(a);
+      const pb = priority(b);
+      if (pa !== pb) return pa - pb;
+      // Same tier: alpha by the rendered chip name so parent/child labels sort
+      // by their full "Parent / Child" string (groups siblings under same parent).
+      const na = labelChipName(a?.label).toLowerCase();
+      const nb = labelChipName(b?.label).toLowerCase();
+      return na.localeCompare(nb);
+    });
+  };
+
   // Merge state
   const [mergedThreads, setMergedThreads] = useState<any[]>([]);
   const [mergingThreadId, setMergingThreadId] = useState<string | null>(null);
@@ -2466,7 +2494,7 @@ export default function ConversationDetail({
           )}
 
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            {(convo.labels || []).map(
+            {sortLabelsForBadges(convo.labels || []).map(
               (cl) =>
                 cl.label && (
                   <span
@@ -4238,7 +4266,7 @@ export default function ConversationDetail({
 
                         {(thread.labels || []).length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-2">
-                            {thread.labels.map((cl: any) =>
+                            {sortLabelsForBadges(thread.labels).map((cl: any) =>
                               cl.label ? (
                                 <span
                                   key={`${thread.id}-${cl.label_id || cl.label?.id}`}
