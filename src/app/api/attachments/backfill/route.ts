@@ -321,8 +321,10 @@ export async function POST(req: NextRequest) {
       const hasBytes = !!body.attachmentId || !!body.data;
       const mime = String(payload.mimeType || "");
       // text/plain and text/html are the message body, not attachments.
+      // message/rfc822 = nested forwarded email; capture these too.
       const isBodyText = mime === "text/plain" || mime === "text/html";
-      if (!isBodyText && hasBytes && (payload.filename || mime.startsWith("image/") || mime.startsWith("application/"))) {
+      const isNestedEmail = mime === "message/rfc822";
+      if (!isBodyText && hasBytes && (payload.filename || isNestedEmail || mime.startsWith("image/") || mime.startsWith("application/"))) {
         out.push(payload);
       }
       if (Array.isArray(payload.parts)) for (const p of payload.parts) collectParts(p, out);
@@ -370,8 +372,30 @@ export async function POST(req: NextRequest) {
       const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
 
       // Derive a filename for parts that don't carry one.
+      // For message/rfc822 parts (forwarded emails), synthesize a .eml name
+      // from the nested message's Subject header.
       const fallbackName = (() => {
         const mt = String(p.mimeType || "").toLowerCase();
+        if (mt === "message/rfc822") {
+          const findSubject = (node: any): string | null => {
+            const hdrs: any[] = node?.headers || [];
+            const subj = hdrs.find((h) => h.name?.toLowerCase() === "subject")?.value;
+            if (subj) return subj;
+            if (Array.isArray(node?.parts)) {
+              for (const child of node.parts) {
+                const found = findSubject(child);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          const subj = findSubject(p);
+          const safe = (subj || "forwarded-message")
+            .replace(/[\/\\:*?"<>|\r\n]+/g, "")
+            .trim()
+            .slice(0, 100);
+          return `${safe || "forwarded-message"}.eml`;
+        }
         const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
         return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
       })();
@@ -478,6 +502,64 @@ export async function POST(req: NextRequest) {
         return;
       }
       const meta = items[i];
+      const odataType = String(meta["@odata.type"] || "").toLowerCase();
+      const isItemAttachment = odataType === "#microsoft.graph.itemattachment";
+
+      // ── itemAttachment (nested email / contact / calendar item) ──
+      // Graph splits attachments into fileAttachment (raw bytes) and
+      // itemAttachment (a nested Graph object, typically a message). The
+      // default GET /attachments/{id} endpoint omits the nested item.
+      // We refetch with $expand to retrieve the nested message JSON, then
+      // serialize it into a simplified RFC822 (.eml) format. Not byte-perfect
+      // — original MIME boundaries/encoding are gone — but valid .eml that
+      // any email client can open, with key headers + body preserved.
+      if (isItemAttachment) {
+        const expandRes = await fetchWithTimeout(
+          `${GRAPH_BASE}/users/${accountEmail}/messages/${graphMsgId}/attachments/${meta.id}?$expand=microsoft.graph.itemAttachment/item`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!expandRes.ok) {
+          stats.errors.push({ message_id: msgRowId, reason: `Graph itemAttachment fetch ${meta.name || "(unnamed)"} failed: ${expandRes.statusText}` });
+          continue;
+        }
+        const expand = await expandRes.json();
+        const nestedItem = expand.item || null;
+        if (!nestedItem) {
+          stats.errors.push({ message_id: msgRowId, reason: `Graph itemAttachment ${meta.name || "(unnamed)"}: no nested item` });
+          continue;
+        }
+
+        const eml = buildEmlFromGraphMessage(nestedItem);
+        const buf = Buffer.from(eml, "utf-8");
+        const subj = nestedItem.subject || meta.name || "forwarded-message";
+        const safeName = subj.replace(/[\/\\:*?"<>|\r\n]+/g, "").trim().slice(0, 100) || "forwarded-message";
+        const filename = `${safeName}.eml`;
+
+        const up = await uploadAttachmentToStorage(supabase, {
+          accountId,
+          messageId: msgRowId,
+          attachment: {
+            filename,
+            contentType: "message/rfc822",
+            size: buf.length,
+            isInline: !!meta.isInline,
+            contentId: meta.contentId || null,
+            checksum: null,
+            content: buf,
+          },
+          indexInMessage: i,
+        });
+        if (!up.ok && !up.skipped) {
+          stats.errors.push({ message_id: msgRowId, reason: `Graph itemAttachment upload ${filename}: ${up.error}` });
+        } else if (up.ok && !up.skipped) {
+          stats.attachmentsUploaded++;
+        } else if (up.skipped) {
+          stats.attachmentsSkipped++;
+        }
+        continue; // next attachment
+      }
+
+      // ── Regular fileAttachment path ──
       // Per-attachment fetch returns contentBytes; the list endpoint can omit it.
       const detailRes = await fetchWithTimeout(
         `${GRAPH_BASE}/users/${accountEmail}/messages/${graphMsgId}/attachments/${meta.id}`,
@@ -929,4 +1011,49 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+// Serialize a Microsoft Graph nested message object into a simplified
+// RFC822-formatted .eml string. We don't have the original raw MIME bytes
+// (Graph doesn't expose them for nested item attachments), so we synthesize a
+// valid but simplified .eml from the structured JSON. Any email client (Apple
+// Mail, Outlook, Thunderbird, Gmail web) will open it; the original headers,
+// MIME boundaries, and inline-image refs from the truly-original raw message
+// are lost.
+function buildEmlFromGraphMessage(msg: any): string {
+  const formatAddr = (addr: any): string => {
+    if (!addr?.emailAddress) return "";
+    const { name, address } = addr.emailAddress;
+    if (name && address && name !== address) return `"${name.replace(/"/g, '\\"')}" <${address}>`;
+    return address || "";
+  };
+  const formatAddrList = (list: any[] | undefined): string =>
+    (list || []).map(formatAddr).filter(Boolean).join(", ");
+
+  const headers: string[] = [];
+  if (msg.subject) headers.push(`Subject: ${String(msg.subject).replace(/\r?\n/g, " ")}`);
+  if (msg.from) {
+    const f = formatAddr(msg.from);
+    if (f) headers.push(`From: ${f}`);
+  }
+  const to = formatAddrList(msg.toRecipients);
+  if (to) headers.push(`To: ${to}`);
+  const cc = formatAddrList(msg.ccRecipients);
+  if (cc) headers.push(`Cc: ${cc}`);
+  const bcc = formatAddrList(msg.bccRecipients);
+  if (bcc) headers.push(`Bcc: ${bcc}`);
+  if (msg.sentDateTime) headers.push(`Date: ${new Date(msg.sentDateTime).toUTCString()}`);
+  if (msg.internetMessageId) headers.push(`Message-ID: ${msg.internetMessageId}`);
+  headers.push("MIME-Version: 1.0");
+
+  const bodyContent: string = msg.body?.content || msg.bodyPreview || "";
+  const isHtml = String(msg.body?.contentType || "").toLowerCase() === "html";
+  headers.push(`Content-Type: ${isHtml ? "text/html" : "text/plain"}; charset=utf-8`);
+  headers.push("Content-Transfer-Encoding: 8bit");
+
+  // Single-part .eml; if the nested item itself had attachments, we don't
+  // recurse — Graph only exposes one level of attachments per call and
+  // re-walking would explode the response size for deeply-nested forwards.
+  return headers.join("\r\n") + "\r\n\r\n" + bodyContent;
 }

@@ -262,7 +262,20 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             // fallback) renders correctly in the UI.
             const snippet = decodeEmailText(msgData.snippet || "");
             const sentAt = headers.date ? new Date(headers.date).toISOString() : new Date(parseInt(msgData.internalDate)).toISOString();
-            const hasAttachments = (msgData.payload?.parts || []).some((p: any) => p.filename && p.filename.length > 0);
+            // has_attachments must capture: parts with a filename (regular files),
+            // and parts that are nested forwarded emails (message/rfc822 — these
+            // often have NO filename header). Without the rfc822 case, forwarded-
+            // as-attachment emails get dropped silently.
+            const hasAttachmentsCheck = (parts: any[]): boolean => {
+              for (const p of parts) {
+                if (p.filename && p.filename.length > 0) return true;
+                const mt = String(p.mimeType || "").toLowerCase();
+                if (mt === "message/rfc822") return true;
+                if (Array.isArray(p.parts) && hasAttachmentsCheck(p.parts)) return true;
+              }
+              return false;
+            };
+            const hasAttachments = hasAttachmentsCheck(msgData.payload?.parts || []);
 
             // Extract HTML body from Gmail payload (nested MIME parts)
             const extractBody = (payload: any): { html: string; text: string } => {
@@ -578,8 +591,14 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 // Skip text/html and text/plain body parts — those are the
                 // message body, not attachments. Everything else with bytes
                 // is a candidate.
+                //
+                // message/rfc822 = a nested email (Gmail "Forward as
+                // attachment", inline forwards, etc). These often have NO
+                // filename header — Gmail's web UI invents one on download.
+                // We allow them through and synthesize a filename below.
                 const isBodyText = mime === "text/plain" || mime === "text/html";
-                if (!isBodyText && hasBytes && (payload.filename || mime.startsWith("image/") || mime.startsWith("application/"))) {
+                const isNestedEmail = mime === "message/rfc822";
+                if (!isBodyText && hasBytes && (payload.filename || isNestedEmail || mime.startsWith("image/") || mime.startsWith("application/"))) {
                   out.push(payload);
                 }
                 if (Array.isArray(payload.parts)) {
@@ -626,8 +645,35 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
 
                   // Derive a filename when the part doesn't carry one.
                   // Yahoo sometimes sends inline images with no filename header.
+                  // Gmail "Forward as attachment" sends message/rfc822 parts
+                  // with no filename — invent one from the nested Subject header
+                  // when possible, fall back to "forwarded-message.eml".
                   const fallbackName = (() => {
                     const mt = String(p.mimeType || "").toLowerCase();
+                    if (mt === "message/rfc822") {
+                      // Walk the nested part's headers for a Subject. Gmail
+                      // exposes them in p.parts[0].headers for the inner
+                      // RFC822 part — check both top-level and nested headers.
+                      const findSubject = (node: any): string | null => {
+                        const hdrs: any[] = node?.headers || [];
+                        const subj = hdrs.find((h) => h.name?.toLowerCase() === "subject")?.value;
+                        if (subj) return subj;
+                        if (Array.isArray(node?.parts)) {
+                          for (const child of node.parts) {
+                            const found = findSubject(child);
+                            if (found) return found;
+                          }
+                        }
+                        return null;
+                      };
+                      const subj = findSubject(p);
+                      // Sanitize for filesystem: remove / \ : * ? " < > | and trim
+                      const safe = (subj || "forwarded-message")
+                        .replace(/[\/\\:*?"<>|\r\n]+/g, "")
+                        .trim()
+                        .slice(0, 100);
+                      return `${safe || "forwarded-message"}.eml`;
+                    }
                     const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
                     return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
                   })();
