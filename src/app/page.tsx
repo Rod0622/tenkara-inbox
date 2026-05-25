@@ -18,7 +18,6 @@ import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
 import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
-import CallsView from "@/components/calls/CallsView";
 import CreateConversation from "@/components/CreateConversation";
 import QuickCallModal from "@/components/QuickCallModal";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -200,7 +199,6 @@ export default function InboxPage() {
 
   const isTaskView = (activeView === "tasks" || activeView === "new-task") && !activeMailbox && !activeFolder;
   const isDraftsView = activeView === "drafts" && !activeMailbox && !activeFolder;
-  const isCallsView = activeView === "calls" && !activeMailbox && !activeFolder;
   // Per-account "Drafts" virtual folder — selected when the user clicks the
   // Drafts row under an account in the sidebar. Shows ALL team members'
   // drafts on that account.
@@ -656,15 +654,6 @@ export default function InboxPage() {
               onTasksChanged={refetchTasks}
               autoOpenComposer={activeView === "new-task"}
               onOpenConversation={openConversationFromTask}
-            />
-          </Panel>
-        ) : isCallsView ? (
-          <Panel defaultSize={86} minSize={50} order={2} id="content-calls">
-            <CallsView
-              onOpenConversation={(conversationId) => {
-                setActiveView("inbox");
-                window.location.hash = `#conversation=${conversationId}`;
-              }}
             />
           </Panel>
         ) : isDraftsView ? (

@@ -8,9 +8,10 @@ import {
   ArrowLeft, Loader2, Users, CheckCircle2, AlertTriangle,
   ListTodo, Mail, CalendarClock, Send, ChevronDown, X,
   ExternalLink, Inbox, Eye, Download, FileSpreadsheet, FileJson, FileText,
-  UserMinus, Trash2, Clock
+  UserMinus, Trash2, Clock, Phone
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
+import CallsView from "@/components/calls/CallsView";
 import {
   getBusinessHoursRemaining as sharedGetBusinessHoursRemaining,
   getBusinessHoursElapsed as sharedGetBusinessHoursElapsed,
@@ -80,7 +81,7 @@ interface SentEmail {
   from_email: string;
 }
 
-type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export" | "removals";
+type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export" | "removals" | "calls";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -861,6 +862,7 @@ export default function DashboardPage() {
           { id: "critical", label: "Critical Tasks (" + criticalTasks.length + ")" },
           { id: "all-tasks", label: "All Tasks (" + allTasks.length + ")" },
           { id: "sla", label: "SLA / Response Times" },
+          { id: "calls", label: "Calls" },
           { id: "removals", label: "Removals" },
           { id: "export", label: "Export Data" },
         ] as { id: ViewMode; label: string }[]).map((tab) => (
@@ -931,6 +933,8 @@ export default function DashboardPage() {
                 <div className="text-center text-sm font-semibold text-[var(--accent)]">{user.sentEmails}</div>
               </button>
             ))}
+            {/* Quick-glance Calls widget — recent calls + active follow-ups */}
+            <CallsOverviewWidget onOpenCallsTab={() => setViewMode("calls")} />
           </div>
         )}
 
@@ -1620,6 +1624,21 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {viewMode === "calls" && (
+          // CallsView manages its own internal scroll. We escape the
+          // parent's overflow with a negative-margin trick so the view
+          // fills the remaining vertical space cleanly.
+          <div className="-mx-6 h-full">
+            <CallsView
+              onOpenConversation={(conversationId) => {
+                // From the dashboard, route back to the main app's inbox
+                // with the conversation hash so it auto-opens
+                window.location.href = `/#conversation=${conversationId}`;
+              }}
+            />
+          </div>
+        )}
+
         {viewMode === "export" && (
           <ExportPanel dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} />
         )}
@@ -2220,4 +2239,130 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+// ─────────────────────────────────────────────────────────
+// CallsOverviewWidget — quick-glance summary on Team Overview
+// ─────────────────────────────────────────────────────────
+// Fetches a tiny slice of /api/calls/all to show:
+//   - Active follow-ups count
+//   - Last 7d call count
+//   - 5 most recent calls needing a follow-up
+// Click the widget header or any row → switches the dashboard
+// to the "calls" tab where the full view lives.
+
+function CallsOverviewWidget({ onOpenCallsTab }: { onOpenCallsTab: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [followUps, setFollowUps] = useState<any[]>([]);
+  const [followUpCount, setFollowUpCount] = useState(0);
+  const [last7dCount, setLast7dCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        // Parallel fetch: follow-ups slice (5 most recent) + 7d count
+        const [fuRes, weekRes] = await Promise.all([
+          fetch("/api/calls/all?has_follow_up=true&range=all&limit=5"),
+          fetch("/api/calls/all?range=7d&limit=1"),
+        ]);
+        if (cancelled) return;
+        if (fuRes.ok) {
+          const fu = await fuRes.json();
+          setFollowUps(fu.calls || []);
+          setFollowUpCount(fu.stats?.total_filtered || 0);
+        }
+        if (weekRes.ok) {
+          const w = await weekRes.json();
+          setLast7dCount(w.stats?.total_filtered || 0);
+        }
+      } catch (_e) {
+        /* non-fatal */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const fmtTime = (iso: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h ago`;
+    return `${Math.floor(diffMin / (60 * 24))}d ago`;
+  };
+
+  return (
+    <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <button
+        onClick={onOpenCallsTab}
+        className="w-full px-4 py-3 flex items-center justify-between border-b border-[var(--border)] hover:bg-[var(--bg)] transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-[var(--accent)]/12 flex items-center justify-center">
+            <Phone size={13} className="text-[var(--accent)]" />
+          </div>
+          <div>
+            <div className="text-[13px] font-bold text-[var(--text-primary)]">Calls</div>
+            <div className="text-[10px] text-[var(--text-muted)]">Open the Calls tab for filters + history</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-[18px] font-bold text-[var(--info)] leading-none">{followUpCount}</div>
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mt-0.5">follow-ups</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[18px] font-bold text-[var(--text-primary)] leading-none">{last7dCount}</div>
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mt-0.5">last 7 days</div>
+          </div>
+          <ChevronDown size={14} className="-rotate-90 text-[var(--text-muted)]" />
+        </div>
+      </button>
+
+      {/* Recent follow-up rows preview */}
+      <div className="divide-y divide-[var(--border)]">
+        {loading ? (
+          <div className="px-4 py-6 text-center text-[var(--text-muted)] text-[11px]">Loading…</div>
+        ) : followUps.length === 0 ? (
+          <div className="px-4 py-6 text-center text-[var(--text-muted)] text-[11px]">
+            No active call follow-ups. Nice work.
+          </div>
+        ) : (
+          followUps.map((c: any) => (
+            <button
+              key={c.id}
+              onClick={onOpenCallsTab}
+              className="w-full px-4 py-2 flex items-center gap-3 hover:bg-[var(--bg)] transition-colors text-left"
+            >
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                c.direction === "inbound" ? "bg-[var(--info)]/10 text-[var(--info)]" : "bg-[var(--accent)]/10 text-[var(--accent)]"
+              }`}>
+                <Phone size={10} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] text-[var(--text-primary)] font-medium truncate">
+                  {c.supplier_name || c.person_name || (
+                    <span className="italic text-[var(--text-muted)] font-normal">Unknown caller</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)] font-mono">{c.participant_phone || "—"}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[10px] text-[var(--text-muted)]">{fmtTime(c.started_at)}</div>
+                {(c.attributed_team_member_name || c.team_member_name) && (
+                  <div className="text-[10px] text-[var(--text-secondary)]">
+                    {c.attributed_team_member_name || c.team_member_name}
+                  </div>
+                )}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
