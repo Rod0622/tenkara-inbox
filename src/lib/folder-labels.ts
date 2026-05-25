@@ -51,21 +51,44 @@ function pickColorFor(name: string): { color: string; bg_color: string } {
 // all resolve to the same label.
 // ────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────
+// ensureGlobalLabel
+//
+// Returns the id of a label with the given name. Creates one if missing.
+// Names are matched case-insensitively (ilike) so "Inbox", "inbox", "INBOX"
+// all resolve to the same label.
+//
+// Optional `parentLabelId` filter — when set, the lookup AND any created
+// label are scoped to that parent. This is how the folder-hierarchy fix
+// works: "Asia" under parent "Suppliers" is a distinct label from "Asia"
+// under parent "Operations" (or top-level "Asia"). Pass null explicitly
+// to match top-level labels only. Pass undefined (default) for the old
+// behavior — match ANY label with that name (legacy callers).
+// ────────────────────────────────────────────────────────────────────
+
 export async function ensureGlobalLabel(
   name: string,
-  options?: { color?: string; bg_color?: string }
+  options?: { color?: string; bg_color?: string; parentLabelId?: string | null }
 ): Promise<string | null> {
   const supabase = createServerClient();
   const trimmed = name.trim();
   if (!trimmed) return null;
 
-  // Try to find existing
-  const { data: existing } = await supabase
+  // Look up an existing label by name (case-insensitive). When parentLabelId
+  // is explicitly provided (even null), scope the lookup to that parent.
+  // When undefined, fall through to the legacy any-match behavior.
+  let lookupQ = supabase
     .from("labels")
     .select("id")
-    .ilike("name", trimmed)
-    .limit(1)
-    .maybeSingle();
+    .ilike("name", trimmed);
+  if (options && "parentLabelId" in options) {
+    if (options.parentLabelId === null) {
+      lookupQ = lookupQ.is("parent_label_id", null);
+    } else {
+      lookupQ = lookupQ.eq("parent_label_id", options.parentLabelId);
+    }
+  }
+  const { data: existing } = await lookupQ.limit(1).maybeSingle();
 
   if (existing?.id) return existing.id;
 
@@ -74,9 +97,14 @@ export async function ensureGlobalLabel(
     ? { color: options.color, bg_color: options.bg_color || options.color + "20" }
     : pickColorFor(trimmed);
 
+  const insertRow: any = { name: trimmed, color: palette.color, bg_color: palette.bg_color };
+  if (options && "parentLabelId" in options && options.parentLabelId) {
+    insertRow.parent_label_id = options.parentLabelId;
+  }
+
   const { data: created, error } = await supabase
     .from("labels")
-    .insert({ name: trimmed, color: palette.color, bg_color: palette.bg_color })
+    .insert(insertRow)
     .select("id")
     .single();
 
@@ -186,12 +214,33 @@ export async function ensureAccountLabels(accountId: string): Promise<AccountLab
 // helper — the caller decides when/where to apply it.
 // ────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────
+// ensureFolderLabel
+//
+// Returns the label id for a folder. Mirrors folder hierarchy into label
+// hierarchy (Option B):
+//
+//   • Top-level folder ("Suppliers") → top-level label "Suppliers"
+//   • Child folder ("Asia" under "Suppliers") → child label "Asia" with
+//     parent_label_id = top-level label "Suppliers"
+//
+// If the folder is 3+ levels deep, the label hierarchy flattens to 2 levels
+// (matches the label-table constraint). The IMMEDIATE parent folder's
+// name becomes the top-level label; the folder itself becomes the child.
+// Deeper ancestors aren't reflected in labels.
+//
+// Idempotent: calling repeatedly returns the same id.
+//
+// Returns the label id. The label is NOT applied to anything by this helper
+// — the caller decides when/where to apply it.
+// ────────────────────────────────────────────────────────────────────
+
 export async function ensureFolderLabel(folderId: string): Promise<string | null> {
   const supabase = createServerClient();
 
   const { data: folder, error } = await supabase
     .from("folders")
-    .select("name")
+    .select("name, parent_folder_id")
     .eq("id", folderId)
     .maybeSingle();
 
@@ -200,7 +249,39 @@ export async function ensureFolderLabel(folderId: string): Promise<string | null
     return null;
   }
 
-  return ensureGlobalLabel(folder.name);
+  const folderName = folder.name;
+  const parentFolderId = folder.parent_folder_id as string | null;
+
+  // Top-level folder: just create/find the label at the top level.
+  if (!parentFolderId) {
+    return ensureGlobalLabel(folderName, { parentLabelId: null });
+  }
+
+  // Child folder: look up the parent folder's name, ensure a top-level label
+  // exists for it, then ensure a child label exists with the folder's name
+  // under that parent. If parent folder lookup fails, fall back to top-level
+  // (defensive — never lose the ability to label).
+  const { data: parentFolder } = await supabase
+    .from("folders")
+    .select("name")
+    .eq("id", parentFolderId)
+    .maybeSingle();
+  if (!parentFolder?.name) {
+    console.warn("[ensureFolderLabel] parent folder missing, falling back to flat label for:", folderId);
+    return ensureGlobalLabel(folderName, { parentLabelId: null });
+  }
+
+  // Ensure the parent label exists at the top level (parent_label_id = null).
+  // This handles the case where the parent folder itself hasn't been "touched"
+  // since the hierarchy fix went live — we don't need it to exist already.
+  const parentLabelId = await ensureGlobalLabel(parentFolder.name, { parentLabelId: null });
+  if (!parentLabelId) {
+    console.warn("[ensureFolderLabel] could not ensure parent label, falling back to flat label for:", folderId);
+    return ensureGlobalLabel(folderName, { parentLabelId: null });
+  }
+
+  // Ensure the child label exists under that parent.
+  return ensureGlobalLabel(folderName, { parentLabelId });
 }
 
 // ────────────────────────────────────────────────────────────────────
