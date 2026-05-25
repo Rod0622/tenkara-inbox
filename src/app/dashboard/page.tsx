@@ -3761,8 +3761,8 @@ function WatchersTab({ userId, activeMembers }: { userId: string; activeMembers:
     <div>
       <SearchAndSort q={q} setQ={setQ} sort={sort} setSort={setSort}
         sortOptions={[
-          { value: "default", label: "Recently watched first" },
-          { value: "created_at_asc", label: "Oldest first" },
+          { value: "default", label: "Most active thread first" },
+          { value: "last_message_at_asc", label: "Least active first" },
         ]}
         totalLabel={`Showing ${items.length} of ${total}`}
       />
@@ -3797,7 +3797,7 @@ function WatchersTab({ userId, activeMembers }: { userId: string; activeMembers:
                 </th>
                 <th className="text-left px-3 py-2">Conversation</th>
                 <th className="text-left px-3 py-2 w-[140px]">Account</th>
-                <th className="text-left px-3 py-2 w-[100px]">Watched</th>
+                <th className="text-left px-3 py-2 w-[120px]">Last activity</th>
                 <th className="text-right px-3 py-2 w-[160px]">Actions</th>
               </tr>
             </thead>
@@ -3823,7 +3823,7 @@ function WatchersTab({ userId, activeMembers }: { userId: string; activeMembers:
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)]">{fmtRelative(w.created_at)}</td>
+                  <td className="px-3 py-2.5 align-top text-[10px] text-[var(--text-muted)]">{fmtRelative(w.last_message_at)}</td>
                   <td className="px-3 py-2.5 align-top">
                     <div className="flex items-center gap-1 justify-end">
                       <RowReassignSelect activeMembers={activeMembers} onPick={(id) => doSingle(w.id, "transfer_watchers", id)} disabled={working} />

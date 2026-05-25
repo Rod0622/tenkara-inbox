@@ -233,8 +233,12 @@ async function listFollowUps(supabase: any, userId: string, q: string, sort: str
 
 // ── Watchers ─────────────────────────────────────────
 async function listWatchers(supabase: any, userId: string, q: string, sort: string, limit: number, offset: number) {
-  let order: { column: string; ascending: boolean } = { column: "created_at", ascending: false };
-  if (sort === "created_at_asc") order = { column: "created_at", ascending: true };
+  // conversation_watchers has NO timestamp column on the row itself. We sort
+  // via the joined conversation's last_message_at instead — that's the
+  // operationally useful sort anyway ("which watched threads are most active").
+  let order: { foreignTable: string; column: string; ascending: boolean } =
+    { foreignTable: "conversation", column: "last_message_at", ascending: false };
+  if (sort === "last_message_at_asc") order = { foreignTable: "conversation", column: "last_message_at", ascending: true };
 
   let countQ = supabase.from("conversation_watchers").select("conversation_id", { count: "exact", head: true })
     .eq("user_id", userId);
@@ -242,11 +246,11 @@ async function listWatchers(supabase: any, userId: string, q: string, sort: stri
 
   let listQ = supabase
     .from("conversation_watchers")
-    .select("conversation_id, watch_source, created_at, " +
+    .select("conversation_id, watch_source, " +
             "conversation:conversations(id, subject, preview, last_message_at, " +
             "  email_account:email_accounts(id, name, icon, color))")
     .eq("user_id", userId)
-    .order(order.column, { ascending: order.ascending, nullsFirst: false })
+    .order(order.column, { ascending: order.ascending, nullsFirst: false, foreignTable: order.foreignTable })
     .range(offset, offset + limit - 1);
 
   const { data, error } = await listQ;
@@ -257,7 +261,6 @@ async function listWatchers(supabase: any, userId: string, q: string, sort: stri
     id: w.conversation_id,
     conversation_id: w.conversation_id,
     watch_source: w.watch_source,
-    created_at: w.created_at,
     subject: w.conversation?.subject || "(no subject)",
     preview: w.conversation?.preview || "",
     last_message_at: w.conversation?.last_message_at,
