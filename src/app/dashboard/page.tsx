@@ -81,7 +81,7 @@ interface SentEmail {
   from_email: string;
 }
 
-type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export" | "removals" | "calls";
+type ViewMode = "overview" | "critical" | "all-tasks" | "user-detail" | "sla" | "export" | "removals" | "calls" | "offboarded";
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -864,6 +864,7 @@ export default function DashboardPage() {
           { id: "sla", label: "SLA / Response Times" },
           { id: "calls", label: "Calls" },
           { id: "removals", label: "Removals" },
+          { id: "offboarded", label: "Offboarded Users" },
           { id: "export", label: "Export Data" },
         ] as { id: ViewMode; label: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => { setViewMode(tab.id); setSelectedUserId(null); }}
@@ -1639,6 +1640,10 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {viewMode === "offboarded" && (
+          <OffboardedUsersPanel onJump={(viewMode) => setViewMode(viewMode as any)} />
+        )}
+
         {viewMode === "export" && (
           <ExportPanel dateFrom={effectiveDateFrom} dateTo={effectiveDateTo} />
         )}
@@ -2363,6 +2368,543 @@ function CallsOverviewWidget({ onOpenCallsTab }: { onOpenCallsTab: () => void })
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// OffboardedUsersPanel — list deactivated users with workload
+// counts and a bulk-reassign action per user.
+// ─────────────────────────────────────────────────────────
+
+interface OffboardedUser {
+  id: string;
+  name: string;
+  email: string;
+  initials: string;
+  color: string;
+  deactivated_at: string | null;
+  counts: {
+    conversations: number;
+    open_tasks: number;
+    active_follow_ups: number;
+    drafts: number;
+    watched_threads: number;
+    unread_notifications: number;
+    total_outstanding: number;
+  };
+}
+
+interface ActiveMember {
+  id: string;
+  name: string;
+  email: string;
+  initials: string;
+  color: string;
+}
+
+function OffboardedUsersPanel({ onJump }: { onJump: (viewMode: string) => void }) {
+  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<OffboardedUser[]>([]);
+  const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [reassignTarget, setReassignTarget] = useState<OffboardedUser | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/offboarded-users");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load");
+      setUsers(data.users || []);
+      setActiveMembers(data.active_team_members || []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  if (loading) {
+    return (
+      <div className="py-12 flex items-center justify-center text-[var(--text-muted)] text-[12px]">
+        <Loader2 size={16} className="animate-spin mr-2" /> Loading offboarded users…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-3 py-2 mt-4 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-xs text-[var(--danger)] flex items-start gap-2">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (users.length === 0) {
+    return (
+      <div className="py-16 flex flex-col items-center justify-center text-center">
+        <div className="w-12 h-12 rounded-full bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center mb-3">
+          <UserMinus size={20} className="text-[var(--text-muted)]" />
+        </div>
+        <div className="text-[13px] font-semibold text-[var(--text-primary)] mb-1">No offboarded users</div>
+        <div className="text-[11px] text-[var(--text-secondary)] max-w-sm">
+          When you deactivate a team member from Settings → Team, they'll appear here with their pending workload so you can reassign or clean it up.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] text-[var(--text-secondary)] pb-2">
+        Deactivated team members with outstanding work. Click <strong>Reassign</strong> on any row to transfer their workload in one go.
+      </div>
+
+      <div className="rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--surface)]">
+        <table className="w-full text-[12px]">
+          <thead className="bg-[var(--bg)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-bold">
+            <tr>
+              <th className="text-left px-4 py-2.5">User</th>
+              <th className="text-center px-2 py-2.5" title="Assigned conversations">Convos</th>
+              <th className="text-center px-2 py-2.5" title="Open tasks (status not completed/dismissed)">Tasks</th>
+              <th className="text-center px-2 py-2.5" title="Active call follow-ups">Follow-ups</th>
+              <th className="text-center px-2 py-2.5" title="Conversation watchers">Watchers</th>
+              <th className="text-center px-2 py-2.5" title="Email drafts (not auto-reassigned)">Drafts</th>
+              <th className="text-center px-2 py-2.5" title="Unread notifications">Notifs</th>
+              <th className="text-right px-4 py-2.5">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border)]">
+            {users.map((u) => {
+              const c = u.counts;
+              const hasActionable = c.total_outstanding > 0;
+              return (
+                <tr key={u.id} className="hover:bg-[var(--bg)]/40">
+                  <td className="px-4 py-3 align-middle">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-[var(--bg)] shrink-0 opacity-60"
+                        style={{ background: u.color || "var(--text-muted)" }}
+                      >
+                        {u.initials}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-medium text-[var(--text-primary)] truncate flex items-center gap-1.5">
+                          <span className="line-through opacity-70">{u.name}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--text-muted)]/15 text-[var(--text-muted)]">
+                            Deactivated
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[var(--text-muted)] font-mono">{u.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <CountCell n={c.conversations} highlight={c.conversations > 0} />
+                  <CountCell n={c.open_tasks} highlight={c.open_tasks > 0} />
+                  <CountCell n={c.active_follow_ups} highlight={c.active_follow_ups > 0} />
+                  <CountCell n={c.watched_threads} highlight={c.watched_threads > 0} muted />
+                  <CountCell n={c.drafts} highlight={false} muted />
+                  <CountCell n={c.unread_notifications} highlight={false} muted />
+                  <td className="px-4 py-3 align-middle text-right">
+                    {hasActionable || c.drafts > 0 || c.unread_notifications > 0 ? (
+                      <button
+                        onClick={() => setReassignTarget(u)}
+                        className="px-2.5 py-1 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold hover:bg-[var(--accent-strong)]"
+                      >
+                        Reassign
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-[var(--text-muted)] italic">No outstanding work</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="text-[10px] text-[var(--text-muted)]">
+        <strong>Note on drafts:</strong> Email drafts are NOT auto-reassigned by default — drafts have personal voice and signatures. You can choose to delete them in the reassign dialog.
+      </div>
+
+      {reassignTarget && (
+        <ReassignModal
+          user={reassignTarget}
+          activeMembers={activeMembers}
+          onClose={() => setReassignTarget(null)}
+          onComplete={() => { setReassignTarget(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CountCell({ n, highlight, muted = false }: { n: number; highlight: boolean; muted?: boolean }) {
+  return (
+    <td className="px-2 py-3 align-middle text-center">
+      <span className={`text-[13px] font-semibold ${
+        n === 0 ? "text-[var(--text-muted)]" :
+        muted ? "text-[var(--text-secondary)]" :
+        highlight ? "text-[var(--warning)]" : "text-[var(--text-primary)]"
+      }`}>
+        {n}
+      </span>
+    </td>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// ReassignModal — pick target + categories, apply, show results
+// ─────────────────────────────────────────────────────────
+
+function ReassignModal({
+  user,
+  activeMembers,
+  onClose,
+  onComplete,
+}: {
+  user: OffboardedUser;
+  activeMembers: ActiveMember[];
+  onClose: () => void;
+  onComplete: () => void;
+}) {
+  const [targetId, setTargetId] = useState<string>("");
+  const [doConversations, setDoConversations] = useState(true);
+  const [doTasks, setDoTasks] = useState(true);
+  const [doFollowUps, setDoFollowUps] = useState(true);
+  const [watchersMode, setWatchersMode] = useState<"transfer" | "delete" | "skip">("transfer");
+  const [draftsMode, setDraftsMode] = useState<"keep" | "delete">("keep");
+  const [doMarkNotifsRead, setDoMarkNotifsRead] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<any | null>(null);
+
+  const needsTarget = doConversations || doTasks || doFollowUps || watchersMode === "transfer";
+
+  const handleSubmit = async () => {
+    if (needsTarget && !targetId) {
+      setError("Pick a target team member to reassign to.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+    try {
+      const categories: any = {};
+      if (doConversations) categories.conversations = true;
+      if (doTasks) categories.tasks = true;
+      if (doFollowUps) categories.follow_ups = true;
+      if (watchersMode !== "skip") categories.watchers = watchersMode;
+      if (draftsMode === "delete") categories.drafts = "delete";
+      if (doMarkNotifsRead) categories.notifications = "mark_read";
+
+      const res = await fetch("/api/admin/offboarded-users/reassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from_user_id: user.id,
+          to_user_id: targetId || null,
+          categories,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Reassign failed");
+      setResult(data.result);
+    } catch (e: any) {
+      setError(e?.message || "Reassign failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const target = activeMembers.find((m) => m.id === targetId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="w-full max-w-xl max-h-[90vh] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between shrink-0">
+          <div>
+            <div className="text-sm font-bold text-[var(--text-primary)]">Reassign workload</div>
+            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+              From <span className="font-semibold">{user.name}</span> (deactivated)
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {!result && (
+            <>
+              {/* Target */}
+              <div>
+                <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1.5">
+                  Reassign to {needsTarget && <span className="text-[var(--danger)]">*</span>}
+                </label>
+                <select
+                  value={targetId}
+                  onChange={(e) => setTargetId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="">— Pick a team member —</option>
+                  {activeMembers.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Categories */}
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                  Categories to transfer
+                </div>
+                <div className="space-y-2">
+                  <CategoryRow
+                    enabled={doConversations}
+                    onToggle={setDoConversations}
+                    label="Assigned conversations"
+                    count={user.counts.conversations}
+                    requires_target
+                    description={`Update assignee_id on ${user.counts.conversations} conversation${user.counts.conversations === 1 ? "" : "s"}.`}
+                  />
+                  <CategoryRow
+                    enabled={doTasks}
+                    onToggle={setDoTasks}
+                    label="Open tasks"
+                    count={user.counts.open_tasks}
+                    requires_target
+                    description={`Remove ${user.name} from ${user.counts.open_tasks} task assignment${user.counts.open_tasks === 1 ? "" : "s"} and add the target. Tasks with multiple assignees keep the others.`}
+                  />
+                  <CategoryRow
+                    enabled={doFollowUps}
+                    onToggle={setDoFollowUps}
+                    label="Active call follow-ups"
+                    count={user.counts.active_follow_ups}
+                    requires_target
+                    description={`Reassign ${user.counts.active_follow_ups} pending/in-progress call follow-up${user.counts.active_follow_ups === 1 ? "" : "s"}.`}
+                  />
+
+                  {/* Watchers — three-way choice */}
+                  <div className="px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="text-[12px] font-medium text-[var(--text-primary)]">
+                        Conversation watchers
+                        <span className="ml-2 text-[10px] font-mono text-[var(--text-muted)]">{user.counts.watched_threads}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 mt-1">
+                      <ThreeWayChip value={watchersMode} option="transfer" label="Transfer to target" onChange={setWatchersMode} />
+                      <ThreeWayChip value={watchersMode} option="delete" label="Just delete" onChange={setWatchersMode} />
+                      <ThreeWayChip value={watchersMode} option="skip" label="Skip" onChange={setWatchersMode} />
+                    </div>
+                  </div>
+
+                  {/* Drafts — keep or delete */}
+                  <div className="px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="text-[12px] font-medium text-[var(--text-primary)]">
+                        Email drafts
+                        <span className="ml-2 text-[10px] font-mono text-[var(--text-muted)]">{user.counts.drafts}</span>
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] mb-2">
+                      Drafts aren't transferred — they have personal voice and signatures. You can keep them under {user.name} (read-only) or delete them.
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <ThreeWayChip value={draftsMode} option="keep" label="Keep" onChange={setDraftsMode} />
+                      <ThreeWayChip value={draftsMode} option="delete" label="Delete all" onChange={setDraftsMode} />
+                    </div>
+                  </div>
+
+                  {/* Notifications */}
+                  <CategoryRow
+                    enabled={doMarkNotifsRead}
+                    onToggle={setDoMarkNotifsRead}
+                    label="Unread notifications"
+                    count={user.counts.unread_notifications}
+                    requires_target={false}
+                    description={`Mark ${user.counts.unread_notifications} unread notification${user.counts.unread_notifications === 1 ? "" : "s"} as read. They'll never see them anyway.`}
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="px-3 py-2 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-[11px] text-[var(--danger)] flex items-start gap-2">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {result && (
+            <div className="space-y-3">
+              <div className="px-3 py-2 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[12px] text-[var(--accent)] flex items-start gap-2">
+                <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  Reassignment complete{target ? ` — workload transferred to ${target.name}` : ""}.
+                </span>
+              </div>
+              <ResultRow label="Conversations" attempted={result.conversations.attempted} ok={!result.conversations.error}
+                detail={`Updated ${result.conversations.updated}`} error={result.conversations.error} />
+              <ResultRow label="Tasks" attempted={result.tasks.attempted} ok={!result.tasks.error}
+                detail={`Removed from ${result.tasks.removed} task${result.tasks.removed === 1 ? "" : "s"}` +
+                  (result.tasks.added > 0 ? `, target added to ${result.tasks.added}` : "") +
+                  (result.tasks.skipped_already_assigned > 0 ? `, ${result.tasks.skipped_already_assigned} already had target` : "")}
+                error={result.tasks.error} />
+              <ResultRow label="Call follow-ups" attempted={result.follow_ups.attempted} ok={!result.follow_ups.error}
+                detail={`Updated ${result.follow_ups.updated}`} error={result.follow_ups.error} />
+              <ResultRow label="Watchers" attempted={result.watchers.attempted} ok={!result.watchers.error}
+                detail={result.watchers.transferred > 0 ? `Transferred ${result.watchers.transferred}` : `Deleted ${result.watchers.deleted}`}
+                error={result.watchers.error} />
+              <ResultRow label="Drafts" attempted={result.drafts.attempted} ok={!result.drafts.error}
+                detail={`Deleted ${result.drafts.deleted}`} error={result.drafts.error} />
+              <ResultRow label="Notifications" attempted={result.notifications.attempted} ok={!result.notifications.error}
+                detail={`Marked ${result.notifications.marked_read} as read`} error={result.notifications.error} />
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-[var(--border)] flex items-center justify-end gap-2 shrink-0">
+          {!result ? (
+            <>
+              <button onClick={onClose} className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] px-3 py-1.5">
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {submitting ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                {submitting ? "Reassigning…" : "Reassign"}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onComplete}
+              className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11px] font-bold"
+            >
+              Done
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryRow({
+  enabled,
+  onToggle,
+  label,
+  count,
+  requires_target,
+  description,
+}: {
+  enabled: boolean;
+  onToggle: (v: boolean) => void;
+  label: string;
+  count: number;
+  requires_target: boolean;
+  description: string;
+}) {
+  return (
+    <button
+      onClick={() => onToggle(!enabled)}
+      className={`w-full px-3 py-2.5 rounded-lg border text-left transition-colors flex items-start gap-3 ${
+        enabled ? "border-[var(--accent)]/40 bg-[var(--accent)]/8" : "border-[var(--border)] bg-[var(--bg)]"
+      }`}
+      type="button"
+    >
+      <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 ${
+        enabled ? "bg-[var(--accent)] border-[var(--accent)] text-[var(--bg)]" : "border-[var(--text-muted)]"
+      }`}>
+        {enabled && <CheckCircle2 size={10} />}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[12px] font-medium text-[var(--text-primary)]">
+            {label}
+            <span className="ml-2 text-[10px] font-mono text-[var(--text-muted)]">{count}</span>
+            {requires_target && (
+              <span className="ml-1.5 text-[9px] text-[var(--text-muted)] font-normal italic">requires target</span>
+            )}
+          </div>
+        </div>
+        <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{description}</div>
+      </div>
+    </button>
+  );
+}
+
+function ThreeWayChip({
+  value,
+  option,
+  label,
+  onChange,
+}: {
+  value: string;
+  option: string;
+  label: string;
+  onChange: (v: any) => void;
+}) {
+  const selected = value === option;
+  return (
+    <button
+      onClick={() => onChange(option)}
+      className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+        selected ? "bg-[var(--accent)] text-[var(--bg)]" : "bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+      }`}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function ResultRow({
+  label,
+  attempted,
+  ok,
+  detail,
+  error,
+}: {
+  label: string;
+  attempted: boolean;
+  ok: boolean;
+  detail: string;
+  error: string | null;
+}) {
+  if (!attempted) {
+    return (
+      <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+        <span className="w-3 h-3 rounded-full bg-[var(--text-muted)]/20" />
+        <span className="font-medium w-32">{label}</span>
+        <span className="italic">skipped</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-2 text-[11px]">
+      <span className={`w-3 h-3 rounded-full ${ok ? "bg-[var(--accent)]" : "bg-[var(--danger)]"} mt-0.5 shrink-0`} />
+      <span className="font-medium w-32 text-[var(--text-primary)] shrink-0">{label}</span>
+      <span className={ok ? "text-[var(--text-secondary)]" : "text-[var(--danger)]"}>
+        {ok ? detail : error}
+      </span>
     </div>
   );
 }
