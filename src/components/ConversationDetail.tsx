@@ -284,6 +284,11 @@ export default function ConversationDetail({
   // function body with these prevents the duplicate.
   const creatingSuggestedTaskLockRef = useRef<Set<string>>(new Set());
   const creatingAllSuggestedTasksLockRef = useRef(false);
+  // Same lock for the in-conversation Tasks tab "Create task" button — the
+  // button previously had NO saving guard at all, so spam-clicking would
+  // POST the same task multiple times.
+  const addTaskInternalLockRef = useRef(false);
+  const [savingNewTask, setSavingNewTask] = useState(false);
 
   // Scroll to current match
   useEffect(() => {
@@ -1353,52 +1358,65 @@ export default function ConversationDetail({
   const handleAddTaskInternal = async () => {
     if (!convo || !newTaskText.trim()) return;
 
-    // Calculate due_time from hours using supplier business hours
-    let computedDueDate = newTaskDueDate || undefined;
-    let computedDueTime: string | undefined = undefined;
-    if (newTaskDueTime) {
-      const hours = parseInt(newTaskDueTime);
-      if (hours > 0) {
-        // Fetch supplier hours if available
-        let supplierHrs: SupplierHours | null = null;
-        try {
-          if ((convo as any)?.supplier_contact_id) {
-            const sb = createBrowserClient();
-            const { data: sc } = await sb.from("supplier_contacts")
-              .select("timezone, work_start, work_end, work_days")
-              .eq("id", (convo as any).supplier_contact_id)
-              .single();
-            if (sc) supplierHrs = sc;
-          }
-        } catch (_e) { /* use defaults */ }
+    // Synchronous lock — prevents the duplicate / triplicate POST that was
+    // happening when users rapid-click "Create task". Setting React state
+    // (savingNewTask) below is async, so a second click can fire before the
+    // disabled prop takes effect. The ref lock is checked instantly.
+    if (addTaskInternalLockRef.current) return;
+    addTaskInternalLockRef.current = true;
+    setSavingNewTask(true);
 
-        const result = addBusinessHours(new Date(), hours, supplierHrs);
-        computedDueDate = computedDueDate || result.dueDate;
-        computedDueTime = result.dueTime;
+    try {
+      // Calculate due_time from hours using supplier business hours
+      let computedDueDate = newTaskDueDate || undefined;
+      let computedDueTime: string | undefined = undefined;
+      if (newTaskDueTime) {
+        const hours = parseInt(newTaskDueTime);
+        if (hours > 0) {
+          // Fetch supplier hours if available
+          let supplierHrs: SupplierHours | null = null;
+          try {
+            if ((convo as any)?.supplier_contact_id) {
+              const sb = createBrowserClient();
+              const { data: sc } = await sb.from("supplier_contacts")
+                .select("timezone, work_start, work_end, work_days")
+                .eq("id", (convo as any).supplier_contact_id)
+                .single();
+              if (sc) supplierHrs = sc;
+            }
+          } catch (_e) { /* use defaults */ }
+
+          const result = addBusinessHours(new Date(), hours, supplierHrs);
+          computedDueDate = computedDueDate || result.dueDate;
+          computedDueTime = result.dueTime;
+        }
       }
+
+      await onAddTask(
+        convo.id,
+        newTaskText.trim(),
+        newTaskAssigneeIds.length > 0
+          ? newTaskAssigneeIds
+          : currentUser?.id
+            ? [currentUser.id]
+            : [],
+        computedDueDate,
+        newTaskCategoryId || undefined,
+        computedDueTime
+      );
+
+      await refetchDetail();
+      setActiveTab("tasks");
+      setNewTaskText("");
+      setNewTaskAssigneeIds([]);
+      setNewTaskDueDate("");
+      setNewTaskDueTime("");
+      setNewTaskCategoryId("");
+      setShowTaskInput(false);
+    } finally {
+      setSavingNewTask(false);
+      addTaskInternalLockRef.current = false;
     }
-
-    await onAddTask(
-      convo.id,
-      newTaskText.trim(),
-      newTaskAssigneeIds.length > 0
-        ? newTaskAssigneeIds
-        : currentUser?.id
-          ? [currentUser.id]
-          : [],
-      computedDueDate,
-      newTaskCategoryId || undefined,
-      computedDueTime
-    );
-
-    await refetchDetail();
-    setActiveTab("tasks");
-    setNewTaskText("");
-    setNewTaskAssigneeIds([]);
-    setNewTaskDueDate("");
-    setNewTaskDueTime("");
-    setNewTaskCategoryId("");
-    setShowTaskInput(false);
   };
 
   const handleDeleteTasks = async (taskIds: string[]) => {
@@ -3693,10 +3711,10 @@ export default function ConversationDetail({
                   </button>
                   <button
                     onClick={handleAddTaskInternal}
-                    disabled={!newTaskText.trim()}
+                    disabled={!newTaskText.trim() || savingNewTask}
                     className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--accent)] disabled:opacity-40"
                   >
-                    Create task
+                    {savingNewTask ? "Creating..." : "Create task"}
                   </button>
                 </div>
               </div>
