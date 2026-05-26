@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AttachmentPreviewModal from "@/components/AttachmentPreviewModal";
 import {
   Archive, Check, Download, ExternalLink, File, FileText, FolderOpen,
   Image, Paperclip, Plus, X, Edit3, RotateCcw,
@@ -49,6 +50,13 @@ export default function MessageAttachments({ messageId }: { messageId: string })
   const [loaded, setLoaded] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<{
+    messageId: string;
+    attachmentId: string;
+    filename: string;
+    contentType?: string;
+    size?: number;
+  } | null>(null);
 
   // ── Drive modal state ─────────────────────────────────
   const [showDrivePicker, setShowDrivePicker] = useState(false);
@@ -428,23 +436,39 @@ export default function MessageAttachments({ messageId }: { messageId: string })
         </div>
         <div className="flex flex-wrap gap-1.5">
           {visibleAttachments.map((att: any) => (
-            <div key={att.id} className="flex items-center gap-1">
+            <div
+              key={att.id}
+              className="flex items-center bg-[var(--bg)] border border-[var(--border)] rounded-lg overflow-hidden hover:border-[var(--accent)]/30 transition-all group"
+              title={`${att.name} · ${formatSize(att.size)}\nClick to preview`}
+            >
               <button
-                onClick={() => downloadAttachment(att.id, att.name)}
-                disabled={downloading === att.id}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--accent)]/30 hover:bg-[var(--surface)] transition-all group"
+                onClick={() => setPreviewTarget({
+                  messageId,
+                  attachmentId: att.id,
+                  filename: att.name,
+                  contentType: att.contentType,
+                  size: att.size,
+                })}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-[var(--surface)] transition-colors"
               >
                 {getFileIcon(att.name, att.contentType)}
                 <span className="text-[11px] text-[var(--text-primary)] max-w-[150px] truncate">{att.name}</span>
                 <span className="text-[9px] text-[var(--text-muted)]">{formatSize(att.size)}</span>
-                <Download size={10} className="text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); downloadAttachment(att.id, att.name); }}
+                disabled={downloading === att.id}
+                title="Download"
+                className="px-1.5 py-1.5 border-l border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-colors disabled:opacity-50"
+              >
+                <Download size={11} />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); openDrivePicker(att.id); }}
                 title="Save just this file to Google Drive"
-                className="w-7 h-7 rounded-lg bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--info)]/30 flex items-center justify-center transition-all"
+                className="px-1.5 py-1.5 border-l border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--info)] hover:bg-[var(--surface)] transition-colors"
               >
-                <ExternalLink size={10} className="text-[var(--text-muted)] hover:text-[var(--info)]" />
+                <ExternalLink size={11} />
               </button>
             </div>
           ))}
@@ -762,6 +786,9 @@ export default function MessageAttachments({ messageId }: { messageId: string })
           </div>
         </div>
       )}
+
+      {/* Preview modal — click any attachment chip to open */}
+      <AttachmentPreviewModal target={previewTarget} onClose={() => setPreviewTarget(null)} />
     </div>
   );
 }

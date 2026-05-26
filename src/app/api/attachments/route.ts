@@ -134,6 +134,47 @@ export async function GET(req: NextRequest) {
       if (!dl) {
         return NextResponse.json({ error: "Failed to download attachment from storage" }, { status: 500 });
       }
+
+      // parse=eml — serve a parsed forwarded-email view for the
+      // AttachmentPreviewModal. Returns JSON, not raw bytes.
+      // The .eml format is RFC822 — we use mailparser (already a dep,
+      // used by IMAP sync) to extract headers and body.
+      const parse = req.nextUrl.searchParams.get("parse");
+      if (parse === "eml") {
+        try {
+          // Lazy-load mailparser only when needed
+          const { simpleParser } = await import("mailparser");
+          const parsed = await simpleParser(Buffer.from(dl.bytes));
+          const formatAddr = (a: any): string => {
+            if (!a) return "";
+            if (typeof a === "string") return a;
+            if (a.text) return a.text;
+            if (Array.isArray(a.value)) {
+              return a.value
+                .map((v: any) => v.name ? `${v.name} <${v.address}>` : v.address)
+                .filter(Boolean)
+                .join(", ");
+            }
+            return "";
+          };
+          return NextResponse.json({
+            from: formatAddr(parsed.from),
+            to: formatAddr(parsed.to),
+            cc: formatAddr(parsed.cc),
+            date: parsed.date ? parsed.date.toUTCString() : "",
+            subject: parsed.subject || "",
+            body_html: parsed.html || "",
+            body_text: parsed.text || "",
+            attachments_count: (parsed.attachments || []).length,
+          });
+        } catch (e: any) {
+          return NextResponse.json(
+            { error: `Failed to parse email: ${e?.message || "unknown"}` },
+            { status: 500 }
+          );
+        }
+      }
+
       return new NextResponse(new Uint8Array(dl.bytes), {
         headers: {
           "Content-Type": row.mime_type || dl.contentType || "application/octet-stream",

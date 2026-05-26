@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AttachmentPreviewModal from "@/components/AttachmentPreviewModal";
 import {
   ChevronDown, Check, Download, ExternalLink, File, FileText, FolderOpen,
-  Image, Paperclip, Plus, X, Edit3, RotateCcw,
+  Image, Paperclip, Plus, X, Edit3, RotateCcw, Eye,
 } from "lucide-react";
 
 // One row in the Drive upload modal. Tracks per-attachment checked/rename
@@ -49,8 +50,7 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const messagesWithAttachments = messages.filter((m: any) => m.has_attachments);
   const [allAttachments, setAllAttachments] = useState<{ messageId: string; fromName: string; attachments: any[] }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  // Track whether the API returned any rows AT ALL (inline or not). Used
+  const [loaded, setLoaded] = useState(false);  // Track whether the API returned any rows AT ALL (inline or not). Used
   // to distinguish "truly missing (pre-capture)" from "only inline images"
   // — the latter is normal for emails with signature logos.
   const [hadAnyRows, setHadAnyRows] = useState(false);
@@ -58,6 +58,13 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
   const [expanded, setExpanded] = useState(true);
   const [savingToDrive, setSavingToDrive] = useState(false);
   const [driveResult, setDriveResult] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<{
+    messageId: string;
+    attachmentId: string;
+    filename: string;
+    contentType?: string;
+    size?: number;
+  } | null>(null);
   const [downloadingAllThread, setDownloadingAllThread] = useState(false);
 
   // ── Drive picker state ────────────────────────────────
@@ -482,15 +489,32 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                 <div className="text-[10px] text-[var(--text-muted)] mt-2 mb-1">From {group.fromName}:</div>
                 <div className="flex flex-wrap gap-1.5">
                   {group.attachments.map((att: any) => (
-                    <button
+                    <div
                       key={att.id}
-                      onClick={() => downloadAtt(group.messageId, att.id, att.name)}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--bg)] border border-[var(--border)] hover:border-[var(--accent)]/30 transition-all text-left"
+                      className="flex items-center bg-[var(--bg)] border border-[var(--border)] rounded-lg overflow-hidden hover:border-[var(--accent)]/30 transition-all"
+                      title={`${att.name}\nClick to preview`}
                     >
-                      {getIcon(att.name)}
-                      <span className="text-[10px] text-[var(--text-primary)] max-w-[140px] truncate">{att.name}</span>
-                      <Download size={9} className="text-[var(--text-muted)]" />
-                    </button>
+                      <button
+                        onClick={() => setPreviewTarget({
+                          messageId: group.messageId,
+                          attachmentId: att.id,
+                          filename: att.name,
+                          contentType: att.contentType,
+                          size: att.size,
+                        })}
+                        className="flex items-center gap-1.5 px-2 py-1 hover:bg-[var(--surface)] transition-colors text-left"
+                      >
+                        {getIcon(att.name)}
+                        <span className="text-[10px] text-[var(--text-primary)] max-w-[140px] truncate">{att.name}</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); downloadAtt(group.messageId, att.id, att.name); }}
+                        title="Download"
+                        className="px-1.5 py-1 border-l border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-colors"
+                      >
+                        <Download size={10} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -660,6 +684,19 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
                             className="flex-1 min-w-0 px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[11px] font-mono text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50"
                             placeholder={row.originalName}
                           />
+                          <button
+                            onClick={() => setPreviewTarget({
+                              messageId: row.messageId,
+                              attachmentId: row.attachmentId,
+                              filename: row.originalName,
+                              contentType: row.contentType,
+                              size: row.size ?? undefined,
+                            })}
+                            title="Preview this file before saving"
+                            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--info)] hover:bg-[var(--border)] shrink-0"
+                          >
+                            <Eye size={11} />
+                          </button>
                           {row.size !== null && (
                             <span className="text-[9px] text-[var(--text-muted)] font-mono shrink-0 w-16 text-right">
                               {formatSize(row.size)}
@@ -855,6 +892,9 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
           </div>
         </div>
       )}
+
+      {/* Preview modal — shared between thread-bar chips and Drive picker rows */}
+      <AttachmentPreviewModal target={previewTarget} onClose={() => setPreviewTarget(null)} />
     </div>
   );
 }
