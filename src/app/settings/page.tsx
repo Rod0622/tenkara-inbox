@@ -741,9 +741,8 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
                     >
                       <FileSignature size={14} />
                     </button>
-                    <button className="w-8 h-8 rounded-md flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--border)] transition-colors">
-                      <RefreshCw size={14} />
-                    </button>
+                    {/* Manual sync button removed — was a no-op placeholder.
+                        Sync runs via the IMAP cron + provider webhooks. */}
                     {/* One-shot attachment backfill — re-fetches attachments for messages
                         that were synced before storage was wired up. Shows the result
                         inline (e.g. "5 new · 2 dedup · 0 errors") for a few seconds. */}
