@@ -175,9 +175,36 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // For inline previews, infer a useful Content-Type from the filename
+      // extension when the stored MIME is missing or generic. Browsers won't
+      // render application/octet-stream in an <iframe> / <img>; they'd force
+      // a download — even when the bytes are a real PDF or image. Many of
+      // our attachments came in with octet-stream from the IMAP/Graph layer.
+      const inferContentType = (filename: string): string | null => {
+        const ext = filename.toLowerCase().slice(filename.lastIndexOf(".") + 1);
+        const map: Record<string, string> = {
+          pdf: "application/pdf",
+          jpg: "image/jpeg", jpeg: "image/jpeg",
+          png: "image/png", gif: "image/gif", webp: "image/webp",
+          svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+          txt: "text/plain", csv: "text/csv", log: "text/plain",
+          md: "text/markdown", json: "application/json", xml: "application/xml",
+          yaml: "text/yaml", yml: "text/yaml",
+          eml: "message/rfc822",
+          html: "text/html", htm: "text/html",
+        };
+        return map[ext] || null;
+      };
+      const storedMime = row.mime_type || dl.contentType || "";
+      const isGenericMime = !storedMime || storedMime.toLowerCase() === "application/octet-stream";
+      const effectiveMime =
+        inlineMode && isGenericMime
+          ? (inferContentType(row.filename) || storedMime || "application/octet-stream")
+          : (storedMime || "application/octet-stream");
+
       return new NextResponse(new Uint8Array(dl.bytes), {
         headers: {
-          "Content-Type": row.mime_type || dl.contentType || "application/octet-stream",
+          "Content-Type": effectiveMime,
           "Content-Disposition": `${inlineMode ? "inline" : "attachment"}; filename="${encodeURIComponent(row.filename)}"`,
           "Content-Length": String(dl.bytes.length),
         },

@@ -121,11 +121,17 @@ export default function AttachmentPreviewModal({ target, onClose }: Props) {
 
   if (!target) return null;
   const kind = detectKind(target.filename, target.contentType);
-  const fileUrl = `/api/attachments?message_id=${target.messageId}&attachment_id=${target.attachmentId}`;
+  // Two URLs:
+  //   previewUrl uses inline=1 → server sends Content-Disposition: inline
+  //     so <iframe> / <img> render in-page instead of triggering download
+  //   downloadUrl omits it → server sends Content-Disposition: attachment
+  //     so the Download button always downloads
+  const previewUrl = `/api/attachments?message_id=${target.messageId}&attachment_id=${target.attachmentId}&inline=1`;
+  const downloadUrl = `/api/attachments?message_id=${target.messageId}&attachment_id=${target.attachmentId}`;
 
   const handleDownload = async () => {
     try {
-      const res = await fetch(fileUrl);
+      const res = await fetch(downloadUrl);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -162,7 +168,7 @@ export default function AttachmentPreviewModal({ target, onClose }: Props) {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <a
-              href={fileUrl}
+              href={previewUrl}
               target="_blank"
               rel="noopener"
               className="px-2 py-1.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--border)] inline-flex items-center gap-1"
@@ -191,7 +197,7 @@ export default function AttachmentPreviewModal({ target, onClose }: Props) {
           {kind === "image" && (
             <div className="w-full h-full flex items-center justify-center p-4">
               <img
-                src={fileUrl}
+                src={previewUrl}
                 alt={target.filename}
                 className="max-w-full max-h-full object-contain"
               />
@@ -200,7 +206,7 @@ export default function AttachmentPreviewModal({ target, onClose }: Props) {
 
           {kind === "pdf" && (
             <iframe
-              src={fileUrl}
+              src={previewUrl}
               title={target.filename}
               className="w-full h-full border-0"
             />
@@ -240,7 +246,7 @@ export default function AttachmentPreviewModal({ target, onClose }: Props) {
                 </div>
                 <div className="flex items-center justify-center gap-2">
                   <a
-                    href={fileUrl}
+                    href={previewUrl}
                     target="_blank"
                     rel="noopener"
                     className="px-3 py-1.5 rounded-md text-[11px] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--surface)] inline-flex items-center gap-1"
