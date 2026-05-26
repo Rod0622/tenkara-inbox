@@ -129,7 +129,16 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
       {/* Constrain to ~3 rows so a long label list doesn't make the filter
           panel taller than the conversation list. Scrolls inside this box. */}
       <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-1">
-        {labels.map((label) => {
+        {[...labels].sort((a, b) => {
+          // Group children right after their parents by sorting on the rendered
+          // "Parent / Child" path string. Top-level labels sort by their own name.
+          const keyFor = (lbl: any) => {
+            if (!lbl.parent_label_id) return (lbl.name || "").toLowerCase();
+            const parent = labels.find((l) => l.id === lbl.parent_label_id);
+            return `${(parent?.name || "").toLowerCase()} / ${(lbl.name || "").toLowerCase()}`;
+          };
+          return keyFor(a).localeCompare(keyFor(b));
+        }).map((label) => {
           const isActive = (filters.labelIds || []).includes(label.id);
           // Batch 8: show "Parent / Child" if this label has a parent
           const parent = label.parent_label_id ? labels.find((l) => l.id === label.parent_label_id) : null;
@@ -353,6 +362,51 @@ export default function ConversationList({
   const [reminderConvoIds, setReminderConvoIds] = useState<Record<string, string>>({}); // convo_id -> remind_at
   const [searchTab, setSearchTab] = useState<"conversations" | "tasks">("conversations");
   const [taskUserFilter, setTaskUserFilter] = useState<string>("all");
+
+  // Full labels list — needed to sort per-row chips by hierarchy
+  // (account label → top-level → child) and to resolve parent label names.
+  // The LabelFilter sub-component has its own fetch for filter pills; this
+  // one is used at the list-row level.
+  const [allLabels, setAllLabels] = useState<any[]>([]);
+  useEffect(() => {
+    const sb = createBrowserClient();
+    sb.from("labels").select("id, name, parent_label_id").then(({ data }) => setAllLabels(data || []));
+  }, []);
+
+  // Sort a conversation's labels into hierarchy order for badge rendering:
+  //   1. The conversation's own email-account label (matched by name = account
+  //      name from emailAccounts prop) → leftmost
+  //   2. Top-level labels (parent_label_id is null) → alphabetical
+  //   3. Child labels (parent_label_id is set) → alphabetical by
+  //      "<parent name> / <child name>"
+  // Operates on the flat label objects (not the conversation_labels wrappers)
+  // that the row code already produces at line ~886.
+  const sortRowLabels = (labels: any[], emailAccountId: string | null | undefined): any[] => {
+    const account = emailAccountId ? emailAccounts.find((a: any) => a.id === emailAccountId) : null;
+    const acctName = (account?.name || "").trim().toLowerCase();
+    const parentNameFor = (lbl: any): string => {
+      if (!lbl?.parent_label_id) return "";
+      const parent = allLabels.find((l) => l.id === lbl.parent_label_id);
+      return parent?.name || "";
+    };
+    const priority = (lbl: any): number => {
+      if (!lbl) return 9;
+      if (acctName && (lbl.name || "").trim().toLowerCase() === acctName) return 0;
+      if (!lbl.parent_label_id) return 1;
+      return 2;
+    };
+    const sortKey = (lbl: any): string => {
+      if (!lbl) return "";
+      if (!lbl.parent_label_id) return (lbl.name || "").toLowerCase();
+      return `${parentNameFor(lbl).toLowerCase()} / ${(lbl.name || "").toLowerCase()}`;
+    };
+    return [...labels].sort((a, b) => {
+      const pa = priority(a);
+      const pb = priority(b);
+      if (pa !== pb) return pa - pb;
+      return sortKey(a).localeCompare(sortKey(b));
+    });
+  };
 
   // Phase 3: Closed sub-view fetches from /api/conversations/closed-from
   // (separate data source — closures table, not the conversations array).
@@ -993,7 +1047,7 @@ export default function ConversationList({
                               .slice(0, 20)}
                           </span>
                         )}
-                        {labels.map((l) => l && (
+                        {sortRowLabels(labels, c.email_account_id).map((l) => l && (
                           <LabelBadge key={l.id} name={l.name} color={l.color} bgColor={l.bg_color} />
                         ))}
                       </div>
