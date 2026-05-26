@@ -196,12 +196,23 @@ export default function RichTextEditor({
   useEffect(() => {
     if (initialized && editorRef.current && value !== undefined && value !== lastExternalValue.current) {
       if (editorRef.current.innerHTML !== value) {
-        // Special case: caller is wiping to empty (post-send reset). If a
-        // signature is configured, an "empty" reply isn't really empty — it
-        // means "signature only", matching what the user sees on the FIRST
-        // reply. Without this, subsequent replies have no signature.
+        // Three signature-preservation cases when value changes externally:
+        //   1. Caller wiping to empty (post-send reset) — re-inject signature so
+        //      subsequent replies aren't signature-less.
+        //   2. Caller inserting AI-generated text, a template, or any other
+        //      pre-built HTML that DOESN'T contain a signature block — append
+        //      the configured signature so it isn't lost. This is the Inky
+        //      bug fix: previously, inserting an AI draft into an "empty"
+        //      reply (where user hadn't typed yet, so the React `value` was
+        //      "" even though the DOM had the signature) would wipe the
+        //      signature when the new value got written.
+        //   3. Value already has a signature block — write as-is (don't
+        //      double-add).
+        const hasSignatureBlock = value.includes('data-signature-block="true"');
         if (value === "" && signature) {
           editorRef.current.innerHTML = buildSignatureBlockHtml(signature);
+        } else if (signature && !hasSignatureBlock && value) {
+          editorRef.current.innerHTML = value + buildSignatureBlockHtml(signature);
         } else {
           editorRef.current.innerHTML = value;
         }
