@@ -277,6 +277,13 @@ export default function ConversationDetail({
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const matchRefs = useRef<(HTMLElement | null)[]>([]);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  // Synchronous locks to prevent double-submit task creation. React state
+  // (creatingSuggestedTasks / creatingAllSuggestedTasks) is async/batched,
+  // so a fast double-click can fire createSuggestedTask twice before the
+  // disabled prop takes effect. Refs update synchronously — guarding the
+  // function body with these prevents the duplicate.
+  const creatingSuggestedTaskLockRef = useRef<Set<string>>(new Set());
+  const creatingAllSuggestedTasksLockRef = useRef(false);
 
   // Scroll to current match
   useEffect(() => {
@@ -2220,6 +2227,11 @@ export default function ConversationDetail({
     const normalized = normalizeSuggestedTaskText(taskText);
     if (existingTaskTextSet.has(normalized)) return;
 
+    // Synchronous lock — prevents duplicate creation when user double-clicks
+    // faster than React can update `creatingSuggestedTasks` state.
+    if (creatingSuggestedTaskLockRef.current.has(taskText)) return;
+    creatingSuggestedTaskLockRef.current.add(taskText);
+
     try {
       setCreatingSuggestedTasks((prev) => [...prev, taskText]);
 
@@ -2233,6 +2245,7 @@ export default function ConversationDetail({
       await refetchDetail();
     } finally {
       setCreatingSuggestedTasks((prev) => prev.filter((item) => item !== taskText));
+      creatingSuggestedTaskLockRef.current.delete(taskText);
     }
   };
 
@@ -2242,6 +2255,10 @@ export default function ConversationDetail({
     const tasksToCreate = pendingSuggestedTaskItems.map((item) => item.text);
 
     if (tasksToCreate.length === 0) return;
+
+    // Synchronous lock — same rationale as createSuggestedTask.
+    if (creatingAllSuggestedTasksLockRef.current) return;
+    creatingAllSuggestedTasksLockRef.current = true;
 
     try {
       setCreatingAllSuggestedTasks(true);
@@ -2256,6 +2273,7 @@ export default function ConversationDetail({
       await refetchDetail();
     } finally {
       setCreatingAllSuggestedTasks(false);
+      creatingAllSuggestedTasksLockRef.current = false;
     }
   };
 

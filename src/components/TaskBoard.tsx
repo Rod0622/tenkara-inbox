@@ -102,6 +102,9 @@ export default function TaskBoard({
   const [deleting, setDeleting] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const dateInputRef = useRef<HTMLInputElement>(null);
+  // Synchronous lock for createTask — prevents duplicate POST when user
+  // double-clicks faster than React can flush the `saving` state.
+  const savingLockRef = useRef(false);
 
   const openDatePicker = () => {
     const input = dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
@@ -207,6 +210,10 @@ export default function TaskBoard({
 
   const createTask = async () => {
     if (!text.trim()) return;
+    // Synchronous lock — `saving` state alone doesn't prevent double-clicks
+    // because React state updates are async/batched.
+    if (savingLockRef.current) return;
+    savingLockRef.current = true;
     setSaving(true);
     setError(null);
 
@@ -250,6 +257,7 @@ export default function TaskBoard({
       }
     } finally {
       setSaving(false);
+      savingLockRef.current = false;
     }
   };
 
