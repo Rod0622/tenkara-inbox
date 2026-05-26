@@ -1012,9 +1012,12 @@ export default function ConversationDetail({
   // Builds a hash-based URL the team can share. Anyone with access to this
   // conversation can paste it back into the merge-link dialog or open the
   // conversation directly.
+  // The app's URL parser reads `window.location.hash` (see parseHash in
+  // page.tsx) — must use `#conversation=X` not `?conversation=X` for the
+  // link to actually navigate to the conversation when pasted into a new tab.
   const copyConversationLink = async () => {
     if (!convo?.id) return;
-    const url = `${window.location.origin}/?conversation=${convo.id}`;
+    const url = `${window.location.origin}/#conversation=${convo.id}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -5351,7 +5354,7 @@ export default function ConversationDetail({
                   type="text"
                   value={mergeLinkInput}
                   onChange={(e) => { setMergeLinkInput(e.target.value); setMergeLinkError(null); }}
-                  placeholder="https://app.tenkara.com/?conversation=abc-123... or paste the ID"
+                  placeholder="https://app.tenkara.com/#conversation=abc-123... or paste the ID"
                   autoFocus
                   disabled={mergeLinkBusy}
                   className="w-full px-3 py-2 text-[12px] rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50 font-mono"
