@@ -284,7 +284,13 @@ export default function RichTextEditor({
     const hr = document.createElement("tr");
     for (let i = 0; i < cols; i++) {
       const th = document.createElement("th");
-      th.style.cssText = "border:1px solid #1E242C;padding:6px 10px;background:#161B22;color:#E6EDF3;font-size:12px;font-weight:600;text-align:left;overflow:hidden;resize:horizontal";
+      // Email-safe neutral palette — readable in light AND dark mode of the
+      // app, AND in any email client (Gmail web, Outlook, Apple Mail, etc.).
+      // Don't use CSS variables here — they don't resolve in email clients.
+      //   border  #d0d7de  light gray, visible on white and dark backgrounds
+      //   bg      #f6f8fa  very light gray header band
+      //   text    #1f2328  near-black, readable on light header bg
+      th.style.cssText = "border:1px solid #d0d7de;padding:6px 10px;background:#f6f8fa;color:#1f2328;font-size:12px;font-weight:600;text-align:left;overflow:hidden;resize:horizontal";
       th.textContent = "Header " + String(i + 1);
       hr.appendChild(th);
     }
@@ -295,7 +301,9 @@ export default function RichTextEditor({
       const tr = document.createElement("tr");
       for (let c = 0; c < cols; c++) {
         const td = document.createElement("td");
-        td.style.cssText = "border:1px solid #1E242C;padding:6px 10px;color:#E6EDF3;font-size:12px";
+        // Body cells: no background (transparent — picks up email client's
+        // default body bg, usually white). Near-black text for readability.
+        td.style.cssText = "border:1px solid #d0d7de;padding:6px 10px;color:#24292f;font-size:12px";
         td.innerHTML = "\u00a0";
         tr.appendChild(td);
       }
