@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw, Pin } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -353,7 +353,8 @@ export default function ConversationList({
   conversations, activeConvo, setActiveConvo, searchQuery, setSearchQuery,
   searchScope = "all", setSearchScope, activeMailbox, activeFolder, folderSubView = "unassigned", emailAccounts = [], folders = [],
   teamMembers, onBulkAction, searchSnippets, searchTaskResults = [], onOpenConversation,
-}: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void }) {
+  currentUserId,
+}: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void; currentUserId?: string | null }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -362,6 +363,57 @@ export default function ConversationList({
   const [reminderConvoIds, setReminderConvoIds] = useState<Record<string, string>>({}); // convo_id -> remind_at
   const [searchTab, setSearchTab] = useState<"conversations" | "tasks">("conversations");
   const [taskUserFilter, setTaskUserFilter] = useState<string>("all");
+
+  // Personal pins — the set of conversation IDs the current user has pinned.
+  // Updated locally on row-click toggle + via a global "pins:changed" event
+  // dispatched by other components (e.g. ConversationDetail's pin button).
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUserId) {
+      setPinnedIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      fetch(`/api/conversations/pin?user_id=${currentUserId}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          setPinnedIds(new Set(data?.pinned || []));
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const onChange = () => refresh();
+    window.addEventListener("pins:changed", onChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pins:changed", onChange);
+    };
+  }, [currentUserId]);
+
+  const togglePin = async (conversationId: string) => {
+    if (!currentUserId) return;
+    const isPinned = pinnedIds.has(conversationId);
+    // Optimistic update
+    const next = new Set(pinnedIds);
+    if (isPinned) next.delete(conversationId); else next.add(conversationId);
+    setPinnedIds(next);
+    try {
+      await fetch("/api/conversations/pin", {
+        method: isPinned ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUserId, conversation_id: conversationId }),
+      });
+      window.dispatchEvent(new CustomEvent("pins:changed"));
+    } catch (error) {
+      console.error("Toggle pin (list) failed:", error);
+      // Revert
+      const revert = new Set(pinnedIds);
+      if (isPinned) revert.add(conversationId); else revert.delete(conversationId);
+      setPinnedIds(revert);
+    }
+  };
 
   // Full labels list — needed to sort per-row chips by hierarchy
   // (account label → top-level → child) and to resolve parent label names.
@@ -984,6 +1036,18 @@ export default function ConversationList({
                         {c.from_name}
                       </span>
                       {c.is_starred && <span className="text-[var(--highlight)] text-[12px]">★</span>}
+                      {/* Personal pin — only show toggle for the assignee */}
+                      {currentUserId && c.assignee_id === currentUserId && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); togglePin(c.id); }}
+                          title={pinnedIds.has(c.id) ? "Unpin" : "Pin to your personal Pinned view"}
+                          className={`flex-shrink-0 ${
+                            pinnedIds.has(c.id) ? "text-[var(--accent)]" : "text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
+                          } transition-opacity`}
+                        >
+                          <Pin size={11} fill={pinnedIds.has(c.id) ? "var(--accent)" : "none"} />
+                        </button>
+                      )}
                       {reminderConvoIds[c.id] && (
                         <span className="text-[var(--warning)] flex-shrink-0" title={"Follow-up: " + new Date(reminderConvoIds[c.id]).toLocaleString()}>
                           <AlarmClock size={12} />

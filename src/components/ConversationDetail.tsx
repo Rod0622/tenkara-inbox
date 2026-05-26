@@ -45,6 +45,7 @@ import {
   ClipboardCheck,
   Link2,
   StickyNote,
+  Pin,
 } from "lucide-react";
 import FormModal from "./FormModal";
 import {
@@ -2172,6 +2173,48 @@ export default function ConversationDetail({
     }
   };
 
+  // ─── Personal pin (per-user) ──────────────────────────────────────────
+  // Pin is a per-user concept (vs Star which is shared/team). Each user has
+  // their own set of pinned conversations stored in inbox.conversation_pins.
+  // The pin button is only shown when the conversation is assigned to the
+  // current user — per design, you only pin things on your plate.
+  const [isPinned, setIsPinned] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
+  useEffect(() => {
+    if (!convo?.id || !currentUser?.id) {
+      setIsPinned(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/conversations/pin?user_id=${currentUser.id}&conversation_id=${convo.id}`)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setIsPinned(!!data?.pinned); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [convo?.id, currentUser?.id]);
+
+  const handleTogglePin = async () => {
+    if (!convo?.id || !currentUser?.id || pinBusy) return;
+    setPinBusy(true);
+    // Optimistic flip
+    const nextPinned = !isPinned;
+    setIsPinned(nextPinned);
+    try {
+      await fetch("/api/conversations/pin", {
+        method: nextPinned ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUser.id, conversation_id: convo.id }),
+      });
+      // Tell parent so the sidebar Pinned count + ConversationList badges update
+      window.dispatchEvent(new CustomEvent("pins:changed"));
+    } catch (error) {
+      console.error("Toggle pin failed:", error);
+      setIsPinned(!nextPinned); // Revert on failure
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
   const existingTaskTextSet = useMemo(() => {
     return new Set(
       tasks
@@ -2635,6 +2678,20 @@ export default function ConversationDetail({
             >
               <Star size={16} fill={convo.is_starred ? "var(--highlight)" : "none"} />
             </button>
+
+            {/* Pin (personal) — only visible for the assignee; their personal "watch list" */}
+            {currentUser?.id && convo.assignee_id === currentUser.id && (
+              <button
+                onClick={handleTogglePin}
+                disabled={pinBusy}
+                title={isPinned ? "Unpin (remove from your Pinned view)" : "Pin to your personal Pinned view"}
+                className={`w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--surface)] flex items-center justify-center hover:bg-[var(--surface-2)] disabled:opacity-50 ${
+                  isPinned ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
+                }`}
+              >
+                <Pin size={15} fill={isPinned ? "var(--accent)" : "none"} />
+              </button>
+            )}
 
             {/* Watch toggle (Batch 4) */}
             {currentUser?.id && (

@@ -75,6 +75,33 @@ export default function InboxPage() {
     [teamMembers, session]
   );
 
+  // Pinned conversation IDs for the current user. Refreshed on the global
+  // "pins:changed" event so the Pinned view always reflects the latest set.
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setPinnedIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      fetch(`/api/conversations/pin?user_id=${currentUser.id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          setPinnedIds(new Set(data?.pinned || []));
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const onChange = () => refresh();
+    window.addEventListener("pins:changed", onChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pins:changed", onChange);
+    };
+  }, [currentUser?.id]);
+
   // Debounced full-text search across all messages
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
@@ -302,6 +329,20 @@ export default function InboxPage() {
         const localIds = new Set(fromLocal.map((c) => c.id));
         const extras = watchingExtraConvos.filter((c) => !localIds.has(c.id));
         filtered = [...fromLocal, ...extras];
+      } else if (activeView === "pinned") {
+        // Pinned: only conversations the user has personally pinned AND that
+        // are still assigned to them (per the design — pin is for "stuff on
+        // my plate I want quick access to"). If the conversation gets
+        // reassigned or closed, it disappears from Pinned but the pin row
+        // stays (soft-hide). Re-assigning back surfaces it again.
+        filtered = conversations.filter(
+          (c) =>
+            pinnedIds.has(c.id) &&
+            c.assignee_id === currentUser.id &&
+            c.status !== "closed" &&
+            c.status !== "trash" &&
+            c.status !== "spam"
+        );
       } else if (activeView === "inbox") {
         // Personal inbox: show ALL conversations assigned to me
         filtered = conversations.filter(
@@ -354,6 +395,7 @@ export default function InboxPage() {
     mySentConvoIds,
     watchingConvoIds,
     watchingExtraConvos,
+    pinnedIds,
   ]);
 
   // Handle hash-based navigation (notifications, task links, direct URLs)
@@ -704,6 +746,7 @@ export default function InboxPage() {
                 searchSnippets={searchSnippets}
                 searchTaskResults={searchTaskResults}
                 onOpenConversation={openConversationFromTask}
+                currentUserId={currentUser?.id || null}
               />
             </Panel>
 

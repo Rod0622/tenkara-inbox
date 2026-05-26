@@ -26,6 +26,7 @@ import {
   Sun,
   Moon,
   Phone,
+  Pin,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -183,6 +184,7 @@ export default function Sidebar({
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [watchingCount, setWatchingCount] = useState(0);
+  const [pinnedCount, setPinnedCount] = useState(0);
   // Own OOO popover (anchored to user-name button at bottom of sidebar)
   const [showOwnOOO, setShowOwnOOO] = useState(false);
   const [ownOOOAnchor, setOwnOOOAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -247,6 +249,29 @@ export default function Sidebar({
     fetchWatching();
     const id = setInterval(fetchWatching, 30000);
     return () => clearInterval(id);
+  }, [currentUser?.id]);
+
+  // Fetch count of conversations the user has pinned. Refreshes on the
+  // global "pins:changed" event so changes from any surface (the conversation
+  // header pin button, list-row pin button) update the sidebar count instantly.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const fetchPinned = async () => {
+      try {
+        const res = await fetch(`/api/conversations/pin?user_id=${currentUser.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setPinnedCount((data.pinned || []).length);
+      } catch (_e) {}
+    };
+    fetchPinned();
+    const onPinsChanged = () => fetchPinned();
+    window.addEventListener("pins:changed", onPinsChanged);
+    const id = setInterval(fetchPinned, 60000);
+    return () => {
+      window.removeEventListener("pins:changed", onPinsChanged);
+      clearInterval(id);
+    };
   }, [currentUser?.id]);
 
   const markAllRead = async () => {
@@ -603,6 +628,7 @@ export default function Sidebar({
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
+          { id: "pinned", label: "Pinned", icon: Pin, count: pinnedCount, unread: 0 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive =
