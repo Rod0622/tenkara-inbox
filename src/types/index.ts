@@ -44,7 +44,7 @@ export interface Conversation {
   is_unread: boolean;
   is_starred: boolean;
   assignee_id: string | null;
-  status: "open" | "closed" | "snoozed" | "trash" | "spam";
+  status: "open" | "closed" | "snoozed" | "trash" | "spam" | "merged";
   last_message_at: string;
   created_at: string;
   labels?: ConversationLabel[];

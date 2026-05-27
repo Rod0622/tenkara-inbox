@@ -243,6 +243,8 @@ export default function InboxPage() {
     const isTrashFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "trash";
     // Check if we're viewing a Spam system folder
     const isSpamFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "spam";
+    // Check if we're viewing an Archive system folder
+    const isArchiveFolder = selectedFolder?.is_system && String(selectedFolder.name || "").toLowerCase() === "archive";
 
     if (isTrashFolder) {
       // Show only trashed conversations for this account
@@ -253,6 +255,18 @@ export default function InboxPage() {
       // Show only spam conversations for this account
       filtered = conversations.filter(
         (c) => c.status === "spam" && c.email_account_id === activeMailbox
+      );
+    } else if (isArchiveFolder) {
+      // Show all conversations in this account's Archive folder.
+      // INCLUDES status='merged' (the empty shells from merges) so users
+      // can see/recover merged threads. Excludes trash/spam (those have
+      // their own folders).
+      filtered = conversations.filter(
+        (c) =>
+          c.email_account_id === activeMailbox &&
+          c.folder_id === selectedFolder.id &&
+          c.status !== "trash" &&
+          c.status !== "spam"
       );
     } else if (activeMailbox && selectedFolder) {
       const folderName = String(selectedFolder.name || "").toLowerCase();
@@ -360,6 +374,13 @@ export default function InboxPage() {
     // Exclude spam conversations from all views except Spam folder
     if (!isSpamFolder) {
       filtered = filtered.filter((c) => c.status !== "spam");
+    }
+    // Exclude merged shells from all views except Archive folder. The Archive
+    // is the resting place for merged conversations — they should be hidden
+    // from Inbox/personal/folder views and ONLY surface in Archive (or via
+    // direct conversation URL).
+    if (!isArchiveFolder) {
+      filtered = filtered.filter((c) => c.status !== "merged");
     }
 
     if (searchQuery.trim() && searchQuery.trim().length >= 2) {

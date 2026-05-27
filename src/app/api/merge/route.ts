@@ -182,8 +182,42 @@ export async function POST(req: NextRequest) {
         if (toDel.length > 0) moveOps.push(supabase.from("follow_up_tracking").delete().in("id", toDel.map((f: any) => f.id)).select().then(r => r));
       }
 
-      // Mark merged conversation
-      moveOps.push(supabase.from("conversations").update({ merged_into: primary_id, status: "merged" }).eq("id", mergeId).select().then(r => r));
+      // Mark merged conversation — also moves to Archive + clears assignee
+      // so the empty shell stops cluttering Inbox/other folders and stops
+      // being on anyone's plate. On unmerge, status flips to "open" but
+      // folder_id and assignee stay (per design).
+      let archiveFolderId: string | null = null;
+      try {
+        const { data: dupRow } = await supabase
+          .from("conversations")
+          .select("email_account_id")
+          .eq("id", mergeId)
+          .maybeSingle();
+        if (dupRow?.email_account_id) {
+          const { data: archive } = await supabase
+            .from("folders")
+            .select("id")
+            .eq("email_account_id", dupRow.email_account_id)
+            .ilike("name", "archive")
+            .eq("is_system", true)
+            .maybeSingle();
+          archiveFolderId = archive?.id || null;
+        }
+      } catch (e: any) {
+        console.error("[merge] Archive folder lookup failed:", e?.message);
+      }
+      moveOps.push(
+        supabase.from("conversations")
+          .update({
+            merged_into: primary_id,
+            status: "merged",
+            folder_id: archiveFolderId,
+            assignee_id: null,
+          })
+          .eq("id", mergeId)
+          .select()
+          .then(r => r)
+      );
 
       await Promise.all(moveOps);
 

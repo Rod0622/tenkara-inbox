@@ -213,12 +213,14 @@ export function useConversations(accountId: string | null) {
       `;
 
     if (accountId) {
-      // Specific account: fetch all for that account
+      // Specific account: fetch all for that account.
+      // Note: we DO include status='merged' here so the Archive folder view
+      // can render merged shells. The page-level filter excludes merged from
+      // non-Archive views via the isArchiveFolder check.
       const { data, error } = await supabase
         .from("conversations")
         .select(selectFields)
         .eq("email_account_id", accountId)
-        .neq("status", "merged")
         .order("last_message_at", { ascending: false })
         .limit(500);
 

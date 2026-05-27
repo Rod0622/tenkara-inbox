@@ -280,10 +280,44 @@ export async function mergeConversation(
       if (toDel.length > 0) moveOps.push(supabase.from("follow_up_tracking").delete().in("id", toDel.map((f: any) => f.id)).select().then((r: any) => r));
     }
 
-    // Mark duplicate as merged.
+    // Mark duplicate as merged. Also: move it to the account's Archive
+    // folder and clear its assignee. The shell stays as a recoverable
+    // record of the merge but stops cluttering Inbox/other folders and
+    // stops being on anyone's plate. Per design: status stays "merged"
+    // (so it's filtered out of non-Archive views), folder_id moves to
+    // Archive, assignee_id cleared. On unmerge, status flips back to
+    // "open" but folder_id and assignee stay (user decides next steps).
+    let archiveFolderId: string | null = null;
+    try {
+      // Look up the duplicate's email_account_id, then its Archive folder.
+      const { data: dupRow } = await supabase
+        .from("conversations")
+        .select("email_account_id")
+        .eq("id", duplicateId)
+        .maybeSingle();
+      if (dupRow?.email_account_id) {
+        const { data: archive } = await supabase
+          .from("folders")
+          .select("id")
+          .eq("email_account_id", dupRow.email_account_id)
+          .ilike("name", "archive")
+          .eq("is_system", true)
+          .maybeSingle();
+        archiveFolderId = archive?.id || null;
+      }
+    } catch (e: any) {
+      // Defensive: if Archive lookup fails, fall back to NULL folder_id
+      // rather than blocking the merge.
+      console.error("[merge] Archive folder lookup failed:", e?.message);
+    }
     moveOps.push(
       supabase.from("conversations")
-        .update({ merged_into: primaryId, status: "merged" })
+        .update({
+          merged_into: primaryId,
+          status: "merged",
+          folder_id: archiveFolderId,
+          assignee_id: null,
+        })
         .eq("id", duplicateId)
         .select()
         .then((r: any) => r)
