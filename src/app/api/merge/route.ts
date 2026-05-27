@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "One or more conversations are already merged into another thread" }, { status: 400 });
   }
 
-  const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0 } };
+  const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0, watchers: 0, pins: 0, follow_up_tracking: 0, quo_call_logs: 0, call_follow_ups: 0 } };
 
   try {
     for (const mergeId of newMergeIds) {
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       const mid = mergeRecord.id;
 
       // Fetch all record IDs in parallel
-      const [msgsR, tasksR, notesR, activR, labelsR, draftsR, rtsR] = await Promise.all([
+      const [msgsR, tasksR, notesR, activR, labelsR, draftsR, rtsR, watchersR, pinsR, fupTrackR, callLogsR, callFollowUpsR] = await Promise.all([
         supabase.from("messages").select("id").eq("conversation_id", mergeId),
         supabase.from("tasks").select("id").eq("conversation_id", mergeId),
         supabase.from("notes").select("id").eq("conversation_id", mergeId),
@@ -81,6 +81,11 @@ export async function POST(req: NextRequest) {
         supabase.from("conversation_labels").select("id, label_id").eq("conversation_id", mergeId),
         supabase.from("email_drafts").select("id").eq("conversation_id", mergeId),
         supabase.from("response_times").select("id").eq("conversation_id", mergeId),
+        supabase.from("conversation_watchers").select("conversation_id, user_id").eq("conversation_id", mergeId),
+        supabase.from("conversation_pins").select("user_id, conversation_id").eq("conversation_id", mergeId),
+        supabase.from("follow_up_tracking").select("id, rule_id").eq("conversation_id", mergeId),
+        supabase.from("quo_call_logs").select("id").eq("conversation_id", mergeId),
+        supabase.from("call_follow_ups").select("id").eq("conversation_id", mergeId),
       ]);
 
       const msgs = msgsR.data || [];
@@ -90,6 +95,11 @@ export async function POST(req: NextRequest) {
       const labels = labelsR.data || [];
       const drafts = draftsR.data || [];
       const rts = rtsR.data || [];
+      const watchers = watchersR.data || [];
+      const pins = pinsR.data || [];
+      const fupTrack = fupTrackR.data || [];
+      const callLogs = callLogsR.data || [];
+      const callFollowUps = callFollowUpsR.data || [];
 
       // Build all tracking records in one batch
       const trackingRecords: any[] = [];
@@ -105,6 +115,16 @@ export async function POST(req: NextRequest) {
       mkTrack("conversation_labels", labels);
       mkTrack("email_drafts", drafts);
       mkTrack("response_times", rts);
+      mkTrack("follow_up_tracking", fupTrack);
+      mkTrack("quo_call_logs", callLogs);
+      mkTrack("call_follow_ups", callFollowUps);
+      // Composite-PK tables — record_id = user_id for these
+      for (const w of watchers) {
+        trackingRecords.push({ merge_id: mid, table_name: "conversation_watchers", record_id: w.user_id, original_conversation_id: mergeId, target_conversation_id: primary_id });
+      }
+      for (const p of pins) {
+        trackingRecords.push({ merge_id: mid, table_name: "conversation_pins", record_id: p.user_id, original_conversation_id: mergeId, target_conversation_id: primary_id });
+      }
 
       // Insert all tracking records in one call
       if (trackingRecords.length > 0) {
@@ -119,6 +139,8 @@ export async function POST(req: NextRequest) {
       if (activ.length > 0) moveOps.push(supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (drafts.length > 0) moveOps.push(supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (rts.length > 0) moveOps.push(supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (callLogs.length > 0) moveOps.push(supabase.from("quo_call_logs").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (callFollowUps.length > 0) moveOps.push(supabase.from("call_follow_ups").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
 
       // Handle labels: move non-duplicates, delete duplicates
       if (labels.length > 0) {
@@ -128,6 +150,36 @@ export async function POST(req: NextRequest) {
         const toDel = labels.filter((l: any) => existingLabelIds.has(l.label_id));
         if (toMove.length > 0) moveOps.push(supabase.from("conversation_labels").update({ conversation_id: primary_id }).in("id", toMove.map((l: any) => l.id)).select().then(r => r));
         if (toDel.length > 0) moveOps.push(supabase.from("conversation_labels").delete().in("id", toDel.map((l: any) => l.id)).select().then(r => r));
+      }
+
+      // Watchers: composite PK dedup — if user watches both, drop the duplicate's row
+      if (watchers.length > 0) {
+        const { data: existingW } = await supabase.from("conversation_watchers").select("user_id").eq("conversation_id", primary_id);
+        const existingUserIds = new Set((existingW || []).map((w: any) => w.user_id));
+        const toMove = watchers.filter((w: any) => !existingUserIds.has(w.user_id));
+        const toDel = watchers.filter((w: any) => existingUserIds.has(w.user_id));
+        if (toMove.length > 0) moveOps.push(supabase.from("conversation_watchers").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).in("user_id", toMove.map((w: any) => w.user_id)).select().then(r => r));
+        if (toDel.length > 0) moveOps.push(supabase.from("conversation_watchers").delete().eq("conversation_id", mergeId).in("user_id", toDel.map((w: any) => w.user_id)).select().then(r => r));
+      }
+
+      // Pins: same dedup
+      if (pins.length > 0) {
+        const { data: existingP } = await supabase.from("conversation_pins").select("user_id").eq("conversation_id", primary_id);
+        const existingPinUserIds = new Set((existingP || []).map((p: any) => p.user_id));
+        const toMove = pins.filter((p: any) => !existingPinUserIds.has(p.user_id));
+        const toDel = pins.filter((p: any) => existingPinUserIds.has(p.user_id));
+        if (toMove.length > 0) moveOps.push(supabase.from("conversation_pins").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).in("user_id", toMove.map((p: any) => p.user_id)).select().then(r => r));
+        if (toDel.length > 0) moveOps.push(supabase.from("conversation_pins").delete().eq("conversation_id", mergeId).in("user_id", toDel.map((p: any) => p.user_id)).select().then(r => r));
+      }
+
+      // follow_up_tracking dedup on rule_id
+      if (fupTrack.length > 0) {
+        const { data: existingF } = await supabase.from("follow_up_tracking").select("rule_id").eq("conversation_id", primary_id);
+        const existingRuleIds = new Set((existingF || []).map((f: any) => f.rule_id));
+        const toMove = fupTrack.filter((f: any) => !existingRuleIds.has(f.rule_id));
+        const toDel = fupTrack.filter((f: any) => existingRuleIds.has(f.rule_id));
+        if (toMove.length > 0) moveOps.push(supabase.from("follow_up_tracking").update({ conversation_id: primary_id }).in("id", toMove.map((f: any) => f.id)).select().then(r => r));
+        if (toDel.length > 0) moveOps.push(supabase.from("follow_up_tracking").delete().in("id", toDel.map((f: any) => f.id)).select().then(r => r));
       }
 
       // Mark merged conversation
@@ -142,6 +194,11 @@ export async function POST(req: NextRequest) {
       results.moved.labels += labels.length;
       results.moved.drafts += drafts.length;
       results.moved.response_times += rts.length;
+      results.moved.watchers += watchers.length;
+      results.moved.pins += pins.length;
+      results.moved.follow_up_tracking += fupTrack.length;
+      results.moved.quo_call_logs += callLogs.length;
+      results.moved.call_follow_ups += callFollowUps.length;
 
       // Log activity
       await supabase.from("activity_log").insert({
@@ -212,11 +269,25 @@ export async function DELETE(req: NextRequest) {
     // Restore records in parallel — batch by table using record IDs
     const restoreOps: any[] = [];
     for (const [table, records] of Object.entries(byTable)) {
-      const ids = records.map(r => r.record_id);
       const origConvoId = records[0].original_conversation_id;
-      restoreOps.push(
-        supabase.from(table).update({ conversation_id: origConvoId }).in("id", ids).select().then(r => r)
-      );
+      // Composite-PK tables (watchers/pins): we stored user_id in record_id.
+      // Restore via (current conversation_id = primary, user_id = X) → set to original.
+      if (table === "conversation_watchers" || table === "conversation_pins") {
+        const userIds = records.map(r => r.record_id);
+        restoreOps.push(
+          supabase.from(table)
+            .update({ conversation_id: origConvoId })
+            .eq("conversation_id", merge.primary_conversation_id)
+            .in("user_id", userIds)
+            .select()
+            .then((r: any) => r)
+        );
+      } else {
+        const ids = records.map(r => r.record_id);
+        restoreOps.push(
+          supabase.from(table).update({ conversation_id: origConvoId }).in("id", ids).select().then(r => r)
+        );
+      }
     }
     await Promise.all(restoreOps);
 

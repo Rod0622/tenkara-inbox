@@ -382,10 +382,15 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             let conversationId: string | null = null;
 
             if (cleanSubject) {
-              const { data: c } = await supabase.from("conversations").select("id")
+              const { data: c } = await supabase.from("conversations").select("id, merged_into")
                 .eq("email_account_id", accountId).eq("subject", cleanSubject)
                 .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
-              if (c) conversationId = c.id;
+              if (c) {
+                // Redirect to merge primary if the matched conv was merged.
+                conversationId = c.merged_into
+                  ? await resolveMergedInto(supabase, c.merged_into)
+                  : c.id;
+              }
             }
 
             if (!conversationId) {
@@ -1235,6 +1240,28 @@ function parseMail(parsed: ParsedMail, uid: number): ParsedEmail {
 }
 
 // ── Conversation threading ───────────────────────────
+// Resolve a conversation ID through the merged_into chain. If conv X has
+// merged_into = Y, return Y. If Y is also merged into Z, return Z. Etc.
+// Caps at 5 hops to defend against pathological cycles (shouldn't happen
+// but cheap insurance). Returns the input id unchanged if no chain.
+//
+// This MUST be called whenever we match a conversation from history (by
+// In-Reply-To, References, or subject) so that incoming messages on a
+// merged thread go to the surviving primary, not the empty shell.
+async function resolveMergedInto(supabase: any, conversationId: string): Promise<string> {
+  let current = conversationId;
+  for (let hops = 0; hops < 5; hops++) {
+    const { data } = await supabase
+      .from("conversations")
+      .select("merged_into")
+      .eq("id", current)
+      .maybeSingle();
+    if (!data?.merged_into) return current;
+    current = data.merged_into;
+  }
+  return current;
+}
+
 async function findOrCreateConversation(
   supabase: any,
   accountId: string,
@@ -1249,6 +1276,11 @@ async function findOrCreateConversation(
       .or(`provider_message_id.eq.${email.inReplyTo}`)
       .limit(1)
       .maybeSingle();
+    if (existingMsg?.conversation_id) {
+      // Walk merged_into chain so incoming messages land on the surviving
+      // primary, not the empty shell of a merged conversation.
+      return resolveMergedInto(supabase, existingMsg.conversation_id);
+    }
   }
 
   // Strategy 2: Match by References headers
@@ -1262,7 +1294,7 @@ async function findOrCreateConversation(
         .maybeSingle();
 
       if (refMsg?.conversation_id) {
-        return refMsg.conversation_id;
+        return resolveMergedInto(supabase, refMsg.conversation_id);
       }
     }
   }
@@ -1272,7 +1304,7 @@ async function findOrCreateConversation(
   if (normalizedSubject) {
     const { data: subjectMatch } = await supabase
       .from("conversations")
-      .select("id")
+      .select("id, merged_into")
       .eq("email_account_id", accountId)
       .eq("subject", normalizedSubject)
       .gte(
@@ -1284,6 +1316,11 @@ async function findOrCreateConversation(
       .maybeSingle();
 
     if (subjectMatch?.id) {
+      // If the subject-matched conversation was itself merged into another,
+      // walk to the primary. Strategy 3 should never resurrect an empty shell.
+      if (subjectMatch.merged_into) {
+        return resolveMergedInto(supabase, subjectMatch.merged_into);
+      }
       return subjectMatch.id;
     }
   }
