@@ -593,10 +593,22 @@ export default function ConversationList({
         const fName = String(activeF?.name || "").trim().toLowerCase();
         const isSpam = fName === "spam";
         const isTrash = fName === "trash";
+        const isArchive = fName === "archive" && activeF?.is_system;
         const isSpamOrTrash = isSpam || isTrash;
         const requiredStatus = isSpam ? "spam" : isTrash ? "trash" : "open";
 
-        if (isSpamOrTrash) {
+        if (isArchive) {
+          // Archive folder: include conversations with status='open' OR
+          // status='merged' (the empty shells from merges). Match strictly
+          // by folder_id so only conversations actually in this Archive
+          // appear. Assignee filter intentionally not applied — Archive
+          // is account-scoped, not user-scoped.
+          result = result.filter(
+            (c: any) =>
+              c.folder_id === activeFolder &&
+              (c.status === "open" || c.status === "merged")
+          );
+        } else if (isSpamOrTrash) {
           // Trust upstream page.tsx filter; just narrow to status + unassigned.
           result = result.filter(
             (c: any) => c.status === requiredStatus && !c.assignee_id
