@@ -3255,6 +3255,7 @@ export default function ConversationDetail({
                     value={inlineComposeBody}
                     onChange={setInlineComposeBody}
                     compact
+                    autoFocus
                     signature={replySignature}
                   />
                 </div>
@@ -5149,6 +5150,7 @@ export default function ConversationDetail({
             onChange={setForwardBody}
             placeholder="Type your message..."
             minHeight={260}
+            autoFocus
             signature={replySignature}
             onAIDraft={() => { setAiDraftTarget("forwardModal"); setShowAIDraftModal(true); }}
           />
@@ -5335,6 +5337,7 @@ export default function ConversationDetail({
                   onChange={setReplyModalBody}
                   placeholder="Type your reply..."
                   minHeight={260}
+                  autoFocus
                   signature={replySignature}
                   onAIDraft={() => { setAiDraftTarget("replyModal"); setShowAIDraftModal(true); }}
                 />
