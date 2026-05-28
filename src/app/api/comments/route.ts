@@ -139,3 +139,78 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ comment });
 }
+
+// PATCH /api/comments — edit an existing comment's body (author only).
+// Body shape: { id, author_id, body }
+// We require author_id in the body and check it matches the comment's author
+// before allowing the update. No admin override — only the author can edit.
+// On a successful edit we set edited_at = now() so the UI can show "(edited)".
+//
+// We intentionally do NOT re-run mention notifications on edit — would create
+// spam when someone edits to fix a typo. Mentions array stays as-is.
+export async function PATCH(req: NextRequest) {
+  const supabase = createServerClient();
+  const body = await req.json();
+  const { id, author_id, body: newBody } = body || {};
+
+  if (!id || !author_id || !newBody?.trim()) {
+    return NextResponse.json({ error: "id, author_id, and body are required" }, { status: 400 });
+  }
+
+  // Fetch the comment to verify authorship
+  const { data: existing, error: lookupErr } = await supabase
+    .from("comments")
+    .select("id, author_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (lookupErr || !existing) {
+    return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+  }
+  if (existing.author_id !== author_id) {
+    return NextResponse.json({ error: "Only the author can edit this comment" }, { status: 403 });
+  }
+
+  const { data: updated, error } = await supabase
+    .from("comments")
+    .update({ body: newBody.trim(), edited_at: new Date().toISOString() })
+    .eq("id", id)
+    .select(`
+      *,
+      author:team_members!author_id (id, name, initials, color)
+    `)
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ comment: updated });
+}
+
+// DELETE /api/comments?id=X&author_id=Y — delete a comment (author only).
+// Same authorship check as PATCH. Hard delete (no soft delete) — keeps the
+// data model simple and matches user expectation when they "delete" a chat.
+export async function DELETE(req: NextRequest) {
+  const supabase = createServerClient();
+  const id = req.nextUrl.searchParams.get("id");
+  const authorId = req.nextUrl.searchParams.get("author_id");
+
+  if (!id || !authorId) {
+    return NextResponse.json({ error: "id and author_id are required" }, { status: 400 });
+  }
+
+  const { data: existing } = await supabase
+    .from("comments")
+    .select("id, author_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!existing) {
+    return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+  }
+  if (existing.author_id !== authorId) {
+    return NextResponse.json({ error: "Only the author can delete this comment" }, { status: 403 });
+  }
+
+  const { error } = await supabase.from("comments").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

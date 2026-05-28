@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, Send, AtSign, Users, X } from "lucide-react";
+import { MessageSquare, Send, AtSign, Users, X, MoreVertical, Edit2, Trash2, SmilePlus, Check } from "lucide-react";
 import type { TeamMember } from "@/types";
 import Avatar from "./Avatar";
 
 // Token used to mention everyone — the API expands this to all active member IDs.
 const EVERYONE_TOKEN = "@everyone";
+
+// Quick-reaction emoji set offered when the user clicks the smiley button.
+// Kept small and universally-supported (no skin-tone modifiers, no compound
+// ZWJ sequences). Order matches common Slack/Linear conventions.
+const QUICK_REACTIONS = ["👍", "❤️", "😄", "🎉", "👀", "🙏"];
 
 interface MentionEntry {
   // Either a team_member.id (UUID) OR the special "@everyone" string
@@ -28,6 +33,15 @@ export default function TeamChat({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [isTeamChatOpen, setIsTeamChatOpen] = useState(false);
+
+  // Per-message UI state — track which message is being edited, which one has
+  // its action menu open, and which one has the reaction picker open. Only one
+  // of each can be active at a time, keyed by comment id.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const [reactionPickerId, setReactionPickerId] = useState<string | null>(null);
+  const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // If user arrived here via a mention notification, auto-open team chat.
   // The Sidebar sets `&open_team_chat=1` in the URL hash.
@@ -88,6 +102,26 @@ export default function TeamChat({
     const id = setInterval(fetchComments, 5000);
     return () => clearInterval(id);
   }, [conversationId]);
+
+  // Close any open action menu / reaction picker when clicking outside.
+  // Uses ref-based detection — the menu container has a data attribute we
+  // check against the click target's ancestors.
+  useEffect(() => {
+    if (!actionMenuId && !reactionPickerId) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      // If the click was inside any element marked with [data-msg-menu],
+      // don't close — let the inner buttons handle their own behavior.
+      if (target?.closest?.("[data-msg-menu]")) return;
+      setActionMenuId(null);
+      setReactionPickerId(null);
+    };
+    const t = setTimeout(() => document.addEventListener("click", onDocClick), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", onDocClick);
+    };
+  }, [actionMenuId, reactionPickerId]);
 
   // Build the list of pickable members based on filter, with @everyone always at top
   const pickerCandidates: MentionEntry[] = useMemo(() => {
@@ -251,29 +285,186 @@ export default function TeamChat({
     }
   };
 
-  // Render comment body with mention highlights
-  const renderCommentBody = (body: string) => {
-    // Highlight @everyone (in red) and any @word (in orange/blue)
-    const parts: (string | { type: "mention"; text: string; isEveryone: boolean })[] = [];
-    const regex = /@(everyone|[a-zA-Z0-9_.-]+(?:\s[a-zA-Z]+)?)/g;
-    let lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(body)) !== null) {
-      if (m.index > lastIndex) parts.push(body.slice(lastIndex, m.index));
-      const isEveryone = m[1].toLowerCase() === "everyone";
-      parts.push({ type: "mention", text: m[0], isEveryone });
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < body.length) parts.push(body.slice(lastIndex));
+  // ─── Edit ─────────────────────────────────────────────────────────────
+  const startEdit = (comment: any) => {
+    setEditingId(comment.id);
+    setEditingText(comment.body || "");
+    setActionMenuId(null);
+    // Focus the textarea on next tick (after it's rendered)
+    setTimeout(() => editingTextareaRef.current?.focus(), 0);
+  };
 
-    return parts.map((p, i) => {
-      if (typeof p === "string") return <span key={i}>{p}</span>;
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingText("");
+  };
+
+  const saveEdit = async (commentId: string) => {
+    if (!editingText.trim() || !currentUser) return;
+    // Optimistic local update so the UI feels instant
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId
+          ? { ...c, body: editingText.trim(), edited_at: new Date().toISOString() }
+          : c
+      )
+    );
+    setEditingId(null);
+    try {
+      await fetch("/api/comments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: commentId,
+          author_id: currentUser.id,
+          body: editingText.trim(),
+        }),
+      });
+      fetchComments(); // re-sync from server (gets authoritative edited_at)
+    } catch (error) {
+      console.error("Failed to edit comment:", error);
+      fetchComments(); // re-sync to revert optimistic update on failure
+    }
+  };
+
+  // ─── Delete ───────────────────────────────────────────────────────────
+  const deleteComment = async (commentId: string) => {
+    if (!currentUser) return;
+    if (!confirm("Delete this message? This cannot be undone.")) return;
+    setActionMenuId(null);
+    // Optimistic local removal
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
+    try {
+      await fetch(
+        `/api/comments?id=${commentId}&author_id=${currentUser.id}`,
+        { method: "DELETE" }
+      );
+    } catch (error) {
+      console.error("Failed to delete comment:", error);
+      fetchComments(); // re-sync to restore on failure
+    }
+  };
+
+  // ─── Reactions ────────────────────────────────────────────────────────
+  // Toggle a reaction on a comment. Optimistic update so the count changes
+  // instantly. Server is the source of truth — fetchComments() re-syncs in
+  // the next poll regardless.
+  const toggleReaction = async (commentId: string, emoji: string) => {
+    if (!currentUser) return;
+    setReactionPickerId(null);
+    // Optimistic update
+    setComments((prev) =>
+      prev.map((c) => {
+        if (c.id !== commentId) return c;
+        const reactions: Record<string, string[]> = { ...(c.reactions || {}) };
+        const current: string[] = Array.isArray(reactions[emoji]) ? reactions[emoji] : [];
+        if (current.includes(currentUser.id)) {
+          const next = current.filter((id) => id !== currentUser.id);
+          if (next.length === 0) delete reactions[emoji];
+          else reactions[emoji] = next;
+        } else {
+          reactions[emoji] = [...current, currentUser.id];
+        }
+        return { ...c, reactions };
+      })
+    );
+    try {
+      await fetch(`/api/comments/${commentId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUser.id, emoji }),
+      });
+    } catch (error) {
+      console.error("Failed to toggle reaction:", error);
+      fetchComments();
+    }
+  };
+
+  // Render comment body with mention highlights AND clickable links.
+  // We tokenize into three kinds of nodes: plain text, mentions, and URLs.
+  // The order of detection matters — we want URLs that happen to contain "@"
+  // (e.g. "https://example.com/u/@bob") to be treated as URLs, not as an URL
+  // plus a partial mention. To do that we match URLs first, then mentions on
+  // what's left.
+  //
+  // Links open in a new tab with rel="noopener noreferrer" for safety. We use
+  // a React <a> element — never dangerouslySetInnerHTML — so the body text is
+  // always treated as plain text by React's escaping.
+  const renderCommentBody = (body: string) => {
+    type Token =
+      | { kind: "text"; value: string }
+      | { kind: "url"; value: string }
+      | { kind: "mention"; value: string; isEveryone: boolean };
+
+    // Matches http(s)://... and www.... up to whitespace, with a permissive
+    // body of URL-safe characters. Trailing punctuation (.,!?;:) is trimmed
+    // back off so "Check this https://example.com." doesn't include the period.
+    const urlRegex = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/g;
+
+    // First pass — extract URLs
+    const urlTokens: Token[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = urlRegex.exec(body)) !== null) {
+      let url = m[0];
+      // Trim trailing punctuation off the URL
+      const trimMatch = url.match(/[.,!?;:)\]}>"']+$/);
+      let trailing = "";
+      if (trimMatch) {
+        trailing = trimMatch[0];
+        url = url.slice(0, url.length - trailing.length);
+      }
+      if (m.index > last) urlTokens.push({ kind: "text", value: body.slice(last, m.index) });
+      urlTokens.push({ kind: "url", value: url });
+      if (trailing) urlTokens.push({ kind: "text", value: trailing });
+      last = m.index + m[0].length;
+    }
+    if (last < body.length) urlTokens.push({ kind: "text", value: body.slice(last) });
+
+    // Second pass — within text tokens, extract mentions.
+    const mentionRegex = /@(everyone|[a-zA-Z0-9_.-]+(?:\s[a-zA-Z]+)?)/g;
+    const tokens: Token[] = [];
+    for (const tok of urlTokens) {
+      if (tok.kind !== "text") {
+        tokens.push(tok);
+        continue;
+      }
+      let lastM = 0;
+      let mm: RegExpExecArray | null;
+      mentionRegex.lastIndex = 0;
+      while ((mm = mentionRegex.exec(tok.value)) !== null) {
+        if (mm.index > lastM) tokens.push({ kind: "text", value: tok.value.slice(lastM, mm.index) });
+        const isEveryone = mm[1].toLowerCase() === "everyone";
+        tokens.push({ kind: "mention", value: mm[0], isEveryone });
+        lastM = mm.index + mm[0].length;
+      }
+      if (lastM < tok.value.length) tokens.push({ kind: "text", value: tok.value.slice(lastM) });
+    }
+
+    return tokens.map((tok, i) => {
+      if (tok.kind === "text") return <span key={i}>{tok.value}</span>;
+      if (tok.kind === "url") {
+        const href = tok.value.startsWith("http") ? tok.value : `https://${tok.value}`;
+        return (
+          <a
+            key={i}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--info,#60A5FA)] underline hover:opacity-80 break-all"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {tok.value}
+          </a>
+        );
+      }
+      // mention
       return (
         <span
           key={i}
-          className={`px-1 rounded ${p.isEveryone ? "bg-[#5C2828] text-[#FCA5A5]" : "bg-[#1E3A5F] text-[#93C5FD]"} font-medium`}
+          className={`px-1 rounded ${tok.isEveryone ? "bg-[#5C2828] text-[#FCA5A5]" : "bg-[#1E3A5F] text-[#93C5FD]"} font-medium`}
         >
-          {p.text}
+          {tok.value}
         </span>
       );
     });
@@ -371,10 +562,12 @@ export default function TeamChat({
                       comment.author ||
                       teamMembers.find((member) => member.id === comment.author_id) ||
                       null;
-                    // Visual divider between consecutive messages (Rod's
-                    // "break line" request). Hidden above the first message.
+                    const isOwn = currentUser?.id === comment.author_id;
+                    const isEditing = editingId === comment.id;
+                    const reactions: Record<string, string[]> = comment.reactions || {};
+                    // Visual divider between consecutive messages.
                     return (
-                      <div key={comment.id}>
+                      <div key={comment.id} className="group/msg relative">
                         {idx > 0 && (
                           <div className="border-t border-[var(--border)]/40 my-3" />
                         )}
@@ -397,11 +590,163 @@ export default function TeamChat({
                                   ? new Date(comment.created_at).toLocaleString()
                                   : ""}
                               </span>
+                              {comment.edited_at && (
+                                <span
+                                  className="text-[10px] text-[var(--text-muted)] italic"
+                                  title={`Edited ${new Date(comment.edited_at).toLocaleString()}`}
+                                >
+                                  (edited)
+                                </span>
+                              )}
                             </div>
-                            <div className="text-[13px] text-[var(--text-primary)] whitespace-pre-wrap break-words leading-relaxed">
-                              {renderCommentBody(comment.body || "")}
-                            </div>
+
+                            {/* Body — edit mode shows a textarea + save/cancel,
+                                read mode shows the rendered body with link &
+                                mention parsing. */}
+                            {isEditing ? (
+                              <div className="space-y-1.5">
+                                <textarea
+                                  ref={editingTextareaRef}
+                                  value={editingText}
+                                  onChange={(e) => setEditingText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    // Enter saves, Shift+Enter newline, Esc cancels
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      saveEdit(comment.id);
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      cancelEdit();
+                                    }
+                                  }}
+                                  rows={2}
+                                  className="w-full rounded-md bg-[var(--bg)] border border-[var(--border)] px-2 py-1.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] resize-none leading-snug"
+                                />
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => saveEdit(comment.id)}
+                                    disabled={!editingText.trim()}
+                                    className="px-2 py-1 rounded text-[10px] font-semibold bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={cancelEdit}
+                                    className="px-2 py-1 rounded text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <span className="text-[9px] text-[var(--text-muted)]">
+                                    Enter to save · Esc to cancel
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-[13px] text-[var(--text-primary)] whitespace-pre-wrap break-words leading-relaxed">
+                                {renderCommentBody(comment.body || "")}
+                              </div>
+                            )}
+
+                            {/* Reactions row — shows aggregated counts per
+                                emoji. Clicking an existing reaction toggles
+                                the current user's participation. */}
+                            {!isEditing && Object.keys(reactions).length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                {Object.entries(reactions).map(([emoji, userIds]) => {
+                                  const ids = Array.isArray(userIds) ? userIds : [];
+                                  if (ids.length === 0) return null;
+                                  const reactedByMe = currentUser?.id ? ids.includes(currentUser.id) : false;
+                                  // Build tooltip: names of users who reacted
+                                  const names = ids
+                                    .map((id) => teamMembers.find((m) => m.id === id)?.name || "Unknown")
+                                    .join(", ");
+                                  return (
+                                    <button
+                                      key={emoji}
+                                      onClick={() => toggleReaction(comment.id, emoji)}
+                                      title={`${names} reacted with ${emoji}`}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors ${
+                                        reactedByMe
+                                          ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--text-primary)]"
+                                          : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                                      }`}
+                                    >
+                                      <span>{emoji}</span>
+                                      <span className="text-[10px] font-semibold">{ids.length}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
+
+                          {/* Action buttons — hidden until the message is
+                              hovered. Reaction button is always available;
+                              edit/delete only for the author. */}
+                          {!isEditing && (
+                            <div data-msg-menu className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                              {/* Reaction picker trigger */}
+                              <div className="relative">
+                                <button
+                                  onClick={() =>
+                                    setReactionPickerId(
+                                      reactionPickerId === comment.id ? null : comment.id
+                                    )
+                                  }
+                                  className="w-6 h-6 rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] flex items-center justify-center"
+                                  title="Add reaction"
+                                >
+                                  <SmilePlus size={13} />
+                                </button>
+                                {reactionPickerId === comment.id && (
+                                  <div className="absolute right-0 top-7 z-20 flex items-center gap-0.5 px-1.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-lg">
+                                    {QUICK_REACTIONS.map((emoji) => (
+                                      <button
+                                        key={emoji}
+                                        onClick={() => toggleReaction(comment.id, emoji)}
+                                        className="w-7 h-7 rounded hover:bg-[var(--surface-2)] flex items-center justify-center text-[15px]"
+                                      >
+                                        {emoji}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Own-message action menu (edit / delete) */}
+                              {isOwn && (
+                                <div className="relative">
+                                  <button
+                                    onClick={() =>
+                                      setActionMenuId(
+                                        actionMenuId === comment.id ? null : comment.id
+                                      )
+                                    }
+                                    className="w-6 h-6 rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] flex items-center justify-center"
+                                    title="More"
+                                  >
+                                    <MoreVertical size={13} />
+                                  </button>
+                                  {actionMenuId === comment.id && (
+                                    <div className="absolute right-0 top-7 z-20 min-w-[120px] py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-lg">
+                                      <button
+                                        onClick={() => startEdit(comment)}
+                                        className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-2)] flex items-center gap-2"
+                                      >
+                                        <Edit2 size={11} /> Edit
+                                      </button>
+                                      <button
+                                        onClick={() => deleteComment(comment.id)}
+                                        className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--danger,#F87171)] hover:bg-[var(--surface-2)] flex items-center gap-2"
+                                      >
+                                        <Trash2 size={11} /> Delete
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
