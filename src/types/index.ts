@@ -40,10 +40,17 @@ export interface Conversation {
   subject: string;
   from_name: string;
   from_email: string;
+  // Primary contact override — manually-set or auto-updated to the latest
+  // external sender on the thread. Falls back to from_name/from_email when
+  // null. See /api/conversations/primary-contact and imap-sync auto-update.
+  primary_contact_name?: string | null;
+  primary_contact_email?: string | null;
+  primary_contact_is_manual?: boolean;
   preview: string;
   is_unread: boolean;
   is_starred: boolean;
   assignee_id: string | null;
+  supplier_contact_id?: string | null;
   status: "open" | "closed" | "snoozed" | "trash" | "spam" | "merged";
   last_message_at: string;
   created_at: string;

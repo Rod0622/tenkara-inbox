@@ -490,6 +490,72 @@ export default function ConversationDetail({
   // Tracks which participant email was just copied to clipboard, so the
   // badge can flash a "Copied!" confirmation briefly.
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
+  // Primary contact dropdown (the "Name <email>" line below the subject).
+  // Open state + the latest list of selectable external participants.
+  const [primaryContactMenuOpen, setPrimaryContactMenuOpen] = useState(false);
+
+  // Per-badge action menu — keyed by email so only one menu is open at a time.
+  const [badgeMenuEmail, setBadgeMenuEmail] = useState<string | null>(null);
+
+  // Supplier picker modal — opened when user clicks "Add as contact" on a
+  // participant badge but the conversation has no supplier_contact_id yet.
+  const [addContactPending, setAddContactPending] = useState<{
+    name: string;
+    email: string;
+  } | null>(null);
+  const [supplierPickerResults, setSupplierPickerResults] = useState<any[]>([]);
+  const [supplierPickerQuery, setSupplierPickerQuery] = useState("");
+
+  // Toast for "Added as contact" / "Set as primary contact" feedback. Keeps
+  // the UI consistent with copy-feedback elsewhere in the header.
+  const [contactToast, setContactToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setContactToast(msg);
+    setTimeout(() => setContactToast((cur) => (cur === msg ? null : cur)), 2200);
+  };
+
+  // Close primary-contact dropdown and badge menus on outside click.
+  // Inner buttons use data-contact-menu to prevent closing on their own clicks.
+  useEffect(() => {
+    if (!primaryContactMenuOpen && !badgeMenuEmail) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("[data-contact-menu]")) return;
+      setPrimaryContactMenuOpen(false);
+      setBadgeMenuEmail(null);
+    };
+    const t = setTimeout(() => document.addEventListener("click", onDocClick), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", onDocClick);
+    };
+  }, [primaryContactMenuOpen, badgeMenuEmail]);
+
+  // Supplier picker search — when the "Add to which supplier?" modal is open
+  // and the user types a query, search supplier_contacts by name.
+  useEffect(() => {
+    if (!addContactPending) return;
+    const q = supplierPickerQuery.trim();
+    if (!q) { setSupplierPickerResults([]); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const supabase = createBrowserClient();
+        const { data } = await supabase
+          .from("supplier_contacts")
+          .select("id, name")
+          .ilike("name", `%${q}%`)
+          .order("name")
+          .limit(10);
+        if (!cancelled) setSupplierPickerResults(data || []);
+      } catch {
+        if (!cancelled) setSupplierPickerResults([]);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [supplierPickerQuery, addContactPending]);
+
   // Notes by id → DOM element, used to scroll-to-note when clicking a marker
   const noteRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Which note is currently in the "pick a message to attach" mode (for retroactive attaching)
@@ -704,6 +770,142 @@ export default function ConversationDetail({
     activities,
     refetch: refetchDetail,
   } = useConversationDetail(convo?.id || null);
+  // ─── Primary contact + badge action handlers ──────────────────────────
+
+  // Set the primary contact (manual mode). Closes any open menus + toasts.
+  const setPrimaryContact = async (name: string, email: string) => {
+    if (!convo?.id) return;
+    try {
+      await fetch("/api/conversations/primary-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: convo.id, name, email }),
+      });
+      showToast(`Primary contact set to ${name || email}`);
+      setPrimaryContactMenuOpen(false);
+      setBadgeMenuEmail(null);
+      // Optimistic local update so the line updates instantly
+      if (convo) {
+        (convo as any).primary_contact_name = name;
+        (convo as any).primary_contact_email = email.toLowerCase();
+        (convo as any).primary_contact_is_manual = true;
+      }
+    } catch (error) {
+      console.error("Failed to set primary contact:", error);
+    }
+  };
+
+  // Revert to auto mode — the next inbound message will repopulate the
+  // primary contact from the sync layer.
+  const resetPrimaryContactToAuto = async () => {
+    if (!convo?.id) return;
+    try {
+      await fetch(`/api/conversations/primary-contact?conversation_id=${convo.id}`, {
+        method: "DELETE",
+      });
+      showToast("Reset to auto");
+      setPrimaryContactMenuOpen(false);
+      if (convo) {
+        (convo as any).primary_contact_name = null;
+        (convo as any).primary_contact_email = null;
+        (convo as any).primary_contact_is_manual = false;
+      }
+    } catch (error) {
+      console.error("Failed to reset primary contact:", error);
+    }
+  };
+
+  // Add a participant as a supplier contact person. If the conversation
+  // has no supplier_contact_id, open the supplier picker first.
+  const addAsContact = async (name: string, email: string) => {
+    setBadgeMenuEmail(null);
+    if (!convo?.supplier_contact_id) {
+      // Need to pick a supplier first
+      setAddContactPending({ name, email });
+      return;
+    }
+    await doAddContact(convo.supplier_contact_id, name, email);
+  };
+
+  const doAddContact = async (supplierContactId: string, name: string, email: string) => {
+    try {
+      const res = await fetch("/api/contact-command-center/persons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplier_contact_id: supplierContactId,
+          name: name || email.split("@")[0],
+          email: email.toLowerCase(),
+        }),
+      });
+      if (res.ok) {
+        showToast(`Added ${name || email} as contact`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Error: ${err?.error || "Failed to add"}`);
+      }
+    } catch (error: any) {
+      showToast(`Error: ${error?.message || "Failed to add"}`);
+    } finally {
+      setAddContactPending(null);
+      setSupplierPickerQuery("");
+      setSupplierPickerResults([]);
+    }
+  };
+
+  // Build the list of external participants on this thread, used for the
+  // primary-contact dropdown. Excludes team_member emails (we don't want to
+  // promote ourselves as primary contact). Connected-account emails would
+  // also be skipped — but we don't have them in props, and team_members
+  // already covers all our internal addresses in practice. Also excludes
+  // the conversation's own account email if we can resolve it.
+  const externalParticipants = useMemo(() => {
+    if (!messages || messages.length === 0) return [] as { name: string; email: string }[];
+    const ownEmails = new Set<string>();
+    for (const tm of (teamMembers || [])) {
+      if ((tm as any)?.email) ownEmails.add((tm as any).email.toLowerCase());
+    }
+
+    const stripQuotes = (s: string) => s.trim().replace(/^["'\s]+|["'\s]+$/g, "");
+    const parsePart = (raw: string): { name: string; email: string } | null => {
+      const part = raw.trim();
+      if (!part) return null;
+      const m = part.match(/^(.*?)\s*<\s*([^<>]+?)\s*>\s*$/);
+      if (m) {
+        const email = stripQuotes(m[2]).toLowerCase();
+        if (!email.includes("@")) return null;
+        let name = stripQuotes(m[1]);
+        if (!name || name.toLowerCase() === email) name = email.split("@")[0];
+        return { name, email };
+      }
+      const bare = stripQuotes(part).toLowerCase();
+      if (!bare.includes("@")) return null;
+      return { name: bare.split("@")[0], email: bare };
+    };
+
+    const seen = new Set<string>();
+    const out: { name: string; email: string }[] = [];
+    const add = (name: string, email: string) => {
+      const e = (email || "").toLowerCase();
+      if (!e || !e.includes("@") || seen.has(e)) return;
+      if (ownEmails.has(e)) return; // skip internal team members
+      seen.add(e);
+      out.push({ name: name || e.split("@")[0], email: e });
+    };
+
+    for (const msg of messages) {
+      if (msg.from_email) add(msg.from_name || "", msg.from_email);
+      for (const raw of String((msg as any).to_addresses || "").split(",")) {
+        const p = parsePart(raw);
+        if (p) add(p.name, p.email);
+      }
+      for (const raw of String((msg as any).cc_addresses || "").split(",")) {
+        const p = parsePart(raw);
+        if (p) add(p.name, p.email);
+      }
+    }
+    return out;
+  }, [messages, teamMembers]);
 
   // ── Quo calls linked to this conversation ────────────────
   // Fetched separately from useConversationDetail to keep blast radius small.
@@ -2404,8 +2606,77 @@ export default function ConversationDetail({
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap text-xs">
-            <span className="text-[var(--text-secondary)]">{convo.from_name}</span>
-            <span className="text-[var(--text-muted)]">&lt;{convo.from_email}&gt;</span>
+            {/* Primary contact display — clickable dropdown.
+                Shows manual override if set, otherwise the original sender. */}
+            {(() => {
+              const displayName = (convo as any).primary_contact_name || convo.from_name;
+              const displayEmail = (convo as any).primary_contact_email || convo.from_email;
+              const isManual = (convo as any).primary_contact_is_manual === true;
+              return (
+                <div data-contact-menu className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setPrimaryContactMenuOpen((o) => !o)}
+                    title={isManual ? "Manually set — click to change" : "Auto-updates to latest external reply — click to change"}
+                    className="inline-flex items-center gap-1 px-1 -mx-1 rounded hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                  >
+                    <span className="text-[var(--text-secondary)]">{displayName}</span>
+                    <span className="text-[var(--text-muted)]">&lt;{displayEmail}&gt;</span>
+                    {isManual && (
+                      <span
+                        title="Manual override — won't auto-update on new replies"
+                        className="text-[9px] px-1 py-0.5 rounded bg-[var(--accent)]/15 text-[var(--accent)] font-semibold ml-0.5"
+                      >
+                        manual
+                      </span>
+                    )}
+                    <ChevronDown size={10} className="text-[var(--text-muted)] ml-0.5" />
+                  </button>
+                  {primaryContactMenuOpen && (
+                    <div className="absolute top-full left-0 mt-1 z-30 min-w-[260px] max-w-[340px] py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-lg">
+                      <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
+                        Set primary contact
+                      </div>
+                      {externalParticipants.length === 0 ? (
+                        <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">
+                          No external participants found
+                        </div>
+                      ) : (
+                        externalParticipants.map((p) => {
+                          const isCurrent = (displayEmail || "").toLowerCase() === p.email;
+                          return (
+                            <button
+                              key={p.email}
+                              onClick={() => setPrimaryContact(p.name, p.email)}
+                              className={`w-full px-3 py-1.5 text-left text-[12px] flex items-center justify-between gap-2 hover:bg-[var(--surface-2)] ${
+                                isCurrent ? "text-[var(--accent)] font-semibold" : "text-[var(--text-primary)]"
+                              }`}
+                            >
+                              <span className="truncate">
+                                <span>{p.name}</span>
+                                <span className="text-[var(--text-muted)]"> &lt;{p.email}&gt;</span>
+                              </span>
+                              {isCurrent && <span className="text-[10px]">●</span>}
+                            </button>
+                          );
+                        })
+                      )}
+                      {isManual && (
+                        <>
+                          <div className="border-t border-[var(--border)] my-1" />
+                          <button
+                            onClick={resetPrimaryContactToAuto}
+                            className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                          >
+                            ↻ Reset to auto-update
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* Batch 11: Supplier responsiveness chip — small icon-only with hover tooltip */}
             {supplierHoursInfo && supplierHoursInfo.responsiveness_score !== null && supplierHoursInfo.responsiveness_score !== undefined && (() => {
               const tier = supplierHoursInfo.responsiveness_tier as string;
@@ -2506,6 +2777,7 @@ export default function ConversationDetail({
                 <Users size={11} className="text-[var(--text-muted)] shrink-0" />
                 {shown.map((p, i) => {
                   const wasCopied = copiedEmail === p.email;
+                  const menuOpen = badgeMenuEmail === p.email;
                   const handleCopy = async () => {
                     try {
                       await navigator.clipboard.writeText(p.email);
@@ -2534,25 +2806,61 @@ export default function ConversationDetail({
                     }
                   };
                   return (
-                    <button
-                      key={p.email}
-                      type="button"
-                      onClick={handleCopy}
-                      title={wasCopied ? "Copied!" : `Click to copy ${p.email}`}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] max-w-[160px] truncate transition-colors ${
-                        wasCopied
-                          ? "bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]"
-                          : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:border-[var(--accent)]/40 cursor-pointer"
-                      }`}
-                    >
-                      <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
-                        style={{ background: i === 0 ? "var(--info)" : i === 1 ? "var(--accent)" : i === 2 ? "#BC8CFF" : i === 3 ? "var(--warning)" : "var(--highlight)" }}>
-                        {(p.name || "?").slice(0, 2).toUpperCase()}
-                      </span>
-                      <span className="truncate">
-                        {wasCopied ? "Copied!" : (p.name || p.email)}
-                      </span>
-                    </button>
+                    <div key={p.email} data-contact-menu className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Toggle dropdown for this badge
+                          setBadgeMenuEmail((cur) => (cur === p.email ? null : p.email));
+                        }}
+                        onContextMenu={(e) => {
+                          // Right-click → copy email (preserves prior behavior)
+                          e.preventDefault();
+                          handleCopy();
+                        }}
+                        title={wasCopied ? "Copied!" : `${p.name || p.email} — click for options, right-click to copy email`}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] max-w-[160px] truncate transition-colors ${
+                          wasCopied
+                            ? "bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]"
+                            : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:border-[var(--accent)]/40 cursor-pointer"
+                        }`}
+                      >
+                        <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
+                          style={{ background: i === 0 ? "var(--info)" : i === 1 ? "var(--accent)" : i === 2 ? "#BC8CFF" : i === 3 ? "var(--warning)" : "var(--highlight)" }}>
+                          {(p.name || "?").slice(0, 2).toUpperCase()}
+                        </span>
+                        <span className="truncate">
+                          {wasCopied ? "Copied!" : (p.name || p.email)}
+                        </span>
+                      </button>
+                      {menuOpen && (
+                        <div className="absolute left-0 top-full mt-1 z-30 min-w-[200px] py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-lg">
+                          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] truncate">
+                            {p.email}
+                          </div>
+                          <div className="border-t border-[var(--border)] my-1" />
+                          <button
+                            onClick={() => addAsContact(p.name, p.email)}
+                            className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+                          >
+                            + Add as contact
+                          </button>
+                          <button
+                            onClick={() => { setPrimaryContact(p.name, p.email); }}
+                            className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+                          >
+                            ★ Set as primary contact
+                          </button>
+                          <button
+                            onClick={() => { handleCopy(); setBadgeMenuEmail(null); }}
+                            className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                          >
+                            📋 Copy email
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
                 {extra > 0 && (
@@ -5475,6 +5783,74 @@ export default function ConversationDetail({
             window.location.hash = `#conversation=${convo.id}`;
           }}
         />
+      )}
+
+      {/* Supplier picker modal — opens when "Add as contact" is clicked on
+          a participant badge but the conversation has no supplier link yet. */}
+      {addContactPending && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+          onClick={() => setAddContactPending(null)}
+        >
+          <div
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-[var(--border)]">
+              <div className="text-[13px] font-bold text-[var(--text-primary)]">
+                Add to which supplier?
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                Adding {addContactPending.name || addContactPending.email}
+              </div>
+            </div>
+            <div className="px-4 py-3 border-b border-[var(--border)]">
+              <input
+                value={supplierPickerQuery}
+                onChange={(e) => setSupplierPickerQuery(e.target.value)}
+                placeholder="Search suppliers by name…"
+                autoFocus
+                className="w-full px-3 py-2 rounded-md bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {supplierPickerQuery.trim() === "" ? (
+                <div className="px-3 py-4 text-center text-[11px] text-[var(--text-muted)]">
+                  Start typing to search suppliers
+                </div>
+              ) : supplierPickerResults.length === 0 ? (
+                <div className="px-3 py-4 text-center text-[11px] text-[var(--text-muted)]">
+                  No suppliers match &ldquo;{supplierPickerQuery}&rdquo;
+                </div>
+              ) : (
+                supplierPickerResults.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => doAddContact(s.id, addContactPending.name, addContactPending.email)}
+                    className="w-full text-left px-3 py-2 rounded-md text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+                  >
+                    {s.name}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-[var(--border)] flex justify-end">
+              <button
+                onClick={() => setAddContactPending(null)}
+                className="px-3 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating toast for contact-related feedback */}
+      {contactToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-lg text-[12px] text-[var(--text-primary)] animate-fade-in">
+          {contactToast}
+        </div>
       )}
 
       {/* AI Draft Modal — Tenkara workflow assistant.

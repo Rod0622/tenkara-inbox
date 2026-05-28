@@ -721,6 +721,52 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             };
             if (!isOutbound) {
               convoUpdate.last_inbound_at = sentAt;
+
+              // ── Auto-update primary contact (when in auto mode) ──
+              // The primary_contact line shown under the conversation subject
+              // tracks the latest external sender. Skip if:
+              //   - the conversation has been manually locked
+              //   - the sender's email matches one of our connected accounts
+              //     (would mean we replied to ourselves)
+              //   - the sender's email matches a team_members row
+              //
+              // We check current mode + accounts/team_members inline here.
+              // It's an extra small query but it keeps the auto-update logic
+              // co-located with the inbound flag we already have.
+              try {
+                const { data: convoState } = await supabase
+                  .from("conversations")
+                  .select("primary_contact_is_manual")
+                  .eq("id", conversationId)
+                  .maybeSingle();
+                if (!convoState?.primary_contact_is_manual) {
+                  const lowerFrom = (fromEmail || "").toLowerCase();
+                  // Check if sender is our own account or a team member.
+                  // These are small lookups against tiny tables; not a concern.
+                  const { data: ownAcct } = await supabase
+                    .from("email_accounts")
+                    .select("id")
+                    .eq("email", lowerFrom)
+                    .maybeSingle();
+                  let isInternal = !!ownAcct;
+                  if (!isInternal) {
+                    const { data: teamMember } = await supabase
+                      .from("team_members")
+                      .select("id")
+                      .eq("email", lowerFrom)
+                      .maybeSingle();
+                    isInternal = !!teamMember;
+                  }
+                  if (!isInternal && lowerFrom && lowerFrom !== "internal") {
+                    convoUpdate.primary_contact_name = fromName || lowerFrom.split("@")[0];
+                    convoUpdate.primary_contact_email = lowerFrom;
+                  }
+                }
+              } catch (e: any) {
+                // Best-effort — don't block the message insert if this fails.
+                console.error("[primary-contact auto-update]", e?.message);
+              }
+
               // If the conversation is currently sitting in the system Sent
               // folder (because /api/send put it there), move it to the
               // account's INBOX folder. We can't just set folder_id=null —
