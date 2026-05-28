@@ -158,7 +158,7 @@ export default function TranscriptsSlideOver({ open, onClose, currentUserEmail }
 
         {/* Body */}
         {selected ? (
-          <DetailView transcript={selected} />
+          <DetailView transcript={selected} query={q} />
         ) : (
           <>
             {/* Filters */}
@@ -230,7 +230,7 @@ export default function TranscriptsSlideOver({ open, onClose, currentUserEmail }
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div className="text-[12px] font-semibold text-[var(--text-primary)] flex-1 min-w-0">
-                      {t.supplier_name || "(Untitled)"}
+                      <HighlightedText text={t.supplier_name || "(Untitled)"} query={q} />
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)] shrink-0">
                       {formatDate(t.call_date)}
@@ -256,12 +256,14 @@ export default function TranscriptsSlideOver({ open, onClose, currentUserEmail }
                   {t.participants && (
                     <div className="text-[10px] text-[var(--text-secondary)] flex items-center gap-1 mb-1 truncate">
                       <Users size={9} className="shrink-0" />
-                      <span className="truncate">{t.participants}</span>
+                      <span className="truncate">
+                        <HighlightedText text={t.participants} query={q} />
+                      </span>
                     </div>
                   )}
                   {t.summary && (
                     <div className="text-[11px] text-[var(--text-secondary)] line-clamp-2 leading-snug">
-                      {t.summary.slice(0, 200)}{t.summary.length > 200 ? "…" : ""}
+                      <HighlightedText text={excerptAroundMatch(t.summary, q, 200)} query={q} />
                     </div>
                   )}
                 </button>
@@ -274,16 +276,16 @@ export default function TranscriptsSlideOver({ open, onClose, currentUserEmail }
   );
 }
 
-function DetailView({ transcript }: { transcript: TranscriptDetail }) {
+function DetailView({ transcript, query }: { transcript: TranscriptDetail; query: string }) {
   return (
     <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
       {/* Metadata block */}
       <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-3 space-y-1.5">
-        <MetaRow label="Date" value={formatDate(transcript.call_date)} />
-        {transcript.department && <MetaRow label="Department" value={transcript.department} />}
-        {transcript.call_type && <MetaRow label="Type" value={transcript.call_type} />}
-        {transcript.category && <MetaRow label="Category" value={transcript.category} />}
-        {transcript.participants && <MetaRow label="Participants" value={transcript.participants} />}
+        <MetaRow label="Date" value={formatDate(transcript.call_date)} query={query} />
+        {transcript.department && <MetaRow label="Department" value={transcript.department} query={query} />}
+        {transcript.call_type && <MetaRow label="Type" value={transcript.call_type} query={query} />}
+        {transcript.category && <MetaRow label="Category" value={transcript.category} query={query} />}
+        {transcript.participants && <MetaRow label="Participants" value={transcript.participants} query={query} />}
         {transcript.transcript_link && (
           <div className="flex items-center gap-1.5 pt-1">
             <a
@@ -305,7 +307,7 @@ function DetailView({ transcript }: { transcript: TranscriptDetail }) {
             <Tag size={10} /> Action Items
           </div>
           <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-3 text-[12px] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">
-            {transcript.action_items}
+            <HighlightedText text={transcript.action_items} query={query} />
           </div>
         </div>
       )}
@@ -314,7 +316,7 @@ function DetailView({ transcript }: { transcript: TranscriptDetail }) {
         <div>
           <div className="text-[11px] font-bold text-[var(--text-secondary)] mb-1.5 uppercase tracking-wide">Summary</div>
           <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-3 text-[12px] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">
-            {transcript.summary}
+            <HighlightedText text={transcript.summary} query={query} />
           </div>
         </div>
       )}
@@ -323,7 +325,7 @@ function DetailView({ transcript }: { transcript: TranscriptDetail }) {
         <div>
           <div className="text-[11px] font-bold text-[var(--text-secondary)] mb-1.5 uppercase tracking-wide">Full Transcript</div>
           <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-3 text-[12px] text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap font-mono">
-            {transcript.transcript_text}
+            <HighlightedText text={transcript.transcript_text} query={query} />
           </div>
         </div>
       )}
@@ -331,11 +333,13 @@ function DetailView({ transcript }: { transcript: TranscriptDetail }) {
   );
 }
 
-function MetaRow({ label, value }: { label: string; value: string }) {
+function MetaRow({ label, value, query }: { label: string; value: string; query?: string }) {
   return (
     <div className="grid grid-cols-[80px_1fr] gap-2 text-[11px]">
       <div className="text-[var(--text-muted)] font-semibold">{label}</div>
-      <div className="text-[var(--text-primary)] break-words">{value}</div>
+      <div className="text-[var(--text-primary)] break-words">
+        {query ? <HighlightedText text={value} query={query} /> : value}
+      </div>
     </div>
   );
 }
@@ -348,4 +352,64 @@ function formatDate(s: string | null): string {
   } catch {
     return s;
   }
+}
+
+// ─── Search-match highlighting ──────────────────────────────────────────────
+// Wraps every occurrence of `query` inside `text` with a <mark> element so
+// users can see where their search term hit. Case-insensitive, handles regex
+// special chars via escaping, and degrades to plain text if query is empty
+// or text is null.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function HighlightedText({ text, query, className }: { text: string | null | undefined; query: string; className?: string }) {
+  if (!text) return null;
+  const trimmed = query.trim();
+  if (!trimmed) return <span className={className}>{text}</span>;
+  // Build a global, case-insensitive regex from the (escaped) query.
+  let re: RegExp;
+  try {
+    re = new RegExp(`(${escapeRegex(trimmed)})`, "gi");
+  } catch {
+    return <span className={className}>{text}</span>;
+  }
+  const parts = text.split(re);
+  const lowerQuery = trimmed.toLowerCase();
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        part.toLowerCase() === lowerQuery ? (
+          <mark key={i} className="bg-[var(--accent)]/30 text-[var(--text-primary)] rounded-sm px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </span>
+  );
+}
+
+// Pull a short excerpt from `text` centered around the first match of `query`.
+// If `query` is empty or not found, returns text.slice(0, maxLen) like before.
+// Useful for showing the *relevant* part of a long summary instead of just
+// the first N chars.
+function excerptAroundMatch(text: string, query: string, maxLen: number = 200): string {
+  if (!text) return "";
+  const trimmedQ = query.trim();
+  if (!trimmedQ) {
+    return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+  }
+  const idx = text.toLowerCase().indexOf(trimmedQ.toLowerCase());
+  if (idx === -1) {
+    return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+  }
+  // Center the excerpt around the match
+  const halfWindow = Math.floor((maxLen - trimmedQ.length) / 2);
+  const start = Math.max(0, idx - halfWindow);
+  const end = Math.min(text.length, idx + trimmedQ.length + halfWindow);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  return prefix + text.slice(start, end) + suffix;
 }
