@@ -233,6 +233,7 @@ export default function ConversationDetail({
   conversation: convo,
   currentUser,
   teamMembers,
+  emailAccounts,
   onAddNote,
   onToggleTask,
   onAddTask,
@@ -815,16 +816,58 @@ export default function ConversationDetail({
     }
   };
 
-  // Add a participant as a supplier contact person. If the conversation
-  // has no supplier_contact_id, open the supplier picker first.
+  // Add a participant as a supplier contact person. Resolution order:
+  //   1. If convo.supplier_contact_id is set → use it directly.
+  //   2. Otherwise look up supplier_contacts by the conversation's external
+  //      email (from_email or any participant). If a match is found, use it
+  //      and quietly back-link the conversation to that supplier so future
+  //      calls skip this step.
+  //   3. Last resort — show the supplier picker modal.
   const addAsContact = async (name: string, email: string) => {
     setBadgeMenuEmail(null);
-    if (!convo?.supplier_contact_id) {
-      // Need to pick a supplier first
-      setAddContactPending({ name, email });
+    if (convo?.supplier_contact_id) {
+      await doAddContact(convo.supplier_contact_id, name, email);
       return;
     }
-    await doAddContact(convo.supplier_contact_id, name, email);
+    // Try to find a supplier matching this conversation's primary external
+    // email. We look up supplier_contacts by EXACT email match. This handles
+    // the common case where the supplier was created (e.g. via the Suppliers
+    // panel) but the conversation row was never back-linked.
+    if (convo?.id) {
+      try {
+        const sb = createBrowserClient();
+        // The "anchor" email to match — prefer primary_contact_email
+        // (current display) and fall back to convo.from_email.
+        const anchorEmail = (
+          (convo as any).primary_contact_email ||
+          convo.from_email ||
+          ""
+        ).toLowerCase().trim();
+        if (anchorEmail && anchorEmail.includes("@")) {
+          const { data: match } = await sb
+            .from("supplier_contacts")
+            .select("id, name")
+            .eq("email", anchorEmail)
+            .maybeSingle();
+          if (match?.id) {
+            // Back-link the conversation so future "Add as contact" clicks
+            // skip the lookup. Best-effort — don't block if it fails.
+            sb.from("conversations")
+              .update({ supplier_contact_id: match.id })
+              .eq("id", convo.id)
+              .then(() => { /* fire and forget */ });
+            // Mutate local state too so the UI stays consistent in this session
+            (convo as any).supplier_contact_id = match.id;
+            await doAddContact(match.id, name, email);
+            return;
+          }
+        }
+      } catch (e: any) {
+        console.error("Auto supplier lookup failed:", e?.message);
+      }
+    }
+    // Still no supplier — surface the picker.
+    setAddContactPending({ name, email });
   };
 
   const doAddContact = async (supplierContactId: string, name: string, email: string) => {
@@ -854,16 +897,18 @@ export default function ConversationDetail({
   };
 
   // Build the list of external participants on this thread, used for the
-  // primary-contact dropdown. Excludes team_member emails (we don't want to
-  // promote ourselves as primary contact). Connected-account emails would
-  // also be skipped — but we don't have them in props, and team_members
-  // already covers all our internal addresses in practice. Also excludes
-  // the conversation's own account email if we can resolve it.
+  // primary-contact dropdown. Excludes:
+  //   - team_member emails (our internal staff)
+  //   - email_accounts emails (our connected mailboxes — Bobber Labs, Vita
+  //     Organica, etc. These are us, not external contacts.)
   const externalParticipants = useMemo(() => {
     if (!messages || messages.length === 0) return [] as { name: string; email: string }[];
     const ownEmails = new Set<string>();
     for (const tm of (teamMembers || [])) {
       if ((tm as any)?.email) ownEmails.add((tm as any).email.toLowerCase());
+    }
+    for (const acct of (emailAccounts || [])) {
+      if ((acct as any)?.email) ownEmails.add((acct as any).email.toLowerCase());
     }
 
     const stripQuotes = (s: string) => s.trim().replace(/^["'\s]+|["'\s]+$/g, "");
@@ -905,7 +950,7 @@ export default function ConversationDetail({
       }
     }
     return out;
-  }, [messages, teamMembers]);
+  }, [messages, teamMembers, emailAccounts]);
 
   // ── Quo calls linked to this conversation ────────────────
   // Fetched separately from useConversationDetail to keep blast radius small.

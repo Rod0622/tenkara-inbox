@@ -284,6 +284,7 @@ export interface ConversationDetailProps {
   conversation: Conversation | null;
   currentUser: TeamMember | null;
   teamMembers: TeamMember[];
+  emailAccounts?: Mailbox[];
   onAddNote: (conversationId: string, text: string, title?: string, messageId?: string | null) => Promise<void>;
   onToggleTask: (taskId: string, isDone: boolean) => Promise<void>;
   onAddTask: (conversationId: string, text: string, assigneeIds?: string[], dueDate?: string, categoryId?: string, dueTime?: string) => Promise<void>;

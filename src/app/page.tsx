@@ -782,6 +782,7 @@ export default function InboxPage() {
                 conversation={activeConvo}
                 currentUser={currentUser}
                 teamMembers={teamMembers}
+                emailAccounts={emailAccounts}
                 onAddNote={actions.addNote}
                 onToggleTask={handleToggleTask}
                 onAddTask={handleAddTask}
