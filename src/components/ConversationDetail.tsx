@@ -61,6 +61,7 @@ import { addBusinessHours, type SupplierHours } from "@/lib/business-hours";
 import TaskCountdown from "@/components/TaskCountdown";
 import RichTextEditor from "@/components/RichTextEditor";
 import AIDraftModal from "@/components/AIDraftModal";
+import RelatedTranscripts from "@/components/ConversationDetail/RelatedTranscripts";
 import Avatar from "./ConversationDetail/Avatar";
 import HighlightedText from "./ConversationDetail/HighlightedText";
 import MessageHeader from "./ConversationDetail/MessageHeader";
@@ -2999,6 +3000,18 @@ export default function ConversationDetail({
 
             {/* Attachment summary bar — shows all attachments across all messages */}
             <ThreadAttachmentBar messages={messages} />
+
+            {/* Related Granola call transcripts — appears when the conversation's
+                supplier (or sender) matches transcripts in the Granola Sync DB.
+                Hidden entirely when there are no matches. */}
+            {convo?.id && currentUser?.email && (
+              <div className="mb-3">
+                <RelatedTranscripts
+                  conversationId={convo.id}
+                  currentUserEmail={currentUser.email}
+                />
+              </div>
+            )}
 
             {/* In-thread search bar */}
             {threadSearchActive ? (

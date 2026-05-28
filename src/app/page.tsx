@@ -20,6 +20,7 @@ import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
 import CreateConversation from "@/components/CreateConversation";
 import QuickCallModal from "@/components/QuickCallModal";
+import TranscriptsSlideOver from "@/components/TranscriptsSlideOver";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { Conversation, TaskStatus } from "@/types";
 
@@ -67,6 +68,7 @@ export default function InboxPage() {
 
   // QuickCallModal — opened from the sidebar QuickActions dropdown
   const [showCallModal, setShowCallModal] = useState(false);
+  const [showTranscripts, setShowTranscripts] = useState(false);
 
   const { conversations, refetch } = useConversations(activeMailbox);
 
@@ -670,6 +672,7 @@ export default function InboxPage() {
             mySentCount={mySentConvoIds.size}
             onMoveToFolder={handleMoveToFolder}
             onMakeCall={() => setShowCallModal(true)}
+            onOpenTranscripts={() => setShowTranscripts(true)}
           />
         </Panel>
 
@@ -808,6 +811,13 @@ export default function InboxPage() {
             }
           }
         }}
+      />
+
+      {/* Granola transcripts side panel — triggered from sidebar header button */}
+      <TranscriptsSlideOver
+        open={showTranscripts}
+        onClose={() => setShowTranscripts(false)}
+        currentUserEmail={currentUser?.email || session?.user?.email || null}
       />
     </div>
   );

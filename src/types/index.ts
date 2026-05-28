@@ -252,6 +252,7 @@ export interface SidebarProps {
   mySentCount?: number;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
   onMakeCall?: () => void;
+  onOpenTranscripts?: () => void;
 }
 
 export interface ConversationListProps {

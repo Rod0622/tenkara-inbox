@@ -27,6 +27,7 @@ import {
   Moon,
   Phone,
   Pin,
+  Mic,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -163,6 +164,7 @@ export default function Sidebar({
   mySentCount: mySentCountProp,
   onMoveToFolder,
   onMakeCall,
+  onOpenTranscripts,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -553,6 +555,17 @@ export default function Sidebar({
     >
       <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
     </button>
+
+    {/* Granola transcripts side panel trigger */}
+    {onOpenTranscripts && (
+      <button
+        onClick={onOpenTranscripts}
+        className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-all"
+        title="Call transcripts"
+      >
+        <Mic size={14} />
+      </button>
+    )}
 
     <QuickCreateMenu
       onCompose={() => setActiveView("compose")}
