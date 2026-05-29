@@ -33,10 +33,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // 8 chars covers compound emoji with skin-tone modifiers and ZWJ sequences.
   const cleanEmoji = String(emoji).slice(0, 8);
 
-  // Fetch current reactions
+  // Fetch current reactions + conversation_id (needed for the audit entry)
   const { data: existing, error: lookupErr } = await supabase
     .from("comments")
-    .select("reactions")
+    .select("reactions, conversation_id")
     .eq("id", commentId)
     .maybeSingle();
 
@@ -71,5 +71,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: reaction_added / reaction_removed ─────────────────
+  if (existing.conversation_id) {
+    await supabase.from("activity_log").insert({
+      conversation_id: existing.conversation_id,
+      actor_id: user_id,
+      action: alreadyReacted ? "reaction_removed" : "reaction_added",
+      details: {
+        comment_id: commentId,
+        emoji: cleanEmoji,
+      },
+    });
+  }
+
   return NextResponse.json({ comment: updated });
 }

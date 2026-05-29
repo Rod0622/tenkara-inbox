@@ -467,6 +467,34 @@ export async function PATCH(req: NextRequest) {
     }
 
     const task = await selectTaskById(supabase, taskId);
+
+    // ─── Footprint: task_edited ───────────────────────────────────────
+    // We log an "edited" entry whenever any meaningful field changes via
+    // PATCH (text, due_date, status, assignees, category). The toggle-
+    // assignee path above logs its own task_completed/reopened entry
+    // already and exits early — so we only reach here for full edits.
+    const taskConvoId = task?.conversation_id || result.data?.conversation_id;
+    if (taskConvoId) {
+      const changedFields: string[] = [];
+      if (text) changedFields.push("text");
+      if (dueDate !== undefined) changedFields.push("due_date");
+      if (status) changedFields.push("status");
+      if (Array.isArray(assigneeIds)) changedFields.push("assignees");
+      if (categoryId !== undefined) changedFields.push("category");
+      if (changedFields.length > 0) {
+        await supabase.from("activity_log").insert({
+          conversation_id: taskConvoId,
+          actor_id: body.actor_id || null,
+          action: "task_edited",
+          details: {
+            task_id: taskId,
+            text: String(task?.text || "").slice(0, 80),
+            changed: changedFields,
+          },
+        });
+      }
+    }
+
     return NextResponse.json({ task });
   } catch (error: any) {
     console.error("PATCH /api/tasks failed:", error);
@@ -524,7 +552,7 @@ export async function DELETE(req: NextRequest) {
       .filter((task: any) => task.conversation_id)
       .map((task: any) => ({
         conversation_id: task.conversation_id,
-        actor_id: null,
+        actor_id: body.actor_id || null,
         action: "task_deleted",
         details: {
           task_id: task.id,

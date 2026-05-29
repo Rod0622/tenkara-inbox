@@ -227,6 +227,26 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // ─── Footprint: note_edited ─────────────────────────────────────────
+  // Log whenever a note is updated (text/title/message attachment). Skips
+  // logging if nothing actually changed (no-op PATCH).
+  const changedFields: string[] = [];
+  if (hasText) changedFields.push("text");
+  if (hasTitle) changedFields.push("title");
+  if (hasMessageId) changedFields.push("message_id");
+  if (changedFields.length > 0 && existingNote.conversation_id) {
+    await supabase.from("activity_log").insert({
+      conversation_id: existingNote.conversation_id,
+      actor_id: body.actor_id || null,
+      action: "note_edited",
+      details: {
+        note_id: noteId,
+        preview: String(note?.text || "").slice(0, 80),
+        changed: changedFields,
+      },
+    });
+  }
+
   return NextResponse.json({ note });
 }
 
@@ -237,15 +257,38 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const noteId = req.nextUrl.searchParams.get("note_id") || req.nextUrl.searchParams.get("id");
+  const actorId = req.nextUrl.searchParams.get("actor_id");
 
   if (!noteId) {
     return NextResponse.json({ error: "note_id is required" }, { status: 400 });
   }
 
+  // Look up the note before deleting so we have the conversation_id and a
+  // preview of the text for the audit entry. Best-effort — if the lookup
+  // fails we still try the delete.
+  const { data: existing } = await supabase
+    .from("notes")
+    .select("conversation_id, text")
+    .eq("id", noteId)
+    .maybeSingle();
+
   const { error } = await supabase.from("notes").delete().eq("id", noteId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // ─── Footprint: note_deleted ────────────────────────────────────────
+  if (existing?.conversation_id) {
+    await supabase.from("activity_log").insert({
+      conversation_id: existing.conversation_id,
+      actor_id: actorId || null,
+      action: "note_deleted",
+      details: {
+        note_id: noteId,
+        preview: String(existing.text || "").slice(0, 80),
+      },
+    });
   }
 
   return NextResponse.json({ success: true });

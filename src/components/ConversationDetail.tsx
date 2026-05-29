@@ -835,7 +835,7 @@ export default function ConversationDetail({
       await fetch("/api/conversations/primary-contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: convo.id, name, email }),
+        body: JSON.stringify({ conversation_id: convo.id, name, email, actor_id: currentUser?.id }),
       });
       showToast(`Primary contact set to ${name || email}`);
       setPrimaryContactMenuOpen(false);
@@ -856,7 +856,7 @@ export default function ConversationDetail({
   const resetPrimaryContactToAuto = async () => {
     if (!convo?.id) return;
     try {
-      await fetch(`/api/conversations/primary-contact?conversation_id=${convo.id}`, {
+      await fetch(`/api/conversations/primary-contact?conversation_id=${convo.id}&actor_id=${currentUser?.id || ""}`, {
         method: "DELETE",
       });
       showToast("Reset to auto");
@@ -1631,7 +1631,7 @@ export default function ConversationDetail({
       const res = await fetch("/api/conversations/notes", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note_id: noteId, message_id: messageId }),
+        body: JSON.stringify({ note_id: noteId, message_id: messageId, actor_id: currentUser?.id }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -1669,6 +1669,7 @@ export default function ConversationDetail({
           note_id: editingNoteId,
           text: trimmed,
           title: editingNoteTitle.trim(),
+          actor_id: currentUser?.id,
         }),
       });
       if (!res.ok) {
@@ -1686,7 +1687,7 @@ export default function ConversationDetail({
     if (!confirm("Delete this note? This can't be undone.")) return;
     setDeletingNoteId(noteId);
     try {
-      const res = await fetch(`/api/conversations/notes?note_id=${noteId}`, { method: "DELETE" });
+      const res = await fetch(`/api/conversations/notes?note_id=${noteId}&actor_id=${currentUser?.id || ""}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         alert(err?.error || "Failed to delete note");
@@ -1800,7 +1801,7 @@ export default function ConversationDetail({
       await fetch("/api/tasks", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_ids: taskIds }),
+        body: JSON.stringify({ task_ids: taskIds, actor_id: currentUser?.id }),
       });
       setSelectedTaskIds([]);
       await refetchDetail();
@@ -1865,6 +1866,7 @@ export default function ConversationDetail({
           due_time: computedDueTime,
           assignee_ids: editTaskAssigneeIds,
           category_id: editTaskCategoryId || null,
+          actor_id: currentUser?.id,
         }),
       });
 

@@ -64,6 +64,16 @@ export async function POST(req: NextRequest) {
     .upsert({ user_id, conversation_id }, { onConflict: "user_id,conversation_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: pin_added ─────────────────────────────────────────
+  // Per-user pin, so actor and the pinned-by user are the same.
+  await supabase.from("activity_log").insert({
+    conversation_id,
+    actor_id: user_id,
+    action: "pin_added",
+    details: { user_id },
+  });
+
   return NextResponse.json({ ok: true });
 }
 
@@ -84,5 +94,14 @@ export async function DELETE(req: NextRequest) {
     .eq("conversation_id", conversationId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: pin_removed ───────────────────────────────────────
+  await supabase.from("activity_log").insert({
+    conversation_id: conversationId,
+    actor_id: userId,
+    action: "pin_removed",
+    details: { user_id: userId },
+  });
+
   return NextResponse.json({ ok: true });
 }

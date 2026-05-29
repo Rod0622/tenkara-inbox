@@ -137,6 +137,17 @@ export async function POST(req: NextRequest) {
     });
   } catch (_e) { /* best-effort */ }
 
+  // ─── Footprint: comment_added ─────────────────────────────────────
+  await supabase.from("activity_log").insert({
+    conversation_id,
+    actor_id: author_id || null,
+    action: "comment_added",
+    details: {
+      comment_id: comment?.id,
+      preview: commentBody.trim().slice(0, 80),
+    },
+  });
+
   return NextResponse.json({ comment });
 }
 
@@ -157,10 +168,11 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "id, author_id, and body are required" }, { status: 400 });
   }
 
-  // Fetch the comment to verify authorship
+  // Fetch the comment to verify authorship + get conversation_id for the
+  // audit log entry below.
   const { data: existing, error: lookupErr } = await supabase
     .from("comments")
-    .select("id, author_id")
+    .select("id, author_id, conversation_id")
     .eq("id", id)
     .maybeSingle();
 
@@ -182,6 +194,20 @@ export async function PATCH(req: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: comment_edited ────────────────────────────────────
+  if (existing.conversation_id) {
+    await supabase.from("activity_log").insert({
+      conversation_id: existing.conversation_id,
+      actor_id: author_id,
+      action: "comment_edited",
+      details: {
+        comment_id: id,
+        preview: newBody.trim().slice(0, 80),
+      },
+    });
+  }
+
   return NextResponse.json({ comment: updated });
 }
 
@@ -199,7 +225,7 @@ export async function DELETE(req: NextRequest) {
 
   const { data: existing } = await supabase
     .from("comments")
-    .select("id, author_id")
+    .select("id, author_id, conversation_id, body")
     .eq("id", id)
     .maybeSingle();
 
@@ -212,5 +238,18 @@ export async function DELETE(req: NextRequest) {
 
   const { error } = await supabase.from("comments").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: comment_deleted ───────────────────────────────────
+  if (existing.conversation_id) {
+    await supabase.from("activity_log").insert({
+      conversation_id: existing.conversation_id,
+      actor_id: authorId,
+      action: "comment_deleted",
+      details: {
+        comment_id: id,
+        preview: String(existing.body || "").slice(0, 80),
+      },
+    });
+  }
   return NextResponse.json({ ok: true });
 }

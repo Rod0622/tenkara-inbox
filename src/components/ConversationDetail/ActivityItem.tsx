@@ -2,8 +2,9 @@
 
 import {
   Bookmark, CheckCircle, Circle, Clock, Eye, Flag, FolderOpen,
-  GitBranch, GitMerge, Mail, MessageSquare, Pencil, Plus, Send, Tag,
-  Trash2, User, Palette, ClipboardList, Phone, PhoneMissed, BellRing,
+  GitBranch, GitMerge, Mail, MessageSquare, Pencil, Pin, Plus, Send,
+  Smile, Tag, Trash2, User, UserCheck, Palette, ClipboardList, Phone,
+  PhoneMissed, BellRing,
 } from "lucide-react";
 import type { TeamMember } from "@/types";
 import Avatar from "./Avatar";
@@ -72,10 +73,28 @@ const ACTION_MAP: Record<string, { label: string; color: string; icon: any }> = 
   // Notes & tasks
   note_added: { label: "Note added", color: "#A371F7", icon: MessageSquare },
   note_created: { label: "Note added", color: "#A371F7", icon: MessageSquare }, // alias for legacy rows
+  note_edited: { label: "Note edited", color: "var(--info)", icon: Pencil },
+  note_deleted: { label: "Note deleted", color: "var(--danger)", icon: Trash2 },
   task_created: { label: "Task created", color: "var(--info)", icon: Plus },
+  task_edited: { label: "Task edited", color: "var(--info)", icon: Pencil },
   task_completed: { label: "Task completed", color: "var(--accent)", icon: CheckCircle },
   task_reopened: { label: "Task reopened", color: "var(--highlight)", icon: Circle },
   task_deleted: { label: "Task deleted", color: "var(--danger)", icon: Trash2 },
+
+  // Pins (per-user, but logged so the team can audit)
+  pin_added: { label: "Pinned", color: "var(--accent)", icon: Pin },
+  pin_removed: { label: "Unpinned", color: "var(--text-secondary)", icon: Pin },
+
+  // Primary contact
+  primary_contact_changed: { label: "Primary contact changed", color: "var(--info)", icon: UserCheck },
+  primary_contact_reset: { label: "Primary contact reset to auto", color: "var(--text-secondary)", icon: UserCheck },
+
+  // Comments / Team Chat
+  comment_added: { label: "Team chat sent", color: "#A371F7", icon: MessageSquare },
+  comment_edited: { label: "Team chat edited", color: "var(--info)", icon: Pencil },
+  comment_deleted: { label: "Team chat deleted", color: "var(--danger)", icon: Trash2 },
+  reaction_added: { label: "Reaction added", color: "var(--highlight)", icon: Smile },
+  reaction_removed: { label: "Reaction removed", color: "var(--text-secondary)", icon: Smile },
 
   // Email
   reply_sent: { label: "Reply sent", color: "var(--accent)", icon: Send },
@@ -188,6 +207,58 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
       if (!previewText) return null;
       const trimmed = String(previewText).length > 80 ? String(previewText).slice(0, 80) + "…" : previewText;
       return <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>;
+    }
+    case "note_edited":
+    case "note_deleted": {
+      const previewText = details.preview;
+      if (!previewText) return null;
+      const trimmed = String(previewText).length > 80 ? String(previewText).slice(0, 80) + "…" : previewText;
+      return <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>;
+    }
+    case "task_edited": {
+      const text = details.text;
+      const changed = Array.isArray(details.changed) ? details.changed : [];
+      if (!text && changed.length === 0) return null;
+      const trimmed = text && String(text).length > 60 ? String(text).slice(0, 60) + "…" : text;
+      return (
+        <span>
+          {trimmed && <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>}
+          {trimmed && changed.length > 0 && <span className="text-[var(--text-muted)] mx-1">·</span>}
+          {changed.length > 0 && <span className="text-[var(--text-secondary)]">{changed.join(", ")}</span>}
+        </span>
+      );
+    }
+    case "primary_contact_changed": {
+      const from = details.from_email;
+      const to = details.to_email;
+      if (!to) return null;
+      const t = (s: string) => String(s).length > 40 ? String(s).slice(0, 40) + "…" : s;
+      return (
+        <span>
+          {from && <span className="text-[var(--text-secondary)]">{t(from)}</span>}
+          {from && to && <span className="text-[var(--text-muted)] mx-1">→</span>}
+          <span className="text-[var(--text-primary)] font-medium">{t(to)}</span>
+        </span>
+      );
+    }
+    case "primary_contact_reset": {
+      const prev = details.previous_email;
+      if (!prev) return null;
+      return <span>was <span className="text-[var(--text-secondary)]">{prev}</span></span>;
+    }
+    case "comment_added":
+    case "comment_edited":
+    case "comment_deleted": {
+      const previewText = details.preview;
+      if (!previewText) return null;
+      const trimmed = String(previewText).length > 80 ? String(previewText).slice(0, 80) + "…" : previewText;
+      return <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>;
+    }
+    case "reaction_added":
+    case "reaction_removed": {
+      const emoji = details.emoji;
+      if (!emoji) return null;
+      return <span className="text-[var(--text-primary)] text-base">{emoji}</span>;
     }
     case "color_set": {
       const color = details.color;

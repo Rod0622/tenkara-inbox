@@ -33,6 +33,13 @@ export async function POST(req: NextRequest) {
   }
   const cleanName = name ? String(name).trim() : cleanEmail.split("@")[0];
 
+  // Fetch the previous primary contact for the audit entry's "from"
+  const { data: prev } = await supabase
+    .from("conversations")
+    .select("primary_contact_name, primary_contact_email")
+    .eq("id", conversation_id)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from("conversations")
     .update({
@@ -45,16 +52,38 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: primary_contact_changed ───────────────────────────
+  await supabase.from("activity_log").insert({
+    conversation_id,
+    actor_id: body.actor_id || null,
+    action: "primary_contact_changed",
+    details: {
+      from_name: prev?.primary_contact_name || null,
+      from_email: prev?.primary_contact_email || null,
+      to_name: cleanName,
+      to_email: cleanEmail,
+    },
+  });
+
   return NextResponse.json({ conversation: data });
 }
 
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
+  const actorId = req.nextUrl.searchParams.get("actor_id");
 
   if (!conversationId) {
     return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
   }
+
+  // Capture the previous primary contact before resetting, for the audit log
+  const { data: prev } = await supabase
+    .from("conversations")
+    .select("primary_contact_name, primary_contact_email")
+    .eq("id", conversationId)
+    .maybeSingle();
 
   // Revert to auto mode. Also clear the override fields so the UI falls back
   // to from_name/from_email until the next inbound message triggers the sync
@@ -71,5 +100,17 @@ export async function DELETE(req: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Footprint: primary_contact_reset ─────────────────────────────
+  await supabase.from("activity_log").insert({
+    conversation_id: conversationId,
+    actor_id: actorId || null,
+    action: "primary_contact_reset",
+    details: {
+      previous_name: prev?.primary_contact_name || null,
+      previous_email: prev?.primary_contact_email || null,
+    },
+  });
+
   return NextResponse.json({ conversation: data });
 }
