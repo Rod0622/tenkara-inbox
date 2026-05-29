@@ -270,9 +270,44 @@ export default function DashboardPage() {
 
       // Phase 2: records + per-supplier / per-user aggregation. Run in the
       // background. The slow records fetch was the SLA tab's main bottleneck.
+      //
+      // Two-track fetch:
+      //   - /api/response-times/by-user  → per-user roll-ups (tiny payload,
+      //     includes ALL active team members even those with zero replies)
+      //   - /api/response-times          → full records for the supplier
+      //     responsiveness sub-tab (still needed there). Eventually we'll
+      //     refactor that too, but not in this batch.
+      const byUserUrlParams = new URLSearchParams();
+      if (effectiveDateFrom) byUserUrlParams.set("date_from", effectiveDateFrom);
+      if (effectiveDateTo) byUserUrlParams.set("date_to", effectiveDateTo);
+      const byUserUrl = "/api/response-times/by-user" + (byUserUrlParams.toString() ? "?" + byUserUrlParams.toString() : "");
+
       let rtRecordsUrl = "/api/response-times?";
       if (effectiveDateFrom) rtRecordsUrl += "date_from=" + effectiveDateFrom + "&";
       if (effectiveDateTo) rtRecordsUrl += "date_to=" + effectiveDateTo + "&";
+
+      // Fetch the per-user roll-up FIRST and show it. The bigger supplier-
+      // records fetch runs in the background; users can already see the
+      // Response Times by User table while it loads.
+      const byUserRes = await fetch(byUserUrl).catch(() => null);
+      const byUserJson = byUserRes && byUserRes.ok ? await byUserRes.json() : null;
+      if (byUserJson?.users) {
+        // Convert to the shape the existing render code expects: keep the
+        // same fields (user_id, avg_minutes, fastest_minutes, slowest_minutes,
+        // total) and add an empty suppliers array. Suppliers are lazy-loaded
+        // when a row is expanded.
+        setUserRtData(
+          byUserJson.users.map((u: any) => ({
+            user_id: u.user_id,
+            avg_minutes: u.avg_minutes,
+            fastest_minutes: u.fastest_minutes,
+            slowest_minutes: u.slowest_minutes,
+            total: u.total,
+            supplier_count: u.supplier_count,
+            suppliers: [], // populated lazily by loadUserSuppliers()
+          }))
+        );
+      }
 
       const recRes = await fetch(rtRecordsUrl).catch(() => null);
       const recJson = recRes && recRes.ok ? await recRes.json() : null;
@@ -374,47 +409,53 @@ export default function DashboardPage() {
       });
       setSupplierRtData(suppList);
 
-      // Aggregate user response times (with per-supplier breakdown)
-      const userMap: Record<string, { total_mins: number[]; by_supplier: Record<string, { mins: number[]; subjects: Set<string> }> }> = {};
-      for (const r of records) {
-        if (r.direction !== "team_reply" || !r.team_member_id) continue;
-        if (!userMap[r.team_member_id]) userMap[r.team_member_id] = { total_mins: [], by_supplier: {} };
-        userMap[r.team_member_id].total_mins.push(r.response_minutes);
-        // Per-supplier breakdown
-        const se = r.supplier_email || "unknown";
-        if (!userMap[r.team_member_id].by_supplier[se]) userMap[r.team_member_id].by_supplier[se] = { mins: [], subjects: new Set() };
-        userMap[r.team_member_id].by_supplier[se].mins.push(r.response_minutes);
-        const cm = convoMeta[r.conversation_id];
-        if (cm?.subject) userMap[r.team_member_id].by_supplier[se].subjects.add(cm.subject);
-      }
-      const userList = Object.entries(userMap).map(([uid, data]) => {
-        const sorted = data.total_mins.slice().sort((a, b) => a - b);
-        const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
-        const suppliers = Object.entries(data.by_supplier).map(([email, sd]) => {
-          const sMins = sd.mins.slice().sort((a, b) => a - b);
-          return {
-            email,
-            avg_minutes: Math.round(sMins.reduce((a, b) => a + b, 0) / sMins.length),
-            total: sMins.length,
-            subjects: Array.from(sd.subjects),
-          };
-        }).sort((a, b) => b.total - a.total);
-        return {
-          user_id: uid,
-          avg_minutes: Math.round(avg),
-          fastest_minutes: Math.round(sorted[0]),
-          slowest_minutes: Math.round(sorted[sorted.length - 1]),
-          total: sorted.length,
-          suppliers,
-        };
-      }).sort((a, b) => a.avg_minutes - b.avg_minutes);
-      setUserRtData(userList);
+      // Aggregate user response times — handled by /api/response-times/by-user
+      // earlier in this function. We don't need to re-aggregate from records
+      // here. The supplier breakdown is loaded lazily when the user expands
+      // a row in the dashboard (see loadUserSuppliers).
+      //
+      // NOTE: The old block built `userRtData` with per-supplier breakdowns
+      // inline. That worked but forced us to fetch every response_times row
+      // and join with conversation metadata up front, which made the SLA
+      // tab slow. The new flow shows the per-user table immediately and
+      // only fetches supplier details when a row is expanded.
 
     } catch (_e) {
       console.error("Failed to load SLA metrics");
     } finally {
       setSlaLoading(false);
       setSlaRecordsLoading(false);
+    }
+  }
+
+  // Lazy-load the per-supplier breakdown for a single user. Called when the
+  // user clicks to expand a row in the Response Times by User table. We cache
+  // results on the userRtData row itself (suppliers array) so subsequent
+  // expansions don't refetch.
+  const [loadingSuppliersFor, setLoadingSuppliersFor] = useState<string | null>(null);
+  async function loadUserSuppliers(userId: string) {
+    // If we already have suppliers cached for this user, no-op
+    const existing = userRtData.find((u: any) => u.user_id === userId);
+    if (existing && existing.suppliers && existing.suppliers.length > 0) return;
+    if (loadingSuppliersFor === userId) return;
+    setLoadingSuppliersFor(userId);
+    try {
+      const params = new URLSearchParams();
+      if (effectiveDateFrom) params.set("date_from", effectiveDateFrom);
+      if (effectiveDateTo) params.set("date_to", effectiveDateTo);
+      const url = `/api/response-times/by-user/${userId}/suppliers` + (params.toString() ? "?" + params.toString() : "");
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const json = await res.json();
+      setUserRtData((prev: any[]) =>
+        prev.map((u: any) =>
+          u.user_id === userId ? { ...u, suppliers: json.suppliers || [] } : u
+        )
+      );
+    } catch (e) {
+      console.error("Failed to load supplier breakdown:", e);
+    } finally {
+      setLoadingSuppliersFor(null);
     }
   }
 
@@ -1213,36 +1254,72 @@ export default function DashboardPage() {
                     </div>
                     {userRtData.map((stat: any) => {
                       const user = userStats.find((u) => u.id === stat.user_id);
-                      const fmtM = (m: number) => m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60 * 10) / 10 + "h" : Math.round(m / 1440 * 10) / 10 + "d";
+                      const fmtM = (m: number | null | undefined): string => {
+                        if (m === null || m === undefined) return "—";
+                        if (m < 60) return m + "m";
+                        if (m < 1440) return Math.round(m / 60 * 10) / 10 + "h";
+                        return Math.round(m / 1440 * 10) / 10 + "d";
+                      };
                       const isExpanded = expandedUserId === stat.user_id;
+                      const hasData = stat.total > 0;
+                      const supplierCount = stat.supplier_count ?? stat.suppliers?.length ?? 0;
                       return (
                         <div key={stat.user_id}>
-                          <div onClick={() => setExpandedUserId(isExpanded ? null : stat.user_id)}
-                            className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border items-center cursor-pointer transition-colors ${isExpanded ? "border-[var(--info)]/30 bg-[var(--surface)]" : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--info)]/20"}`}>
+                          <div onClick={() => {
+                            const newExpanded = isExpanded ? null : stat.user_id;
+                            setExpandedUserId(newExpanded);
+                            // Lazy-load supplier breakdown on first expansion.
+                            // Skip if user has no data (no suppliers to load).
+                            if (newExpanded && hasData) loadUserSuppliers(stat.user_id);
+                          }}
+                            className={`grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-3 rounded-xl border items-center cursor-pointer transition-colors ${isExpanded ? "border-[var(--info)]/30 bg-[var(--surface)]" : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--info)]/20"} ${!hasData ? "opacity-60" : ""}`}>
                             <div className="flex items-center gap-3">
                               {user ? (
                                 <>
                                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-[var(--bg)]" style={{ background: user.color }}>{user.initials}</div>
-                                  <div><div className="text-[13px] font-semibold">{user.name}</div><div className="text-[10px] text-[var(--text-muted)]">{user.department} · {stat.suppliers?.length || 0} suppliers</div></div>
+                                  <div>
+                                    <div className="text-[13px] font-semibold">{user.name}</div>
+                                    <div className="text-[10px] text-[var(--text-muted)]">
+                                      {user.department}
+                                      {hasData ? ` · ${supplierCount} supplier${supplierCount === 1 ? "" : "s"}` : " · no replies in period"}
+                                    </div>
+                                  </div>
                                 </>
                               ) : (
                                 <div className="text-[13px] text-[var(--text-muted)]">Unassigned</div>
                               )}
                             </div>
-                            <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "var(--accent)" : stat.avg_minutes <= 660 ? "var(--warning)" : "var(--danger)" }}>
-                              {fmtM(stat.avg_minutes)}
-                            </div>
-                            <div className="text-center text-sm text-[var(--accent)]">{fmtM(stat.fastest_minutes)}</div>
-                            <div className="text-center text-sm text-[var(--warning)]">{fmtM(stat.slowest_minutes)}</div>
-                            <div className="text-center text-sm text-[var(--text-primary)]">{stat.total}</div>
+                            {hasData ? (
+                              <>
+                                <div className="text-center text-sm font-semibold" style={{ color: stat.avg_minutes <= 240 ? "var(--accent)" : stat.avg_minutes <= 660 ? "var(--warning)" : "var(--danger)" }}>
+                                  {fmtM(stat.avg_minutes)}
+                                </div>
+                                <div className="text-center text-sm text-[var(--accent)]">{fmtM(stat.fastest_minutes)}</div>
+                                <div className="text-center text-sm text-[var(--warning)]">{fmtM(stat.slowest_minutes)}</div>
+                                <div className="text-center text-sm text-[var(--text-primary)]">{stat.total}</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-center text-sm text-[var(--text-muted)]">—</div>
+                                <div className="text-center text-sm text-[var(--text-muted)]">—</div>
+                                <div className="text-center text-sm text-[var(--text-muted)]">—</div>
+                                <div className="text-center text-sm text-[var(--text-muted)]">0</div>
+                              </>
+                            )}
                           </div>
                           {/* Expanded: per-supplier breakdown */}
-                          {isExpanded && stat.suppliers && stat.suppliers.length > 0 && (
+                          {isExpanded && hasData && (
                             <div className="ml-11 mt-1 mb-2 space-y-1">
                               <div className="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 px-4 py-1.5 text-[9px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
                                 <span>Supplier</span><span className="text-center">Avg Response</span><span className="text-center">Replies</span><span>Materials / Subjects</span>
                               </div>
-                              {stat.suppliers.map((sup: any) => {
+                              {loadingSuppliersFor === stat.user_id && (!stat.suppliers || stat.suppliers.length === 0) && (
+                                <div className="text-center py-4 text-[11px] text-[var(--text-muted)]">
+                                  <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)] mx-auto mb-1" />
+                                  Loading supplier breakdown…
+                                </div>
+                              )}
+                              {(stat.suppliers || []).map((sup: any) => {
                                 const sc = sup.avg_minutes <= 240 ? "var(--accent)" : sup.avg_minutes <= 660 ? "var(--warning)" : "var(--danger)";
                                 return (
                                   <a key={sup.email} href={"/contacts/" + encodeURIComponent(sup.email)}
