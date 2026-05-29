@@ -151,6 +151,39 @@ export async function POST(req: NextRequest) {
       console.error("[remove-me] audit insert failed:", remErr);
     }
 
+    // ─── Footprint: activity_log ──────────────────────────────────────
+    // Mirror the action into activity_log so it shows up in the per-
+    // conversation Activity tab alongside the other footprints. Without
+    // this, soft-deleting a task via "Remove me" leaves no trace in the
+    // user-facing log (only the dedicated task_removals audit table).
+    //
+    // Two action types:
+    //   task_deleted — the caller was the sole assignee (task is gone)
+    //   task_left    — caller stepped off a multi-assignee task (still
+    //                  exists for others)
+    //
+    // Skip if there's no conversation (standalone tasks don't show up in
+    // any conversation's activity tab anyway).
+    if (task.conversation_id) {
+      try {
+        await supabase.from("activity_log").insert({
+          conversation_id: task.conversation_id,
+          actor_id: removedBy,
+          action: wasSole ? "task_deleted" : "task_left",
+          details: {
+            task_id: taskId,
+            text: String(task.text || "").slice(0, 80),
+            reason: rawReason.slice(0, 200),
+            via: "remove_me",
+          },
+        });
+      } catch (e: any) {
+        // Best-effort — don't block the response if the activity log write
+        // fails. The task_removals audit row is the canonical record.
+        console.error("[remove-me] activity_log insert failed:", e?.message);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       action: wasSole ? "soft_deleted" : "left",

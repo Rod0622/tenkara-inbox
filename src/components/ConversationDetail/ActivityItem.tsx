@@ -80,6 +80,7 @@ const ACTION_MAP: Record<string, { label: string; color: string; icon: any }> = 
   task_completed: { label: "Task completed", color: "var(--accent)", icon: CheckCircle },
   task_reopened: { label: "Task reopened", color: "var(--highlight)", icon: Circle },
   task_deleted: { label: "Task deleted", color: "var(--danger)", icon: Trash2 },
+  task_left: { label: "Left task", color: "var(--warning)", icon: User },
 
   // Pins (per-user, but logged so the team can audit)
   pin_added: { label: "Pinned", color: "var(--accent)", icon: Pin },
@@ -225,6 +226,37 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
           {trimmed && <span className="text-[var(--text-primary)] italic">"{trimmed}"</span>}
           {trimmed && changed.length > 0 && <span className="text-[var(--text-muted)] mx-1">·</span>}
           {changed.length > 0 && <span className="text-[var(--text-secondary)]">{changed.join(", ")}</span>}
+        </span>
+      );
+    }
+    case "task_left": {
+      const text = details.text;
+      const reason = details.reason;
+      const trimmedText = text && String(text).length > 60 ? String(text).slice(0, 60) + "…" : text;
+      const trimmedReason = reason && String(reason).length > 80 ? String(reason).slice(0, 80) + "…" : reason;
+      if (!trimmedText && !trimmedReason) return null;
+      return (
+        <span>
+          {trimmedText && <span className="text-[var(--text-primary)] italic">"{trimmedText}"</span>}
+          {trimmedText && trimmedReason && <span className="text-[var(--text-muted)] mx-1">·</span>}
+          {trimmedReason && <span className="text-[var(--text-secondary)]">reason: {trimmedReason}</span>}
+        </span>
+      );
+    }
+    case "task_deleted": {
+      // Two flavors: normal delete (just text) or remove-me sole-assignee
+      // delete (text + reason). Both render the same way — show what was
+      // there plus the reason if present.
+      const text = details.text;
+      const reason = details.reason;
+      const trimmedText = text && String(text).length > 60 ? String(text).slice(0, 60) + "…" : text;
+      const trimmedReason = reason && String(reason).length > 80 ? String(reason).slice(0, 80) + "…" : reason;
+      if (!trimmedText && !trimmedReason) return null;
+      return (
+        <span>
+          {trimmedText && <span className="text-[var(--text-primary)] italic">"{trimmedText}"</span>}
+          {trimmedText && trimmedReason && <span className="text-[var(--text-muted)] mx-1">·</span>}
+          {trimmedReason && <span className="text-[var(--text-secondary)]">reason: {trimmedReason}</span>}
         </span>
       );
     }
