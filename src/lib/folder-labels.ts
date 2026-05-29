@@ -399,6 +399,42 @@ export async function swapFolderLabel(
   // which can happen when two folders share a name).
   if (oldLabelId && oldLabelId !== newLabelId) {
     labelsToStrip.push(oldLabelId);
+
+    // ─── Nested-label cleanup ──────────────────────────────────────────
+    // The old folder's label may have CHILD labels that the conversation
+    // also has applied (e.g. parent label "Suppliers" with child "Asia",
+    // or "Suppliers/A1", "Suppliers/A2"). When moving out of the parent
+    // folder, those nested labels become stale and should be stripped too.
+    //
+    // Two-step: (1) find all child labels whose parent_label_id matches
+    // the old folder's label, then (2) check which of those are actually
+    // applied to this conversation, and add them to the strip list.
+    //
+    // We skip a child label if it equals newLabelId (caller is moving
+    // INTO that child — keep it).
+    const { data: childLabels } = await supabase
+      .from("labels")
+      .select("id")
+      .eq("parent_label_id", oldLabelId);
+
+    const childLabelIds = (childLabels || [])
+      .map((l: any) => l.id)
+      .filter((id: string) => id !== newLabelId);
+
+    if (childLabelIds.length > 0) {
+      // Of those child labels, which are actually attached to this conversation?
+      const { data: attached } = await supabase
+        .from("conversation_labels")
+        .select("label_id")
+        .eq("conversation_id", conversationId)
+        .in("label_id", childLabelIds);
+
+      for (const row of (attached || [])) {
+        if (!labelsToStrip.includes(row.label_id)) {
+          labelsToStrip.push(row.label_id);
+        }
+      }
+    }
   }
 
   // If destination is NOT the Inbox folder, also strip the global Inbox label
