@@ -1153,16 +1153,32 @@ export default function ConversationDetail({
     }
   }, [refetchCalls]);
 
-  // Auto-activate thread search when coming from global search
+  // Auto-activate thread search when opening a conversation from global search.
+  //
+  // Important: only fires when `convo?.id` changes (i.e., user opens a new
+  // conversation). NOT on `globalSearchQuery` changes — otherwise every
+  // keystroke in the main search bar would re-trigger this effect, which
+  // re-applies autoFocus to the in-thread search input and steals focus
+  // from whatever the user was actually typing in.
+  //
+  // We use a ref to read the CURRENT global query at the moment the convo
+  // opens, without making it a dependency of the effect.
+  const globalSearchQueryRef = useRef<string>(globalSearchQuery || "");
   useEffect(() => {
-    if (globalSearchQuery && convo?.id) {
-      setThreadSearch(globalSearchQuery);
+    globalSearchQueryRef.current = globalSearchQuery || "";
+  }, [globalSearchQuery]);
+
+  useEffect(() => {
+    const q = globalSearchQueryRef.current;
+    if (q && convo?.id) {
+      setThreadSearch(q);
       setThreadSearchActive(true);
       setCurrentMatchIndex(0);
       matchRefs.current = [];
       setActiveTab("messages");
     }
-  }, [convo?.id, globalSearchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convo?.id]);
 
   // Fetch supplier business hours + responsiveness score for header display
   useEffect(() => {

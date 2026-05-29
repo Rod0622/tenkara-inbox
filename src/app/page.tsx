@@ -60,6 +60,18 @@ export default function InboxPage() {
   //   • "closed" — Closed sub-view: closures from this folder (separate data source)
   const [folderSubView, setFolderSubView] = useState<"unassigned" | "all" | "closed">("unassigned");
   const [searchQuery, setSearchQuery] = useState("");
+  // Debounced version of searchQuery — lags real input by ~300ms. Used for:
+  //   1. The /api/search fetch (avoids one fetch per keystroke)
+  //   2. The globalSearchQuery passed to ConversationDetail (avoids re-firing
+  //      the in-thread auto-activate effect on every keystroke, which steals
+  //      focus from the main search bar)
+  // The visible input is still controlled by `searchQuery` so typing feels
+  // instant; only downstream effects use the debounced value.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
   const [searchScope, setSearchScope] = useState<"all" | "account" | "folder">("all");
   const [searchResults, setSearchResults] = useState<Conversation[] | null>(null);
   const [searchSnippets, setSearchSnippets] = useState<Record<string, string>>({});
@@ -104,9 +116,15 @@ export default function InboxPage() {
     };
   }, [currentUser?.id]);
 
-  // Debounced full-text search across all messages
+  // Full-text search across all messages. Uses the debounced query so we
+  // don't fire one API call per keystroke. The inner setTimeout is kept
+  // for backward compatibility but is now redundant — could be removed
+  // since `debouncedSearchQuery` already lags by 300ms. Leaving it as a
+  // tiny additional buffer; total perceived delay is still under half a
+  // second.
   useEffect(() => {
-    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+    const q = debouncedSearchQuery.trim();
+    if (!q || q.length < 2) {
       setSearchResults(null);
       setSearchSnippets({});
       setSearchTaskResults([]);
@@ -115,7 +133,7 @@ export default function InboxPage() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(async () => {
       try {
-        let url = "/api/search?q=" + encodeURIComponent(searchQuery.trim());
+        let url = "/api/search?q=" + encodeURIComponent(q);
         if (searchScope === "account" && activeMailbox) url += "&account_id=" + activeMailbox;
         if (searchScope === "folder" && activeFolder) url += "&folder_id=" + activeFolder;
         if (searchScope === "folder" && activeMailbox) url += "&account_id=" + activeMailbox;
@@ -129,9 +147,9 @@ export default function InboxPage() {
         setSearchResults(null);
         setSearchSnippets({});
       }
-    }, 300);
+    }, 50);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery, searchScope, activeMailbox, activeFolder]);
+  }, [debouncedSearchQuery, searchScope, activeMailbox, activeFolder]);
 
   const { tasks: personalTasks, refetch: refetchTasks } = useTasks(currentUser?.id || null, "mine");
 
@@ -385,13 +403,15 @@ export default function InboxPage() {
       filtered = filtered.filter((c) => c.status !== "merged");
     }
 
-    if (searchQuery.trim() && searchQuery.trim().length >= 2) {
+    if (debouncedSearchQuery.trim() && debouncedSearchQuery.trim().length >= 2) {
       // When searching, show results from ALL accounts (returned by search API)
       if (searchResults) {
         return searchResults;
       } else {
-        // Fallback: local search while API is loading
-        const q = searchQuery.toLowerCase();
+        // Fallback: local search while API is loading. Uses the debounced
+        // query so the filter doesn't recompute on every keystroke (which
+        // was previously the case and added jank on large inboxes).
+        const q = debouncedSearchQuery.toLowerCase();
         filtered = conversations.filter(
           (c) =>
             c.status !== "trash" && c.status !== "spam" && (
@@ -412,7 +432,7 @@ export default function InboxPage() {
     activeView,
     folderSubView,
     currentUser,
-    searchQuery,
+    debouncedSearchQuery,
     searchResults,
     accountEmails,
     mySentConvoIds,
@@ -790,7 +810,7 @@ export default function InboxPage() {
                 onAssign={handleAssign}
                 onSendReply={actions.sendReply}
                 onMoveToFolder={handleMoveToFolder}
-                globalSearchQuery={searchQuery.trim().length >= 2 ? searchQuery : ""}
+                globalSearchQuery={debouncedSearchQuery.trim().length >= 2 ? debouncedSearchQuery : ""}
               />
             </Panel>
           </>

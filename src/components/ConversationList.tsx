@@ -773,16 +773,42 @@ export default function ConversationList({
       {/* Search + Filter toggle */}
       <div className="p-3 pb-2">
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
-          <Search size={16} className="text-[var(--text-muted)]" />
+          <Search size={16} className="text-[var(--text-muted)] shrink-0" />
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search conversations..."
-            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)]"
+            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] text-[13px] placeholder:text-[var(--text-muted)] min-w-0"
+            onKeyDown={(e) => {
+              // Esc clears the search and blurs the input — fast reset
+              // when the user wants to abandon a search mid-typing.
+              if (e.key === "Escape") {
+                setSearchQuery("");
+                (e.currentTarget as HTMLInputElement).blur();
+              }
+            }}
           />
+          {searchQuery.length > 0 && (
+            // Clear (✕) button — visible only when there's a query. Restores
+            // focus to the input after clearing so the user can keep typing.
+            <button
+              onClick={(e) => {
+                setSearchQuery("");
+                // Focus the input again. Lookup via DOM rather than ref to
+                // keep this component change minimal.
+                const input = (e.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null);
+                input?.focus();
+              }}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors shrink-0"
+              title="Clear search (Esc)"
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all shrink-0 ${
               hasActiveFilters
                 ? "bg-[rgba(74,222,128,0.12)] text-[var(--accent)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
