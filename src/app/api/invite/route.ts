@@ -196,6 +196,34 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "member_id is required" }, { status: 400 });
   }
 
+  // ─── Last-admin protection ──────────────────────────────────────────
+  // Deactivating the only active admin would lock the workspace out of all
+  // admin features. Refuse with 409 — same shape as the PATCH protection.
+  const { data: target } = await supabase
+    .from("team_members")
+    .select("id, role, is_active")
+    .eq("id", member_id)
+    .maybeSingle();
+
+  if (target && target.role === "admin" && target.is_active === true) {
+    const { count: otherAdmins } = await supabase
+      .from("team_members")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin")
+      .eq("is_active", true)
+      .neq("id", member_id);
+
+    if ((otherAdmins || 0) === 0) {
+      return NextResponse.json(
+        {
+          error: "Cannot deactivate the last admin",
+          detail: "This is the only active admin in the workspace. Promote another member to admin before deactivating this account.",
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const { error } = await supabase
     .from("team_members")
     .update({ is_active: false })
@@ -222,6 +250,52 @@ export async function PATCH(req: NextRequest) {
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  // ─── Last-admin protection ──────────────────────────────────────────
+  // Refuse any change that would leave the workspace with zero active
+  // admins. Two ways this can happen:
+  //   (a) demoting the only admin (role: "admin" → "member")
+  //   (b) deactivating the only admin (is_active: true → false)
+  //
+  // We compute "would this leave zero admins?" by counting other active
+  // admins excluding the target row. If that count is zero AND the target
+  // row is currently an active admin AND the update would remove that
+  // status, block with 409.
+  const isDemoting = role !== undefined && role !== "admin";
+  const isDeactivating = is_active === false;
+  if (isDemoting || isDeactivating) {
+    // Fetch the target's current state. If they aren't currently an active
+    // admin, the change can't reduce the admin count below current — skip
+    // the check.
+    const { data: target } = await supabase
+      .from("team_members")
+      .select("id, role, is_active")
+      .eq("id", member_id)
+      .maybeSingle();
+
+    const targetIsActiveAdmin = target && target.role === "admin" && target.is_active === true;
+    if (targetIsActiveAdmin) {
+      // Count OTHER active admins (excluding this target)
+      const { count: otherAdmins } = await supabase
+        .from("team_members")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "admin")
+        .eq("is_active", true)
+        .neq("id", member_id);
+
+      if ((otherAdmins || 0) === 0) {
+        return NextResponse.json(
+          {
+            error: "Cannot remove the last admin",
+            detail: isDemoting
+              ? "This is the only active admin in the workspace. Promote another member to admin first, then change this role."
+              : "This is the only active admin in the workspace. Promote another member to admin before deactivating this account.",
+          },
+          { status: 409 }
+        );
+      }
+    }
   }
 
   const { data, error } = await supabase

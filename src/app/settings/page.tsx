@@ -1259,6 +1259,7 @@ function ConnectEmailModal({ onClose }: { onClose: () => void }) {
 
 // ── Team Members Tab ─────────────────────────────────
 function TeamTab() {
+  const { data: session } = useSession();
   const [members, setMembers] = useState<any[]>([]);
   const [emailAccounts, setEmailAccounts] = useState<any[]>([]);
   const [accessMap, setAccessMap] = useState<Record<string, string[]>>({}); // memberId -> accountIds[]
@@ -1357,7 +1358,10 @@ function TeamTab() {
     setInviting(false);
   };
 
-  const handleUpdateMember = async (id: string, update: any) => {
+  // PATCH a team member. Returns true on success, false on failure.
+  // Handles server-side errors (e.g. 409 last-admin protection) by surfacing
+  // the detail message to the user via alert().
+  const handleUpdateMember = async (id: string, update: any): Promise<boolean> => {
     try {
       const res = await fetch("/api/invite", {
         method: "PATCH",
@@ -1367,10 +1371,89 @@ function TeamTab() {
       if (res.ok) {
         fetchMembers();
         setEditingId(null);
+        return true;
       }
+      // Surface the server's error/detail so users see WHY a change was blocked.
+      // The 409 last-admin response includes a `detail` field; fall back to
+      // `error` for other failures.
+      const errBody = await res.json().catch(() => ({}));
+      alert(errBody?.detail || errBody?.error || "Update failed. Please try again.");
+      // Re-fetch so any optimistic local state (e.g. a select's defaultValue)
+      // gets reset to the actual server value on next render.
+      fetchMembers();
+      return false;
     } catch {
       console.error("Update failed");
+      alert("Update failed. Check your network and try again.");
+      fetchMembers();
+      return false;
     }
+  };
+
+  // Role change requires a confirmation. Three flavors:
+  //   - Self-demote (admin → member, you = target): strongest warning, you'll
+  //     lose admin features in the workspace
+  //   - Other-demote (admin → member, you ≠ target): straightforward
+  //   - Promote (member → admin): less risky but still worth confirming since
+  //     it grants full access
+  // Server-side has a hard block for last-admin demotion (409) — caught
+  // through handleUpdateMember's alert path.
+  //
+  // The select element in the row is uncontrolled (defaultValue=m.role). If
+  // the user cancels OR the server rejects, the visible select option won't
+  // automatically revert. We use a re-key trick: bump roleSelectKey so React
+  // remounts the select with its new defaultValue. This is simpler than
+  // converting to a controlled select for one-off cases.
+  const handleRoleChange = async (
+    targetMember: any,
+    newRole: string
+  ): Promise<void> => {
+    const currentRole = targetMember.role;
+    if (currentRole === newRole) return;
+
+    const targetName = targetMember.name || "this user";
+    const isSelf = (session as any)?.teamMember?.id === targetMember.id;
+    const isDemotion = currentRole === "admin" && newRole === "member";
+    const isPromotion = currentRole === "member" && newRole === "admin";
+
+    let prompt = "";
+    if (isSelf && isDemotion) {
+      prompt =
+        "You are about to demote YOURSELF from Admin to Member.\n\n" +
+        "You will immediately lose access to admin-only features:\n" +
+        " • Settings (Team, Rules, Labels, etc.)\n" +
+        " • Offboarding teammates\n" +
+        " • Bulk actions on tasks\n\n" +
+        "Only another admin can promote you back.\n\n" +
+        "Are you sure you want to continue?";
+    } else if (isDemotion) {
+      prompt =
+        `Demote ${targetName} from Admin to Member?\n\n` +
+        "They will lose access to admin-only features (Settings, " +
+        "offboarding, bulk actions). They can be promoted back at any time.\n\n" +
+        "Continue?";
+    } else if (isPromotion) {
+      prompt =
+        `Promote ${targetName} from Member to Admin?\n\n` +
+        "Admins have full access:\n" +
+        " • Workspace settings\n" +
+        " • Manage team members\n" +
+        " • Offboard users\n" +
+        " • Bulk delete tasks/conversations\n\n" +
+        "Continue?";
+    } else {
+      // Some other role transition we don't recognize — confirm generically.
+      prompt = `Change ${targetName}'s role from "${currentRole}" to "${newRole}"?`;
+    }
+
+    if (!confirm(prompt)) {
+      // User cancelled. Force a re-fetch so the select snaps back to its
+      // server-side defaultValue.
+      fetchMembers();
+      return;
+    }
+
+    await handleUpdateMember(targetMember.id, { role: newRole });
   };
 
   const handleDeactivate = async (id: string, name: string) => {
@@ -1381,9 +1464,16 @@ function TeamTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ member_id: id }),
       });
-      if (res.ok) fetchMembers();
+      if (res.ok) {
+        fetchMembers();
+        return;
+      }
+      // Surface the server's error (especially the 409 last-admin protection)
+      const errBody = await res.json().catch(() => ({}));
+      alert(errBody?.detail || errBody?.error || "Deactivate failed. Please try again.");
     } catch {
       console.error("Deactivate failed");
+      alert("Deactivate failed. Check your network and try again.");
     }
   };
 
@@ -1572,7 +1662,7 @@ function TeamTab() {
                   </select>
                   <select
                     defaultValue={m.role}
-                    onChange={(e) => handleUpdateMember(m.id, { role: e.target.value })}
+                    onChange={(e) => handleRoleChange(m, e.target.value)}
                     className="px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[10px] text-[var(--text-primary)] outline-none"
                   >
                     <option value="member">Member</option>
