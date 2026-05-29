@@ -82,6 +82,61 @@ import QuickCallModal from "./QuickCallModal";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
 import { normalizeSuggestedTaskText, getNormalizedTokens, getTaskMatchMeta } from "./ConversationDetail/utils";
 
+// Convert a domain root like "wholesalesuppliesplus" into a human-readable
+// supplier name "Wholesale Supplies Plus". Best-effort — used as a default
+// when auto-creating a supplier from a participant's email. The user can
+// rename the supplier later in the command center.
+//
+// Approach: greedy left-to-right split. Walks the lowercase domain and
+// inserts a space before any capitalizable chunk, using a dictionary of
+// common English words to find break points. Falls back to title-case of
+// the whole token if no breaks are found.
+function humanizeDomainRoot(root: string): string {
+  if (!root) return "";
+  const cleaned = String(root).toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!cleaned) return root;
+
+  // Small dictionary of common business/supplier words. Order matters — longer
+  // first so "supplies" matches before "supp", "plus" before "plu", etc.
+  const dict = [
+    "wholesale", "supplies", "supply", "company", "industries", "industrial",
+    "international", "global", "natural", "naturals", "nutrition", "ingredients",
+    "ingredient", "products", "product", "biotechnology", "biotech", "chemicals",
+    "chemical", "foods", "food", "labs", "laboratory", "laboratories", "lab",
+    "essentials", "essence", "organics", "organic", "organica", "vita",
+    "premium", "pharma", "trading", "trade", "ltd", "inc", "corp", "co",
+    "the", "and", "of", "for", "plus", "pro", "max", "tech", "group",
+  ];
+
+  const parts: string[] = [];
+  let i = 0;
+  while (i < cleaned.length) {
+    let matched = "";
+    for (const word of dict) {
+      if (cleaned.slice(i, i + word.length) === word && word.length > matched.length) {
+        matched = word;
+      }
+    }
+    if (matched) {
+      parts.push(matched);
+      i += matched.length;
+    } else {
+      // Take a single character until the next dictionary match
+      let chunk = "";
+      while (i < cleaned.length) {
+        chunk += cleaned[i];
+        i += 1;
+        const remaining = cleaned.slice(i);
+        const lookahead = dict.find((w) => remaining.startsWith(w));
+        if (lookahead) break;
+      }
+      if (chunk) parts.push(chunk);
+    }
+  }
+
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+}
+
 // Strip HTML tags + decode common entities from a string. Used when we surface
 // message previews in chips/labels — raw email bodies often contain &nbsp; &amp;
 // etc. that look ugly when shown as plain text.
@@ -816,58 +871,124 @@ export default function ConversationDetail({
     }
   };
 
-  // Add a participant as a supplier contact person. Resolution order:
+  // Add a participant as a supplier contact person. Resolution waterfall:
   //   1. If convo.supplier_contact_id is set → use it directly.
-  //   2. Otherwise look up supplier_contacts by the conversation's external
-  //      email (from_email or any participant). If a match is found, use it
-  //      and quietly back-link the conversation to that supplier so future
-  //      calls skip this step.
-  //   3. Last resort — show the supplier picker modal.
+  //   2. Exact match: look up supplier_contacts by the conversation's external
+  //      email. If found, back-link the conversation and use it.
+  //   3. Domain match: look up supplier_contacts where the email domain
+  //      matches the conversation's external email domain (e.g. any supplier
+  //      contact with @wholesalesuppliesplus.com). If found, use the first
+  //      match (most recent by updated_at) and back-link the conversation.
+  //   4. Auto-create: derive a supplier name from the email domain (e.g.
+  //      "Wholesale Supplies Plus" from "wholesalesuppliesplus.com") and
+  //      create a new supplier_contacts row. Back-link the conversation.
+  //
+  // The supplier picker modal is the absolute last resort and shouldn't be
+  // reached under normal circumstances.
   const addAsContact = async (name: string, email: string) => {
     setBadgeMenuEmail(null);
+    // (1) Conversation already linked to a supplier — fast path
     if (convo?.supplier_contact_id) {
       await doAddContact(convo.supplier_contact_id, name, email);
       return;
     }
-    // Try to find a supplier matching this conversation's primary external
-    // email. We look up supplier_contacts by EXACT email match. This handles
-    // the common case where the supplier was created (e.g. via the Suppliers
-    // panel) but the conversation row was never back-linked.
-    if (convo?.id) {
-      try {
-        const sb = createBrowserClient();
-        // The "anchor" email to match — prefer primary_contact_email
-        // (current display) and fall back to convo.from_email.
-        const anchorEmail = (
-          (convo as any).primary_contact_email ||
-          convo.from_email ||
-          ""
-        ).toLowerCase().trim();
-        if (anchorEmail && anchorEmail.includes("@")) {
-          const { data: match } = await sb
-            .from("supplier_contacts")
-            .select("id, name")
-            .eq("email", anchorEmail)
-            .maybeSingle();
-          if (match?.id) {
-            // Back-link the conversation so future "Add as contact" clicks
-            // skip the lookup. Best-effort — don't block if it fails.
-            sb.from("conversations")
-              .update({ supplier_contact_id: match.id })
-              .eq("id", convo.id)
-              .then(() => { /* fire and forget */ });
-            // Mutate local state too so the UI stays consistent in this session
-            (convo as any).supplier_contact_id = match.id;
-            await doAddContact(match.id, name, email);
-            return;
-          }
-        }
-      } catch (e: any) {
-        console.error("Auto supplier lookup failed:", e?.message);
+    if (!convo?.id) return;
+
+    try {
+      const sb = createBrowserClient();
+      // The "anchor" external email used to resolve the supplier.
+      // Prefer primary_contact_email (current display) then from_email.
+      const anchorEmail = (
+        (convo as any).primary_contact_email ||
+        convo.from_email ||
+        ""
+      ).toLowerCase().trim();
+
+      if (!anchorEmail || !anchorEmail.includes("@") || anchorEmail === "internal") {
+        // Can't resolve a supplier without an external email anchor.
+        // Open the picker as a last resort.
+        setAddContactPending({ name, email });
+        return;
       }
+
+      const anchorDomain = anchorEmail.split("@")[1] || "";
+
+      // (2) Exact-email match
+      const { data: exactMatch } = await sb
+        .from("supplier_contacts")
+        .select("id, name, email")
+        .eq("email", anchorEmail)
+        .maybeSingle();
+      if (exactMatch?.id) {
+        await backLinkAndAdd(sb, convo.id, exactMatch.id, name, email);
+        return;
+      }
+
+      // (3) Domain match — find any supplier_contacts row whose email lives
+      // on the same domain. Prefer the most-recently-updated.
+      if (anchorDomain) {
+        const { data: domainMatches } = await sb
+          .from("supplier_contacts")
+          .select("id, name, email, updated_at")
+          .ilike("email", `%@${anchorDomain}`)
+          .order("updated_at", { ascending: false })
+          .limit(1);
+        const domainMatch = domainMatches?.[0];
+        if (domainMatch?.id) {
+          await backLinkAndAdd(sb, convo.id, domainMatch.id, name, email);
+          return;
+        }
+      }
+
+      // (4) Auto-create supplier from the domain.
+      // Name guess: titleize the domain root. "wholesalesuppliesplus.com"
+      // → "Wholesale Supplies Plus" (best-effort; user can rename later in
+      // the supplier command center).
+      const domainRoot = anchorDomain.split(".")[0] || anchorDomain || anchorEmail;
+      const guessedSupplierName = humanizeDomainRoot(domainRoot);
+
+      const { data: newSupplier, error: createErr } = await sb
+        .from("supplier_contacts")
+        .insert({
+          email: anchorEmail,
+          name: guessedSupplierName || anchorEmail,
+        })
+        .select("id, name")
+        .single();
+      if (createErr || !newSupplier?.id) {
+        // Creation failed (e.g. unique constraint, RLS) — fall through to
+        // the picker so the user can pick manually.
+        console.error("Supplier auto-create failed:", createErr?.message);
+        setAddContactPending({ name, email });
+        return;
+      }
+      await backLinkAndAdd(sb, convo.id, newSupplier.id, name, email);
+      // Toast already fired inside doAddContact, but also let the user know
+      // a new supplier was created (replaces the previous toast).
+      showToast(`Added to new supplier "${newSupplier.name}"`);
+    } catch (e: any) {
+      console.error("Auto supplier lookup/create failed:", e?.message);
+      // Final fallback — show the picker.
+      setAddContactPending({ name, email });
     }
-    // Still no supplier — surface the picker.
-    setAddContactPending({ name, email });
+  };
+
+  // Helper: back-link the conversation to the supplier (silently, fire & forget)
+  // then add the contact person. Used by all three resolution paths above.
+  const backLinkAndAdd = async (
+    sb: any,
+    conversationId: string,
+    supplierId: string,
+    contactName: string,
+    contactEmail: string
+  ) => {
+    // Fire-and-forget back-link so future "Add as contact" calls take the fast path
+    sb.from("conversations")
+      .update({ supplier_contact_id: supplierId })
+      .eq("id", conversationId)
+      .then(() => { /* ignore */ });
+    if (convo) (convo as any).supplier_contact_id = supplierId;
+    await doAddContact(supplierId, contactName, contactEmail);
   };
 
   const doAddContact = async (supplierContactId: string, name: string, email: string) => {
