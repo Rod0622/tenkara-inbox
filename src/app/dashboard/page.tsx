@@ -1273,6 +1273,19 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                   <div className="space-y-1">
+                    {/* Attribution note — explains why users with zero stats appear dimmed.
+                        Reply attribution requires sending through the Tenkara Inbox app;
+                        replies sent directly from shared mailboxes (Gmail web, Outlook
+                        desktop, mobile, etc.) can't be attributed to an individual. */}
+                    <div className="px-3 py-2 mb-2 rounded-lg bg-[var(--info)]/8 border border-[var(--info)]/20 text-[11px] text-[var(--text-secondary)] flex items-start gap-2">
+                      <span className="text-[var(--info)] mt-0.5">ⓘ</span>
+                      <span>
+                        Only replies sent through Tenkara Inbox are attributed to individual team members.
+                        Replies sent directly from shared mailboxes (e.g. Gmail web, Outlook, mobile mail)
+                        appear as <span className="text-[var(--text-muted)]">"no replies in period"</span> for
+                        the sender. To count toward your stats, reply via the Tenkara Inbox app.
+                      </span>
+                    </div>
                     <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 px-4 py-2 text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
                       <span>Team Member</span><span className="text-center">Avg Response</span><span className="text-center">Fastest</span><span className="text-center">Slowest</span><span className="text-center">Responses</span>
                     </div>
