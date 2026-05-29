@@ -106,7 +106,8 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/response-times ──
 // Actions:
-//   { action: "backfill" }                   — Compute response times from all existing messages
+//   { action: "backfill" }                   — Compute response times from all existing messages (DESTRUCTIVE — clears everything first)
+//   { action: "backfill_account", email_account_id: "..." } — Backfill all convos for ONE account, safe (only touches that account's rows)
 //   { action: "backfill_conversation", conversation_id: "..." } — Backfill a single conversation
 //   { action: "compute", conversation_id, message_id } — Compute for a single new message
 export async function POST(req: NextRequest) {
@@ -116,6 +117,13 @@ export async function POST(req: NextRequest) {
 
   if (action === "backfill") {
     return await backfillAll(supabase);
+  }
+
+  if (action === "backfill_account") {
+    const { email_account_id } = body;
+    if (!email_account_id) return NextResponse.json({ error: "email_account_id required" }, { status: 400 });
+    const result = await backfillAccount(supabase, email_account_id);
+    return NextResponse.json(result);
   }
 
   if (action === "backfill_conversation") {
@@ -139,6 +147,80 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
+
+// ══════════════════════════════════════════════════════
+// BACKFILL ONE ACCOUNT (safe — only touches one account's rows)
+// ══════════════════════════════════════════════════════
+//
+// Why this exists separately from backfillAll():
+//   - backfillAll DELETEs everything in response_times before recomputing.
+//     If we run it on a workspace that already has good data for some
+//     accounts, we wipe all that data and risk timing out before it's
+//     rebuilt.
+//   - This per-account version only touches conversations for ONE
+//     email_account_id. Existing data for other accounts is untouched.
+//   - Each conversation's own response_times rows are deleted by
+//     backfillConversation() before reinsertion, so duplicates aren't an
+//     issue.
+//
+// Use case: a new email account was connected after the original backfill,
+// or response_times rows for one account got out of sync somehow. Trigger
+// this once for the affected account.
+async function backfillAccount(supabase: any, accountId: string) {
+  // Fetch all conversation IDs for this account
+  let convoIds: string[] = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data: batch, error } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("email_account_id", accountId)
+      .neq("status", "trash")
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      return { error: error.message, status: 500 };
+    }
+    if (!batch || batch.length === 0) break;
+    convoIds = convoIds.concat(batch.map((c: any) => c.id));
+    if (batch.length < PAGE) break;
+    offset += PAGE;
+  }
+
+  // Backfill each conversation. Each call is self-contained (deletes its own
+  // response_times rows before inserting new ones) so this is safely re-runnable.
+  let totalInserted = 0;
+  let processed = 0;
+  let skipped = 0;
+  const startTime = Date.now();
+
+  for (const cid of convoIds) {
+    try {
+      const count = await backfillConversation(supabase, cid);
+      if (count > 0) {
+        totalInserted += count;
+        processed += 1;
+      } else {
+        skipped += 1;
+      }
+    } catch (e: any) {
+      console.error("[backfill_account] convo", cid, "failed:", e?.message);
+      skipped += 1;
+    }
+  }
+
+  const elapsedMs = Date.now() - startTime;
+  return {
+    success: true,
+    account_id: accountId,
+    conversations_found: convoIds.length,
+    conversations_processed: processed,
+    conversations_skipped: skipped,
+    response_time_records_inserted: totalInserted,
+    elapsed_ms: elapsedMs,
+  };
+}
+
 
 // ══════════════════════════════════════════════════════
 // BACKFILL ALL CONVERSATIONS
