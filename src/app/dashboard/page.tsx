@@ -307,13 +307,28 @@ export default function DashboardPage() {
             suppliers: [], // populated lazily by loadUserSuppliers()
           }))
         );
+        // Stop the table-level loading spinner as soon as we have user data —
+        // the supplier sub-tab has its own spinner that stays up until the
+        // background records fetch finishes.
+        setSlaRecordsLoading(false);
       }
 
-      const recRes = await fetch(rtRecordsUrl).catch(() => null);
-      const recJson = recRes && recRes.ok ? await recRes.json() : null;
-      const records = recJson?.records || [];
+      // Records fetch — used by the SUPPLIER responsiveness sub-tab only,
+      // not the per-user table. Kick it off WITHOUT await so the SLA tab is
+      // immediately usable. The supplier sub-tab shows its own loading state
+      // until this resolves.
+      //
+      // Wrapping in an IIFE keeps the rest of loadSlaData free of the heavy
+      // wait. Errors are swallowed (best-effort); the supplier sub-tab will
+      // just show empty data if this fails.
+      (async () => {
+        try {
+          const recRes = await fetch(rtRecordsUrl);
+          if (!recRes.ok) return;
+          const recJson = await recRes.json();
+          const records = recJson?.records || [];
 
-      // Fetch conversation metadata for subjects and assignees
+          // Fetch conversation metadata for subjects and assignees
       const convoIds = Array.from(new Set(records.map((r: any) => r.conversation_id).filter(Boolean)));
       const convoMeta: Record<string, { subject: string; assignee_id: string | null }> = {};
       if (convoIds.length > 0) {
@@ -419,12 +434,21 @@ export default function DashboardPage() {
       // and join with conversation metadata up front, which made the SLA
       // tab slow. The new flow shows the per-user table immediately and
       // only fetches supplier details when a row is expanded.
+        } catch (e: any) {
+          // Background records fetch failed — non-fatal. The per-user table
+          // is already shown. Supplier sub-tab will show empty data.
+          console.error("[loadSlaData] background records fetch failed:", e?.message);
+        } finally {
+          setSlaRecordsLoading(false);
+        }
+      })(); // end of background IIFE — fire-and-forget, NOT awaited
 
     } catch (_e) {
       console.error("Failed to load SLA metrics");
     } finally {
       setSlaLoading(false);
-      setSlaRecordsLoading(false);
+      // NOTE: setSlaRecordsLoading(false) is called inside the IIFE when
+      // user data arrives, and again in the IIFE's finally for safety.
     }
   }
 
