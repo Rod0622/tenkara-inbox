@@ -561,7 +561,16 @@ export async function DELETE(req: NextRequest) {
       }));
 
     if (activityRows.length > 0) {
-      await supabase.from("activity_log").insert(activityRows);
+      const { error: actErr } = await supabase.from("activity_log").insert(activityRows);
+      // Log loudly if insert fails so we can debug — previously failures were
+      // silently swallowed, making missing footprints hard to diagnose.
+      if (actErr) {
+        console.error("[/api/tasks DELETE] activity_log insert failed:", actErr.message, "rows=", JSON.stringify(activityRows));
+      } else {
+        console.log("[/api/tasks DELETE] logged", activityRows.length, "task_deleted entries");
+      }
+    } else {
+      console.warn("[/api/tasks DELETE] no activity rows generated. existingTasks=", JSON.stringify(existingTasks));
     }
 
     return NextResponse.json({ success: true, deleted_ids: taskIds });

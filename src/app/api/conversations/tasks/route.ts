@@ -567,7 +567,14 @@ export async function DELETE(req: NextRequest) {
       }));
 
     if (activityRows.length > 0) {
-      await supabase.from("activity_log").insert(activityRows);
+      const { error: actErr } = await supabase.from("activity_log").insert(activityRows);
+      if (actErr) {
+        console.error("[/api/conversations/tasks DELETE] activity_log insert failed:", actErr.message, "rows=", JSON.stringify(activityRows));
+      } else {
+        console.log("[/api/conversations/tasks DELETE] logged", activityRows.length, "task_deleted entries");
+      }
+    } else {
+      console.warn("[/api/conversations/tasks DELETE] no activity rows generated. existingTasks=", JSON.stringify(existingTasks));
     }
 
     return NextResponse.json({ success: true, deleted_ids: taskIds });

@@ -286,7 +286,7 @@ export default function TaskBoard({
       const res = await fetch("/api/tasks", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_ids: taskIds }),
+        body: JSON.stringify({ task_ids: taskIds, actor_id: currentUser?.id }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
