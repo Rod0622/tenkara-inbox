@@ -423,7 +423,19 @@ export default function TaskBoard({
                   {userGroups.length > 0 && (
                     <div className="flex flex-wrap gap-1 pb-2 mb-2 border-b border-[var(--border)]">
                       {userGroups.map((g: any) => {
-                        const memberIds = (g.user_group_members || []).map((m: any) => m.team_member_id);
+                        // Filter group members to ACTIVE team_members only.
+                        // Deactivated users may still exist in user_group_members
+                        // (we keep the DB row for clean restoration on reactivate)
+                        // but they shouldn't be selectable/assignable here.
+                        const activeMemberIds: Set<string> = new Set(
+                          teamMembers.filter((m) => m.is_active !== false).map((m) => m.id)
+                        );
+                        const memberIds = (g.user_group_members || [])
+                          .map((m: any) => m.team_member_id)
+                          .filter((id: string) => activeMemberIds.has(id));
+                        // If a group has zero active members (all deactivated),
+                        // hide the chip entirely — clicking it would be a no-op.
+                        if (memberIds.length === 0) return null;
                         const isSelected = memberIds.length > 0 && memberIds.every((id: string) => assigneeIds.includes(id));
                         return (
                           <button key={g.id} onClick={() => {

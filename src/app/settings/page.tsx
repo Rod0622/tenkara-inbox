@@ -1270,6 +1270,8 @@ function TeamTab() {
   const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string; inviteUrl?: string; emailSent?: boolean; emailError?: string | null } | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState<string>("");
   const [managingAccessId, setManagingAccessId] = useState<string | null>(null);
 
   const DEPARTMENTS = ["Operations", "Management", "Dev", "Sales", "Support", "Uncategorized"];
@@ -1481,6 +1483,67 @@ function TeamTab() {
     await handleUpdateMember(id, { is_active: true });
   };
 
+  // Permanent removal of a deactivated user. Triggers a confirm dialog with
+  // strong warning language because the action is irreversible — historical
+  // attribution (e.g. "Task created by Mildred") will show as Unknown after
+  // this. The endpoint refuses to delete still-active members.
+  const handleHardDelete = async (id: string, name: string) => {
+    const confirmText =
+      `PERMANENTLY DELETE ${name}?\n\n` +
+      `This is IRREVERSIBLE. The user will be completely removed from the workspace.\n\n` +
+      `Historical references will show as "Unknown user":\n` +
+      ` • Tasks they created/completed\n` +
+      ` • Notes and comments they authored\n` +
+      ` • Activity log entries\n` +
+      ` • Conversations they were assigned to\n\n` +
+      `If you might want to bring them back later, use Reactivate instead.\n\n` +
+      `Type the user's name in the next prompt to confirm.`;
+    if (!confirm(confirmText)) return;
+
+    const typed = prompt(`Type "${name}" exactly to confirm permanent deletion:`);
+    if (typed !== name) {
+      alert("Name didn't match. Hard delete cancelled.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/team-members/${id}/hard-delete`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(body?.error || "Hard delete failed. Please try again.");
+        return;
+      }
+      // Report what got nullified so the user knows what changed
+      const nullified = body?.nullified || {};
+      const counts = Object.entries(nullified).map(([k, v]) => `  • ${k}: ${v} row(s)`).join("\n");
+      alert(
+        `${name} has been permanently deleted.\n\n` +
+        (counts ? `Attribution cleaned up:\n${counts}` : "No historical references to clean up.")
+      );
+      fetchMembers();
+    } catch (e) {
+      console.error("Hard delete failed:", e);
+      alert("Hard delete failed. Check your network and try again.");
+    }
+  };
+
+  // Inline save for editing a member's name. Re-uses handleUpdateMember
+  // which surfaces 409s and refetches on success.
+  const handleSaveName = async (id: string, newName: string, originalName: string) => {
+    const trimmed = newName.trim();
+    if (trimmed.length === 0) {
+      alert("Name cannot be empty.");
+      return;
+    }
+    if (trimmed === originalName) {
+      // No change — just exit edit mode
+      setEditingNameId(null);
+      return;
+    }
+    const ok = await handleUpdateMember(id, { name: trimmed });
+    if (ok) setEditingNameId(null);
+  };
+
   return (
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
@@ -1641,7 +1704,33 @@ function TeamTab() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{m.name}</span>
+                  {editingNameId === m.id ? (
+                    // Inline name editor — Enter saves, Esc cancels. Auto-
+                    // focused so the user can immediately type. handleSaveName
+                    // exits edit mode on success.
+                    <input
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveName(m.id, nameDraft, m.name);
+                        if (e.key === "Escape") setEditingNameId(null);
+                      }}
+                      onBlur={() => handleSaveName(m.id, nameDraft, m.name)}
+                      className="text-sm font-medium bg-[var(--bg)] border border-[var(--info)]/50 rounded px-1.5 py-0.5 text-[var(--text-primary)] outline-none min-w-0 max-w-[200px]"
+                    />
+                  ) : (
+                    <span
+                      className="text-sm font-medium cursor-pointer hover:text-[var(--info)] transition-colors"
+                      title="Click to edit name"
+                      onClick={() => {
+                        setEditingNameId(m.id);
+                        setNameDraft(m.name);
+                      }}
+                    >
+                      {m.name}
+                    </span>
+                  )}
                   {!m.password_hash && (
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--highlight-bg)] text-[var(--highlight)] uppercase tracking-wider">
                       Pending
@@ -1761,7 +1850,7 @@ function TeamTab() {
                 Deactivated
               </div>
               {members.filter((m) => m.is_active === false).map((m) => (
-                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] opacity-50">
+                <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] opacity-60">
                   <div
                     className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-[var(--bg)] flex-shrink-0"
                     style={{ background: m.color }}
@@ -1777,6 +1866,15 @@ function TeamTab() {
                     className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[rgba(74,222,128,0.08)] transition-all"
                   >
                     Reactivate
+                  </button>
+                  {/* Permanent removal — irreversible. Requires confirm + name-typed verification.
+                      Server enforces deactivated-only check as a backup. */}
+                  <button
+                    onClick={() => handleHardDelete(m.id, m.name)}
+                    className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-[rgba(248,81,73,0.08)] text-[var(--danger)] hover:bg-[rgba(248,81,73,0.18)] transition-all"
+                    title="Permanently delete this user"
+                  >
+                    Delete permanently
                   </button>
                 </div>
               ))}
@@ -3481,7 +3579,16 @@ function UserGroupsTab() {
     fetchGroups();
   };
 
-  const getGroupMembers = (group: any) => (group.user_group_members || []).map((m: any) => m.team_member).filter(Boolean);
+  // Returns the active member objects for this group. Filters out deactivated
+  // members so they don't appear in the Settings UI either — matches the
+  // hiding behavior in pickers (task assignees, group quick-selects, etc.).
+  // The DB row in user_group_members stays put (so reactivation restores
+  // membership cleanly); we just hide them from the UI.
+  const getGroupMembers = (group: any) =>
+    (group.user_group_members || [])
+      .map((m: any) => m.team_member)
+      .filter(Boolean)
+      .filter((tm: any) => tm.is_active !== false);
 
   const renderForm = (isEdit: boolean, groupId?: string) => (
     <div className="space-y-3 p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">

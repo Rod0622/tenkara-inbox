@@ -237,7 +237,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { member_id, role, department, is_active } = body || {};
+  const { member_id, role, department, is_active, name, has_call_skillset } = body || {};
 
   if (!member_id) {
     return NextResponse.json({ error: "member_id is required" }, { status: 400 });
@@ -247,6 +247,22 @@ export async function PATCH(req: NextRequest) {
   if (role !== undefined) update.role = role;
   if (department !== undefined) update.department = department;
   if (is_active !== undefined) update.is_active = is_active;
+  if (has_call_skillset !== undefined) update.has_call_skillset = has_call_skillset;
+  // Name update — also auto-regenerate initials from the new name (first
+  // letter of first two words, uppercased). If the user later wants
+  // custom initials we can add a separate field; for now this matches the
+  // signup flow.
+  if (name !== undefined) {
+    const trimmed = String(name).trim();
+    if (trimmed.length === 0) {
+      return NextResponse.json({ error: "Name cannot be empty" }, { status: 400 });
+    }
+    update.name = trimmed;
+    const parts = trimmed.split(/\s+/).filter(Boolean);
+    update.initials = parts.length >= 2
+      ? (parts[0][0] + parts[1][0]).toUpperCase()
+      : (parts[0]?.slice(0, 2) || "").toUpperCase();
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });

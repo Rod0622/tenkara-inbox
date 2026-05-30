@@ -4215,7 +4215,15 @@ export default function ConversationDetail({
                   {userGroups.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-2">
                       {userGroups.map((g: any) => {
-                        const memberIds = (g.user_group_members || []).map((m: any) => m.team_member_id);
+                        // Filter to active team_members only — deactivated users shouldn't
+                        // appear in group quick-selects.
+                        const activeIds = new Set(
+                          teamMembers.filter((tm) => tm.is_active !== false).map((tm) => tm.id)
+                        );
+                        const memberIds = (g.user_group_members || [])
+                          .map((m: any) => m.team_member_id)
+                          .filter((id: string) => activeIds.has(id));
+                        if (memberIds.length === 0) return null;
                         const isSelected = memberIds.length > 0 && memberIds.every((id: string) => newTaskAssigneeIds.includes(id));
                         return (
                           <button key={g.id} onClick={() => {
@@ -4345,11 +4353,17 @@ export default function ConversationDetail({
                           onClick={() => setEditTaskAssigneeIds(editTaskAssigneeIds.length === teamMembers.length ? [] : teamMembers.map((m) => m.id))}
                           className="px-2 py-1 rounded-lg text-[10px] font-medium bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
                         >
-                          {editTaskAssigneeIds.length === teamMembers.length ? "Deselect all" : "Select all"}
+                        {editTaskAssigneeIds.length === teamMembers.filter((tm) => tm.is_active !== false).length ? "Deselect all" : "Select all"}
                         </button>
-                        {/* User groups */}
+                        {/* User groups — filter to active team_members only */}
                         {userGroups.map((g: any) => {
-                          const gMembers = (g.user_group_members || []).map((gm: any) => gm.team_member_id);
+                          const activeIds = new Set(
+                            teamMembers.filter((tm) => tm.is_active !== false).map((tm) => tm.id)
+                          );
+                          const gMembers = (g.user_group_members || [])
+                            .map((gm: any) => gm.team_member_id)
+                            .filter((id: string) => activeIds.has(id));
+                          if (gMembers.length === 0) return null;
                           return (
                             <button key={g.id} onClick={() => {
                               const allSelected = gMembers.every((id: string) => editTaskAssigneeIds.includes(id));
@@ -4364,7 +4378,8 @@ export default function ConversationDetail({
                             </button>
                           );
                         })}
-                        {teamMembers.map((m) => {
+                        {/* Individual assignee picker — also filter to active members */}
+                        {teamMembers.filter((tm) => tm.is_active !== false).map((m) => {
                           const selected = editTaskAssigneeIds.includes(m.id);
                           return (
                             <button key={m.id} onClick={() => setEditTaskAssigneeIds(selected ? editTaskAssigneeIds.filter((id) => id !== m.id) : [...editTaskAssigneeIds, m.id])}
