@@ -59,7 +59,7 @@ import type { ConversationDetailProps, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 import { addBusinessHours, type SupplierHours } from "@/lib/business-hours";
 import TaskCountdown from "@/components/TaskCountdown";
-import RichTextEditor from "@/components/RichTextEditor";
+import RichTextEditor, { type RichTextEditorHandle } from "@/components/RichTextEditor";
 import AIDraftModal from "@/components/AIDraftModal";
 import RelatedTranscripts from "@/components/ConversationDetail/RelatedTranscripts";
 import Avatar from "./ConversationDetail/Avatar";
@@ -413,6 +413,10 @@ export default function ConversationDetail({
   }, [convo?.id, currentUser?.id, showFollowUp]); // re-fetch after setting a reminder
   const [replyAttachments, setReplyAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
+  // Reply MODAL (the popout for Reply All / expanded reply) has its own
+  // attachment list independent from the inline reply. Same shape as above.
+  const [replyModalAttachments, setReplyModalAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
+  const replyModalFileInputRef = useRef<HTMLInputElement>(null);
   const [showReplyDrive, setShowReplyDrive] = useState(false);
   const [replyDriveFolders, setReplyDriveFolders] = useState<any[]>([]);
   const [replyDriveFiles, setReplyDriveFiles] = useState<any[]>([]);
@@ -421,6 +425,14 @@ export default function ConversationDetail({
   const [replyDriveDefaultFolder, setReplyDriveDefaultFolder] = useState<string | null>(null);
   const [showReplyTemplateModal, setShowReplyTemplateModal] = useState(false);
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
+  // Where to insert when a template (or Drive file) is picked. Toggled when
+  // the picker opens so the click handler knows which editor to write into.
+  const [replyInsertTarget, setReplyInsertTarget] = useState<"inline" | "modal">("inline");
+  // Refs to the two RichTextEditor instances so pickers can call
+  // insertHTML(html) at the saved cursor position rather than blowing away
+  // the buffer with setReplyText / setReplyModalBody.
+  const inlineReplyEditorRef = useRef<RichTextEditorHandle | null>(null);
+  const modalReplyEditorRef = useRef<RichTextEditorHandle | null>(null);
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   // Tracks which compose surface opened the AI Draft modal so we know
   // where to insert the generated text. Set right before opening AIDraft.
@@ -1950,18 +1962,31 @@ export default function ConversationDetail({
     } catch (e) { console.error(e); }
   };
 
-  const openReplyTemplatePicker = async () => {
+  const openReplyTemplatePicker = async (target: "inline" | "modal" = "inline") => {
+    setReplyInsertTarget(target);
     setShowReplyTemplateModal(true);
-    if (replyTemplates.length === 0) {
-      Promise.resolve().then(() => {
-        const sb = createBrowserClient();
-        sb.from("email_templates").select("*").eq("is_active", true).order("scope").order("sort_order")
-          .then(({ data }) => setReplyTemplates(data || []));
-      });
-    }
+    // Always re-fetch so newly created templates (or scope changes) show
+    // up without a page refresh. Filter to:
+    //   • Organization-scoped templates (visible to everyone)
+    //   • Personal templates owned by the current user (mine only)
+    // Other users' personal templates are excluded.
+    Promise.resolve().then(() => {
+      const sb = createBrowserClient();
+      const myId = currentUser?.id || "";
+      // The .or() filter is a Postgrest expression — quotes around the UUID
+      // are required for the equality check.
+      sb.from("email_templates")
+        .select("*")
+        .eq("is_active", true)
+        .or(`scope.eq.organization,and(scope.eq.personal,owner_id.eq.${myId})`)
+        .order("scope")
+        .order("sort_order")
+        .then(({ data }) => setReplyTemplates(data || []));
+    });
   };
 
-  const openReplyDrivePicker = async () => {
+  const openReplyDrivePicker = async (target: "inline" | "modal" = "inline") => {
+    setReplyInsertTarget(target);
     setShowReplyDrive(true);
     setReplyDriveFolders([]); setReplyDriveFiles([]); setReplyDrivePath([]);
     setReplyDriveLoading(true);
@@ -2022,10 +2047,17 @@ export default function ConversationDetail({
         reader.onload = () => resolve((reader.result as string).split(",")[1]);
         reader.readAsDataURL(blob);
       });
-      setReplyAttachments((prev) => [...prev, {
+      const attachment = {
         name: file.name, size: file.size || 0,
         type: file.mimeType || "application/octet-stream", data,
-      }]);
+      };
+      // Route to the right attachment list. replyInsertTarget tells us which
+      // compose surface opened the Drive picker.
+      if (replyInsertTarget === "modal") {
+        setReplyModalAttachments((prev) => [...prev, attachment]);
+      } else {
+        setReplyAttachments((prev) => [...prev, attachment]);
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -2140,8 +2172,10 @@ export default function ConversationDetail({
     if (!convo) return;
     if (!replyModalTo.trim() || !replyModalSubject.trim() || !replyModalBody.trim()) return;
 
-    // Optional missing-attachment check (mirrors Forward flow)
-    const warning = checkMissingAttachments(replyModalBody, 0);
+    // Pass the attachment count to checkMissingAttachments so the "you said
+    // attached but didn't attach anything" warning doesn't false-positive
+    // when there ARE attachments.
+    const warning = checkMissingAttachments(replyModalBody, replyModalAttachments.length);
     if (warning && !confirm(warning + "\n\nSend anyway?")) return;
 
     try {
@@ -2149,7 +2183,8 @@ export default function ConversationDetail({
 
       // Use /api/send in REPLY mode (conversation_id present) so the message
       // threads correctly into this conversation. The endpoint accepts
-      // overrides for `to` and `subject`.
+      // overrides for `to` and `subject`, plus an `attachments` array of
+      // { name, size, type, data: base64 } objects.
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2162,6 +2197,7 @@ export default function ConversationDetail({
           bcc: replyModalBcc.trim(),
           subject: replyModalSubject.trim(),
           body: replyModalBody,
+          attachments: replyModalAttachments.length > 0 ? replyModalAttachments : undefined,
           actor_id: currentUser?.id || null,
         }),
       });
@@ -2179,6 +2215,7 @@ export default function ConversationDetail({
       setReplyModalBcc("");
       setReplyModalSubject("");
       setReplyModalBody("");
+      setReplyModalAttachments([]);
       setReplyModalSendableAccounts([]);
       // Successful send → delete the draft (we just persisted it as a real
       // message). Also clear the inline reply state since they share storage.
@@ -2201,6 +2238,9 @@ export default function ConversationDetail({
   // they next open the conversation. Empty body → delete any existing draft.
   const handleCloseReplyModal = async () => {
     setShowReplyModal(false);
+    // Attachments aren't persisted with drafts — clear them so they don't
+    // appear next time the modal opens.
+    setReplyModalAttachments([]);
     if (!convo?.id || !currentUser?.id) {
       // Edge case: missing state; just close.
       return;
@@ -5448,6 +5488,7 @@ export default function ConversationDetail({
                 </div>
               )}
               <RichTextEditor
+                ref={inlineReplyEditorRef}
                 value={replyText}
                 onChange={setReplyText}
                 placeholder="Write a reply..."
@@ -5456,8 +5497,8 @@ export default function ConversationDetail({
                 autoFocus
                 signature={replySignature}
                 onAttach={() => replyFileInputRef.current?.click()}
-                onDrive={() => openReplyDrivePicker()}
-                onTemplate={() => openReplyTemplatePicker()}
+                onDrive={() => openReplyDrivePicker("inline")}
+                onTemplate={() => openReplyTemplatePicker("inline")}
                 onAIDraft={() => { setAiDraftTarget("inline"); setShowAIDraftModal(true); }}
               />
               {/* Reply attachments */}
@@ -5567,7 +5608,7 @@ export default function ConversationDetail({
                     <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                       <div>
                         <div className="text-sm font-bold text-[var(--text-primary)]">Insert Template</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Click a template to insert into reply</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">Click a template to insert at your cursor</div>
                       </div>
                       <button onClick={() => setShowReplyTemplateModal(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
                         <X size={16} />
@@ -5575,7 +5616,14 @@ export default function ConversationDetail({
                     </div>
                     <div className="max-h-[400px] overflow-y-auto">
                       {replyTemplates.length === 0 ? (
-                        <div className="text-center py-8 text-[var(--text-muted)] text-[12px]">No templates yet. Create them in Settings.</div>
+                        <div className="text-center py-8 text-[var(--text-muted)] text-[12px]">
+                          No templates yet.
+                          <div className="mt-2">
+                            <a href="/settings#templates" target="_blank" rel="noopener" className="text-[var(--info)] hover:underline">
+                              Create one in Settings →
+                            </a>
+                          </div>
+                        </div>
                       ) : (
                         <div className="p-2 space-y-0.5">
                           {["organization", "personal"].map((scope) => {
@@ -5584,10 +5632,26 @@ export default function ConversationDetail({
                             return (
                               <div key={scope}>
                                 <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest px-3 pt-2 pb-1">
-                                  {scope === "organization" ? "🏢 Organization" : "👤 Personal"}
+                                  {scope === "organization" ? "🏢 Shared (all users)" : "👤 Personal (just me)"}
                                 </div>
                                 {scopeTemplates.map((tpl: any) => (
-                                  <button key={tpl.id} onClick={() => { setReplyText(tpl.body); setShowReplyTemplateModal(false); }}
+                                  <button key={tpl.id} onClick={() => {
+                                    // Insert at the saved cursor position in whichever
+                                    // editor opened the picker. Falls back to setReplyText
+                                    // append (legacy behavior) if the ref isn't ready —
+                                    // shouldn't happen in practice but better safe.
+                                    const editorRef = replyInsertTarget === "modal"
+                                      ? modalReplyEditorRef
+                                      : inlineReplyEditorRef;
+                                    if (editorRef.current) {
+                                      editorRef.current.insertHTML(tpl.body);
+                                    } else if (replyInsertTarget === "modal") {
+                                      setReplyModalBody((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
+                                    } else {
+                                      setReplyText((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
+                                    }
+                                    setShowReplyTemplateModal(false);
+                                  }}
                                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
                                     <div className="flex-1 min-w-0">
                                       <div className="text-[12px] font-semibold text-[var(--text-primary)]">{tpl.name}</div>
@@ -5605,6 +5669,20 @@ export default function ConversationDetail({
                           })}
                         </div>
                       )}
+                    </div>
+                    {/* Footer link to Settings — easy entry into template management */}
+                    <div className="px-5 py-2 border-t border-[var(--border)] flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--text-muted)]">
+                        Templates are inserted at your cursor position
+                      </span>
+                      <a
+                        href="/settings#templates"
+                        target="_blank"
+                        rel="noopener"
+                        className="text-[10px] text-[var(--info)] hover:underline font-semibold"
+                      >
+                        + New template
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -5936,14 +6014,61 @@ export default function ConversationDetail({
               <div>
                 <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Message</label>
                 <RichTextEditor
+                  ref={modalReplyEditorRef}
                   value={replyModalBody}
                   onChange={setReplyModalBody}
                   placeholder="Type your reply..."
                   minHeight={260}
                   autoFocus
                   signature={replySignature}
+                  onAttach={() => replyModalFileInputRef.current?.click()}
+                  onDrive={() => openReplyDrivePicker("modal")}
+                  onTemplate={() => openReplyTemplatePicker("modal")}
                   onAIDraft={() => { setAiDraftTarget("replyModal"); setShowAIDraftModal(true); }}
                 />
+                {/* Hidden file input for the modal — separate from the inline
+                    reply's so attachment lists don't cross-contaminate. */}
+                <input
+                  ref={replyModalFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    const newAtts: { name: string; size: number; type: string; data: string }[] = [];
+                    for (let i = 0; i < files.length; i++) {
+                      const file = files[i];
+                      // 25MB per file cap, same as inline reply.
+                      if (file.size > 25 * 1024 * 1024) continue;
+                      const data = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+                        reader.readAsDataURL(file);
+                      });
+                      newAtts.push({ name: file.name, size: file.size, type: file.type || "application/octet-stream", data });
+                    }
+                    setReplyModalAttachments((prev) => [...prev, ...newAtts]);
+                    if (replyModalFileInputRef.current) replyModalFileInputRef.current.value = "";
+                  }}
+                />
+                {/* Attachment chips for the modal */}
+                {replyModalAttachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {replyModalAttachments.map((att, i) => (
+                      <div key={i} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[10px]">
+                        <Paperclip size={10} className="text-[var(--info)]" />
+                        <span className="text-[var(--text-primary)] max-w-[180px] truncate">{att.name}</span>
+                        <button
+                          onClick={() => setReplyModalAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="text-[var(--text-muted)] hover:text-[var(--danger)]"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

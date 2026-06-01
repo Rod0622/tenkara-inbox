@@ -1,12 +1,23 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
 import {
   Bold, Italic, Underline, Strikethrough, Link2, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Type, Palette, Smile, ChevronDown,
   Undo2, Redo2, X, Check, Paperclip, FolderOpen, FileSignature, Table2,
   Sparkles,
 } from "lucide-react";
+
+// Imperative methods that parent components can call via ref.
+// Used to insert HTML at the current cursor position (templates, Drive
+// links, etc.) without losing the user's place in the editor.
+export interface RichTextEditorHandle {
+  /** Insert HTML at the last-known cursor position. If the editor has never
+   *  been focused, appends at the end. */
+  insertHTML: (html: string) => void;
+  /** Imperatively focus the editor. */
+  focus: () => void;
+}
 
 // ── Font options ────────────────────────────────────
 const FONT_FAMILIES = [
@@ -100,11 +111,11 @@ interface RichTextEditorProps {
   onAIDraft?: () => void;
 }
 
-export default function RichTextEditor({
+export default forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({
   value, onChange, placeholder = "Write your message...",
   minHeight = 200, compact = false, signature, autoFocus = false,
   onAttach, onDrive, onTemplate, onAIDraft,
-}: RichTextEditorProps) {
+}: RichTextEditorProps, forwardedRef) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFontFamily, setShowFontFamily] = useState(false);
   const [showFontSize, setShowFontSize] = useState(false);
@@ -270,6 +281,53 @@ export default function RichTextEditor({
       }
     }
   };
+
+  // Track cursor position automatically — saves the current selection
+  // whenever the user interacts with the editor (typing, clicking, key
+  // navigation). This way, by the time an external picker opens (template,
+  // Drive, etc.) we already have an up-to-date insertion point.
+  const trackSelection = () => {
+    saveSelection();
+  };
+
+  // Expose imperative methods to parent components via ref. Lets the
+  // ConversationDetail template / Drive pickers insert HTML at the exact
+  // cursor position the user left, instead of overwriting the whole buffer.
+  useImperativeHandle(forwardedRef, () => ({
+    insertHTML: (html: string) => {
+      if (!editorRef.current) return;
+      editorRef.current.focus();
+
+      // If we have a saved selection inside this editor, restore it so the
+      // insert lands at the user's last cursor position. Otherwise the
+      // browser places the caret at the start/end and we'd insert there —
+      // still better than nothing.
+      const savedRange = savedSelectionRef.current;
+      const sel = window.getSelection();
+      if (savedRange && editorRef.current.contains(savedRange.startContainer) && sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+      }
+
+      // execCommand is technically deprecated but still the most reliable
+      // cross-browser way to insert HTML into a contentEditable region —
+      // it handles undo stack integration and triggers our onInput handler
+      // naturally.
+      document.execCommand("insertHTML", false, html);
+      handleInput();
+
+      // After insert, the cursor is at the end of the inserted content —
+      // save that as the new baseline so subsequent inserts pick up from
+      // there.
+      const newSel = window.getSelection();
+      if (newSel && newSel.rangeCount > 0 && editorRef.current.contains(newSel.anchorNode)) {
+        savedSelectionRef.current = newSel.getRangeAt(0).cloneRange();
+      }
+    },
+    focus: () => {
+      editorRef.current?.focus();
+    },
+  }), [handleInput]);
 
   const handleInsertTable = (rows: number, cols: number) => {
     if (!editorRef.current) return;
@@ -589,7 +647,10 @@ export default function RichTextEditor({
           ref={editorRef}
           contentEditable
           suppressContentEditableWarning
-          onInput={handleInput}
+          onInput={() => { handleInput(); trackSelection(); }}
+          onKeyUp={trackSelection}
+          onMouseUp={trackSelection}
+          onBlur={trackSelection}
           onKeyDown={(e) => {
             // Keyboard shortcuts
             if (e.metaKey || e.ctrlKey) {
@@ -645,7 +706,7 @@ export default function RichTextEditor({
       </div>
     </div>
   );
-}
+});
 
 // ── Helper: Get plain text from HTML ────────────────
 export function htmlToPlainText(html: string): string {

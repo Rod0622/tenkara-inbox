@@ -4706,6 +4706,7 @@ function FormSubmissionsView({ form, onBack }: { form: any; onBack: () => void }
 }
 
 function EmailTemplatesTab() {
+  const { data: session } = useSession();
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -4726,12 +4727,26 @@ function EmailTemplatesTab() {
 
   useEffect(() => {
     fetchTemplates();
-    // Get current user ID
-    getSupabase().from("team_members").select("id, email").then(({ data }) => {
-      // Will be set properly when we know the session email
-      if (data && data.length > 0) setCurrentUserId(data[0].id);
-    });
   }, []);
+
+  // Resolve the ACTUAL logged-in user. The previous version of this hook
+  // grabbed the first team_member row returned by the database, which meant
+  // every "personal" template was wrongly attributed to whichever member
+  // happened to be first in the list — defeating the entire point of personal
+  // templates. Now we look up by session email.
+  useEffect(() => {
+    if (!session?.user?.email) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase()
+        .from("team_members")
+        .select("id")
+        .eq("email", session.user!.email!)
+        .maybeSingle();
+      if (!cancelled && data?.id) setCurrentUserId(data.id);
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.email]);
 
   const resetForm = () => { setFormName(""); setFormSubject(""); setFormBody(""); setFormScope("organization"); setFormCategory(""); };
 
