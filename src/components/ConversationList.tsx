@@ -364,6 +364,38 @@ export default function ConversationList({
   const [searchTab, setSearchTab] = useState<"conversations" | "tasks">("conversations");
   const [taskUserFilter, setTaskUserFilter] = useState<string>("all");
 
+  // Bulk-label picker state. When openBulkLabelPicker is true, a dropdown
+  // floats next to the bulk action bar with a multi-select of labels.
+  // bulkLabelSelectedIds tracks the labels the user has ticked in this
+  // session. bulkLabelSearch filters the displayed labels by name.
+  const [bulkLabelPickerOpen, setBulkLabelPickerOpen] = useState(false);
+  const [bulkLabelSelectedIds, setBulkLabelSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLabelSearch, setBulkLabelSearch] = useState("");
+  const bulkLabelPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close the picker when the user clicks outside it. Skipped when picker
+  // isn't open to avoid an unnecessary global listener.
+  useEffect(() => {
+    if (!bulkLabelPickerOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (bulkLabelPickerRef.current && !bulkLabelPickerRef.current.contains(e.target as Node)) {
+        setBulkLabelPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [bulkLabelPickerOpen]);
+
+  // Close the picker when the user clears their selection — there's nothing
+  // left to apply labels to. Prevents a stale picker hovering when the bulk
+  // bar disappears.
+  useEffect(() => {
+    if (selectedIds.size === 0 && bulkLabelPickerOpen) {
+      setBulkLabelPickerOpen(false);
+      setBulkLabelSelectedIds(new Set());
+    }
+  }, [selectedIds.size, bulkLabelPickerOpen]);
+
   // Personal pins — the set of conversation IDs the current user has pinned.
   // Updated locally on row-click toggle + via a global "pins:changed" event
   // dispatched by other components (e.g. ConversationDetail's pin button).
@@ -422,7 +454,9 @@ export default function ConversationList({
   const [allLabels, setAllLabels] = useState<any[]>([]);
   useEffect(() => {
     const sb = createBrowserClient();
-    sb.from("labels").select("id, name, parent_label_id").then(({ data }) => setAllLabels(data || []));
+    // Include color + sort_order so the bulk label picker can render swatches
+    // and use natural ordering.
+    sb.from("labels").select("id, name, parent_label_id, color, sort_order").then(({ data }) => setAllLabels(data || []));
   }, []);
 
   // Sort a conversation's labels into hierarchy order for badge rendering:
@@ -880,6 +914,182 @@ export default function ConversationList({
             >
               <MailOpen size={13} />
             </button>
+            {/* Bulk-label button — opens a dropdown with all labels. Multi-
+                select via checkboxes; apply only fires on the Apply button so
+                the user can tick several labels in one shot. */}
+            <div className="relative" ref={bulkLabelPickerRef}>
+              <button
+                onClick={() => {
+                  setBulkLabelPickerOpen((v) => !v);
+                  setBulkLabelSearch("");
+                  setBulkLabelSelectedIds(new Set());
+                }}
+                className={`p-1.5 rounded transition-all ${
+                  bulkLabelPickerOpen
+                    ? "bg-[var(--border)] text-[var(--accent)]"
+                    : "hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                }`}
+                title="Add labels to selected"
+              >
+                <Tag size={13} />
+              </button>
+
+              {bulkLabelPickerOpen && (
+                <div className="absolute top-full left-0 mt-1 z-50 w-64 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 flex flex-col max-h-[420px]">
+                  <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
+                      Apply labels to {selectedIds.size} conv{selectedIds.size === 1 ? "" : "s"}
+                    </div>
+                    <div className="relative">
+                      <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                      <input
+                        autoFocus
+                        type="text"
+                        value={bulkLabelSearch}
+                        onChange={(e) => setBulkLabelSearch(e.target.value)}
+                        placeholder="Search labels…"
+                        className="w-full pl-6 pr-2 py-1 text-[11px] bg-[var(--bg)] border border-[var(--border)] rounded-md text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto py-1">
+                    {(() => {
+                      // Build sorted tree (parents + children) using same
+                      // natural-numeric sort as the per-conversation label
+                      // picker, so labels like "1-inquiries", "2-quotes",
+                      // "10-archived" appear in numeric order.
+                      const naturalSort = (a: string, b: string) =>
+                        (a || "").localeCompare(b || "", undefined, { numeric: true, sensitivity: "base" });
+                      const q = bulkLabelSearch.trim().toLowerCase();
+
+                      const topLevel = allLabels
+                        .filter((l: any) => !l.parent_label_id)
+                        .slice()
+                        .sort((a: any, b: any) => naturalSort(a.name, b.name));
+
+                      const childrenByParent = new Map<string, any[]>();
+                      for (const l of allLabels) {
+                        if (l.parent_label_id) {
+                          const arr = childrenByParent.get(l.parent_label_id) || [];
+                          arr.push(l);
+                          childrenByParent.set(l.parent_label_id, arr);
+                        }
+                      }
+                      childrenByParent.forEach((kids) => {
+                        kids.sort((a: any, b: any) => naturalSort(a.name, b.name));
+                      });
+
+                      // Filter: parent shown if its name matches OR any child matches.
+                      // When a parent matches by its own name, show ALL its children;
+                      // when only children match, show only the matching ones.
+                      const filteredChildren = new Map<string, any[]>();
+                      const matchedParentIds = new Set<string>();
+                      for (const parent of topLevel) {
+                        const kids = childrenByParent.get(parent.id) || [];
+                        const matchingKids = q ? kids.filter((k: any) => (k.name || "").toLowerCase().includes(q)) : kids;
+                        if (q && matchingKids.length > 0) {
+                          filteredChildren.set(parent.id, matchingKids);
+                          matchedParentIds.add(parent.id);
+                        }
+                      }
+                      const filteredTopLevel = topLevel.filter((parent: any) => {
+                        if (!q) return true;
+                        if (matchedParentIds.has(parent.id)) return true;
+                        if ((parent.name || "").toLowerCase().includes(q)) {
+                          const kids = childrenByParent.get(parent.id) || [];
+                          if (kids.length > 0) filteredChildren.set(parent.id, kids);
+                          return true;
+                        }
+                        return false;
+                      });
+                      if (!q) {
+                        for (const parent of filteredTopLevel) {
+                          const kids = childrenByParent.get(parent.id) || [];
+                          if (kids.length > 0) filteredChildren.set(parent.id, kids);
+                        }
+                      }
+
+                      const renderRow = (label: any, isChild: boolean) => {
+                        const checked = bulkLabelSelectedIds.has(label.id);
+                        return (
+                          <button
+                            key={label.id}
+                            onClick={() => {
+                              setBulkLabelSelectedIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(label.id)) next.delete(label.id);
+                                else next.add(label.id);
+                                return next;
+                              });
+                            }}
+                            className={`flex items-center gap-2 w-full px-3 py-1.5 text-[12px] hover:bg-[var(--border)] ${isChild ? "pl-6" : ""}`}
+                          >
+                            <div
+                              className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
+                                checked ? "border-transparent" : "border-[var(--text-muted)]"
+                              }`}
+                              style={checked ? { background: label.color } : {}}
+                            >
+                              {checked && <Check size={10} className="text-[var(--bg)]" />}
+                            </div>
+                            {isChild && <span className="text-[var(--text-muted)] text-[10px] select-none">└</span>}
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: label.color }} />
+                            <span className={`truncate text-left ${checked ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"}`}>
+                              {label.name}
+                            </span>
+                          </button>
+                        );
+                      };
+
+                      const visibleCount = filteredTopLevel.length +
+                        Array.from(filteredChildren.values()).reduce((s, kids) => s + kids.length, 0);
+
+                      if (allLabels.length === 0) {
+                        return <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">No labels yet</div>;
+                      }
+                      if (allLabels.length > 0 && visibleCount === 0) {
+                        return <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">No matches for "{bulkLabelSearch}"</div>;
+                      }
+                      return filteredTopLevel.map((parent: any) => (
+                        <div key={parent.id}>
+                          {renderRow(parent, false)}
+                          {(filteredChildren.get(parent.id) || []).map((child: any) => renderRow(child, true))}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between shrink-0">
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      {bulkLabelSelectedIds.size} label{bulkLabelSelectedIds.size === 1 ? "" : "s"} picked
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => { setBulkLabelPickerOpen(false); setBulkLabelSelectedIds(new Set()); }}
+                        className="px-2 py-1 rounded text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (bulkLabelSelectedIds.size === 0) return;
+                          await handleBulkAction("apply_labels", {
+                            label_ids: Array.from(bulkLabelSelectedIds),
+                          });
+                          setBulkLabelPickerOpen(false);
+                          setBulkLabelSelectedIds(new Set());
+                        }}
+                        disabled={bulkLabelSelectedIds.size === 0}
+                        className="px-2.5 py-1 rounded bg-[var(--accent)] text-[var(--bg)] text-[10px] font-bold disabled:opacity-40"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => handleBulkAction("archive")}
               className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--info)] transition-all"
