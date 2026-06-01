@@ -70,10 +70,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Resolve @everyone -> all active member IDs (excluding the author).
-  // This produces the actual list of users to notify.
+  // Resolve @everyone, @group, and @user mentions to a list of user IDs to notify.
+  //
+  // The `mentions` payload from the client is an array of opaque strings:
+  //   - The literal "@everyone" → expand to all active members
+  //   - "group:<uuid>"          → expand to all active members of that group
+  //   - "<uuid>"                → a single team_member id (direct mention)
+  //
+  // Group expansion: look up active members of each group, dedupe across all
+  // groups and direct mentions, then exclude the author from the final
+  // notify list. Skipped silently if a group id doesn't exist (e.g. deleted
+  // between picker open and submit).
   let notifyUserIds: string[] = [];
   const hasEveryone = cleanedMentions.includes("@everyone");
+  const groupTokens = cleanedMentions.filter((m) => m.startsWith("group:"));
+  const directUserIds = cleanedMentions.filter((m) => m !== "@everyone" && !m.startsWith("group:"));
 
   if (hasEveryone) {
     const { data: allActive } = await supabase
@@ -83,10 +94,38 @@ export async function POST(req: NextRequest) {
     notifyUserIds = (allActive || []).map((m: any) => m.id);
   }
 
-  // Add specific user IDs (non-everyone tokens)
-  for (const m of cleanedMentions) {
-    if (m === "@everyone") continue;
-    if (!notifyUserIds.includes(m)) notifyUserIds.push(m);
+  // Collect group names for the notification title (e.g. "mentioned @Ops")
+  // and resolve each group to its active member IDs.
+  const groupNames: string[] = [];
+  if (groupTokens.length > 0) {
+    const groupIds = groupTokens.map((t) => t.slice("group:".length));
+    const { data: groups } = await supabase
+      .from("user_groups")
+      .select("id, name, user_group_members(team_member_id)")
+      .in("id", groupIds)
+      .eq("is_active", true);
+
+    // Look up active member ids in one query so we can intersect.
+    const { data: activeMembers } = await supabase
+      .from("team_members")
+      .select("id")
+      .eq("is_active", true);
+    const activeSet = new Set((activeMembers || []).map((m: any) => m.id));
+
+    for (const g of groups || []) {
+      groupNames.push((g as any).name);
+      const memberIds: string[] = ((g as any).user_group_members || [])
+        .map((mm: any) => mm.team_member_id)
+        .filter((id: string) => activeSet.has(id));
+      for (const uid of memberIds) {
+        if (!notifyUserIds.includes(uid)) notifyUserIds.push(uid);
+      }
+    }
+  }
+
+  // Add direct user mentions
+  for (const uid of directUserIds) {
+    if (!notifyUserIds.includes(uid)) notifyUserIds.push(uid);
   }
 
   // Don't notify the author of their own message
@@ -100,9 +139,18 @@ export async function POST(req: NextRequest) {
         supabase.from("team_members").select("name").eq("id", author_id).maybeSingle(),
         supabase.from("conversations").select("subject").eq("id", conversation_id).maybeSingle(),
       ]);
+      // Determine the most-specific mention type for the notification title.
+      // Priority: everyone > group > direct. If multiple kinds were mentioned
+      // in the same comment we surface the broadest one so the user knows
+      // it's a broad shout-out.
+      const mentionType: "direct" | "everyone" | "group" =
+        hasEveryone ? "everyone"
+        : groupNames.length > 0 ? "group"
+        : "direct";
       await notifyMention(notifyUserIds, author_id, commentBody.trim(), conversation_id, {
         actorName: actor?.name || undefined,
-        mentionType: hasEveryone ? "everyone" : "direct",
+        mentionType,
+        groupNames: groupNames.length > 0 ? groupNames : undefined,
         conversationSubject: convo?.subject || undefined,
       });
     } catch (notifyErr: any) {

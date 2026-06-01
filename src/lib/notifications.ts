@@ -70,21 +70,44 @@ export async function notifyTaskAssigned(
 
 // Notify when someone is mentioned in a team chat or note
 // Accepts optional actorName to produce a more readable title.
-// If `mentionType === "everyone"`, the title makes that clear.
+//
+// mentionType controls the title format:
+//   - "direct"   → "Sammy mentioned you"
+//   - "everyone" → "Sammy mentioned @everyone"
+//   - "group"    → "Sammy mentioned @Ops" (uses groupNames if provided)
+//
+// groupNames is only consulted when mentionType === "group". If multiple
+// groups are mentioned in one comment, they're joined with commas. If the
+// caller forgets to pass groupNames for a group mention, we fall back to a
+// generic "@a group" label so the notification still makes sense.
 export async function notifyMention(
   mentionedUserIds: string[],
   actorId: string | null,
   noteText: string,
   conversationId: string,
-  opts?: { actorName?: string; mentionType?: "direct" | "everyone"; conversationSubject?: string }
+  opts?: {
+    actorName?: string;
+    mentionType?: "direct" | "everyone" | "group";
+    groupNames?: string[];
+    conversationSubject?: string;
+  }
 ) {
   const actorName = opts?.actorName?.trim() || "Someone";
-  const isEveryone = opts?.mentionType === "everyone";
+  const mentionType = opts?.mentionType || "direct";
   const subjectPart = opts?.conversationSubject?.trim();
 
-  const title = isEveryone
-    ? `${actorName} mentioned @everyone`
-    : `${actorName} mentioned you`;
+  let title: string;
+  if (mentionType === "everyone") {
+    title = `${actorName} mentioned @everyone`;
+  } else if (mentionType === "group") {
+    const names = (opts?.groupNames || []).filter(Boolean);
+    const groupLabel = names.length > 0
+      ? names.map((n) => `@${n}`).join(", ")
+      : "@a group";
+    title = `${actorName} mentioned ${groupLabel}`;
+  } else {
+    title = `${actorName} mentioned you`;
+  }
 
   const bodyParts: string[] = [];
   if (subjectPart) bodyParts.push(subjectPart);

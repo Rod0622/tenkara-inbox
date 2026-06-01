@@ -8,16 +8,32 @@ import Avatar from "./Avatar";
 // Token used to mention everyone — the API expands this to all active member IDs.
 const EVERYONE_TOKEN = "@everyone";
 
+// Prefix used to mark group mentions in the wire payload. The API uses this
+// to distinguish a group reference from a user id. e.g. "group:abc-123"
+// resolves to all active members of user_group abc-123.
+const GROUP_PREFIX = "group:";
+
 // Quick-reaction emoji set offered when the user clicks the smiley button.
 // Kept small and universally-supported (no skin-tone modifiers, no compound
 // ZWJ sequences). Order matches common Slack/Linear conventions.
 const QUICK_REACTIONS = ["👍", "❤️", "😄", "🎉", "👀", "🙏"];
 
 interface MentionEntry {
-  // Either a team_member.id (UUID) OR the special "@everyone" string
+  // For "user":     team_member.id (UUID)
+  // For "group":    "group:<user_group_id>" — prefixed so the API can tell
+  //                 it apart from a user id
+  // For "everyone": EVERYONE_TOKEN string literal
   id: string;
+  // The token text that appears after "@" in the input (e.g. "everyone",
+  // "Ops", "Jane Doe"). Used both for display in the picker AND for the
+  // recompute pass that drops a mention if the user has deleted its text
+  // from the input.
   display: string;
-  isEveryone?: boolean;
+  kind: "user" | "group" | "everyone";
+  // Member count is shown next to group entries in the picker so the user
+  // sees "Ops · 4 members" — sets expectations on how many notifications
+  // will fire.
+  memberCount?: number;
 }
 
 export default function TeamChat({
@@ -83,6 +99,55 @@ export default function TeamChat({
   // Mentions that have been confirmed (selected from the picker) for this in-progress comment
   const [mentions, setMentions] = useState<MentionEntry[]>([]);
 
+  // User groups available for @group mentions. Loaded once when the chat opens.
+  // We only need name + active member IDs for filtering/picker display.
+  const [userGroups, setUserGroups] = useState<Array<{
+    id: string;
+    name: string;
+    icon?: string;
+    color?: string;
+    activeMemberIds: string[];
+  }>>([]);
+
+  // Fetch user groups + their members. Filters group members to active users
+  // only so the mention count + downstream notification list is accurate.
+  useEffect(() => {
+    if (!isTeamChatOpen) return; // lazy — don't load until the user opens chat
+    if (userGroups.length > 0) return; // cache for session
+    (async () => {
+      try {
+        const sb = (await import("@/lib/supabase")).createBrowserClient();
+        const [groupsRes, membersRes] = await Promise.all([
+          sb.from("user_groups")
+            .select("id, name, icon, color, user_group_members(team_member_id)")
+            .eq("is_active", true)
+            .order("name"),
+          sb.from("team_members").select("id, is_active"),
+        ]);
+        const activeMemberIdSet = new Set(
+          (membersRes.data || [])
+            .filter((m: any) => m.is_active !== false)
+            .map((m: any) => m.id)
+        );
+        const groups = (groupsRes.data || []).map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          icon: g.icon,
+          color: g.color,
+          activeMemberIds: (g.user_group_members || [])
+            .map((mm: any) => mm.team_member_id)
+            .filter((id: string) => activeMemberIdSet.has(id)),
+        }))
+        // Hide groups with zero active members — mentioning them would notify
+        // nobody. Keeps the picker clean.
+        .filter((g: any) => g.activeMemberIds.length > 0);
+        setUserGroups(groups);
+      } catch (e) {
+        console.error("Failed to load user groups:", e);
+      }
+    })();
+  }, [isTeamChatOpen, userGroups.length]);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchComments = async () => {
@@ -123,16 +188,36 @@ export default function TeamChat({
     };
   }, [actionMenuId, reactionPickerId]);
 
-  // Build the list of pickable members based on filter, with @everyone always at top
+  // Build the list of pickable mentions based on filter. Ordering:
+  //   1. @everyone (when filter is empty or matches "everyone")
+  //   2. User groups matching the filter (with member counts)
+  //   3. Individual team members matching the filter
+  // Groups appear before users because they're typically what someone
+  // types "@" for when filtering by department/team.
   const pickerCandidates: MentionEntry[] = useMemo(() => {
     const f = pickerFilter.toLowerCase();
     const everyone: MentionEntry = {
       id: EVERYONE_TOKEN,
       display: "everyone",
-      isEveryone: true,
+      kind: "everyone",
     };
-    const matched = teamMembers
+
+    // Group entries — filter by name match. Each entry's id is prefixed with
+    // GROUP_PREFIX so the API can distinguish it from a user id when the
+    // comment is submitted.
+    const matchedGroups: MentionEntry[] = userGroups
+      .filter((g) => !f || (g.name || "").toLowerCase().includes(f))
+      .map((g) => ({
+        id: `${GROUP_PREFIX}${g.id}`,
+        display: g.name,
+        kind: "group" as const,
+        memberCount: g.activeMemberIds.length,
+      }));
+
+    // Individual member entries — filter by name OR email match.
+    const matchedUsers: MentionEntry[] = teamMembers
       .filter((m) => {
+        if (m.is_active === false) return false; // hide deactivated
         if (!f) return true;
         const name = (m.name || "").toLowerCase();
         const email = ((m as any).email || "").toLowerCase();
@@ -141,12 +226,17 @@ export default function TeamChat({
       .map((m) => ({
         id: m.id,
         display: m.name || (m as any).email || "Unknown",
+        kind: "user" as const,
       }));
 
-    // Show "everyone" only when it matches the filter (or filter is empty)
+    // @everyone only shown when filter is empty or substring of "everyone"
     const showEveryone = !f || "everyone".includes(f);
-    return showEveryone ? [everyone, ...matched] : matched;
-  }, [pickerFilter, teamMembers]);
+    return [
+      ...(showEveryone ? [everyone] : []),
+      ...matchedGroups,
+      ...matchedUsers,
+    ];
+  }, [pickerFilter, teamMembers, userGroups]);
 
   // When input changes, decide whether to open/update/close the picker
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -257,8 +347,10 @@ export default function TeamChat({
       // (handles: user mentioned, then deleted the @name from the input)
       const finalMentions: string[] = mentions
         .filter((m) => {
-          if (m.isEveryone) return input.includes("@everyone");
-          // Match against display name token
+          if (m.kind === "everyone") return input.includes("@everyone");
+          // For users AND groups, match against the display name token
+          // ("@Ops", "@Jane Doe"). The id payload distinguishes them
+          // (group ids carry the GROUP_PREFIX).
           return input.includes(`@${m.display}`);
         })
         .map((m) => m.id);
@@ -381,7 +473,9 @@ export default function TeamChat({
   };
 
   // Render comment body with mention highlights AND clickable links.
-  // We tokenize into three kinds of nodes: plain text, mentions, and URLs.
+  // We tokenize into four kinds of nodes: plain text, URLs, and mentions
+  // (which themselves come in three flavors: everyone, group, user).
+  //
   // The order of detection matters — we want URLs that happen to contain "@"
   // (e.g. "https://example.com/u/@bob") to be treated as URLs, not as an URL
   // plus a partial mention. To do that we match URLs first, then mentions on
@@ -390,11 +484,15 @@ export default function TeamChat({
   // Links open in a new tab with rel="noopener noreferrer" for safety. We use
   // a React <a> element — never dangerouslySetInnerHTML — so the body text is
   // always treated as plain text by React's escaping.
+  //
+  // Group name matching is done by comparing the @<token> against the names
+  // of loaded user groups (case-insensitive). A token that matches a group
+  // gets the group color; otherwise it's treated as a user mention.
   const renderCommentBody = (body: string) => {
     type Token =
       | { kind: "text"; value: string }
       | { kind: "url"; value: string }
-      | { kind: "mention"; value: string; isEveryone: boolean };
+      | { kind: "mention"; value: string; mentionKind: "user" | "group" | "everyone" };
 
     // Matches http(s)://... and www.... up to whitespace, with a permissive
     // body of URL-safe characters. Trailing punctuation (.,!?;:) is trimmed
@@ -421,8 +519,18 @@ export default function TeamChat({
     }
     if (last < body.length) urlTokens.push({ kind: "text", value: body.slice(last) });
 
-    // Second pass — within text tokens, extract mentions.
-    const mentionRegex = /@(everyone|[a-zA-Z0-9_.-]+(?:\s[a-zA-Z]+)?)/g;
+    // Build a lookup of group names (lowercase) for quick mentionKind detection.
+    const groupNameSet = new Set(
+      userGroups.map((g) => (g.name || "").toLowerCase())
+    );
+
+    // Second pass — within text tokens, extract mentions. Mentions can be:
+    //   - "@everyone"
+    //   - "@Group Name" (one or more name words)
+    //   - "@User Name" (one or more name words)
+    // We use a permissive regex that captures the @ plus following word(s),
+    // then classify the captured token against the group name set.
+    const mentionRegex = /@(everyone|[a-zA-Z0-9_.-]+(?:\s[a-zA-Z]+)*)/g;
     const tokens: Token[] = [];
     for (const tok of urlTokens) {
       if (tok.kind !== "text") {
@@ -434,8 +542,12 @@ export default function TeamChat({
       mentionRegex.lastIndex = 0;
       while ((mm = mentionRegex.exec(tok.value)) !== null) {
         if (mm.index > lastM) tokens.push({ kind: "text", value: tok.value.slice(lastM, mm.index) });
-        const isEveryone = mm[1].toLowerCase() === "everyone";
-        tokens.push({ kind: "mention", value: mm[0], isEveryone });
+        const name = mm[1].toLowerCase();
+        let mentionKind: "user" | "group" | "everyone";
+        if (name === "everyone") mentionKind = "everyone";
+        else if (groupNameSet.has(name)) mentionKind = "group";
+        else mentionKind = "user";
+        tokens.push({ kind: "mention", value: mm[0], mentionKind });
         lastM = mm.index + mm[0].length;
       }
       if (lastM < tok.value.length) tokens.push({ kind: "text", value: tok.value.slice(lastM) });
@@ -458,11 +570,18 @@ export default function TeamChat({
           </a>
         );
       }
-      // mention
+      // mention — different background/text colors per kind so they're
+      // immediately distinguishable:
+      //   everyone → red-ish (high attention, all users)
+      //   group    → amber-ish (mid attention, group of users)
+      //   user     → blue-ish (low attention, single user)
+      let cls = "bg-[#1E3A5F] text-[#93C5FD]"; // default: user
+      if (tok.mentionKind === "everyone") cls = "bg-[#5C2828] text-[#FCA5A5]";
+      else if (tok.mentionKind === "group") cls = "bg-[#5C4A1F] text-[#FCD34D]";
       return (
         <span
           key={i}
-          className={`px-1 rounded ${tok.isEveryone ? "bg-[#5C2828] text-[#FCA5A5]" : "bg-[#1E3A5F] text-[#93C5FD]"} font-medium`}
+          className={`px-1 rounded ${cls} font-medium`}
         >
           {tok.value}
         </span>
@@ -774,17 +893,28 @@ export default function TeamChat({
                           : "text-[#9CA3AF] hover:bg-[var(--surface)]"
                       }`}
                     >
-                      {entry.isEveryone ? (
+                      {entry.kind === "everyone" ? (
                         <Users size={14} className="text-[#FCA5A5]" />
+                      ) : entry.kind === "group" ? (
+                        <Users size={14} className="text-[#FCD34D]" />
                       ) : (
                         <AtSign size={14} className="text-[var(--text-secondary)]" />
                       )}
-                      <span className={entry.isEveryone ? "font-semibold text-[#FCA5A5]" : ""}>
-                        {entry.isEveryone ? "@everyone" : entry.display}
+                      <span className={
+                        entry.kind === "everyone" ? "font-semibold text-[#FCA5A5]"
+                        : entry.kind === "group" ? "font-semibold text-[#FCD34D]"
+                        : ""
+                      }>
+                        {entry.kind === "everyone" ? "@everyone" : `@${entry.display}`}
                       </span>
-                      {entry.isEveryone && (
+                      {entry.kind === "everyone" && (
                         <span className="ml-auto text-[10px] text-[var(--text-secondary)]">
                           notify all team members
+                        </span>
+                      )}
+                      {entry.kind === "group" && (
+                        <span className="ml-auto text-[10px] text-[var(--text-secondary)]">
+                          {entry.memberCount} member{entry.memberCount === 1 ? "" : "s"}
                         </span>
                       )}
                     </button>
