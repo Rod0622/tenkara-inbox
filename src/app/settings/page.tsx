@@ -4955,11 +4955,30 @@ function ApiTokensTab() {
   const [newTokenName, setNewTokenName] = useState("");
   const [newTokenScopes, setNewTokenScopes] = useState<string[]>(["drafts:write"]);
   const [newTokenNotes, setNewTokenNotes] = useState("");
+  // Phase 2: optional webhook URL + rate limit on the create form.
+  // Setting a webhook URL also generates a signing secret returned in the
+  // create response (alongside the raw token).
+  const [newTokenWebhookUrl, setNewTokenWebhookUrl] = useState("");
+  const [newTokenRateLimit, setNewTokenRateLimit] = useState<string>("60");
   const [saving, setSaving] = useState(false);
-  // After creation, show the raw token in a "copy this now" panel until
-  // dismissed. Once dismissed it's gone — the only place we can show it.
-  const [createdToken, setCreatedToken] = useState<{ id: string; name: string; raw_token: string } | null>(null);
+  // After creation, show the raw token (and webhook secret if applicable)
+  // in a "copy this now" panel until dismissed. Once dismissed, gone forever.
+  const [createdToken, setCreatedToken] = useState<{
+    id: string;
+    name: string;
+    raw_token: string;
+    webhook_secret?: string | null;
+  } | null>(null);
   const [copyHint, setCopyHint] = useState(false);
+  // Phase 2: per-token edit panel — admins can change webhook URL, rotate
+  // secret, adjust rate limit, edit scopes. Keyed by token id.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{
+    webhook_url: string;
+    rate_limit_per_minute: string;
+    rotate_secret: boolean;
+  }>({ webhook_url: "", rate_limit_per_minute: "60", rotate_secret: false });
+  const [rotatedSecret, setRotatedSecret] = useState<{ id: string; secret: string } | null>(null);
 
   const ALL_SCOPES = [
     { id: "drafts:write", label: "Create drafts", desc: "Agent can POST new drafts" },
@@ -5005,6 +5024,15 @@ function ApiTokensTab() {
     try {
       setSaving(true);
       const { actor_id, actor_role } = await getActorContext();
+      // Validate the rate limit input — empty falls back to default 60
+      const rl = newTokenRateLimit.trim()
+        ? parseInt(newTokenRateLimit, 10)
+        : 60;
+      if (Number.isNaN(rl) || rl <= 0) {
+        alert("Rate limit must be a positive number.");
+        setSaving(false);
+        return;
+      }
       const res = await fetch("/api/admin/api-tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5012,6 +5040,8 @@ function ApiTokensTab() {
           name: newTokenName.trim(),
           scopes: newTokenScopes,
           notes: newTokenNotes || null,
+          webhook_url: newTokenWebhookUrl.trim() || null,
+          rate_limit_per_minute: rl,
           actor_id,
           actor_role,
         }),
@@ -5021,16 +5051,62 @@ function ApiTokensTab() {
         alert("Failed: " + (json.error || "Unknown error"));
         return;
       }
-      setCreatedToken({ id: json.id, name: json.name, raw_token: json.raw_token });
+      setCreatedToken({
+        id: json.id,
+        name: json.name,
+        raw_token: json.raw_token,
+        webhook_secret: json.webhook_secret || null,
+      });
       setNewTokenName("");
       setNewTokenScopes(["drafts:write"]);
       setNewTokenNotes("");
+      setNewTokenWebhookUrl("");
+      setNewTokenRateLimit("60");
       setShowCreate(false);
       await fetchTokens();
     } catch (e: any) {
       alert("Failed: " + (e?.message || String(e)));
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Phase 2: save edits to an existing token (webhook url, rate limit,
+  // optionally rotate the signing secret).
+  async function saveEdit(tokenId: string) {
+    try {
+      const { actor_id, actor_role } = await getActorContext();
+      const rl = editForm.rate_limit_per_minute.trim()
+        ? parseInt(editForm.rate_limit_per_minute, 10)
+        : 60;
+      if (Number.isNaN(rl) || rl <= 0) {
+        alert("Rate limit must be a positive number.");
+        return;
+      }
+      const res = await fetch("/api/admin/api-tokens", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: tokenId,
+          webhook_url: editForm.webhook_url.trim() || null,
+          rate_limit_per_minute: rl,
+          rotate_webhook_secret: editForm.rotate_secret,
+          actor_id,
+          actor_role,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert("Failed: " + (json.error || "Unknown error"));
+        return;
+      }
+      if (json.webhook_secret) {
+        setRotatedSecret({ id: tokenId, secret: json.webhook_secret });
+      }
+      setEditingId(null);
+      await fetchTokens();
+    } catch (e: any) {
+      alert("Failed: " + (e?.message || String(e)));
     }
   }
 
@@ -5108,6 +5184,30 @@ function ApiTokensTab() {
               <Copy size={11} /> {copyHint ? "Copied!" : "Copy"}
             </button>
           </div>
+          {/* Webhook signing secret reveal — only shown when token was created
+              with a webhook_url. Partners verify webhook authenticity by
+              recomputing HMAC-SHA256 over the body using this secret. */}
+          {createdToken.webhook_secret && (
+            <div className="mt-3">
+              <div className="text-[11px] font-semibold text-[var(--text-primary)] mb-1.5 flex items-center gap-1">
+                <Key size={11} className="text-[var(--info)]" />
+                Webhook signing secret
+              </div>
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-primary)] break-all">
+                <span className="flex-1">{createdToken.webhook_secret}</span>
+                <button
+                  onClick={() => copyToClipboard(createdToken.webhook_secret!)}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-[var(--border)] text-[11px] hover:bg-[var(--text-muted)]/20 transition-colors shrink-0"
+                  title="Copy webhook secret"
+                >
+                  <Copy size={11} /> Copy
+                </button>
+              </div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-1">
+                Send this to the partner. They verify each webhook by computing <code className="font-mono">HMAC-SHA256(secret, body)</code> and comparing to the <code className="font-mono">X-Tenkara-Signature</code> header.
+              </div>
+            </div>
+          )}
           <button
             onClick={() => setCreatedToken(null)}
             className="mt-2 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -5161,6 +5261,32 @@ function ApiTokensTab() {
                   </label>
                 );
               })}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Webhook URL (optional)</label>
+            <input
+              value={newTokenWebhookUrl}
+              onChange={(e) => setNewTokenWebhookUrl(e.target.value)}
+              placeholder="https://partner.example.com/webhooks/tenkara"
+              className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50 font-mono"
+            />
+            <div className="text-[10px] text-[var(--text-muted)] mt-1">
+              We POST <code className="font-mono">draft.sent</code> and <code className="font-mono">draft.discarded</code> events here. Body signed with HMAC-SHA256 — a signing secret will be generated and shown once on creation.
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Rate limit (per minute)</label>
+            <input
+              type="number"
+              min="1"
+              value={newTokenRateLimit}
+              onChange={(e) => setNewTokenRateLimit(e.target.value)}
+              placeholder="60"
+              className="w-32 px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50"
+            />
+            <div className="text-[10px] text-[var(--text-muted)] mt-1">
+              Requests exceeding this in a 60-second sliding window get HTTP 429. Default 60 is generous for &lt;500/day partners.
             </div>
           </div>
           <div>
@@ -5239,8 +5365,116 @@ function ApiTokensTab() {
                     {t.notes && (
                       <div className="mt-1 text-[10px] text-[var(--text-secondary)] italic">{t.notes}</div>
                     )}
+                    {/* Phase 2 — webhook + rate limit summary, always shown
+                        so admins can see config at a glance. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                      <span className="flex items-center gap-1">
+                        Rate: <span className="font-mono text-[var(--text-secondary)]">{t.rate_limit_per_minute ?? 60}/min</span>
+                      </span>
+                      <span>·</span>
+                      <span className="flex items-center gap-1">
+                        Webhook:{" "}
+                        {t.webhook_url ? (
+                          <span className="font-mono text-[var(--info)] break-all max-w-[280px] truncate inline-block align-bottom" title={t.webhook_url}>
+                            {t.webhook_url}
+                          </span>
+                        ) : (
+                          <span className="italic">none</span>
+                        )}
+                      </span>
+                    </div>
+                    {/* Phase 2 — inline edit form (webhook URL, rate limit, rotate secret) */}
+                    {editingId === t.id && (
+                      <div className="mt-3 p-3 rounded-lg bg-[var(--bg)] border border-[var(--border)] space-y-2">
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Webhook URL</label>
+                          <input
+                            value={editForm.webhook_url}
+                            onChange={(e) => setEditForm({ ...editForm, webhook_url: e.target.value })}
+                            placeholder="https://partner.example.com/webhooks/tenkara"
+                            className="w-full px-2 py-1 rounded bg-[var(--surface)] border border-[var(--border)] text-[11px] font-mono outline-none focus:border-[var(--info)]/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Rate limit (per minute)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editForm.rate_limit_per_minute}
+                            onChange={(e) => setEditForm({ ...editForm, rate_limit_per_minute: e.target.value })}
+                            className="w-28 px-2 py-1 rounded bg-[var(--surface)] border border-[var(--border)] text-[11px] outline-none focus:border-[var(--info)]/50"
+                          />
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={editForm.rotate_secret}
+                            onChange={(e) => setEditForm({ ...editForm, rotate_secret: e.target.checked })}
+                            className="accent-[var(--accent)]"
+                          />
+                          <span className="text-[11px] text-[var(--text-secondary)]">Rotate webhook signing secret <span className="text-[var(--warning)]">(invalidates old secret immediately)</span></span>
+                        </label>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="px-2.5 py-1 rounded border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => saveEdit(t.id)}
+                            className="px-3 py-1 rounded bg-[var(--accent)] text-[var(--bg)] text-[10px] font-semibold"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {/* Rotated secret reveal — shown after a successful rotate */}
+                    {rotatedSecret?.id === t.id && (
+                      <div className="mt-3 p-3 rounded-lg border-2 border-[var(--accent)] bg-[var(--accent)]/5">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Key size={11} className="text-[var(--accent)]" />
+                          <span className="text-[11px] font-bold">New webhook secret</span>
+                        </div>
+                        <div className="flex items-center gap-2 p-2 rounded bg-[var(--bg)] border border-[var(--border)] font-mono text-[10px] break-all">
+                          <span className="flex-1">{rotatedSecret!.secret}</span>
+                          <button
+                            onClick={() => copyToClipboard(rotatedSecret!.secret)}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-[var(--border)] text-[10px] shrink-0"
+                          >
+                            <Copy size={10} /> Copy
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between mt-1.5">
+                          <span className="text-[9px] text-[var(--text-muted)]">Send this to the partner. The old secret is now invalid.</span>
+                          <button
+                            onClick={() => setRotatedSecret(null)}
+                            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="shrink-0">
+                  <div className="shrink-0 flex flex-col gap-1">
+                    {!isRevoked && (
+                      <button
+                        onClick={() => {
+                          setEditingId(editingId === t.id ? null : t.id);
+                          setEditForm({
+                            webhook_url: t.webhook_url || "",
+                            rate_limit_per_minute: String(t.rate_limit_per_minute ?? 60),
+                            rotate_secret: false,
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+                        title="Edit webhook URL, rate limit, or rotate secret"
+                      >
+                        Edit
+                      </button>
+                    )}
                     {isRevoked ? (
                       <button
                         onClick={() => setRevoked(t.id, false)}

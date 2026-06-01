@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { authenticateBearer, hasScope } from "@/lib/api-token-auth";
+import { checkAndRecordRateLimit, rateLimitedResponse } from "@/lib/api-token-rate-limit";
+import { dispatchDraftWebhook } from "@/lib/api-token-webhook";
 
 // GET /api/drafts — list drafts.
 // Filters (all optional, combinable):
@@ -93,6 +95,10 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    // Phase 2: rate limit. After auth + scope check but before any DB writes
+    // so a blocked client doesn't burn write budget.
+    const rl = await checkAndRecordRateLimit(agentToken!.id, "/api/drafts");
+    if (!rl.allowed) return rateLimitedResponse(rl);
   } else {
     // Session-authed flow: keep the original constraint. Standalone drafts
     // require an author_id to enforce the partial unique index (one
@@ -167,6 +173,24 @@ export async function POST(req: NextRequest) {
       .select()
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Phase 2: audit log entry for agent-driven updates. Operator updates
+    // are already implicit via the draft's updated_at — no need to log them.
+    if (isAgentRequest && data?.conversation_id) {
+      supabase.from("activity_log").insert({
+        conversation_id: data.conversation_id,
+        actor_id: null,
+        action: "agent_draft_updated",
+        details: {
+          agent_name: agentToken!.name,
+          draft_id: data.id,
+          token_id: agentToken!.id,
+        },
+      }).then(({ error: logErr }) => {
+        if (logErr) console.error("[drafts/POST] audit log failed:", logErr.message);
+      });
+    }
+
     return NextResponse.json({ draft: data });
   }
 
@@ -196,23 +220,112 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Phase 2: audit log entry for agent-driven creates so the conversation
+  // history pane shows "Sammy Agent v1 created a draft".
+  if (isAgentRequest && data?.conversation_id) {
+    supabase.from("activity_log").insert({
+      conversation_id: data.conversation_id,
+      actor_id: null,
+      action: "agent_draft_created",
+      details: {
+        agent_name: agentToken!.name,
+        draft_id: data.id,
+        token_id: agentToken!.id,
+        requires_sender_selection: data.requires_sender_selection,
+      },
+    }).then(({ error: logErr }) => {
+      if (logErr) console.error("[drafts/POST] audit log failed:", logErr.message);
+    });
+  }
+
   return NextResponse.json({ draft: data });
 }
 
 // DELETE /api/drafts?id=xxx or ?conversation_id=xxx
+//
+// Phase 2: If the draft being deleted was created by an external agent
+// (created_by_agent IS NOT NULL), we fire a "draft.discarded" webhook to
+// the partner so they know the operator chose not to send it. This is the
+// "discard" half of the send/discard event pair — the "sent" event fires
+// from /api/send when the operator hits Send.
+//
+// Important: we fetch the draft row BEFORE delete so we have the fields
+// needed by the webhook. The delete proceeds even if the webhook dispatch
+// fails (best-effort).
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const id = req.nextUrl.searchParams.get("id");
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
 
+  // "discarded_by_send" param distinguishes the operator hitting Send
+  // (which deletes the draft as part of the send flow) from a manual
+  // discard. /api/send sets this when it deletes an agent draft after
+  // a successful send so we DON'T double-fire (sent + discarded for the
+  // same action). Operators discarding via the UI omit this param.
+  const discardedBySend = req.nextUrl.searchParams.get("discarded_by_send") === "1";
+
+  // Pre-fetch the draft(s) we're about to delete so we can fire webhooks +
+  // audit-log entries with full context.
+  type DraftRow = {
+    id: string;
+    conversation_id: string | null;
+    created_by_agent: string | null;
+    email_account_id: string | null;
+    subject: string | null;
+    to_addresses: string | null;
+  };
+  let draftsToDelete: DraftRow[] = [];
+
+  if (id) {
+    const { data } = await supabase
+      .from("email_drafts")
+      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .eq("id", id);
+    draftsToDelete = (data || []) as DraftRow[];
+  } else if (conversationId) {
+    const { data } = await supabase
+      .from("email_drafts")
+      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .eq("conversation_id", conversationId);
+    draftsToDelete = (data || []) as DraftRow[];
+  } else {
+    return NextResponse.json({ error: "id or conversation_id required" }, { status: 400 });
+  }
+
+  // Do the actual delete.
   if (id) {
     const { error } = await supabase.from("email_drafts").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (conversationId) {
     const { error } = await supabase.from("email_drafts").delete().eq("conversation_id", conversationId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  } else {
-    return NextResponse.json({ error: "id or conversation_id required" }, { status: 400 });
+  }
+
+  // Fire webhooks + audit log for agent drafts. Skipped when discardedBySend
+  // is true — that's the send-flow path which fires draft.sent instead.
+  if (!discardedBySend) {
+    for (const d of draftsToDelete) {
+      if (!d.created_by_agent) continue;
+
+      // Best-effort webhook
+      dispatchDraftWebhook("draft.discarded", d, {
+        // No operator id available on a DELETE — partner can query who
+        // discarded via conversation activity if they want.
+      }).catch((e) => console.error("[drafts/DELETE] webhook error:", e?.message));
+
+      // Audit log
+      if (d.conversation_id) {
+        supabase.from("activity_log").insert({
+          conversation_id: d.conversation_id,
+          actor_id: null,
+          action: "agent_draft_discarded",
+          details: { agent_name: d.created_by_agent, draft_id: d.id },
+        }).then(({ error: logErr }) => {
+          if (logErr) console.error("[drafts/DELETE] audit log failed:", logErr.message);
+        });
+      }
+    }
   }
 
   return NextResponse.json({ success: true });

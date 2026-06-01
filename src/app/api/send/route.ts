@@ -5,6 +5,7 @@ import { runRulesForMessage } from "@/lib/rule-engine";
 import { sendGraphEmail } from "@/lib/microsoft-graph";
 import { notifyWatchers } from "@/lib/notifications";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { dispatchDraftWebhook } from "@/lib/api-token-webhook";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
 
@@ -428,6 +429,49 @@ export async function POST(req: NextRequest) {
           actorId: body.actor_id || null,
         });
       } catch (_e) { /* best-effort */ }
+
+      // ── Phase 2: agent-drafted email tracking ──────────────────────
+      // If this conversation has an agent-created draft, the operator just
+      // sent it. Fire the draft.sent webhook to the partner so they know
+      // the draft was used, then delete the draft. Both are best-effort:
+      // failures don't roll back the successful send.
+      try {
+        const { data: agentDraft } = await supabase
+          .from("email_drafts")
+          .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+          .eq("conversation_id", conversationId)
+          .not("created_by_agent", "is", null)
+          .maybeSingle();
+
+        if (agentDraft) {
+          // Fire webhook before deleting so audit row references a real draft id.
+          dispatchDraftWebhook("draft.sent", agentDraft, {
+            sent_by_user_id: body.actor_id || null,
+            message_id: messageId || null,
+          }).catch((e) => console.error("[send] draft.sent webhook error:", e?.message));
+
+          // Audit log
+          supabase.from("activity_log").insert({
+            conversation_id: conversationId,
+            actor_id: body.actor_id || null,
+            action: "agent_draft_sent",
+            details: {
+              agent_name: agentDraft.created_by_agent,
+              draft_id: agentDraft.id,
+            },
+          }).then(({ error: logErr }) => {
+            if (logErr) console.error("[send] audit log failed:", logErr.message);
+          });
+
+          // Delete the agent draft. Pass discarded_by_send=1 wouldn't work
+          // here because we're not going through the HTTP endpoint — but
+          // we ARE bypassing the DELETE handler, so it won't double-fire
+          // the discarded webhook.
+          await supabase.from("email_drafts").delete().eq("id", agentDraft.id);
+        }
+      } catch (e: any) {
+        console.error("[send] agent-draft handling error:", e?.message || e);
+      }
     }
 
     return NextResponse.json({
