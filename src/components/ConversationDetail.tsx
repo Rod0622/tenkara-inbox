@@ -1612,6 +1612,56 @@ export default function ConversationDetail({
     return active.filter((m) => allowedIds.includes(m.id));
   }, [teamMembers, convo?.email_account_id, accountAccessMap]);
 
+  // ─── Call-skillset gating ────────────────────────────────────────────
+  // When the task's category name contains "call", only team members with
+  // has_call_skillset=true should be selectable. The skillset flag is set
+  // in Settings → Team and is meant to identify who's trained to make
+  // outbound calls. Without this gate, the flag is meaningless because the
+  // picker shows everyone regardless of category.
+  //
+  // We accept any category whose name includes "call" (case-insensitive) so
+  // workspaces with names like "Call", "Phone Call", "Customer Call" all
+  // trigger the filter. Match-by-name is consistent with how /api/conversations/close
+  // identifies the call task category.
+  const isCallCategory = (categoryId: string | null | undefined): boolean => {
+    if (!categoryId) return false;
+    const cat = taskCategories.find((c: any) => c.id === categoryId);
+    if (!cat || !cat.name) return false;
+    return String(cat.name).toLowerCase().includes("call");
+  };
+
+  // Filtered version of assignableMembers used by the NEW task form. When
+  // the picked category is a call category, drops anyone without the call
+  // skillset.
+  const newTaskAssignableMembers = useMemo(() => {
+    if (!isCallCategory(newTaskCategoryId)) return assignableMembers;
+    return assignableMembers.filter((m: any) => m.has_call_skillset === true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignableMembers, newTaskCategoryId, taskCategories]);
+
+  // Same idea for the EDIT task form (separate state).
+  const editTaskAssignableMembers = useMemo(() => {
+    if (!isCallCategory(editTaskCategoryId)) return assignableMembers;
+    return assignableMembers.filter((m: any) => m.has_call_skillset === true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignableMembers, editTaskCategoryId, taskCategories]);
+
+  // When the category changes, prune any currently-selected assignees who are
+  // no longer eligible (e.g. switching to a Call category drops anyone without
+  // the call skillset). Prevents silently submitting a task with a now-invalid
+  // assignee list. Runs for both NEW and EDIT pickers via their own effects.
+  useEffect(() => {
+    const allowedIds = new Set(newTaskAssignableMembers.map((m: any) => m.id));
+    setNewTaskAssigneeIds((prev) => prev.filter((id) => allowedIds.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newTaskCategoryId]);
+
+  useEffect(() => {
+    const allowedIds = new Set(editTaskAssignableMembers.map((m: any) => m.id));
+    setEditTaskAssigneeIds((prev) => prev.filter((id) => allowedIds.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editTaskCategoryId]);
+
   const getTaskAssignees = (task: any) =>
     task.assignees?.length ? task.assignees : task.assignee ? [task.assignee] : [];
 
@@ -4197,18 +4247,28 @@ export default function ConversationDetail({
                 {/* Assignees with Select All + Groups */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-[10px] text-[var(--text-muted)] font-semibold">Assign to</div>
+                    <div className="text-[10px] text-[var(--text-muted)] font-semibold flex items-center gap-1.5">
+                      <span>Assign to</span>
+                      {/* When this is a call task, the picker is filtered to
+                          call-skilled members only. Show a tiny hint so the
+                          operator knows why someone might be missing. */}
+                      {isCallCategory(newTaskCategoryId) && (
+                        <span className="text-[9px] font-normal text-[var(--text-muted)] italic">
+                          📞 call-skilled only
+                        </span>
+                      )}
+                    </div>
                     <button
                       onClick={() => {
-                        if (newTaskAssigneeIds.length === assignableMembers.length) {
+                        if (newTaskAssigneeIds.length === newTaskAssignableMembers.length) {
                           setNewTaskAssigneeIds([]);
                         } else {
-                          setNewTaskAssigneeIds(assignableMembers.map((m) => m.id));
+                          setNewTaskAssigneeIds(newTaskAssignableMembers.map((m) => m.id));
                         }
                       }}
                       className="text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold"
                     >
-                      {newTaskAssigneeIds.length === assignableMembers.length ? "Deselect all" : "Select all"}
+                      {newTaskAssigneeIds.length === newTaskAssignableMembers.length ? "Deselect all" : "Select all"}
                     </button>
                   </div>
                   {/* Group quick-select */}
@@ -4216,13 +4276,19 @@ export default function ConversationDetail({
                     <div className="flex flex-wrap gap-1 mb-2">
                       {userGroups.map((g: any) => {
                         // Filter to active team_members only — deactivated users shouldn't
-                        // appear in group quick-selects.
+                        // appear in group quick-selects. Also apply the call-skillset
+                        // filter when the picked category is a call category, so the
+                        // group quick-select can't bypass the gate.
                         const activeIds = new Set(
                           teamMembers.filter((tm) => tm.is_active !== false).map((tm) => tm.id)
                         );
+                        const callSkilledIds = new Set(
+                          teamMembers.filter((tm: any) => tm.is_active !== false && tm.has_call_skillset === true).map((tm) => tm.id)
+                        );
+                        const gateIds = isCallCategory(newTaskCategoryId) ? callSkilledIds : activeIds;
                         const memberIds = (g.user_group_members || [])
                           .map((m: any) => m.team_member_id)
-                          .filter((id: string) => activeIds.has(id));
+                          .filter((id: string) => gateIds.has(id));
                         if (memberIds.length === 0) return null;
                         const isSelected = memberIds.length > 0 && memberIds.every((id: string) => newTaskAssigneeIds.includes(id));
                         return (
@@ -4244,7 +4310,7 @@ export default function ConversationDetail({
                     </div>
                   )}
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2 space-y-1 max-h-32 overflow-y-auto">
-                    {assignableMembers
+                    {newTaskAssignableMembers
                       .map((member) => {
                         const checked = newTaskAssigneeIds.includes(member.id);
                         return (
@@ -4346,23 +4412,39 @@ export default function ConversationDetail({
                     </div>
                     {/* Assignees */}
                     <div>
-                      <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5">Assignees</div>
+                      <div className="text-[10px] text-[var(--text-muted)] font-semibold mb-1.5 flex items-center gap-1.5">
+                        <span>Assignees</span>
+                        {isCallCategory(editTaskCategoryId) && (
+                          <span className="text-[9px] font-normal text-[var(--text-muted)] italic">
+                            📞 call-skilled only
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {/* Select all / Deselect all */}
+                        {/* Select all / Deselect all — counts vs the filtered pool */}
                         <button
-                          onClick={() => setEditTaskAssigneeIds(editTaskAssigneeIds.length === teamMembers.length ? [] : teamMembers.map((m) => m.id))}
+                          onClick={() => setEditTaskAssigneeIds(
+                            editTaskAssigneeIds.length === editTaskAssignableMembers.length
+                              ? []
+                              : editTaskAssignableMembers.map((m: any) => m.id)
+                          )}
                           className="px-2 py-1 rounded-lg text-[10px] font-medium bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
                         >
-                        {editTaskAssigneeIds.length === teamMembers.filter((tm) => tm.is_active !== false).length ? "Deselect all" : "Select all"}
+                        {editTaskAssigneeIds.length === editTaskAssignableMembers.length ? "Deselect all" : "Select all"}
                         </button>
-                        {/* User groups — filter to active team_members only */}
+                        {/* User groups — filter to active team_members only AND
+                            apply call-skillset gate when category is Call. */}
                         {userGroups.map((g: any) => {
                           const activeIds = new Set(
                             teamMembers.filter((tm) => tm.is_active !== false).map((tm) => tm.id)
                           );
+                          const callSkilledIds = new Set(
+                            teamMembers.filter((tm: any) => tm.is_active !== false && tm.has_call_skillset === true).map((tm) => tm.id)
+                          );
+                          const gateIds = isCallCategory(editTaskCategoryId) ? callSkilledIds : activeIds;
                           const gMembers = (g.user_group_members || [])
                             .map((gm: any) => gm.team_member_id)
-                            .filter((id: string) => activeIds.has(id));
+                            .filter((id: string) => gateIds.has(id));
                           if (gMembers.length === 0) return null;
                           return (
                             <button key={g.id} onClick={() => {
@@ -4378,8 +4460,9 @@ export default function ConversationDetail({
                             </button>
                           );
                         })}
-                        {/* Individual assignee picker — also filter to active members */}
-                        {teamMembers.filter((tm) => tm.is_active !== false).map((m) => {
+                        {/* Individual assignee picker — filtered by call skillset
+                            when the category is Call. */}
+                        {editTaskAssignableMembers.map((m: any) => {
                           const selected = editTaskAssigneeIds.includes(m.id);
                           return (
                             <button key={m.id} onClick={() => setEditTaskAssigneeIds(selected ? editTaskAssigneeIds.filter((id) => id !== m.id) : [...editTaskAssigneeIds, m.id])}

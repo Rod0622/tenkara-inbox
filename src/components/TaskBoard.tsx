@@ -106,6 +106,29 @@ export default function TaskBoard({
   // double-clicks faster than React can flush the `saving` state.
   const savingLockRef = useRef(false);
 
+  // ─── Call-skillset gating ──────────────────────────────────────────
+  // When the picked category's name contains "call", filter the assignee
+  // pool to only members with has_call_skillset=true. Matches the gating
+  // applied in ConversationDetail's task pickers.
+  const isCallCategory = (catId: string | null | undefined): boolean => {
+    if (!catId) return false;
+    const cat = taskCategories.find((c: any) => c.id === catId);
+    return !!cat?.name && String(cat.name).toLowerCase().includes("call");
+  };
+  const assignableMembersForCategory = useMemo(() => {
+    const active = teamMembers.filter((m) => m.is_active !== false);
+    if (!isCallCategory(categoryId)) return active;
+    return active.filter((m: any) => m.has_call_skillset === true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamMembers, categoryId, taskCategories]);
+
+  // When category changes, prune assignees no longer in the eligible pool.
+  useEffect(() => {
+    const allowedIds = new Set(assignableMembersForCategory.map((m) => m.id));
+    setAssigneeIds((prev) => prev.filter((id) => allowedIds.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryId]);
+
   const openDatePicker = () => {
     const input = dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
     input?.showPicker?.();
@@ -410,12 +433,22 @@ export default function TaskBoard({
             <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4 mt-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">Assignees</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] flex items-center gap-1.5">
+                    <span>Assignees</span>
+                    {isCallCategory(categoryId) && (
+                      <span className="text-[9px] font-normal text-[var(--text-muted)] italic normal-case tracking-normal">
+                        📞 call-skilled only
+                      </span>
+                    )}
+                  </div>
                   <button onClick={() => {
-                    const active = teamMembers.filter((m) => m.is_active !== false);
-                    setAssigneeIds(assigneeIds.length === active.length ? [] : active.map((m) => m.id));
+                    setAssigneeIds(
+                      assigneeIds.length === assignableMembersForCategory.length
+                        ? []
+                        : assignableMembersForCategory.map((m) => m.id)
+                    );
                   }} className="text-[10px] text-[var(--info)] hover:text-[#79B8FF] font-semibold">
-                    {assigneeIds.length === teamMembers.filter((m) => m.is_active !== false).length ? "Deselect all" : "Select all"}
+                    {assigneeIds.length === assignableMembersForCategory.length ? "Deselect all" : "Select all"}
                   </button>
                 </div>
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 space-y-2 max-h-40 overflow-y-auto">
@@ -427,14 +460,16 @@ export default function TaskBoard({
                         // Deactivated users may still exist in user_group_members
                         // (we keep the DB row for clean restoration on reactivate)
                         // but they shouldn't be selectable/assignable here.
-                        const activeMemberIds: Set<string> = new Set(
-                          teamMembers.filter((m) => m.is_active !== false).map((m) => m.id)
+                        // When the picked category is Call, also gate to
+                        // call-skilled members.
+                        const eligibleIds: Set<string> = new Set(
+                          assignableMembersForCategory.map((m) => m.id)
                         );
                         const memberIds = (g.user_group_members || [])
                           .map((m: any) => m.team_member_id)
-                          .filter((id: string) => activeMemberIds.has(id));
-                        // If a group has zero active members (all deactivated),
-                        // hide the chip entirely — clicking it would be a no-op.
+                          .filter((id: string) => eligibleIds.has(id));
+                        // If a group has zero eligible members, hide the chip
+                        // entirely — clicking it would be a no-op.
                         if (memberIds.length === 0) return null;
                         const isSelected = memberIds.length > 0 && memberIds.every((id: string) => assigneeIds.includes(id));
                         return (
@@ -455,27 +490,25 @@ export default function TaskBoard({
                       })}
                     </div>
                   )}
-                  {teamMembers
-                    .filter((member) => member.is_active !== false)
-                    .map((member) => {
-                      const checked = assigneeIds.includes(member.id);
-                      return (
-                        <label key={member.id} className="flex items-center gap-2 text-sm text-[var(--text-primary)] cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setAssigneeIds((prev) =>
-                                e.target.checked ? [...prev, member.id] : prev.filter((id) => id !== member.id)
-                              );
-                            }}
-                            className="accent-[var(--accent)]"
-                          />
-                          <Avatar initials={member.initials} color={member.color} size={18} />
-                          <span>{member.name}</span>
-                        </label>
-                      );
-                    })}
+                  {assignableMembersForCategory.map((member) => {
+                    const checked = assigneeIds.includes(member.id);
+                    return (
+                      <label key={member.id} className="flex items-center gap-2 text-sm text-[var(--text-primary)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setAssigneeIds((prev) =>
+                              e.target.checked ? [...prev, member.id] : prev.filter((id) => id !== member.id)
+                            );
+                          }}
+                          className="accent-[var(--accent)]"
+                        />
+                        <Avatar initials={member.initials} color={member.color} size={18} />
+                        <span>{member.name}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
