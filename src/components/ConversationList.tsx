@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw, Pin } from "lucide-react";
+import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw, Pin, FolderInput, AlertCircle } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -373,6 +373,16 @@ export default function ConversationList({
   const [bulkLabelSearch, setBulkLabelSearch] = useState("");
   const bulkLabelPickerRef = useRef<HTMLDivElement>(null);
 
+  // Bulk move-to-folder picker. Same anchoring pattern as the label picker.
+  // bulkMoveSearch filters folders by name. We compute the unique set of
+  // email_account_ids across the current selection on render; if it's more
+  // than one, the picker shows a warning instead of folders (per Rod's
+  // choice: "Same-account only — if selection spans multiple accounts,
+  // picker shows a warning and asks to filter by account first").
+  const [bulkMovePickerOpen, setBulkMovePickerOpen] = useState(false);
+  const [bulkMoveSearch, setBulkMoveSearch] = useState("");
+  const bulkMovePickerRef = useRef<HTMLDivElement>(null);
+
   // Close the picker when the user clicks outside it. Skipped when picker
   // isn't open to avoid an unnecessary global listener.
   useEffect(() => {
@@ -395,6 +405,23 @@ export default function ConversationList({
       setBulkLabelSelectedIds(new Set());
     }
   }, [selectedIds.size, bulkLabelPickerOpen]);
+
+  // Same outside-click + auto-close-on-clear behavior for the move picker.
+  useEffect(() => {
+    if (!bulkMovePickerOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (bulkMovePickerRef.current && !bulkMovePickerRef.current.contains(e.target as Node)) {
+        setBulkMovePickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [bulkMovePickerOpen]);
+  useEffect(() => {
+    if (selectedIds.size === 0 && bulkMovePickerOpen) {
+      setBulkMovePickerOpen(false);
+    }
+  }, [selectedIds.size, bulkMovePickerOpen]);
 
   // Personal pins — the set of conversation IDs the current user has pinned.
   // Updated locally on row-click toggle + via a global "pins:changed" event
@@ -753,6 +780,20 @@ export default function ConversationList({
     return result;
   }, [conversations, filters, folderSubView, activeFolder, closedConvos, folders]);
 
+  // Compute the unique set of email_account_ids across currently-selected
+  // conversations. Used by the bulk move picker to decide whether to show
+  // folders or a "filter by account first" warning. Recalculated only when
+  // selection or visible conversation list changes.
+  const selectedAccountIds = useMemo(() => {
+    const accountSet = new Set<string>();
+    for (const c of filteredConversations) {
+      if (selectedIds.has(c.id) && c.email_account_id) {
+        accountSet.add(c.email_account_id);
+      }
+    }
+    return accountSet;
+  }, [selectedIds, filteredConversations]);
+
   const grouped = useMemo(() => groupByDate(filteredConversations), [filteredConversations]);
 
   // Clean up selected IDs when conversations change
@@ -1090,6 +1131,139 @@ export default function ConversationList({
                 </div>
               )}
             </div>
+            {/* Bulk move-to-folder button. Opens a dropdown with the
+                relevant account's folders. If selection spans multiple
+                accounts, shows a warning instead — moves can only happen
+                inside a single email account (cross-account folder moves
+                would orphan conversations to a folder in a different
+                mailbox).
+                Hidden in the Trash sub-view because that's not a real
+                folder you'd want to move conversations OUT of via this
+                affordance — use Restore. */}
+            {!isTrashFolder && (
+              <div className="relative" ref={bulkMovePickerRef}>
+                <button
+                  onClick={() => {
+                    setBulkMovePickerOpen((v) => !v);
+                    setBulkMoveSearch("");
+                  }}
+                  className={`p-1.5 rounded transition-all ${
+                    bulkMovePickerOpen
+                      ? "bg-[var(--border)] text-[var(--info)]"
+                      : "hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--info)]"
+                  }`}
+                  title="Move selected to folder"
+                >
+                  <FolderInput size={13} />
+                </button>
+
+                {bulkMovePickerOpen && (() => {
+                  // Cross-account guard: if the selection spans accounts,
+                  // refuse to show folders and instruct the user to filter.
+                  const accountIdsArr = Array.from(selectedAccountIds);
+                  const isSingleAccount = accountIdsArr.length === 1;
+                  const targetAccountId = isSingleAccount ? accountIdsArr[0] : null;
+
+                  return (
+                    <div className="absolute top-full left-0 mt-1 z-50 w-64 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 flex flex-col max-h-[420px]">
+                      <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
+                        <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
+                          Move {selectedIds.size} conv{selectedIds.size === 1 ? "" : "s"} to folder
+                        </div>
+                        {isSingleAccount && (
+                          <div className="relative">
+                            <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                            <input
+                              autoFocus
+                              type="text"
+                              value={bulkMoveSearch}
+                              onChange={(e) => setBulkMoveSearch(e.target.value)}
+                              placeholder="Search folders…"
+                              className="w-full pl-6 pr-2 py-1 text-[11px] bg-[var(--bg)] border border-[var(--border)] rounded-md text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)]"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto py-1">
+                        {!isSingleAccount ? (
+                          // Multi-account warning. Per Rod's choice: "Same-
+                          // account only — if your selection spans multiple
+                          // email accounts, picker shows a warning and asks
+                          // you to filter by account first."
+                          <div className="px-4 py-5 text-center">
+                            <AlertCircle size={20} className="text-[var(--warning)] mx-auto mb-2" />
+                            <div className="text-[12px] text-[var(--text-primary)] font-semibold mb-1">
+                              Selection spans multiple accounts
+                            </div>
+                            <div className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                              Your {selectedIds.size} selected conversation{selectedIds.size === 1 ? "" : "s"} {selectedIds.size === 1 ? "is" : "are"} from {accountIdsArr.length} different email account{accountIdsArr.length === 1 ? "" : "s"}.
+                              <br /><br />
+                              Folders belong to a specific account, so moving across accounts isn't supported. Filter the list by a single account first, then bulk-move.
+                            </div>
+                          </div>
+                        ) : (() => {
+                          // Build the folder list for the target account,
+                          // respecting the hook's sort_order and applying
+                          // the user's search filter.
+                          const accountFolders = folders
+                            .filter((f: any) => f.email_account_id === targetAccountId)
+                            .filter((f: any) => {
+                              const q = bulkMoveSearch.trim().toLowerCase();
+                              if (!q) return true;
+                              return (f.name || "").toLowerCase().includes(q);
+                            });
+
+                          if (accountFolders.length === 0 && folders.filter((f: any) => f.email_account_id === targetAccountId).length === 0) {
+                            return (
+                              <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">
+                                No folders for this account
+                              </div>
+                            );
+                          }
+                          if (accountFolders.length === 0) {
+                            return (
+                              <div className="px-3 py-3 text-[11px] text-[var(--text-muted)] text-center">
+                                No matches for "{bulkMoveSearch}"
+                              </div>
+                            );
+                          }
+
+                          return accountFolders.map((folder: any) => {
+                            // Mark the active folder so users know they
+                            // can't "move" to where most/all already are.
+                            // Don't disable — they might still want to
+                            // explicitly target it (no-op).
+                            return (
+                              <button
+                                key={folder.id}
+                                onClick={async () => {
+                                  await handleBulkAction("move_folder", { folder_id: folder.id });
+                                  setBulkMovePickerOpen(false);
+                                }}
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
+                              >
+                                <span className="text-[13px]">{folder.icon || "📁"}</span>
+                                <span className="flex-1 text-left truncate">{folder.name}</span>
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      <div className="px-3 py-1.5 border-t border-[var(--border)] flex items-center justify-end shrink-0">
+                        <button
+                          onClick={() => setBulkMovePickerOpen(false)}
+                          className="px-2 py-1 rounded text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
             <button
               onClick={() => handleBulkAction("archive")}
               className="p-1.5 rounded hover:bg-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--info)] transition-all"
