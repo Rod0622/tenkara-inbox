@@ -519,38 +519,97 @@ export default function TeamChat({
     }
     if (last < body.length) urlTokens.push({ kind: "text", value: body.slice(last) });
 
-    // Build a lookup of group names (lowercase) for quick mentionKind detection.
-    const groupNameSet = new Set(
-      userGroups.map((g) => (g.name || "").toLowerCase())
-    );
+    // Build a known-names index for the trim pass. Each entry is lowercased
+    // for case-insensitive matching against captured text. The map value
+    // gives us the mention kind so we can apply the right color without a
+    // second lookup.
+    //
+    // Includes:
+    //   - "everyone" (special)
+    //   - all user_group names (kind: "group")
+    //   - all team_member display names (kind: "user")
+    //
+    // Multi-word names like "Vita Organica" or "Jane Doe" are stored as-is
+    // (with their internal spaces) — the matching algorithm below splits
+    // captured tokens by whitespace and tries successively shorter prefixes,
+    // so multi-word names work without special-casing.
+    const knownNames = new Map<string, "user" | "group" | "everyone">();
+    knownNames.set("everyone", "everyone");
+    for (const g of userGroups) {
+      if (g.name) knownNames.set(g.name.toLowerCase(), "group");
+    }
+    for (const tm of teamMembers) {
+      if (tm.name) knownNames.set(tm.name.toLowerCase(), "user");
+    }
 
-    // Second pass — within text tokens, extract mentions. Mentions can be:
-    //   - "@everyone"
-    //   - "@Group Name" (one or more name words)
-    //   - "@User Name" (one or more name words)
-    // We use a permissive regex that captures the @ plus following word(s),
-    // then classify the captured token against the group name set.
-    const mentionRegex = /@(everyone|[a-zA-Z0-9_.-]+(?:\s[a-zA-Z]+)*)/g;
+    // Mention regex: capture @ followed by up to ~6 space-separated word-like
+    // tokens. The cap prevents pathological greedy matches (e.g. consuming
+    // an entire paragraph) but is generous enough for compound names like
+    // "Sales and Marketing Team". Word tokens allow alphanumerics, dot,
+    // hyphen, underscore — same as before, plus an apostrophe so names like
+    // "O'Brien" don't break the token.
+    const mentionRegex = /@([a-zA-Z0-9_.'-]+(?:\s+[a-zA-Z0-9_.'-]+){0,5})/g;
     const tokens: Token[] = [];
     for (const tok of urlTokens) {
       if (tok.kind !== "text") {
         tokens.push(tok);
         continue;
       }
+      const source = tok.value;
       let lastM = 0;
       let mm: RegExpExecArray | null;
       mentionRegex.lastIndex = 0;
-      while ((mm = mentionRegex.exec(tok.value)) !== null) {
-        if (mm.index > lastM) tokens.push({ kind: "text", value: tok.value.slice(lastM, mm.index) });
-        const name = mm[1].toLowerCase();
-        let mentionKind: "user" | "group" | "everyone";
-        if (name === "everyone") mentionKind = "everyone";
-        else if (groupNameSet.has(name)) mentionKind = "group";
-        else mentionKind = "user";
-        tokens.push({ kind: "mention", value: mm[0], mentionKind });
-        lastM = mm.index + mm[0].length;
+      while ((mm = mentionRegex.exec(source)) !== null) {
+        const atIndex = mm.index;
+
+        // Skip @s preceded by an alphanumeric — those are email addresses
+        // (e.g. "jeff@example.com"), not mentions. Mentions are expected to
+        // come at the start of the text or after whitespace/punctuation.
+        if (atIndex > 0) {
+          const prevChar = source[atIndex - 1];
+          if (/[a-zA-Z0-9]/.test(prevChar)) {
+            // Don't treat as mention. Advance past this @ so the regex
+            // engine keeps searching, but don't emit a token for it.
+            mentionRegex.lastIndex = atIndex + 1;
+            continue;
+          }
+        }
+
+        // The captured value may include trailing words that aren't part of
+        // any known name (e.g. "@Mildred I asked Carvey..." captures the
+        // whole phrase). Trim back word-by-word until we hit a known group/
+        // user name, or fall back to the single first word as an unknown
+        // user mention.
+        const capturedFull = mm[1];
+        const words = capturedFull.split(/\s+/);
+        let chosenWords = 1; // default: just the first word
+        let chosenKind: "user" | "group" | "everyone" = "user";
+        for (let len = words.length; len >= 1; len--) {
+          const candidate = words.slice(0, len).join(" ").toLowerCase();
+          const kind = knownNames.get(candidate);
+          if (kind) {
+            chosenWords = len;
+            chosenKind = kind;
+            break;
+          }
+        }
+        const chosenText = "@" + words.slice(0, chosenWords).join(" ");
+
+        // Emit any plain text between the previous match and this one.
+        if (atIndex > lastM) {
+          tokens.push({ kind: "text", value: source.slice(lastM, atIndex) });
+        }
+        tokens.push({ kind: "mention", value: chosenText, mentionKind: chosenKind });
+
+        // Advance position past the chosen mention. The regex's match may
+        // have spanned more text than chosenText (we trimmed back), so
+        // recompute lastIndex carefully — anything we didn't claim as part
+        // of the mention should be available for the next iteration.
+        const consumedLen = chosenText.length;
+        lastM = atIndex + consumedLen;
+        mentionRegex.lastIndex = lastM;
       }
-      if (lastM < tok.value.length) tokens.push({ kind: "text", value: tok.value.slice(lastM) });
+      if (lastM < source.length) tokens.push({ kind: "text", value: source.slice(lastM) });
     }
 
     return tokens.map((tok, i) => {
