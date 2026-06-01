@@ -417,6 +417,9 @@ export default function ConversationDetail({
   // attachment list independent from the inline reply. Same shape as above.
   const [replyModalAttachments, setReplyModalAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
   const replyModalFileInputRef = useRef<HTMLInputElement>(null);
+  // Forward modal attachments — same shape, separate list.
+  const [forwardAttachments, setForwardAttachments] = useState<{ name: string; size: number; type: string; data: string }[]>([]);
+  const forwardFileInputRef = useRef<HTMLInputElement>(null);
   const [showReplyDrive, setShowReplyDrive] = useState(false);
   const [replyDriveFolders, setReplyDriveFolders] = useState<any[]>([]);
   const [replyDriveFiles, setReplyDriveFiles] = useState<any[]>([]);
@@ -427,12 +430,24 @@ export default function ConversationDetail({
   const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
   // Where to insert when a template (or Drive file) is picked. Toggled when
   // the picker opens so the click handler knows which editor to write into.
-  const [replyInsertTarget, setReplyInsertTarget] = useState<"inline" | "modal">("inline");
-  // Refs to the two RichTextEditor instances so pickers can call
+  // - "inline":  the small inline reply at the bottom of the conversation
+  // - "modal":   the expanded Reply / Reply All popout modal
+  // - "forward": the Forward Message modal
+  const [replyInsertTarget, setReplyInsertTarget] = useState<"inline" | "modal" | "forward">("inline");
+  // Refs to all three RichTextEditor instances so pickers can call
   // insertHTML(html) at the saved cursor position rather than blowing away
-  // the buffer with setReplyText / setReplyModalBody.
+  // the buffer with set*Text setters.
   const inlineReplyEditorRef = useRef<RichTextEditorHandle | null>(null);
   const modalReplyEditorRef = useRef<RichTextEditorHandle | null>(null);
+  const forwardEditorRef = useRef<RichTextEditorHandle | null>(null);
+  // Inline create-template form state — shown when the user clicks
+  // "+ New template" inside the picker. Avoids forcing them into Settings
+  // (which non-admins can't access).
+  const [showCreateTemplateForm, setShowCreateTemplateForm] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateScope, setNewTemplateScope] = useState<"personal" | "organization">("personal");
+  const [newTemplateBody, setNewTemplateBody] = useState("");
+  const [newTemplateSaving, setNewTemplateSaving] = useState(false);
   const [showAIDraftModal, setShowAIDraftModal] = useState(false);
   // Tracks which compose surface opened the AI Draft modal so we know
   // where to insert the generated text. Set right before opening AIDraft.
@@ -1962,7 +1977,7 @@ export default function ConversationDetail({
     } catch (e) { console.error(e); }
   };
 
-  const openReplyTemplatePicker = async (target: "inline" | "modal" = "inline") => {
+  const openReplyTemplatePicker = async (target: "inline" | "modal" | "forward" = "inline") => {
     setReplyInsertTarget(target);
     setShowReplyTemplateModal(true);
     // Always re-fetch so newly created templates (or scope changes) show
@@ -1985,7 +2000,7 @@ export default function ConversationDetail({
     });
   };
 
-  const openReplyDrivePicker = async (target: "inline" | "modal" = "inline") => {
+  const openReplyDrivePicker = async (target: "inline" | "modal" | "forward" = "inline") => {
     setReplyInsertTarget(target);
     setShowReplyDrive(true);
     setReplyDriveFolders([]); setReplyDriveFiles([]); setReplyDrivePath([]);
@@ -2055,6 +2070,8 @@ export default function ConversationDetail({
       // compose surface opened the Drive picker.
       if (replyInsertTarget === "modal") {
         setReplyModalAttachments((prev) => [...prev, attachment]);
+      } else if (replyInsertTarget === "forward") {
+        setForwardAttachments((prev) => [...prev, attachment]);
       } else {
         setReplyAttachments((prev) => [...prev, attachment]);
       }
@@ -2321,12 +2338,68 @@ export default function ConversationDetail({
     setShowForwardModal(true);
   };
 
+  // Save a new template directly from inside the picker. Non-admins can't
+  // reach Settings → Email Templates, so this is their only path to create
+  // their own templates. Admin can use it too (faster than navigating to
+  // Settings).
+  //
+  // Scope:
+  //   - personal    → owner_id = current user, visible only to them
+  //   - organization → visible to everyone in the workspace
+  //
+  // owner_id is set in both cases so we know who created the template
+  // (useful for audit / future "my templates" filters).
+  const saveNewTemplate = async () => {
+    if (!newTemplateName.trim() || !newTemplateBody.trim()) {
+      alert("Name and body are required.");
+      return;
+    }
+    if (!currentUser?.id) {
+      alert("Couldn't determine your user account. Try refreshing.");
+      return;
+    }
+    try {
+      setNewTemplateSaving(true);
+      const sb = createBrowserClient();
+      const { error } = await sb.from("email_templates").insert({
+        name: newTemplateName.trim(),
+        body: newTemplateBody,
+        scope: newTemplateScope,
+        owner_id: currentUser.id,
+        is_active: true,
+      });
+      if (error) {
+        alert("Failed to save template: " + error.message);
+        return;
+      }
+      // Reset form + reload list so the new template appears immediately.
+      setNewTemplateName("");
+      setNewTemplateBody("");
+      setNewTemplateScope("personal");
+      setShowCreateTemplateForm(false);
+      const myId = currentUser.id;
+      const { data } = await sb
+        .from("email_templates")
+        .select("*")
+        .eq("is_active", true)
+        .or(`scope.eq.organization,and(scope.eq.personal,owner_id.eq.${myId})`)
+        .order("scope")
+        .order("sort_order");
+      setReplyTemplates(data || []);
+    } catch (e: any) {
+      console.error("Save template failed:", e);
+      alert("Failed to save template. Please try again.");
+    } finally {
+      setNewTemplateSaving(false);
+    }
+  };
+
   const handleSendForward = async () => {
     if (!convo) return;
     if (!forwardTo.trim() || !forwardSubject.trim() || !forwardBody.trim()) return;
 
-    // Check for missing attachments in forward body
-    const warning = checkMissingAttachments(forwardBody, 0);
+    // Pass attachment count so the missing-attachment warning is accurate.
+    const warning = checkMissingAttachments(forwardBody, forwardAttachments.length);
     if (warning && !confirm(warning + "\n\nSend anyway?")) return;
 
     try {
@@ -2343,6 +2416,7 @@ export default function ConversationDetail({
           cc: forwardCc.trim(),
           subject: forwardSubject.trim(),
           body: forwardBody,
+          attachments: forwardAttachments.length > 0 ? forwardAttachments : undefined,
           actor_id: currentUser?.id || null,
         }),
       });
@@ -2358,6 +2432,7 @@ export default function ConversationDetail({
       setForwardCc("");
       setForwardSubject("");
       setForwardBody("");
+      setForwardAttachments([]);
     } catch (error: any) {
       console.error("Forward failed:", error);
       alert(error?.message || "Failed to forward email");
@@ -5602,143 +5677,11 @@ export default function ConversationDetail({
               </div>
 
               {/* Reply Template Picker Modal */}
-              {showReplyTemplateModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowReplyTemplateModal(false)}>
-                  <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                    <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-bold text-[var(--text-primary)]">Insert Template</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Click a template to insert at your cursor</div>
-                      </div>
-                      <button onClick={() => setShowReplyTemplateModal(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
-                        <X size={16} />
-                      </button>
-                    </div>
-                    <div className="max-h-[400px] overflow-y-auto">
-                      {replyTemplates.length === 0 ? (
-                        <div className="text-center py-8 text-[var(--text-muted)] text-[12px]">
-                          No templates yet.
-                          <div className="mt-2">
-                            <a href="/settings#templates" target="_blank" rel="noopener" className="text-[var(--info)] hover:underline">
-                              Create one in Settings →
-                            </a>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2 space-y-0.5">
-                          {["organization", "personal"].map((scope) => {
-                            const scopeTemplates = replyTemplates.filter((t: any) => t.scope === scope);
-                            if (scopeTemplates.length === 0) return null;
-                            return (
-                              <div key={scope}>
-                                <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest px-3 pt-2 pb-1">
-                                  {scope === "organization" ? "🏢 Shared (all users)" : "👤 Personal (just me)"}
-                                </div>
-                                {scopeTemplates.map((tpl: any) => (
-                                  <button key={tpl.id} onClick={() => {
-                                    // Insert at the saved cursor position in whichever
-                                    // editor opened the picker. Falls back to setReplyText
-                                    // append (legacy behavior) if the ref isn't ready —
-                                    // shouldn't happen in practice but better safe.
-                                    const editorRef = replyInsertTarget === "modal"
-                                      ? modalReplyEditorRef
-                                      : inlineReplyEditorRef;
-                                    if (editorRef.current) {
-                                      editorRef.current.insertHTML(tpl.body);
-                                    } else if (replyInsertTarget === "modal") {
-                                      setReplyModalBody((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
-                                    } else {
-                                      setReplyText((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
-                                    }
-                                    setShowReplyTemplateModal(false);
-                                  }}
-                                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
-                                    <div className="flex-1 min-w-0">
-                                      <div className="text-[12px] font-semibold text-[var(--text-primary)]">{tpl.name}</div>
-                                      <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">
-                                        {tpl.body.replace(/<[^>]*>/g, "").slice(0, 80)}...
-                                      </div>
-                                    </div>
-                                    {tpl.category && (
-                                      <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[var(--info)] shrink-0">{tpl.category}</span>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    {/* Footer link to Settings — easy entry into template management */}
-                    <div className="px-5 py-2 border-t border-[var(--border)] flex items-center justify-between">
-                      <span className="text-[10px] text-[var(--text-muted)]">
-                        Templates are inserted at your cursor position
-                      </span>
-                      <a
-                        href="/settings#templates"
-                        target="_blank"
-                        rel="noopener"
-                        className="text-[10px] text-[var(--info)] hover:underline font-semibold"
-                      >
-                        + New template
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Template picker + Drive picker are rendered at component
+                  root (further down) so they work from inline reply, reply
+                  modal, AND forward modal — not just inline. */}
 
-              {/* Reply Drive Picker Modal */}
-              {showReplyDrive && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowReplyDrive(false)}>
-                  <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                    <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-bold text-[var(--text-primary)]">Insert from Google Drive</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">Click a file to attach it</div>
-                      </div>
-                      <button onClick={() => setShowReplyDrive(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
-                        <X size={16} />
-                      </button>
-                    </div>
-                    <div className="p-4 max-h-[400px] overflow-y-auto">
-                      {replyDrivePath.length > 0 && (
-                        <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
-                          {replyDrivePath.map((fp, i) => (
-                            <span key={fp.id} className="flex items-center gap-1">
-                              {i > 0 && <span className="text-[var(--text-muted)]">/</span>}
-                              <button onClick={() => navigateReplyDrivePath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {replyDriveLoading ? (
-                        <div className="text-center py-6 text-[var(--text-muted)] text-[12px]">Loading...</div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {replyDriveFolders.map((f) => (
-                            <button key={f.id} onClick={() => navigateReplyDriveFolder(f)}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
-                              <FolderOpen size={14} className="text-[var(--warning)]" />
-                              <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
-                            </button>
-                          ))}
-                          {replyDriveFiles.map((f) => (
-                            <button key={f.id} onClick={() => { attachReplyDriveFile(f); setShowReplyDrive(false); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[rgba(74,222,128,0.08)] text-left transition-colors">
-                              <FileText size={14} className="text-[var(--info)]" />
-                              <span className="text-[12px] text-[var(--text-primary)] flex-1 truncate">{f.name}</span>
-                            </button>
-                          ))}
-                          {replyDriveFolders.length === 0 && replyDriveFiles.length === 0 && (
-                            <div className="text-[11px] text-[var(--text-muted)] py-4 text-center">No files in this folder</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Reply Drive Picker Modal — moved to component root, see below */}
             </div>
           )}
         </div>
@@ -5750,6 +5693,251 @@ export default function ConversationDetail({
           currentUser={currentUser}
           teamMembers={teamMembers}
         />
+      )}
+
+      {/* ── Unified Template Picker (works from inline reply, reply modal,
+             AND forward modal). Previously these pickers were rendered
+             inside the inline reply branch which meant clicking template/
+             Drive from the modal popouts did nothing because the picker JSX
+             wasn't mounted. Lifting them to the component root fixes that. */}
+      {showReplyTemplateModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => { setShowReplyTemplateModal(false); setShowCreateTemplateForm(false); }}>
+          <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[var(--text-primary)]">
+                  {showCreateTemplateForm ? "Create Template" : "Insert Template"}
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)]">
+                  {showCreateTemplateForm
+                    ? "Save text you'll reuse — personal (just you) or shared (everyone)"
+                    : "Click a template to insert at your cursor"}
+                </div>
+              </div>
+              <button onClick={() => { setShowReplyTemplateModal(false); setShowCreateTemplateForm(false); }} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+
+            {showCreateTemplateForm ? (
+              // ─── CREATE FORM ────────────────────────────────────────────
+              // Lets non-admins make templates without needing /settings access.
+              <div className="p-4 space-y-3">
+                <div>
+                  <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Name</div>
+                  <input
+                    autoFocus
+                    value={newTemplateName}
+                    onChange={(e) => setNewTemplateName(e.target.value)}
+                    placeholder="e.g. Quote follow-up"
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)]"
+                  />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Who can use this template</div>
+                  <div className="flex gap-1.5">
+                    {(["personal", "organization"] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setNewTemplateScope(s)}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                          newTemplateScope === s
+                            ? "bg-[var(--border)] text-[var(--text-primary)] ring-1 ring-[var(--accent)]"
+                            : "bg-[var(--bg)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
+                        }`}
+                      >
+                        {s === "personal" ? "👤 Personal (just me)" : "🏢 Shared (everyone)"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Body</div>
+                    {/* Quick fill from whatever they're currently composing.
+                        Saves them re-typing if they want to template their
+                        current draft. */}
+                    <button
+                      onClick={() => {
+                        const draftBody = replyInsertTarget === "modal" ? replyModalBody
+                          : replyInsertTarget === "forward" ? forwardBody
+                          : replyText;
+                        if (draftBody && draftBody.trim()) {
+                          setNewTemplateBody(draftBody);
+                        }
+                      }}
+                      className="text-[10px] text-[var(--info)] hover:underline font-semibold"
+                      title="Copy what you've already typed into this template"
+                    >
+                      Use current draft
+                    </button>
+                  </div>
+                  <textarea
+                    value={newTemplateBody}
+                    onChange={(e) => setNewTemplateBody(e.target.value)}
+                    placeholder="Template body — supports basic HTML. Plain text works fine too."
+                    rows={6}
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)] resize-none font-mono"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button
+                    onClick={() => setShowCreateTemplateForm(false)}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-[12px] hover:bg-[var(--bg)]"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={saveNewTemplate}
+                    disabled={newTemplateSaving || !newTemplateName.trim() || !newTemplateBody.trim()}
+                    className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold disabled:opacity-40"
+                  >
+                    {newTemplateSaving ? "Saving…" : "Save template"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // ─── BROWSE TEMPLATES ───────────────────────────────────────
+              <div className="max-h-[400px] overflow-y-auto">
+                {replyTemplates.length === 0 ? (
+                  <div className="text-center py-8 text-[var(--text-muted)] text-[12px]">
+                    No templates yet.
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setShowCreateTemplateForm(true)}
+                        className="text-[var(--info)] hover:underline font-semibold"
+                      >
+                        Create your first one →
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2 space-y-0.5">
+                    {["organization", "personal"].map((scope) => {
+                      const scopeTemplates = replyTemplates.filter((t: any) => t.scope === scope);
+                      if (scopeTemplates.length === 0) return null;
+                      return (
+                        <div key={scope}>
+                          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest px-3 pt-2 pb-1">
+                            {scope === "organization" ? "🏢 Shared (all users)" : "👤 Personal (just me)"}
+                          </div>
+                          {scopeTemplates.map((tpl: any) => (
+                            <button key={tpl.id} onClick={() => {
+                              // Insert at cursor in whichever editor opened the picker.
+                              const editorRef = replyInsertTarget === "modal"
+                                ? modalReplyEditorRef
+                                : replyInsertTarget === "forward"
+                                ? forwardEditorRef
+                                : inlineReplyEditorRef;
+                              if (editorRef.current) {
+                                editorRef.current.insertHTML(tpl.body);
+                              } else if (replyInsertTarget === "modal") {
+                                setReplyModalBody((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
+                              } else if (replyInsertTarget === "forward") {
+                                setForwardBody((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
+                              } else {
+                                setReplyText((prev) => (prev ? prev + "<p></p>" + tpl.body : tpl.body));
+                              }
+                              setShowReplyTemplateModal(false);
+                            }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[12px] font-semibold text-[var(--text-primary)]">{tpl.name}</div>
+                                <div className="text-[10px] text-[var(--text-muted)] truncate mt-0.5">
+                                  {tpl.body.replace(/<[^>]*>/g, "").slice(0, 80)}...
+                                </div>
+                              </div>
+                              {tpl.category && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[var(--info)] shrink-0">{tpl.category}</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Footer — only shown in browse mode, hidden during create form */}
+            {!showCreateTemplateForm && (
+              <div className="px-5 py-2 border-t border-[var(--border)] flex items-center justify-between">
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  Templates insert at your cursor position
+                </span>
+                <button
+                  onClick={() => {
+                    // Prefill body with current draft if anything's typed
+                    const draftBody = replyInsertTarget === "modal" ? replyModalBody
+                      : replyInsertTarget === "forward" ? forwardBody
+                      : replyText;
+                    if (draftBody && draftBody.trim() && !newTemplateBody) {
+                      setNewTemplateBody(draftBody);
+                    }
+                    setShowCreateTemplateForm(true);
+                  }}
+                  className="text-[10px] text-[var(--info)] hover:underline font-semibold"
+                >
+                  + New template
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Unified Drive Picker (works from inline reply, reply modal,
+             AND forward modal). */}
+      {showReplyDrive && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowReplyDrive(false)}>
+          <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-[var(--text-primary)]">Insert from Google Drive</div>
+                <div className="text-[10px] text-[var(--text-muted)]">Click a file to attach it</div>
+              </div>
+              <button onClick={() => setShowReplyDrive(false)} className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 max-h-[400px] overflow-y-auto">
+              {replyDrivePath.length > 0 && (
+                <div className="flex items-center gap-1 mb-3 text-[11px] flex-wrap">
+                  {replyDrivePath.map((fp, i) => (
+                    <span key={fp.id} className="flex items-center gap-1">
+                      {i > 0 && <span className="text-[var(--text-muted)]">/</span>}
+                      <button onClick={() => navigateReplyDrivePath(i)} className="text-[var(--info)] hover:underline">{fp.name}</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {replyDriveLoading ? (
+                <div className="text-center py-6 text-[var(--text-muted)] text-[12px]">Loading...</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {replyDriveFolders.map((f) => (
+                    <button key={f.id} onClick={() => navigateReplyDriveFolder(f)}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--border)] text-left transition-colors">
+                      <FolderOpen size={14} className="text-[var(--warning)]" />
+                      <span className="text-[12px] text-[var(--text-primary)]">{f.name}</span>
+                    </button>
+                  ))}
+                  {replyDriveFiles.map((f) => (
+                    <button key={f.id} onClick={() => { attachReplyDriveFile(f); setShowReplyDrive(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[rgba(74,222,128,0.08)] text-left transition-colors">
+                      <FileText size={14} className="text-[var(--info)]" />
+                      <span className="text-[12px] text-[var(--text-primary)] flex-1 truncate">{f.name}</span>
+                    </button>
+                  ))}
+                  {replyDriveFolders.length === 0 && replyDriveFiles.length === 0 && (
+                    <div className="text-[11px] text-[var(--text-muted)] py-4 text-center">No files in this folder</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {showForwardModal && (
@@ -5827,14 +6015,59 @@ export default function ConversationDetail({
         <div>
           <label className="mb-1 block text-[12px] font-semibold text-[var(--text-secondary)]">Message</label>
           <RichTextEditor
+            ref={forwardEditorRef}
             value={forwardBody}
             onChange={setForwardBody}
             placeholder="Type your message..."
             minHeight={260}
             autoFocus
             signature={replySignature}
+            onAttach={() => forwardFileInputRef.current?.click()}
+            onDrive={() => openReplyDrivePicker("forward")}
+            onTemplate={() => openReplyTemplatePicker("forward")}
             onAIDraft={() => { setAiDraftTarget("forwardModal"); setShowAIDraftModal(true); }}
           />
+          {/* Hidden file input for forward */}
+          <input
+            ref={forwardFileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={async (e) => {
+              const files = e.target.files;
+              if (!files) return;
+              const newAtts: { name: string; size: number; type: string; data: string }[] = [];
+              for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (file.size > 25 * 1024 * 1024) continue;
+                const data = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve((reader.result as string).split(",")[1]);
+                  reader.readAsDataURL(file);
+                });
+                newAtts.push({ name: file.name, size: file.size, type: file.type || "application/octet-stream", data });
+              }
+              setForwardAttachments((prev) => [...prev, ...newAtts]);
+              if (forwardFileInputRef.current) forwardFileInputRef.current.value = "";
+            }}
+          />
+          {/* Forward attachment chips */}
+          {forwardAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {forwardAttachments.map((att, i) => (
+                <div key={i} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[10px]">
+                  <Paperclip size={10} className="text-[var(--info)]" />
+                  <span className="text-[var(--text-primary)] max-w-[180px] truncate">{att.name}</span>
+                  <button
+                    onClick={() => setForwardAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="text-[var(--text-muted)] hover:text-[var(--danger)]"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
