@@ -461,6 +461,14 @@ export default function ConversationDetail({
   const [accountEmail, setAccountEmail] = useState<string>("");
   const [accountName, setAccountName] = useState<string>("");
   const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+  // Agent-created draft metadata. Populated when the draft loaded into the
+  // inline reply editor was created via the external API (e.g. Sammy's bot).
+  // null when the draft is a normal operator draft.
+  const [loadedDraftMeta, setLoadedDraftMeta] = useState<{
+    created_by_agent: string | null;
+    requires_sender_selection: boolean;
+    email_account_id: string | null;
+  } | null>(null);
 
   // Check for drafts when conversation loads
   useEffect(() => {
@@ -480,9 +488,17 @@ export default function ConversationDetail({
             if (myDraft.cc_addresses) { setReplyCc(myDraft.cc_addresses); setShowReplyCc(true); }
             if (myDraft.bcc_addresses) { setReplyBcc(myDraft.bcc_addresses); setShowReplyBcc(true); }
             setLoadedDraftId(myDraft.id);
+            // Track agent metadata so the inline editor can show a badge and
+            // force the operator to pick a sender before Send.
+            setLoadedDraftMeta({
+              created_by_agent: myDraft.created_by_agent || null,
+              requires_sender_selection: !!myDraft.requires_sender_selection,
+              email_account_id: myDraft.email_account_id || null,
+            });
             setShowReplyEditor(true);
           } else {
             setLoadedDraftId(null);
+            setLoadedDraftMeta(null);
           }
         }
       } catch { /* silent */ }
@@ -500,6 +516,7 @@ export default function ConversationDetail({
       if (loadedDraftId && !plainText) {
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+        setLoadedDraftMeta(null);
       }
       return;
     }
@@ -777,6 +794,7 @@ export default function ConversationDetail({
       if (loadedDraftId) {
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+        setLoadedDraftMeta(null);
       }
       return;
     }
@@ -1577,6 +1595,7 @@ export default function ConversationDetail({
     // asynchronously). The load-draft effect below this re-populates it correctly
     // for the new conversation, if a draft exists.
     setLoadedDraftId(null);
+    setLoadedDraftMeta(null);
     setNoteText("");
     setNewTaskText("");
     setNewTaskAssigneeIds([]);
@@ -2138,6 +2157,7 @@ export default function ConversationDetail({
       if (loadedDraftId) {
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+        setLoadedDraftMeta(null);
       }
       await refetchDetail();
     } finally {
@@ -2239,6 +2259,7 @@ export default function ConversationDetail({
       if (loadedDraftId) {
         fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+        setLoadedDraftMeta(null);
       }
       setReplyText("");
     } catch (error: any) {
@@ -2268,6 +2289,7 @@ export default function ConversationDetail({
       if (loadedDraftId) {
         await fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
         setLoadedDraftId(null);
+        setLoadedDraftMeta(null);
       }
       setReplyText("");
       return;
@@ -5562,6 +5584,70 @@ export default function ConversationDetail({
                   </button>
                 </div>
               )}
+              {/* Agent-drafted banner. Renders when the loaded draft was
+                  created via the external API (e.g. Sammy's bot). The badge
+                  identifies the agent; if requires_sender_selection is true,
+                  a sender picker is shown inline and the Send button is
+                  blocked below (handled at the Send-action site). */}
+              {loadedDraftMeta?.created_by_agent && (
+                <div className="mb-2 p-2.5 rounded-lg border border-[#A855F7]/30 bg-[#A855F7]/5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[14px]">🤖</span>
+                    <span className="text-[11px] font-semibold text-[#A855F7]">
+                      Drafted by {loadedDraftMeta.created_by_agent}
+                    </span>
+                    {loadedDraftMeta.requires_sender_selection && (
+                      <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--warning)]/15 text-[var(--warning)]">
+                        SENDER REQUIRED
+                      </span>
+                    )}
+                  </div>
+                  {loadedDraftMeta.requires_sender_selection && (
+                    <div className="mt-1.5">
+                      <div className="text-[10px] text-[var(--text-secondary)] mb-1">
+                        This agent draft didn't specify a sending account. Pick which mailbox to send from:
+                      </div>
+                      <select
+                        value={loadedDraftMeta.email_account_id || ""}
+                        onChange={async (e) => {
+                          const newAccountId = e.target.value || null;
+                          if (!newAccountId || !loadedDraftId) return;
+                          // Patch the draft on the server so the flag clears
+                          // and email_account_id sticks across reloads. The
+                          // backend's normal POST flow clears requires_sender_selection
+                          // when an email_account_id is provided by a session-authed user.
+                          try {
+                            await fetch("/api/drafts", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                conversation_id: convo?.id,
+                                email_account_id: newAccountId,
+                                author_id: currentUser?.id,
+                                to_addresses: replyTo,
+                                cc_addresses: showReplyCc ? replyCc : "",
+                                bcc_addresses: showReplyBcc ? replyBcc : "",
+                                subject: replySubject,
+                                body_html: replyText,
+                              }),
+                            });
+                          } catch { /* best-effort */ }
+                          // Update local UI immediately so Send unlocks.
+                          setLoadedDraftMeta((prev) =>
+                            prev ? { ...prev, email_account_id: newAccountId, requires_sender_selection: false } : prev
+                          );
+                        }}
+                        className="w-full px-2 py-1 rounded bg-[var(--bg)] border border-[var(--border)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50"
+                      >
+                        <option value="">— Pick an account —</option>
+                        {(emailAccounts || []).map((a: any) => (
+                          <option key={a.id} value={a.id}>{a.name || a.email}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
               <RichTextEditor
                 ref={inlineReplyEditorRef}
                 value={replyText}
@@ -5623,6 +5709,7 @@ export default function ConversationDetail({
                       onClick={async () => {
                         await fetch(`/api/drafts?id=${loadedDraftId}`, { method: "DELETE" }).catch(() => {});
                         setLoadedDraftId(null);
+                        setLoadedDraftMeta(null);
                         setReplyText("");
                         setShowReplyEditor(false);
                         setReplyAttachments([]);
@@ -5667,8 +5754,16 @@ export default function ConversationDetail({
                   })()}
                   <button
                     onClick={handleSendReplyInternal}
-                    disabled={sending || (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0)}
+                    disabled={
+                      sending ||
+                      (!replyText.replace(/<[^>]*>/g, "").trim() && replyAttachments.length === 0) ||
+                      // Block Send when an agent draft hasn't had a sender
+                      // account picked yet. The banner above shows a picker;
+                      // until they pick, this stays disabled.
+                      !!loadedDraftMeta?.requires_sender_selection
+                    }
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] disabled:opacity-40 transition-all text-[11px] font-bold"
+                    title={loadedDraftMeta?.requires_sender_selection ? "Pick a sending account above before sending" : undefined}
                   >
                     <Send size={12} />
                     {sending ? "Sending..." : "Send"}

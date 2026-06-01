@@ -11,7 +11,8 @@ import {
   ArrowLeft, Mail, Users, Tag, Shield, Plus, Trash2, Edit2,
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
-  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText, Plug, Database
+  FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText, Plug, Database,
+  Key, Copy, AlertTriangle
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 
@@ -61,6 +62,7 @@ const TABS = [
   { id: "kara", label: "Kara (AI Assistant)", icon: Sparkles },
   { id: "data_tools", label: "Data Tools", icon: Database },
   { id: "integrations", label: "Integrations", icon: Plug },
+  { id: "api_tokens", label: "API Tokens", icon: Key },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -128,6 +130,7 @@ export default function SettingsPage() {
         {activeTab === "kara" && <KaraTab />}
         {activeTab === "data_tools" && <PhoneBackfillTab />}
         {activeTab === "integrations" && <IntegrationsTab />}
+        {activeTab === "api_tokens" && <ApiTokensTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -4931,6 +4934,341 @@ function EmailTemplatesTab() {
 //
 // The override is appended after the cached base prompt, so edits take effect
 // on the next Kara message without invalidating Anthropic's prompt cache.
+// ── API Tokens Tab ──────────────────────────────────────────────────────
+//
+// Admin-only UI for managing external API tokens (Sammy's drafting agent,
+// etc.). Lets admins:
+//   - mint new tokens with a name + scopes — raw value shown ONCE on creation
+//   - revoke / un-revoke existing tokens
+//   - rename + edit scopes on existing tokens
+//   - see when each token was last used
+//
+// The raw token never appears again after the first reveal; the DB stores
+// only the SHA-256 hash. If someone loses a token, they revoke it and mint
+// a new one.
+function ApiTokensTab() {
+  const { data: session } = useSession();
+  const isAdmin = (session as any)?.teamMember?.role === "admin";
+  const [tokens, setTokens] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [newTokenScopes, setNewTokenScopes] = useState<string[]>(["drafts:write"]);
+  const [newTokenNotes, setNewTokenNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  // After creation, show the raw token in a "copy this now" panel until
+  // dismissed. Once dismissed it's gone — the only place we can show it.
+  const [createdToken, setCreatedToken] = useState<{ id: string; name: string; raw_token: string } | null>(null);
+  const [copyHint, setCopyHint] = useState(false);
+
+  const ALL_SCOPES = [
+    { id: "drafts:write", label: "Create drafts", desc: "Agent can POST new drafts" },
+    { id: "drafts:read", label: "Read drafts", desc: "Agent can list / fetch drafts it created" },
+    { id: "drafts:update", label: "Update drafts", desc: "Agent can edit drafts it previously created" },
+    { id: "conversations:read", label: "Read conversations (Phase 2)", desc: "Agent can read message history. Granted but not yet enforced by all endpoints." },
+  ];
+
+  async function fetchTokens() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/api-tokens");
+      if (res.ok) {
+        const data = await res.json();
+        setTokens(data.tokens || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch tokens:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchTokens(); }, []);
+
+  async function getActorContext() {
+    const sb = getSupabase();
+    const email = session?.user?.email;
+    if (!email) return { actor_id: null, actor_role: null };
+    const { data: me } = await sb
+      .from("team_members")
+      .select("id, role")
+      .eq("email", email)
+      .maybeSingle();
+    return { actor_id: me?.id || null, actor_role: me?.role || null };
+  }
+
+  async function createToken() {
+    if (!newTokenName.trim() || newTokenScopes.length === 0) {
+      alert("Name and at least one scope are required.");
+      return;
+    }
+    try {
+      setSaving(true);
+      const { actor_id, actor_role } = await getActorContext();
+      const res = await fetch("/api/admin/api-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newTokenName.trim(),
+          scopes: newTokenScopes,
+          notes: newTokenNotes || null,
+          actor_id,
+          actor_role,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert("Failed: " + (json.error || "Unknown error"));
+        return;
+      }
+      setCreatedToken({ id: json.id, name: json.name, raw_token: json.raw_token });
+      setNewTokenName("");
+      setNewTokenScopes(["drafts:write"]);
+      setNewTokenNotes("");
+      setShowCreate(false);
+      await fetchTokens();
+    } catch (e: any) {
+      alert("Failed: " + (e?.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setRevoked(id: string, revoked: boolean) {
+    if (revoked && !confirm("Revoke this token? Any agent using it will stop working immediately.")) return;
+    try {
+      const { actor_id, actor_role } = await getActorContext();
+      const res = await fetch("/api/admin/api-tokens", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, revoked, actor_id, actor_role }),
+      });
+      if (res.ok) await fetchTokens();
+      else {
+        const json = await res.json();
+        alert("Failed: " + (json.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      alert("Failed: " + (e?.message || String(e)));
+    }
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopyHint(true);
+      setTimeout(() => setCopyHint(false), 1500);
+    });
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="p-8">
+        <div className="text-[var(--text-muted)] text-sm">Admin access required.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 max-w-4xl">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-1">API Tokens</h2>
+          <p className="text-[12px] text-[var(--text-muted)] leading-relaxed">
+            For external integrations like Sammy's drafting agent. Each token has a name (used in audit logs) and scopes (what it's allowed to do).
+            <br />Raw tokens are shown ONCE on creation — store them securely.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold hover:opacity-90"
+        >
+          <Plus size={13} /> New token
+        </button>
+      </div>
+
+      {/* Just-created token reveal panel */}
+      {createdToken && (
+        <div className="mb-4 rounded-xl border-2 border-[var(--accent)] bg-[var(--accent)]/5 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Key size={14} className="text-[var(--accent)]" />
+            <span className="text-[13px] font-bold text-[var(--text-primary)]">Token created: {createdToken.name}</span>
+          </div>
+          <div className="text-[11px] text-[var(--text-secondary)] mb-2 flex items-start gap-1.5">
+            <AlertTriangle size={11} className="text-[var(--warning)] mt-0.5 shrink-0" />
+            <span>This raw token will <strong>only be shown once</strong>. Copy it now and store it in your partner's secrets manager. We can't recover it later — only revoke + mint new.</span>
+          </div>
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-primary)] break-all">
+            <span className="flex-1">{createdToken.raw_token}</span>
+            <button
+              onClick={() => copyToClipboard(createdToken.raw_token)}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-[var(--border)] text-[11px] hover:bg-[var(--text-muted)]/20 transition-colors shrink-0"
+              title="Copy to clipboard"
+            >
+              <Copy size={11} /> {copyHint ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <button
+            onClick={() => setCreatedToken(null)}
+            className="mt-2 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          >
+            I've saved it, dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-semibold text-[var(--text-primary)]">Create new token</div>
+            <button onClick={() => setShowCreate(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+              <X size={14} />
+            </button>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Name</label>
+            <input
+              autoFocus
+              value={newTokenName}
+              onChange={(e) => setNewTokenName(e.target.value)}
+              placeholder="e.g. Sammy Agent v1"
+              className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50"
+            />
+            <div className="text-[10px] text-[var(--text-muted)] mt-1">This name shows up in audit logs as the actor (e.g. "Sammy Agent v1 created draft").</div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Scopes</label>
+            <div className="space-y-1.5">
+              {ALL_SCOPES.map((s) => {
+                const checked = newTokenScopes.includes(s.id);
+                return (
+                  <label key={s.id} className="flex items-start gap-2 p-2 rounded-lg hover:bg-[var(--bg)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        setNewTokenScopes((prev) =>
+                          prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]
+                        );
+                      }}
+                      className="mt-0.5 accent-[var(--accent)]"
+                    />
+                    <div className="flex-1">
+                      <div className="text-[12px] font-semibold text-[var(--text-primary)]">{s.label}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">{s.desc}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Notes (optional)</label>
+            <textarea
+              value={newTokenNotes}
+              onChange={(e) => setNewTokenNotes(e.target.value)}
+              placeholder="e.g. Used by Sammy's drafting agent. Contact: sam@example.com"
+              rows={2}
+              className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50 resize-none"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              onClick={() => setShowCreate(false)}
+              className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={createToken}
+              disabled={saving || !newTokenName.trim() || newTokenScopes.length === 0}
+              className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold disabled:opacity-40"
+            >
+              {saving ? "Creating…" : "Create token"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Token list */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px]">
+          <Loader2 size={14} className="animate-spin" /> Loading tokens…
+        </div>
+      ) : tokens.length === 0 ? (
+        <div className="text-center py-12 text-[var(--text-muted)] text-[12px]">
+          No API tokens yet. Click "New token" to mint one.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {tokens.map((t) => {
+            const isRevoked = !!t.revoked_at;
+            return (
+              <div
+                key={t.id}
+                className={`rounded-xl border bg-[var(--surface)] p-3.5 ${
+                  isRevoked ? "border-[var(--border)] opacity-60" : "border-[var(--border)]"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[var(--bg)] flex items-center justify-center shrink-0">
+                    <Key size={14} className={isRevoked ? "text-[var(--text-muted)]" : "text-[var(--accent)]"} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[13px] font-semibold text-[var(--text-primary)]">{t.name}</span>
+                      {isRevoked && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--danger)]/15 text-[var(--danger)]">REVOKED</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {(t.scopes || []).map((s: string) => (
+                        <span key={s} className="px-1.5 py-0.5 rounded text-[9px] bg-[rgba(88,166,255,0.12)] text-[var(--info)] font-mono">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)]">
+                      Created {new Date(t.created_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+                      {t.created_by?.name && ` by ${t.created_by.name}`}
+                      {t.last_used_at
+                        ? ` · Last used ${new Date(t.last_used_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+                        : " · Never used"}
+                    </div>
+                    {t.notes && (
+                      <div className="mt-1 text-[10px] text-[var(--text-secondary)] italic">{t.notes}</div>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    {isRevoked ? (
+                      <button
+                        onClick={() => setRevoked(t.id, false)}
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+                        title="Un-revoke"
+                      >
+                        Un-revoke
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setRevoked(t.id, true)}
+                        className="px-2.5 py-1 rounded-lg border border-[var(--danger)]/40 text-[10px] text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                        title="Revoke this token immediately"
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KaraTab() {
   const [override, setOverride] = useState("");
   const [original, setOriginal] = useState("");

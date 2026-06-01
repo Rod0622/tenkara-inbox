@@ -125,6 +125,29 @@ export default function DraftsPanel({
                           Auto follow-up
                         </span>
                       )}
+                      {/* Agent-created draft badge. Distinct purple chip so
+                          operators can tell at a glance which drafts came
+                          from an external integration (e.g. Sammy's bot)
+                          vs their own work or auto follow-ups. */}
+                      {draft.created_by_agent && (
+                        <span
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#A855F7]/10 text-[#A855F7] border border-[#A855F7]/20 shrink-0 flex items-center gap-1"
+                          title={`Drafted by ${draft.created_by_agent}`}
+                        >
+                          <span>🤖</span>
+                          <span>{draft.created_by_agent}</span>
+                        </span>
+                      )}
+                      {/* Sender-required warning — operator needs to pick an
+                          account before this draft can be sent. */}
+                      {draft.requires_sender_selection && (
+                        <span
+                          className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/30 shrink-0"
+                          title="Pick a sending account before this draft can be sent"
+                        >
+                          Pick sender
+                        </span>
+                      )}
                     </div>
 
                     {/* To + account + author */}
