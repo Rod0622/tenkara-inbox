@@ -97,13 +97,192 @@ const defaultFilters: Filters = {
   labelLogic: "or",
 };
 
+// Compact dropdown for the Assigned-to filter. Replaces the previous wall-
+// of-chips UI which got unwieldy with 20+ team members. Trigger shows the
+// current selection; dropdown panel has search + scrollable list. Single-
+// select (matches the filter's underlying contract).
+function AssignedToDropdown({
+  value,
+  onChange,
+  teamMembers,
+}: {
+  value: string | null; // null = anyone; "unassigned"; otherwise team_member.id
+  onChange: (v: string | null) => void;
+  teamMembers: TeamMember[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Outside-click to close.
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  // Auto-focus search on open + reset query.
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  }, [open]);
+
+  // Active team members only — deactivated members shouldn't be filter
+  // options (matches the pattern in task pickers + group quick-selects).
+  const activeMembers = teamMembers.filter((m: any) => m.is_active !== false);
+
+  // Filter by name / email substring (case-insensitive).
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? activeMembers.filter((m: any) => {
+        const name = (m.name || "").toLowerCase();
+        const email = (m.email || "").toLowerCase();
+        return name.includes(q) || email.includes(q);
+      })
+    : activeMembers;
+
+  // Resolve the trigger label/avatar based on the current value.
+  const selectedMember = value && value !== "unassigned" ? teamMembers.find((m) => m.id === value) : null;
+  const triggerLabel =
+    value === null ? "Anyone"
+    : value === "unassigned" ? "Unassigned"
+    : selectedMember?.name || "Unknown";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-medium transition-all ${
+          open
+            ? "border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text-primary)]"
+            : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        }`}
+      >
+        {selectedMember ? (
+          <span
+            className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)] flex-shrink-0"
+            style={{ background: selectedMember.color }}
+          >
+            {selectedMember.initials}
+          </span>
+        ) : (
+          <User size={10} className="text-[var(--text-muted)]" />
+        )}
+        <span className="flex-1 text-left truncate">{triggerLabel}</span>
+        <ChevronDown size={10} className="opacity-60" />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg shadow-2xl shadow-black/40 flex flex-col max-h-[280px]">
+          {/* Search */}
+          <div className="px-2 py-1.5 border-b border-[var(--border)] shrink-0">
+            <div className="relative">
+              <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search assignees…"
+                className="w-full pl-6 pr-2 py-1 text-[10px] bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)]"
+              />
+            </div>
+          </div>
+
+          {/* Anyone / Unassigned special rows + filtered members */}
+          <div className="flex-1 overflow-y-auto py-1">
+            {!q && (
+              <>
+                <button
+                  onClick={() => { onChange(null); setOpen(false); }}
+                  className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-[11px] hover:bg-[var(--border)] ${
+                    value === null ? "text-[var(--accent)] font-semibold" : "text-[var(--text-secondary)]"
+                  }`}
+                >
+                  <User size={11} className="opacity-60" />
+                  <span className="flex-1 text-left">Anyone</span>
+                  {value === null && <Check size={11} />}
+                </button>
+                <button
+                  onClick={() => { onChange("unassigned"); setOpen(false); }}
+                  className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-[11px] hover:bg-[var(--border)] ${
+                    value === "unassigned" ? "text-[var(--accent)] font-semibold" : "text-[var(--text-secondary)]"
+                  }`}
+                >
+                  <User size={11} className="opacity-60" />
+                  <span className="flex-1 text-left">Unassigned</span>
+                  {value === "unassigned" && <Check size={11} />}
+                </button>
+                <div className="h-px bg-[var(--border)] my-1" />
+              </>
+            )}
+
+            {filtered.map((m: any) => (
+              <button
+                key={m.id}
+                onClick={() => { onChange(m.id); setOpen(false); }}
+                className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-[11px] hover:bg-[var(--border)] ${
+                  value === m.id ? "text-[var(--accent)] font-semibold" : "text-[var(--text-secondary)]"
+                }`}
+              >
+                <span
+                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)] flex-shrink-0"
+                  style={{ background: m.color }}
+                >
+                  {m.initials}
+                </span>
+                <span className="flex-1 text-left truncate">{m.name}</span>
+                {value === m.id && <Check size={11} />}
+              </button>
+            ))}
+
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-[10px] text-[var(--text-muted)] text-center">
+                No matches for "{search}"
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
   const [labels, setLabels] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const sb = createBrowserClient();
     sb.from("labels").select("*").order("name").then(({ data }) => setLabels(data || []));
   }, []);
+
+  // Outside-click to close.
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  // Auto-focus search on open + reset query.
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setTimeout(() => inputRef.current?.focus(), 10);
+    }
+  }, [open]);
 
   if (labels.length === 0) return null;
 
@@ -113,52 +292,183 @@ function LabelFilter({ filters, setFilters }: { filters: Filters; setFilters: (f
     setFilters({ ...filters, labelIds: next });
   };
 
+  // Build a sorted view: top-level labels first (by name), then their
+  // children indented under them. Matches the per-conversation label picker
+  // pattern so users navigate labels consistently across the app.
+  const naturalSort = (a: string, b: string) =>
+    (a || "").localeCompare(b || "", undefined, { numeric: true, sensitivity: "base" });
+
+  const topLevel = labels
+    .filter((l: any) => !l.parent_label_id)
+    .slice()
+    .sort((a: any, b: any) => naturalSort(a.name, b.name));
+
+  const childrenByParent = new Map<string, any[]>();
+  for (const l of labels) {
+    if (l.parent_label_id) {
+      const arr = childrenByParent.get(l.parent_label_id) || [];
+      arr.push(l);
+      childrenByParent.set(l.parent_label_id, arr);
+    }
+  }
+  childrenByParent.forEach((kids) => {
+    kids.sort((a: any, b: any) => naturalSort(a.name, b.name));
+  });
+
+  // Filter: parent shown if its name matches OR any child matches.
+  // When only children match, show only those children under the parent.
+  const q = search.trim().toLowerCase();
+  const filteredChildren = new Map<string, any[]>();
+  const matchedParentIds = new Set<string>();
+  if (q) {
+    for (const parent of topLevel) {
+      const kids = childrenByParent.get(parent.id) || [];
+      const matchingKids = kids.filter((k: any) => (k.name || "").toLowerCase().includes(q));
+      if (matchingKids.length > 0) {
+        filteredChildren.set(parent.id, matchingKids);
+        matchedParentIds.add(parent.id);
+      }
+    }
+  }
+  const filteredTopLevel = topLevel.filter((parent: any) => {
+    if (!q) return true;
+    if (matchedParentIds.has(parent.id)) return true;
+    if ((parent.name || "").toLowerCase().includes(q)) {
+      const kids = childrenByParent.get(parent.id) || [];
+      if (kids.length > 0) filteredChildren.set(parent.id, kids);
+      return true;
+    }
+    return false;
+  });
+  if (!q) {
+    for (const parent of filteredTopLevel) {
+      const kids = childrenByParent.get(parent.id) || [];
+      if (kids.length > 0) filteredChildren.set(parent.id, kids);
+    }
+  }
+
+  const selectedCount = (filters.labelIds || []).length;
+  const triggerLabel =
+    selectedCount === 0 ? "Any label"
+    : selectedCount === 1 ? (() => {
+        const lbl = labels.find((l: any) => l.id === filters.labelIds![0]);
+        const parent = lbl?.parent_label_id ? labels.find((l: any) => l.id === lbl.parent_label_id) : null;
+        return parent ? `${parent.name} / ${lbl?.name}` : (lbl?.name || "Unknown");
+      })()
+    : `${selectedCount} labels selected`;
+
   return (
-    <div>
+    <div className="mb-2.5">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Labels</span>
-        {(filters.labelIds || []).length > 1 && (
+        {selectedCount > 1 && (
           <button
             onClick={() => setFilters({ ...filters, labelLogic: filters.labelLogic === "and" ? "or" : "and" })}
             className="px-2 py-0.5 rounded text-[9px] font-bold border border-[var(--border)] text-[var(--info)] hover:bg-[var(--surface)] transition-colors"
+            title={filters.labelLogic === "and" ? "Showing conversations with ALL selected labels" : "Showing conversations with ANY selected label"}
           >
             {filters.labelLogic === "and" ? "AND" : "OR"}
           </button>
         )}
       </div>
-      {/* Constrain to ~3 rows so a long label list doesn't make the filter
-          panel taller than the conversation list. Scrolls inside this box. */}
-      <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto pr-1">
-        {[...labels].sort((a, b) => {
-          // Group children right after their parents by sorting on the rendered
-          // "Parent / Child" path string. Top-level labels sort by their own name.
-          const keyFor = (lbl: any) => {
-            if (!lbl.parent_label_id) return (lbl.name || "").toLowerCase();
-            const parent = labels.find((l) => l.id === lbl.parent_label_id);
-            return `${(parent?.name || "").toLowerCase()} / ${(lbl.name || "").toLowerCase()}`;
-          };
-          return keyFor(a).localeCompare(keyFor(b));
-        }).map((label) => {
-          const isActive = (filters.labelIds || []).includes(label.id);
-          // Batch 8: show "Parent / Child" if this label has a parent
-          const parent = label.parent_label_id ? labels.find((l) => l.id === label.parent_label_id) : null;
-          const display = parent ? `${parent.name} / ${label.name}` : label.name;
-          return (
+
+      <div className="relative" ref={ref}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className={`w-full flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] font-medium transition-all ${
+            open
+              ? "border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text-primary)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          }`}
+        >
+          <Tag size={11} className="text-[var(--text-muted)] flex-shrink-0" />
+          <span className={`flex-1 text-left truncate ${selectedCount > 0 ? "text-[var(--text-primary)]" : ""}`}>
+            {triggerLabel}
+          </span>
+          {selectedCount > 0 && (
             <button
-              key={label.id}
-              onClick={() => toggleLabel(label.id)}
-              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all flex items-center gap-1 ${
-                isActive ? "ring-1 ring-white/30" : "opacity-60 hover:opacity-100"
-              }`}
-              style={{ background: isActive ? label.bg_color : label.bg_color + "60", color: label.color }}
+              onClick={(e) => { e.stopPropagation(); setFilters({ ...filters, labelIds: [] }); }}
+              className="text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
+              title="Clear label filter"
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: label.color }} />
-              {display}
+              <X size={10} />
             </button>
-          );
-        })}
+          )}
+          <ChevronDown size={10} className="opacity-60 shrink-0" />
+        </button>
+
+        {open && (
+          <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg shadow-2xl shadow-black/40 flex flex-col max-h-[320px]">
+            <div className="px-2 py-1.5 border-b border-[var(--border)] shrink-0">
+              <div className="relative">
+                <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search labels…"
+                  className="w-full pl-6 pr-2 py-1 text-[10px] bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50 placeholder:text-[var(--text-muted)]"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-1">
+              {filteredTopLevel.length === 0 ? (
+                <div className="px-3 py-3 text-[10px] text-[var(--text-muted)] text-center">
+                  No matches for "{search}"
+                </div>
+              ) : (
+                filteredTopLevel.map((parent: any) => (
+                  <div key={parent.id}>
+                    {renderLabelRow(parent, false, filters, toggleLabel)}
+                    {(filteredChildren.get(parent.id) || []).map((child: any) =>
+                      renderLabelRow(child, true, filters, toggleLabel)
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+// Render a single label row in the dropdown. Extracted from LabelFilter
+// because it's called from two places (parent + child rendering loops) and
+// hoisting it out keeps the JSX in the main fn readable.
+function renderLabelRow(
+  label: any,
+  isChild: boolean,
+  filters: Filters,
+  toggleLabel: (id: string) => void
+) {
+  const isActive = (filters.labelIds || []).includes(label.id);
+  return (
+    <button
+      key={label.id}
+      onClick={() => toggleLabel(label.id)}
+      className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-[11px] hover:bg-[var(--border)] ${isChild ? "pl-6" : ""}`}
+    >
+      <div
+        className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center flex-shrink-0 ${
+          isActive ? "border-transparent" : "border-[var(--text-muted)]"
+        }`}
+        style={isActive ? { background: label.color } : {}}
+      >
+        {isActive && <Check size={9} className="text-[var(--bg)]" />}
+      </div>
+      {isChild && <span className="text-[var(--text-muted)] text-[10px] select-none">└</span>}
+      <span
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={{ background: label.color }}
+      />
+      <span className={`truncate text-left ${isActive ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"}`}>
+        {label.name}
+      </span>
+    </button>
   );
 }
 
@@ -261,50 +571,19 @@ function FilterPanel({
         )}
       </div>
 
-      {/* Assigned To */}
+      {/* Assigned To — compact dropdown to replace the wall-of-chips
+          version. Hides deactivated members. Includes a search input for
+          large teams. Trigger shows current selection (avatar + name for
+          single user, "Anyone" / "Unassigned" for those values). */}
       <div className="mb-2.5">
         <div className="text-[10px] font-semibold text-[var(--text-muted)] mb-1 flex items-center gap-1">
           <User size={10} /> Assigned to
         </div>
-        <div className="flex flex-wrap gap-1">
-          <button
-            onClick={() => setFilters({ ...filters, assignedTo: null })}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
-              filters.assignedTo === null
-                ? "bg-[var(--accent)] text-[var(--bg)]"
-                : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
-            }`}
-          >
-            Anyone
-          </button>
-          <button
-            onClick={() => setFilters({ ...filters, assignedTo: "unassigned" })}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
-              filters.assignedTo === "unassigned"
-                ? "bg-[var(--accent)] text-[var(--bg)]"
-                : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
-            }`}
-          >
-            Unassigned
-          </button>
-          {teamMembers.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setFilters({ ...filters, assignedTo: m.id })}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
-                filters.assignedTo === m.id
-                  ? "bg-[var(--accent)] text-[var(--bg)]"
-                  : "bg-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
-              }`}
-            >
-              <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0"
-                style={{ background: filters.assignedTo === m.id ? "var(--bg)" : m.color, color: filters.assignedTo === m.id ? "var(--accent)" : "var(--bg)" }}>
-                {m.initials}
-              </span>
-              {m.name}
-            </button>
-          ))}
-        </div>
+        <AssignedToDropdown
+          value={filters.assignedTo}
+          onChange={(v) => setFilters({ ...filters, assignedTo: v })}
+          teamMembers={teamMembers}
+        />
       </div>
 
       {/* From email */}
