@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import {
   ArrowLeft, CheckCircle2, ExternalLink, Inbox, ListTodo, Loader2,
-  Mail, Send, AlertTriangle, Eye, Clock,
+  Mail, Send, AlertTriangle, Eye, Clock, Calendar, ChevronDown,
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 import TaskCountdown from "@/components/TaskCountdown";
@@ -37,6 +37,62 @@ function fmtTime(mins: number): string {
   return Math.round(mins / 1440 * 10) / 10 + "d";
 }
 
+type DatePreset = "today" | "7d" | "30d" | "90d" | "this_month" | "last_month" | "all" | "custom";
+
+// Compute [from, to] ISO date strings (YYYY-MM-DD) for a given preset.
+// Returns null for "all" (no bounds) and "custom" (caller picks).
+// Both bounds are inclusive at the date-string level; we add a +1 day shift
+// when querying so the upper bound includes the full day's worth of records.
+function dateRangeForPreset(preset: DatePreset): { from: string | null; to: string | null } {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const d = today.getDate();
+  const iso = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+
+  switch (preset) {
+    case "today":
+      return { from: iso(today), to: iso(today) };
+    case "7d":
+      return { from: iso(new Date(y, m, d - 6)), to: iso(today) };
+    case "30d":
+      return { from: iso(new Date(y, m, d - 29)), to: iso(today) };
+    case "90d":
+      return { from: iso(new Date(y, m, d - 89)), to: iso(today) };
+    case "this_month":
+      return { from: iso(new Date(y, m, 1)), to: iso(today) };
+    case "last_month": {
+      const start = new Date(y, m - 1, 1);
+      const end = new Date(y, m, 0); // last day of previous month
+      return { from: iso(start), to: iso(end) };
+    }
+    case "all":
+    case "custom":
+    default:
+      return { from: null, to: null };
+  }
+}
+
+// Convert a YYYY-MM-DD upper-bound string to an exclusive upper-bound
+// timestamp. This way, "2025-06-01" as a "to" date actually means
+// "everything up to and including all of June 1" (i.e. < 2025-06-02).
+function exclusiveUpperBound(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const PRESET_LABELS: Record<DatePreset, string> = {
+  today: "Today",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  this_month: "This month",
+  last_month: "Last month",
+  all: "All time",
+  custom: "Custom range",
+};
+
 export default function MyPerformancePage() {
   const { data: session } = useSession();
   const [loading, setLoading] = useState(true);
@@ -47,6 +103,56 @@ export default function MyPerformancePage() {
   const [responseStats, setResponseStats] = useState<{ avg: number; fastest: number; slowest: number; total: number; suppliers: any[] } | null>(null);
   const [activeTab, setActiveTab] = useState<"tasks" | "emails" | "unread" | "sent" | "response">("tasks");
 
+  // Date range filter. Applies to all four data sources:
+  //   tasks (by tasks.created_at), conversations (by last_message_at),
+  //   sent emails (by sent_at), response_times (by response_sent_at).
+  //
+  // Default: last 30 days — matches typical "review my recent work" use case.
+  // Setting preset to "all" disables date filtering entirely.
+  // Setting preset to "custom" exposes from/to date pickers.
+  const initialRange = dateRangeForPreset("30d");
+  const [datePreset, setDatePreset] = useState<DatePreset>("30d");
+  const [dateFrom, setDateFrom] = useState<string | null>(initialRange.from);
+  const [dateTo, setDateTo] = useState<string | null>(initialRange.to);
+  const [showDateMenu, setShowDateMenu] = useState(false);
+  const dateMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close the date menu when the user clicks outside it.
+  useEffect(() => {
+    if (!showDateMenu) return;
+    const onClick = (e: MouseEvent) => {
+      if (dateMenuRef.current && !dateMenuRef.current.contains(e.target as Node)) {
+        setShowDateMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [showDateMenu]);
+
+  const applyPreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    if (preset === "custom") {
+      // Keep existing from/to so the user can fine-tune. If they're null
+      // (came from "all"), seed with last 30 days as a starting point.
+      if (!dateFrom || !dateTo) {
+        const seed = dateRangeForPreset("30d");
+        setDateFrom(seed.from);
+        setDateTo(seed.to);
+      }
+      return;
+    }
+    const range = dateRangeForPreset(preset);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setShowDateMenu(false);
+  };
+
+  // Human-readable label for the current date filter, shown on the button.
+  const datePillLabel = useMemo(() => {
+    if (datePreset === "custom" && dateFrom && dateTo) return `${dateFrom} → ${dateTo}`;
+    return PRESET_LABELS[datePreset];
+  }, [datePreset, dateFrom, dateTo]);
+
   useEffect(() => {
     document.body.style.overflow = "auto";
     return () => { document.body.style.overflow = ""; };
@@ -55,7 +161,10 @@ export default function MyPerformancePage() {
   useEffect(() => {
     if (!session?.user?.email) return;
     loadMyData();
-  }, [session?.user?.email]);
+    // Re-run whenever the date range changes so filters apply across all
+    // tabs without a manual refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.email, dateFrom, dateTo, datePreset]);
 
   async function loadMyData() {
     setLoading(true);
@@ -66,37 +175,73 @@ export default function MyPerformancePage() {
     if (!me) { setLoading(false); return; }
     setUser(me);
 
+    // Date filter setup. dateFrom / dateTo are YYYY-MM-DD strings (or null
+    // when "all time" is selected). We compute an exclusive upper bound
+    // (next day) so .lt() picks up the full day, including timestamps like
+    // "2025-06-01T23:59:59".
+    const hasDateFilter = !!(dateFrom && dateTo);
+    const dateFromIso = dateFrom; // ISO-string compatible
+    const dateToExclusive = dateTo ? exclusiveUpperBound(dateTo) : null;
+
+    // Build queries. Each gets a .gte()/.lt() applied on its natural date
+    // column when filtering is active. Limits are raised when filtering so
+    // a wide date range doesn't silently truncate older items.
+    //
+    // Tasks: filter on tasks.created_at via inner join (the !inner makes the
+    // filter restrict task_assignees rows to those whose joined task matches).
+    const tasksJoin = hasDateFilter ? "task:tasks!inner" : "task:tasks";
+    let tasksQuery = sb.from("task_assignees")
+      .select(`task_id, is_done, status, ${tasksJoin}(id, text, due_date, due_time, status, is_done, dismiss_reason, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))`)
+      .eq("team_member_id", me.id);
+    if (hasDateFilter) {
+      tasksQuery = tasksQuery
+        .gte("task.created_at", dateFromIso!)
+        .lt("task.created_at", dateToExclusive!);
+    }
+
+    let convosQuery = sb.from("conversations")
+      .select("id, subject, from_name, from_email, preview, status, is_unread, last_message_at, assignee_id, email_account_id, folder_id, email_account:email_accounts(name), folder:folders(name)")
+      .eq("assignee_id", me.id)
+      .neq("status", "trash")
+      .neq("status", "merged")
+      .order("last_message_at", { ascending: false })
+      .limit(hasDateFilter ? 500 : 100);
+    if (hasDateFilter) {
+      convosQuery = convosQuery
+        .gte("last_message_at", dateFromIso!)
+        .lt("last_message_at", dateToExclusive!);
+    }
+
+    let sentQuery = sb.from("messages")
+      .select("id, subject, to_addresses, sent_at, conversation_id, from_email, sent_by_user_id")
+      .eq("is_outbound", true)
+      .eq("sent_by_user_id", me.id)
+      .order("sent_at", { ascending: false })
+      .limit(hasDateFilter ? 500 : 50);
+    if (hasDateFilter) {
+      sentQuery = sentQuery
+        .gte("sent_at", dateFromIso!)
+        .lt("sent_at", dateToExclusive!);
+    }
+
+    let rtQuery = sb.from("response_times")
+      .select("*")
+      .eq("team_member_id", me.id)
+      .eq("direction", "team_reply")
+      .order("response_sent_at", { ascending: false })
+      .limit(hasDateFilter ? 2000 : 500);
+    if (hasDateFilter) {
+      rtQuery = rtQuery
+        .gte("response_sent_at", dateFromIso!)
+        .lt("response_sent_at", dateToExclusive!);
+    }
+
     // Fetch tasks, conversations, sent emails, response times in parallel
     const [tasksRes, convosRes, sentRes, rtRes] = await Promise.all([
-      // Tasks assigned to me
-      sb.from("task_assignees")
-        .select("task_id, is_done, status, task:tasks(id, text, due_date, due_time, status, is_done, dismiss_reason, created_at, conversation_id, conversation:conversations(id, subject), task_assignees(team_member_id, is_done, status, team_member:team_members(name, initials, color)), category:task_categories(name, color))")
-        .eq("team_member_id", me.id),
-
-      // My assigned conversations
-      sb.from("conversations")
-        .select("id, subject, from_name, from_email, preview, status, is_unread, last_message_at, assignee_id, email_account_id, folder_id, email_account:email_accounts(name), folder:folders(name)")
-        .eq("assignee_id", me.id)
-        .neq("status", "trash")
-        .neq("status", "merged")
-        .order("last_message_at", { ascending: false })
-        .limit(100),
-
-      // My sent emails
-      sb.from("messages")
-        .select("id, subject, to_addresses, sent_at, conversation_id, from_email, sent_by_user_id")
-        .eq("is_outbound", true)
-        .eq("sent_by_user_id", me.id)
-        .order("sent_at", { ascending: false })
-        .limit(50),
-
-      // My response times
-      sb.from("response_times")
-        .select("*")
-        .eq("team_member_id", me.id)
-        .eq("direction", "team_reply")
-        .order("response_sent_at", { ascending: false })
-        .limit(500),
+      tasksQuery,
+      convosQuery,
+      sentQuery,
+      rtQuery,
     ]);
 
     // Process tasks
@@ -230,9 +375,88 @@ export default function MyPerformancePage() {
         <div className="flex items-center gap-4 mb-6">
           <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><ArrowLeft size={20} /></Link>
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-[var(--bg)]" style={{ background: user.color }}>{user.initials}</div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-2xl font-normal font-serif tracking-tight">My Performance</h1>
             <div className="text-sm text-[var(--text-secondary)]">{user.name} · {user.department || "Team Member"}</div>
+          </div>
+
+          {/* Date range filter — applies to every tab. Presets + custom range. */}
+          <div className="relative" ref={dateMenuRef}>
+            <button
+              onClick={() => setShowDateMenu((v) => !v)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all ${
+                showDateMenu
+                  ? "border-[var(--accent)] bg-[var(--surface-2)] text-[var(--text-primary)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-muted)]"
+              }`}
+              title="Filter by date range"
+            >
+              <Calendar size={13} />
+              <span>{datePillLabel}</span>
+              <ChevronDown size={11} className="opacity-60" />
+            </button>
+
+            {showDateMenu && (
+              <div className="absolute top-full right-0 mt-1 z-30 w-64 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
+                {/* Preset list */}
+                <div className="py-1 border-b border-[var(--border)]">
+                  {(["today", "7d", "30d", "90d", "this_month", "last_month", "all"] as DatePreset[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => applyPreset(p)}
+                      className={`flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-left hover:bg-[var(--border)] transition-colors ${
+                        datePreset === p ? "text-[var(--accent)] font-semibold" : "text-[var(--text-secondary)]"
+                      }`}
+                    >
+                      <span>{PRESET_LABELS[p]}</span>
+                      {datePreset === p && <span className="text-[10px]">✓</span>}
+                    </button>
+                  ))}
+                </div>
+                {/* Custom range section. Active when datePreset === "custom"
+                    OR the user starts editing a date input here. */}
+                <div className="p-3 space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Custom range</div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] text-[var(--text-muted)]">
+                      From
+                      <input
+                        type="date"
+                        value={dateFrom || ""}
+                        onChange={(e) => {
+                          // Switching the From date moves the preset into
+                          // custom mode so the menu reflects what the user
+                          // is now looking at.
+                          setDateFrom(e.target.value || null);
+                          setDatePreset("custom");
+                        }}
+                        max={dateTo || undefined}
+                        className="block w-full mt-0.5 px-2 py-1 text-[11px] bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50"
+                      />
+                    </label>
+                    <label className="text-[10px] text-[var(--text-muted)]">
+                      To
+                      <input
+                        type="date"
+                        value={dateTo || ""}
+                        onChange={(e) => {
+                          setDateTo(e.target.value || null);
+                          setDatePreset("custom");
+                        }}
+                        min={dateFrom || undefined}
+                        className="block w-full mt-0.5 px-2 py-1 text-[11px] bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-[var(--info)]/50"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    onClick={() => setShowDateMenu(false)}
+                    className="w-full mt-1 px-2 py-1 rounded bg-[var(--accent)] text-[var(--bg)] text-[11px] font-semibold hover:opacity-90"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
