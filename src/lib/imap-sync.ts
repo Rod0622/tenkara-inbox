@@ -1345,14 +1345,27 @@ async function findOrCreateConversation(
     }
   }
 
-  // Strategy 3: Match by normalized subject + email account
+  // Strategy 3: Match by normalized subject + email account + SENDER.
+  //
+  // CRITICAL: this also requires from_email to match. Without that check,
+  // two completely different suppliers sending the same generic subject
+  // (e.g. "Customer account confirmation" auto-sent by Shopify and similar
+  // e-commerce platforms) would get folded into the same conversation,
+  // making the thread show messages from multiple unrelated companies.
+  //
+  // The normal case (a supplier replying to a previous thread) goes through
+  // Strategy 1 or 2 thanks to In-Reply-To / References headers. Strategy 3
+  // is only for mail systems that strip those headers — and there the
+  // strongest available signal of "same conversation" is "same sender +
+  // same subject", not subject alone.
   const normalizedSubject = normalizeSubject(email.subject);
-  if (normalizedSubject) {
+  if (normalizedSubject && email.fromEmail) {
     const { data: subjectMatch } = await supabase
       .from("conversations")
       .select("id, merged_into")
       .eq("email_account_id", accountId)
       .eq("subject", normalizedSubject)
+      .eq("from_email", email.fromEmail.toLowerCase())
       .gte(
         "last_message_at",
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
