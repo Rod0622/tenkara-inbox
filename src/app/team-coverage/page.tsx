@@ -48,7 +48,7 @@ interface DrillRow {
     id: string;
     subject: string | null;
     last_message_at: string | null;
-    labels: { id: string; name: string; color: string; background_color: string }[];
+    labels: { id: string; name: string; color: string }[];
   } | null;
 }
 
@@ -451,13 +451,16 @@ export default function TeamCoveragePage() {
                             />
                           </td>
                           <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-wrap gap-1.5">
                               {(r.latest_conversation?.labels || []).slice(0, 5).map(l => (
                                 <span
                                   key={l.id}
-                                  className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                                  style={{ color: `#${l.color}`, backgroundColor: `#${l.background_color}` }}
+                                  className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]"
                                 >
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ background: l.color }}
+                                  />
                                   {l.name}
                                 </span>
                               ))}

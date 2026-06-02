@@ -189,7 +189,7 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
         .in("email_account_id", accountIds),
       supabase.from("supplier_statuses").select("id, name, color, background_color"),
       supabase.from("conversation_labels").select("conversation_id, label_id").in("conversation_id", latestConvIds),
-      supabase.from("labels").select("id, name, color, background_color"),
+      supabase.from("labels").select("id, name, color"),
     ]);
 
     for (const [label, res] of [
