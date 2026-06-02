@@ -95,6 +95,7 @@ export default function TeamCoveragePage() {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillRows, setDrillRows] = useState<DrillRow[]>([]);
+  const [drillError, setDrillError] = useState<string | null>(null);
 
   // ── Status options (for the picker + filter) ─────────────────────────
   const [availableStatuses, setAvailableStatuses] = useState<SupplierStatus[]>([]);
@@ -129,16 +130,26 @@ export default function TeamCoveragePage() {
 
   const loadDrill = useCallback(async (memberId: string) => {
     setDrillLoading(true);
+    setDrillError(null);
     try {
       const params = new URLSearchParams();
       if (accountFilter) params.set("account_id", accountFilter);
       if (statusFilter)  params.set("status_id", statusFilter);
       const res = await fetch(`/api/team-coverage/${memberId}?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
         setDrillRows(data.rows || []);
+        // Log debug info even on success — useful for verification
+        if (data._debug) console.info("[team-coverage drill-in]", data._debug);
+      } else {
+        const msg = data.error || `HTTP ${res.status}`;
+        setDrillError(msg);
+        setDrillRows([]);
+        console.error("[team-coverage drill-in] server error:", msg, data._debug);
       }
-    } catch (e) {
+    } catch (e: any) {
+      setDrillError(e?.message || "Network error");
+      setDrillRows([]);
       console.error("Drill load failed:", e);
     } finally {
       setDrillLoading(false);
@@ -381,6 +392,20 @@ export default function TeamCoveragePage() {
           drillLoading ? (
             <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center">
               <Loader2 size={14} className="animate-spin" /> Loading {selectedMember.name}'s suppliers…
+            </div>
+          ) : drillError ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+              <div className="text-[12px] font-semibold text-red-500 mb-1">Drill-in failed</div>
+              <div className="text-[12px] text-[var(--text-secondary)] mb-2">{drillError}</div>
+              <div className="text-[10px] text-[var(--text-muted)]">
+                Open DevTools → Console and look for the "[team-coverage drill-in]" log entry to see the full debug info.
+              </div>
+              <button
+                onClick={() => selectedMember && loadDrill(selectedMember.id)}
+                className="mt-3 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
+              >
+                Retry
+              </button>
             </div>
           ) : (
             <>
