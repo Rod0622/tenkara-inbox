@@ -63,6 +63,7 @@ const TABS = [
   { id: "data_tools", label: "Data Tools", icon: Database },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "api_tokens", label: "API Tokens", icon: Key },
+  { id: "supplier_statuses", label: "Supplier Statuses", icon: Tag },
 ];
 
 // ── Main Settings Page ───────────────────────────────
@@ -131,6 +132,7 @@ export default function SettingsPage() {
         {activeTab === "data_tools" && <PhoneBackfillTab />}
         {activeTab === "integrations" && <IntegrationsTab />}
         {activeTab === "api_tokens" && <ApiTokensTab />}
+        {activeTab === "supplier_statuses" && <SupplierStatusesTab />}
       </div>
 
       {/* Connect Email Modal */}
@@ -4946,6 +4948,364 @@ function EmailTemplatesTab() {
 // The raw token never appears again after the first reveal; the DB stores
 // only the SHA-256 hash. If someone loses a token, they revoke it and mint
 // a new one.
+// ── Supplier Statuses Tab ───────────────────────────────────────────────
+//
+// Admin-only UI for managing the workspace's supplier status values
+// (e.g. "RFQ Email Sent", "Quote Recorded", "Disqualified"). These are the
+// pickable statuses that show up in the Team Coverage page, the conversation
+// header, and the supplier command center.
+//
+// Each status has a name + foreground color + background color. Statuses
+// can be soft-deleted (is_active=false) so existing assignments stay valid.
+//
+// Statuses are workspace-wide — every operator sees the same list.
+function SupplierStatusesTab() {
+  const { data: session } = useSession();
+  const isAdmin = (session as any)?.teamMember?.role === "admin";
+
+  const [statuses, setStatuses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    color: "1F2328",
+    background_color: "E5E7EB",
+    sort_order: "100",
+    is_active: true,
+  });
+  const [showInactive, setShowInactive] = useState(false);
+
+  async function fetchStatuses() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/supplier-statuses?include_inactive=1");
+      if (res.ok) {
+        const data = await res.json();
+        setStatuses(data.statuses || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch statuses:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchStatuses(); }, []);
+
+  async function getActorRole(): Promise<string | null> {
+    const sb = getSupabase();
+    const email = session?.user?.email;
+    if (!email) return null;
+    const { data: me } = await sb.from("team_members").select("role").eq("email", email).maybeSingle();
+    return me?.role || null;
+  }
+
+  function resetForm() {
+    setForm({ name: "", color: "1F2328", background_color: "E5E7EB", sort_order: "100", is_active: true });
+  }
+
+  async function saveNew() {
+    if (!form.name.trim()) { alert("Name is required"); return; }
+    const actor_role = await getActorRole();
+    const res = await fetch("/api/admin/supplier-statuses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.trim(),
+        color: form.color,
+        background_color: form.background_color,
+        sort_order: parseInt(form.sort_order, 10) || 100,
+        actor_role,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) { alert("Failed: " + (json.error || "Unknown")); return; }
+    setShowCreate(false);
+    resetForm();
+    await fetchStatuses();
+  }
+
+  async function saveEdit(id: string) {
+    if (!form.name.trim()) { alert("Name is required"); return; }
+    const actor_role = await getActorRole();
+    const res = await fetch("/api/admin/supplier-statuses", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        name: form.name.trim(),
+        color: form.color,
+        background_color: form.background_color,
+        sort_order: parseInt(form.sort_order, 10) || 100,
+        is_active: form.is_active,
+        actor_role,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) { alert("Failed: " + (json.error || "Unknown")); return; }
+    setEditingId(null);
+    resetForm();
+    await fetchStatuses();
+  }
+
+  async function softDelete(id: string, name: string) {
+    if (!confirm(`Soft-delete "${name}"? Existing assignments stay valid, but the status becomes hidden from new pickers. You can un-delete from this page.`)) return;
+    const actor_role = await getActorRole();
+    const res = await fetch("/api/admin/supplier-statuses", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, actor_role }),
+    });
+    if (!res.ok) {
+      const json = await res.json();
+      alert("Failed: " + (json.error || "Unknown"));
+      return;
+    }
+    await fetchStatuses();
+  }
+
+  async function reactivate(id: string) {
+    const actor_role = await getActorRole();
+    const res = await fetch("/api/admin/supplier-statuses", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, is_active: true, actor_role }),
+    });
+    if (!res.ok) {
+      const json = await res.json();
+      alert("Failed: " + (json.error || "Unknown"));
+      return;
+    }
+    await fetchStatuses();
+  }
+
+  if (!isAdmin) {
+    return <div className="p-8"><div className="text-[var(--text-muted)] text-sm">Admin access required.</div></div>;
+  }
+
+  const visible = statuses.filter((s) => showInactive || s.is_active);
+
+  return (
+    <div className="p-6 max-w-4xl">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-1">Supplier Statuses</h2>
+          <p className="text-[12px] text-[var(--text-muted)] leading-relaxed">
+            The pickable statuses that show up on the Team Coverage page, in the conversation header, and on supplier command centers. Workspace-wide — every operator sees the same list.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer">
+            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="accent-[var(--accent)]" />
+            Show inactive
+          </label>
+          <button
+            onClick={() => { resetForm(); setShowCreate(true); setEditingId(null); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold hover:opacity-90"
+          >
+            <Plus size={13} /> New status
+          </button>
+        </div>
+      </div>
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-semibold text-[var(--text-primary)]">Create status</div>
+            <button onClick={() => { setShowCreate(false); resetForm(); }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+              <X size={14} />
+            </button>
+          </div>
+          <StatusForm form={form} setForm={setForm} />
+          <div className="flex items-center justify-between pt-1">
+            {/* Preview */}
+            <span
+              className="px-2.5 py-1 rounded-md text-[11px] font-semibold"
+              style={{ color: `#${form.color}`, backgroundColor: `#${form.background_color}` }}
+            >
+              {form.name || "Preview"}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowCreate(false); resetForm(); }}
+                className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveNew}
+                disabled={!form.name.trim()}
+                className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold disabled:opacity-40"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* List */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px]">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="text-center py-12 text-[var(--text-muted)] text-[12px]">No statuses to display.</div>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((s) => {
+            const isEditing = editingId === s.id;
+            return (
+              <div key={s.id} className={`rounded-xl border bg-[var(--surface)] p-3.5 ${!s.is_active ? "opacity-60 border-[var(--border)]" : "border-[var(--border)]"}`}>
+                {isEditing ? (
+                  <div className="space-y-3">
+                    <StatusForm form={form} setForm={setForm} />
+                    <div className="flex items-center justify-between pt-1">
+                      <span
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold"
+                        style={{ color: `#${form.color}`, backgroundColor: `#${form.background_color}` }}
+                      >
+                        {form.name || "Preview"}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setEditingId(null); resetForm(); }}
+                          className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => saveEdit(s.id)}
+                          className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[12px] font-semibold"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="px-2.5 py-1 rounded-md text-[11px] font-semibold shrink-0"
+                      style={{ color: `#${s.color}`, backgroundColor: `#${s.background_color}` }}
+                    >
+                      {s.name}
+                    </span>
+                    <div className="flex-1 text-[10px] text-[var(--text-muted)]">
+                      sort_order {s.sort_order}{!s.is_active && " · INACTIVE"}
+                    </div>
+                    {s.is_active ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditingId(s.id);
+                            setShowCreate(false);
+                            setForm({
+                              name: s.name,
+                              color: s.color,
+                              background_color: s.background_color,
+                              sort_order: String(s.sort_order),
+                              is_active: s.is_active,
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => softDelete(s.id, s.name)}
+                          className="px-2.5 py-1 rounded-lg border border-[var(--danger)]/40 text-[10px] text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => reactivate(s.id)}
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg)]"
+                      >
+                        Reactivate
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Subform for create/edit. Lifted out so create and edit share identical UI.
+function StatusForm({ form, setForm }: { form: any; setForm: (f: any) => void }) {
+  return (
+    <>
+      <div>
+        <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Name</label>
+        <input
+          autoFocus
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          placeholder="e.g. Quote Recorded"
+          className="w-full px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Text color (hex)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={`#${form.color}`}
+              onChange={(e) => setForm({ ...form, color: e.target.value.replace("#", "").toUpperCase() })}
+              className="w-9 h-9 rounded border border-[var(--border)] bg-transparent cursor-pointer"
+            />
+            <input
+              value={form.color}
+              onChange={(e) => setForm({ ...form, color: e.target.value.replace(/^#/, "").toUpperCase() })}
+              className="flex-1 px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[11px] font-mono outline-none focus:border-[var(--info)]/50"
+              placeholder="1F2328"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Background (hex)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={`#${form.background_color}`}
+              onChange={(e) => setForm({ ...form, background_color: e.target.value.replace("#", "").toUpperCase() })}
+              className="w-9 h-9 rounded border border-[var(--border)] bg-transparent cursor-pointer"
+            />
+            <input
+              value={form.background_color}
+              onChange={(e) => setForm({ ...form, background_color: e.target.value.replace(/^#/, "").toUpperCase() })}
+              className="flex-1 px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[11px] font-mono outline-none focus:border-[var(--info)]/50"
+              placeholder="E5E7EB"
+            />
+          </div>
+        </div>
+      </div>
+      <div>
+        <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-1">Sort order</label>
+        <input
+          type="number"
+          value={form.sort_order}
+          onChange={(e) => setForm({ ...form, sort_order: e.target.value })}
+          className="w-28 px-3 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-[12px] outline-none focus:border-[var(--info)]/50"
+          placeholder="100"
+        />
+        <div className="text-[10px] text-[var(--text-muted)] mt-1">Lower numbers appear first in pickers.</div>
+      </div>
+    </>
+  );
+}
+
 function ApiTokensTab() {
   const { data: session } = useSession();
   const isAdmin = (session as any)?.teamMember?.role === "admin";
