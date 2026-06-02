@@ -323,10 +323,35 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
     }
     case "merge":
     case "unmerge": {
+      // Both events share a similar shape: details.{merged|unmerged}_subject
+      // identifies the thread that was folded in / out. Newer entries (after
+      // the merge-audit fix) also include from_name/from_email and per-record
+      // counts (messages, tasks, etc.) for richer context.
       const subject = details.merged_subject || details.unmerged_subject;
+      const fromName = details.merged_from_name || details.unmerged_from_name;
+      const fromEmail = details.merged_from_email || details.unmerged_from_email;
+      const moved = details.moved || {};
+      const msgCount = typeof moved.messages === "number" ? moved.messages : null;
+
+      // Old-format entries (no enriched details) just show the label without
+      // a subtitle — same as before. Once you re-merge anything new, the
+      // richer subtitle appears.
       if (!subject) return null;
+
       const trimmed = String(subject).length > 60 ? String(subject).slice(0, 60) + "…" : subject;
-      return <span>: <span className="text-[var(--text-primary)]">{trimmed}</span></span>;
+      const sender = fromName || fromEmail;
+
+      return (
+        <span>
+          : <span className="text-[var(--text-primary)]">{trimmed}</span>
+          {sender && (
+            <span className="text-[var(--text-muted)]"> · from {sender}</span>
+          )}
+          {msgCount !== null && msgCount > 0 && activity.action === "merge" && (
+            <span className="text-[var(--text-muted)]"> · {msgCount} message{msgCount === 1 ? "" : "s"}</span>
+          )}
+        </span>
+      );
     }
     case "quo_call_logged":
     case "quo_call_linked": {

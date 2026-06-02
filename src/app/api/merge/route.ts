@@ -34,11 +34,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "These threads are already merged" }, { status: 400 });
   }
 
-  // Validate all conversations exist and aren't already merged elsewhere
+  // Validate all conversations exist and aren't already merged elsewhere.
+  // We also pull from_name + from_email so the activity_log entry can
+  // include enough context to identify which thread was merged in
+  // ("merged X messages from <name> <email>"). Without these the audit
+  // trail just says "Threads merged" with no identifying info.
   const allIds = [primary_id, ...newMergeIds];
   const { data: convos } = await supabase
     .from("conversations")
-    .select("id, subject, email_account_id, merged_into")
+    .select("id, subject, from_name, from_email, email_account_id, merged_into")
     .in("id", allIds);
 
   if (!convos || convos.length !== allIds.length) {
@@ -47,8 +51,12 @@ export async function POST(req: NextRequest) {
 
   const alreadyMergedElsewhere = convos.filter((c: any) => c.merged_into && c.id !== primary_id);
   if (alreadyMergedElsewhere.length > 0) {
-    return NextResponse.json({ error: "One or more conversations are already merged into another thread" }, { status: 400 });
-  }
+    return NextResponse.json({ error: "One or more conversations are already merged into another thread" }, { status: 400 });  }
+
+  // Map convo by id so the activity_log insert per-mergeId has O(1) access
+  // to the merged conversation's subject + from_email/from_name.
+  const convoById = new Map<string, any>();
+  for (const c of convos) convoById.set(c.id, c);
 
   const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0, watchers: 0, pins: 0, follow_up_tracking: 0, quo_call_logs: 0, call_follow_ups: 0 } };
 
@@ -234,12 +242,41 @@ export async function POST(req: NextRequest) {
       results.moved.quo_call_logs += callLogs.length;
       results.moved.call_follow_ups += callFollowUps.length;
 
-      // Log activity
+      // Log activity — include enough detail so the audit trail is actually
+      // useful. Previously this just recorded the merged_conversation_id
+      // which gave the operator no clue WHICH thread was folded in or HOW
+      // MUCH was moved. Now we include the subject + sender + per-record
+      // counts (messages, tasks, etc.) so a glance at the activity feed
+      // tells the full story.
+      const mergedConvo = convoById.get(mergeId);
       await supabase.from("activity_log").insert({
         conversation_id: primary_id,
         actor_id: actor_id || null,
         action: "merge",
-        details: { merged_conversation_id: mergeId, merge_record_id: mid },
+        details: {
+          merged_conversation_id: mergeId,
+          merge_record_id: mid,
+          merged_subject: mergedConvo?.subject || null,
+          merged_from_name: mergedConvo?.from_name || null,
+          merged_from_email: mergedConvo?.from_email || null,
+          moved: {
+            // Per-record counts so the operator sees the scale of the merge.
+            // Useful when reviewing whether a merge was correct (a 30-message
+            // thread merge is a much bigger deal than a 1-message one).
+            messages: msgs.length,
+            tasks: tasks.length,
+            notes: notes.length,
+            activities: activ.length,
+            labels: labels.length,
+            drafts: drafts.length,
+            response_times: rts.length,
+            watchers: watchers.length,
+            pins: pins.length,
+            follow_up_tracking: fupTrack.length,
+            quo_call_logs: callLogs.length,
+            call_follow_ups: callFollowUps.length,
+          },
+        },
       });
 
       results.merges++;
@@ -325,12 +362,32 @@ export async function DELETE(req: NextRequest) {
     }
     await Promise.all(restoreOps);
 
+    // Fetch the unmerged conversation's identity so the activity_log entry
+    // can include enough context to identify it ("unmerged <subject> from
+    // <from_name>"). Without this the audit trail just says "Thread unmerged".
+    const { data: unmergedConvo } = await supabase
+      .from("conversations")
+      .select("subject, from_name, from_email")
+      .eq("id", merge.merged_conversation_id)
+      .maybeSingle();
+
     // Restore conversation, mark merge inactive, clean up — in parallel
     await Promise.all([
       supabase.from("conversations").update({ merged_into: null, status: "open" }).eq("id", merge.merged_conversation_id).select().then(r => r),
       supabase.from("conversation_merges").update({ is_active: false, unmerged_at: new Date().toISOString(), unmerged_by: actorId || null }).eq("id", mergeId).select().then(r => r),
       supabase.from("merge_moved_records").delete().eq("merge_id", mergeId).select().then(r => r),
-      supabase.from("activity_log").insert({ conversation_id: merge.primary_conversation_id, actor_id: actorId || null, action: "unmerge", details: { unmerged_conversation_id: merge.merged_conversation_id, merge_record_id: mergeId } }).select().then(r => r),
+      supabase.from("activity_log").insert({
+        conversation_id: merge.primary_conversation_id,
+        actor_id: actorId || null,
+        action: "unmerge",
+        details: {
+          unmerged_conversation_id: merge.merged_conversation_id,
+          merge_record_id: mergeId,
+          unmerged_subject: unmergedConvo?.subject || null,
+          unmerged_from_name: unmergedConvo?.from_name || null,
+          unmerged_from_email: unmergedConvo?.from_email || null,
+        },
+      }).select().then(r => r),
     ]);
 
     // Update primary conversation's last_message_at
