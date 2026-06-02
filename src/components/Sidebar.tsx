@@ -28,6 +28,7 @@ import {
   Phone,
   Pin,
   Mic,
+  Users,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -1005,6 +1006,13 @@ export default function Sidebar({
               >
                 <BarChart3 size={16} />
                 <span>Dashboard</span>
+              </Link>
+              <Link
+                href="/team-coverage"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
+              >
+                <Users size={16} />
+                <span>Team Coverage</span>
               </Link>
               <Link
                 href="/settings"
