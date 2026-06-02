@@ -5,32 +5,20 @@ import { createServerClient } from "@/lib/supabase";
 
 // ── GET /api/team-coverage/[teammate_id] ────────────────────────────────
 //
-// Drill-in view: every (supplier × email_account) pair this teammate has
-// sent outbound emails to, plus the manual status and most recent labels.
+// Drill-in: every (supplier × email_account) pair this teammate has sent
+// outbound emails to, plus manual status + latest conversation labels.
 //
-// Optional query params:
-//   from              ISO timestamp
-//   to                ISO timestamp
-//   account_id        filter to one account
-//   status_id         filter to one supplier status
+// IMPLEMENTATION NOTE (June 3, 2026 — Batch 2 bug fix):
+// Earlier version used a nested `conversation:conversations!inner(...)`
+// JOIN that silently returned empty `conversation` fields on the inbox
+// schema, producing zero drill-in rows. Rewritten to a two-pass query
+// pattern (matches existing endpoints in this codebase).
 //
-// Response:
-//   {
-//     team_member: { id, name, ... },
-//     rows: [
-//       {
-//         supplier: { id, name, email },
-//         account: { id, name },
-//         last_contact_at: ISO,
-//         total_outbound: number,
-//         status: { id, name, color, background_color } | null,
-//         latest_conversation: {
-//           id, subject, last_message_at,
-//           labels: [{ id, name, color, background_color }]
-//         } | null
-//       }
-//     ]
-//   }
+// Steps:
+//   1. SELECT outbound messages for this teammate
+//   2. SELECT conversations for those messages
+//   3. SELECT supplier_contacts + email_accounts + status assignments + labels
+//   4. Aggregate per (supplier, account) pair
 export async function GET(req: NextRequest, { params }: { params: { teammate_id: string } }) {
   const supabase = createServerClient();
   const teammateId = params.teammate_id;
@@ -40,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
   const accountIdFilter = url.searchParams.get("account_id");
   const statusIdFilter = url.searchParams.get("status_id");
 
-  // 1. Confirm teammate exists
+  // Step 0: confirm teammate exists
   const { data: teamMember, error: memberErr } = await supabase
     .from("team_members")
     .select("id, name, initials, color, avatar_url, role")
@@ -49,22 +37,49 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
   if (memberErr) return NextResponse.json({ error: memberErr.message }, { status: 500 });
   if (!teamMember) return NextResponse.json({ error: "Team member not found" }, { status: 404 });
 
-  // 2. Fetch every outbound message this teammate sent. Per (supplier,
-  //    account) pair, we want: count of outbound, latest sent_at, and the
-  //    conversation_id of the MOST RECENT outbound (used to pull labels).
+  // Step 1: pull this teammate's outbound messages (with conversation_id + timestamp)
   let msgQuery = supabase
     .from("messages")
-    .select("conversation_id, sent_at, conversation:conversations!inner(id, supplier_contact_id, email_account_id, subject, last_message_at)")
+    .select("conversation_id, sent_at")
     .eq("is_outbound", true)
-    .eq("sent_by_user_id", teammateId);
-
+    .eq("sent_by_user_id", teammateId)
+    .not("conversation_id", "is", null)
+    .limit(50000);
   if (from) msgQuery = msgQuery.gte("sent_at", from);
   if (to)   msgQuery = msgQuery.lt("sent_at", to);
-
   const { data: msgs, error: msgErr } = await msgQuery;
   if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
 
-  // Aggregate per (supplier, account) pair.
+  if (!msgs || msgs.length === 0) {
+    return NextResponse.json({ team_member: teamMember, rows: [] });
+  }
+
+  // Step 2: fetch the conversations referenced by these messages
+  const convoIds = Array.from(new Set(msgs.map((m: any) => m.conversation_id).filter(Boolean)));
+  type ConvLite = {
+    id: string;
+    supplier_contact_id: string | null;
+    email_account_id: string | null;
+    subject: string | null;
+    last_message_at: string | null;
+  };
+  const convoById = new Map<string, ConvLite>();
+  const CHUNK = 500;
+  for (let i = 0; i < convoIds.length; i += CHUNK) {
+    const chunk = convoIds.slice(i, i + CHUNK);
+    const { data: convs, error: convErr } = await supabase
+      .from("conversations")
+      .select("id, supplier_contact_id, email_account_id, subject, last_message_at")
+      .in("id", chunk);
+    if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 });
+    for (const c of convs || []) {
+      convoById.set((c as any).id, c as any);
+    }
+  }
+
+  // Step 3: aggregate per (supplier, account) pair.
+  // For each pair, track total outbound count + latest contact + the
+  // most-recent conversation_id (used to fetch labels).
   type Pair = {
     supplier_id: string;
     account_id: string;
@@ -75,8 +90,9 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
     latest_conversation_last_message_at: string | null;
   };
   const pairsByKey = new Map<string, Pair>();
-  for (const m of msgs || []) {
-    const conv = (m as any).conversation;
+  for (const m of msgs) {
+    const convoId = (m as any).conversation_id as string;
+    const conv = convoById.get(convoId);
     if (!conv) continue;
     const supplierId = conv.supplier_contact_id;
     const accountId  = conv.email_account_id;
@@ -99,8 +115,6 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
       pairsByKey.set(key, pair);
     }
     pair.total_outbound++;
-    // Track the conversation with the latest sent_at within this pair, so
-    // labels reflect the most recent conversation (most useful context).
     if (sentAt > pair.last_contact_at) {
       pair.last_contact_at = sentAt;
       pair.latest_conversation_id = conv.id;
@@ -113,56 +127,65 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
     return NextResponse.json({ team_member: teamMember, rows: [] });
   }
 
-  // 3. Fetch supplier names, account names, statuses, and labels — all in
-  //    parallel batched queries.
+  // Step 4: bulk-fetch supplier names, account names, status assignments,
+  // and labels on the latest conversation IDs. All in parallel.
   const supplierIds = Array.from(new Set(Array.from(pairsByKey.values()).map(p => p.supplier_id)));
   const accountIds  = Array.from(new Set(Array.from(pairsByKey.values()).map(p => p.account_id)));
-  const convIds     = Array.from(new Set(Array.from(pairsByKey.values()).map(p => p.latest_conversation_id)));
+  const latestConvIds = Array.from(new Set(Array.from(pairsByKey.values()).map(p => p.latest_conversation_id)));
 
-  const [
-    { data: suppliers, error: sErr },
-    { data: accounts,  error: aErr },
-    { data: statuses,  error: stErr },
-    { data: convLabels, error: clErr },
-  ] = await Promise.all([
+  const [suppliersRes, accountsRes, statusesRes, statusLookupRes, convLabelsRes, labelsRes] = await Promise.all([
     supabase.from("supplier_contacts").select("id, name, email").in("id", supplierIds),
     supabase.from("email_accounts").select("id, name").in("id", accountIds),
-    // status assignment per (supplier, account) — JOIN with supplier_statuses
+    // assignment rows (status_id may be null)
     supabase
       .from("supplier_account_statuses")
-      .select("supplier_contact_id, email_account_id, status_id, status:supplier_statuses(id, name, color, background_color)")
+      .select("supplier_contact_id, email_account_id, status_id")
       .in("supplier_contact_id", supplierIds)
       .in("email_account_id", accountIds),
-    // labels on the latest conversations
+    // status lookup (id → name, color, bg) — no IN needed, table is small
+    supabase
+      .from("supplier_statuses")
+      .select("id, name, color, background_color"),
+    // labels on latest conversations
     supabase
       .from("conversation_labels")
-      .select("conversation_id, label:labels(id, name, color, background_color)")
-      .in("conversation_id", convIds),
+      .select("conversation_id, label_id")
+      .in("conversation_id", latestConvIds),
+    // label lookup
+    supabase
+      .from("labels")
+      .select("id, name, color, background_color"),
   ]);
 
-  if (sErr)  return NextResponse.json({ error: sErr.message },  { status: 500 });
-  if (aErr)  return NextResponse.json({ error: aErr.message },  { status: 500 });
-  if (stErr) return NextResponse.json({ error: stErr.message }, { status: 500 });
-  if (clErr) return NextResponse.json({ error: clErr.message }, { status: 500 });
+  if (suppliersRes.error)   return NextResponse.json({ error: suppliersRes.error.message },   { status: 500 });
+  if (accountsRes.error)    return NextResponse.json({ error: accountsRes.error.message },    { status: 500 });
+  if (statusesRes.error)    return NextResponse.json({ error: statusesRes.error.message },    { status: 500 });
+  if (statusLookupRes.error)return NextResponse.json({ error: statusLookupRes.error.message },{ status: 500 });
+  if (convLabelsRes.error)  return NextResponse.json({ error: convLabelsRes.error.message },  { status: 500 });
+  if (labelsRes.error)      return NextResponse.json({ error: labelsRes.error.message },      { status: 500 });
 
-  const supplierById = new Map<string, any>((suppliers || []).map((s: any) => [s.id, s]));
-  const accountById  = new Map<string, any>((accounts  || []).map((a: any) => [a.id, a]));
+  const supplierById = new Map<string, any>((suppliersRes.data || []).map((s: any) => [s.id, s]));
+  const accountById  = new Map<string, any>((accountsRes.data  || []).map((a: any) => [a.id, a]));
+  const statusLookup = new Map<string, any>((statusLookupRes.data || []).map((s: any) => [s.id, s]));
   const statusByPair = new Map<string, any>();
-  for (const row of statuses || []) {
+  for (const row of statusesRes.data || []) {
     const key = `${(row as any).supplier_contact_id}::${(row as any).email_account_id}`;
-    statusByPair.set(key, (row as any).status);
+    const statusId = (row as any).status_id;
+    statusByPair.set(key, statusId ? statusLookup.get(statusId) || null : null);
   }
+  const labelLookup = new Map<string, any>((labelsRes.data || []).map((l: any) => [l.id, l]));
   const labelsByConv = new Map<string, any[]>();
-  for (const row of convLabels || []) {
+  for (const row of convLabelsRes.data || []) {
     const cid = (row as any).conversation_id;
-    const lbl = (row as any).label;
+    const lbl = labelLookup.get((row as any).label_id);
     if (!lbl) continue;
     const arr = labelsByConv.get(cid) || [];
     arr.push(lbl);
     labelsByConv.set(cid, arr);
   }
 
-  // 4. Materialize the rows, optionally filtered by status_id.
+  // Step 5: materialize rows, applying optional status filter, and sort
+  // by most-recent contact descending.
   const rows = Array.from(pairsByKey.entries()).map(([key, pair]) => {
     const status = statusByPair.get(key) || null;
     return {
@@ -186,7 +209,6 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
     if (statusIdFilter) return r.status?.id === statusIdFilter;
     return true;
   })
-  // Sort by most-recent contact first
   .sort((a: any, b: any) => (b.last_contact_at || "").localeCompare(a.last_contact_at || ""));
 
   return NextResponse.json({ team_member: teamMember, rows });
