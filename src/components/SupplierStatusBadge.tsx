@@ -131,7 +131,28 @@ export default function SupplierStatusBadge({
     }
   };
 
-  if (!enabled) return null;
+  if (!enabled) {
+    // Render a muted disabled chip so the wire-up is always visible.
+    // This conversation has no supplier_contact_id (or email_account_id) —
+    // probably an internal team chat, system notification, or a conversation
+    // where the sync hasn't classified the supplier yet. The status is
+    // keyed on (supplier, account) so we can't track one here. Showing a
+    // disabled state is clearer than vanishing.
+    return (
+      <div
+        title="This conversation isn't linked to a supplier yet. Status tracking is keyed on (supplier × account) — link a supplier first."
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold opacity-60 cursor-not-allowed"
+        style={{
+          color: "var(--text-muted)",
+          backgroundColor: "var(--surface)",
+          border: "1px dashed var(--border)",
+        }}
+      >
+        <Tag size={11} />
+        <span>No supplier linked</span>
+      </div>
+    );
+  }
 
   return (
     <div className="relative inline-block" data-supplier-status-badge>
