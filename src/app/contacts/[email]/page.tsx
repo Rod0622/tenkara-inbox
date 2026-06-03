@@ -365,24 +365,23 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   ];
 
   // Unique email accounts this supplier has been contacted from. Used by
-  // SupplierStatusCard to render one status row per account. Cross-account
-  // threads count too — if a supplier shows up under multiple accounts,
-  // each gets its own status. Pulls from same-account + cross-account
-  // (NOT domain threads, since those may not belong to this specific
-  // supplier_contact_id even if the domain matches).
-  const supplierAccounts = useMemo<{ id: string; name: string }[]>(() => {
-    const byId = new Map<string, string>();
-    const ingest = (t: any) => {
-      const id = t?.email_account_id;
-      const name = t?.account_name;
-      if (id && name && !byId.has(id)) byId.set(id, name);
-    };
-    (threads || []).forEach(ingest);
-    (cross_account_threads || []).forEach(ingest);
-    return Array.from(byId.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [threads, cross_account_threads]);
+  // SupplierStatusCard below. Plain derivation (not useMemo) since we're
+  // already past the early-return hook-rules barrier and the work is
+  // trivial — same-account + cross-account threads grouped by account.
+  const supplierAccountsMap = new Map<string, string>();
+  for (const t of (threads || [])) {
+    if (t?.email_account_id && t?.account_name && !supplierAccountsMap.has(t.email_account_id)) {
+      supplierAccountsMap.set(t.email_account_id, t.account_name);
+    }
+  }
+  for (const t of (cross_account_threads || [])) {
+    if (t?.email_account_id && t?.account_name && !supplierAccountsMap.has(t.email_account_id)) {
+      supplierAccountsMap.set(t.email_account_id, t.account_name);
+    }
+  }
+  const supplierAccounts = Array.from(supplierAccountsMap.entries())
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
