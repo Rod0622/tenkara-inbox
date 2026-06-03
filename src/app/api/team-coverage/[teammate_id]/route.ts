@@ -28,11 +28,15 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
     const url = req.nextUrl;
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
-    const accountIdFilter = url.searchParams.get("account_id");
+    const accountIdsParam = url.searchParams.get("account_ids");
+    const legacyAccountId = url.searchParams.get("account_id");
+    const accountIdSet = new Set<string>();
+    if (accountIdsParam) accountIdsParam.split(",").map(s => s.trim()).filter(Boolean).forEach(id => accountIdSet.add(id));
+    if (legacyAccountId) accountIdSet.add(legacyAccountId);
     const statusIdFilter = url.searchParams.get("status_id");
 
     debug.teammate_id = teammateId;
-    debug.account_filter = accountIdFilter;
+    debug.account_filter = Array.from(accountIdSet);
     debug.status_filter = statusIdFilter;
 
     // ── Step 0: confirm teammate exists ────────────────────────────────
@@ -137,7 +141,7 @@ export async function GET(req: NextRequest, { params }: { params: { teammate_id:
       const accountId  = conv.email_account_id;
       if (!supplierId) { droppedNoSupplier++; continue; }
       if (!accountId)  { droppedNoAccount++; continue; }
-      if (accountIdFilter && accountId !== accountIdFilter) { droppedAccountFilter++; continue; }
+      if (accountIdSet.size > 0 && !accountIdSet.has(accountId)) { droppedAccountFilter++; continue; }
 
       const key = `${supplierId}::${accountId}`;
       const sentAt = (m as any).sent_at as string;

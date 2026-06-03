@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, ChevronRight, Loader2, Users, Mail, Filter, X, Search, ExternalLink, ChevronDown,
+  ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X,
 } from "lucide-react";
+import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface TeamMember {
@@ -24,7 +26,7 @@ interface AccountLite {
 
 interface OverviewRow {
   team_member: TeamMember;
-  counts: Record<string, number>;   // keyed by account_id
+  counts: Record<string, number>;
   total: number;
   latest_at: string | null;
 }
@@ -34,8 +36,6 @@ interface SupplierStatus {
   name: string;
   color: string;
   background_color: string;
-  sort_order?: number;
-  is_active?: boolean;
 }
 
 interface DrillRow {
@@ -50,6 +50,21 @@ interface DrillRow {
     last_message_at: string | null;
     labels: { id: string; name: string; color: string }[];
   } | null;
+}
+
+interface CompareGroup {
+  key: string;
+  teammate_ids: string[];
+  label: string;
+  rows: {
+    supplier: { id: string; name: string; email: string } | null;
+    account: { id: string; name: string } | null;
+    status: SupplierStatus | null;
+    labels: { id: string; name: string; color: string }[];
+    last_contact_at: string;
+    per_teammate_outbound: Record<string, number>;
+    latest_conversation: { id: string; subject: string | null; last_message_at: string | null } | null;
+  }[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -72,35 +87,99 @@ function memberInitials(m: TeamMember): string {
   return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
 }
 
-// ── Page component ─────────────────────────────────────────────────────
+// ── Main page component ────────────────────────────────────────────────
 export default function TeamCoveragePage() {
   const { data: session } = useSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const userRole = (session as any)?.teamMember?.role || null;
   const currentUserId = (session as any)?.teamMember?.id || null;
-  // Admin-only — non-admins get a friendly "Admin access required" page.
-  // (Codebase has no "manager" role today; if one is added later, update here.)
   const isAllowed = userRole === "admin";
 
-  // ── Filters (shared between overview & drill-in) ─────────────────────
-  const [accountFilter, setAccountFilter]   = useState<string>("");   // "" = all accounts
-  const [statusFilter, setStatusFilter]     = useState<string>("");   // "" = all, "__none__" = no status
-  const [searchQuery, setSearchQuery]       = useState<string>("");
+  // ── URL-synced state ─────────────────────────────────────────────────
+  // Single-teammate drill-in: ?teammate=<id>
+  // Compare view:              ?teammates=<id>,<id>[,<id>...]
+  // Account filter:            ?accounts=<id>,<id>
+  //
+  // Browser back from drill-in or compare goes to /team-coverage (overview)
+  // automatically because each view has its own URL state.
+  const selectedTeammateId = searchParams.get("teammate") || null;
+  const compareTeammateIds = useMemo(() => {
+    const raw = searchParams.get("teammates");
+    if (!raw) return [];
+    return raw.split(",").map(s => s.trim()).filter(Boolean);
+  }, [searchParams]);
+  const accountFilterIds = useMemo(() => {
+    const raw = searchParams.get("accounts");
+    if (!raw) return [];
+    return raw.split(",").map(s => s.trim()).filter(Boolean);
+  }, [searchParams]);
 
-  // ── Overview state ───────────────────────────────────────────────────
+  // Other (transient) filter state — not URL-synced
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  // Overview-only: filter rows to selected teammates
+  const [overviewTeammateFilter, setOverviewTeammateFilter] = useState<string[]>([]);
+
+  // ── Data state ───────────────────────────────────────────────────────
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [accounts, setAccounts] = useState<AccountLite[]>([]);
   const [overviewRows, setOverviewRows] = useState<OverviewRow[]>([]);
 
-  // ── Drill-in state ───────────────────────────────────────────────────
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillRows, setDrillRows] = useState<DrillRow[]>([]);
+  const [drillTeamMember, setDrillTeamMember] = useState<TeamMember | null>(null);
   const [drillError, setDrillError] = useState<string | null>(null);
 
-  // ── Status options (for the picker + filter) ─────────────────────────
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareGroups, setCompareGroups] = useState<CompareGroup[]>([]);
+  const [compareTeammates, setCompareTeammates] = useState<TeamMember[]>([]);
+  const [compareError, setCompareError] = useState<string | null>(null);
+
   const [availableStatuses, setAvailableStatuses] = useState<SupplierStatus[]>([]);
 
-  // Initial loads
+  // Current mode
+  const mode: "overview" | "drill" | "compare" =
+    compareTeammateIds.length >= 2 ? "compare"
+    : selectedTeammateId ? "drill"
+    : "overview";
+
+  // ── URL update helpers ───────────────────────────────────────────────
+  const buildUrl = useCallback((overrides: { teammate?: string | null; teammates?: string[] | null; accounts?: string[] | null }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if ("teammate" in overrides) {
+      if (overrides.teammate) {
+        params.set("teammate", overrides.teammate);
+        params.delete("teammates");
+      } else {
+        params.delete("teammate");
+      }
+    }
+    if ("teammates" in overrides) {
+      if (overrides.teammates && overrides.teammates.length > 0) {
+        params.set("teammates", overrides.teammates.join(","));
+        params.delete("teammate");
+      } else {
+        params.delete("teammates");
+      }
+    }
+    if ("accounts" in overrides) {
+      if (overrides.accounts && overrides.accounts.length > 0) {
+        params.set("accounts", overrides.accounts.join(","));
+      } else {
+        params.delete("accounts");
+      }
+    }
+    const qs = params.toString();
+    return qs ? `/team-coverage?${qs}` : "/team-coverage";
+  }, [searchParams]);
+
+  const navigate = useCallback((overrides: any) => {
+    router.push(buildUrl(overrides));
+  }, [router, buildUrl]);
+
+  // ── Data loaders ─────────────────────────────────────────────────────
   useEffect(() => {
     fetch("/api/supplier-statuses")
       .then(r => r.ok ? r.json() : Promise.reject(r))
@@ -111,9 +190,9 @@ export default function TeamCoveragePage() {
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (accountFilter) params.set("account_id", accountFilter);
-      const res = await fetch(`/api/team-coverage?${params.toString()}`);
+      const p = new URLSearchParams();
+      if (accountFilterIds.length > 0) p.set("account_ids", accountFilterIds.join(","));
+      const res = await fetch(`/api/team-coverage?${p.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setAccounts(data.accounts || []);
@@ -124,48 +203,91 @@ export default function TeamCoveragePage() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [accountFilter]);
+  }, [accountFilterIds]);
 
-  useEffect(() => { if (isAllowed && !selectedMember) loadOverview(); }, [isAllowed, selectedMember, loadOverview]);
-
-  const loadDrill = useCallback(async (memberId: string) => {
+  const loadDrill = useCallback(async (teammateId: string) => {
     setDrillLoading(true);
     setDrillError(null);
     try {
-      const params = new URLSearchParams();
-      if (accountFilter) params.set("account_id", accountFilter);
-      if (statusFilter)  params.set("status_id", statusFilter);
-      const res = await fetch(`/api/team-coverage/${memberId}?${params.toString()}`);
+      const p = new URLSearchParams();
+      if (accountFilterIds.length > 0) p.set("account_ids", accountFilterIds.join(","));
+      if (statusFilter) p.set("status_id", statusFilter);
+      const res = await fetch(`/api/team-coverage/${teammateId}?${p.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setDrillRows(data.rows || []);
-        // Log debug info even on success — useful for verification
+        setDrillTeamMember(data.team_member || null);
         if (data._debug) console.info("[team-coverage drill-in]", data._debug);
       } else {
         const msg = data.error || `HTTP ${res.status}`;
         setDrillError(msg);
         setDrillRows([]);
+        setDrillTeamMember(null);
         console.error("[team-coverage drill-in] server error:", msg, data._debug);
       }
     } catch (e: any) {
       setDrillError(e?.message || "Network error");
       setDrillRows([]);
-      console.error("Drill load failed:", e);
+      setDrillTeamMember(null);
     } finally {
       setDrillLoading(false);
     }
-  }, [accountFilter, statusFilter]);
+  }, [accountFilterIds, statusFilter]);
 
+  const loadCompare = useCallback(async (teammateIds: string[]) => {
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const p = new URLSearchParams();
+      p.set("teammate_ids", teammateIds.join(","));
+      if (accountFilterIds.length > 0) p.set("account_ids", accountFilterIds.join(","));
+      if (statusFilter) p.set("status_id", statusFilter);
+      const res = await fetch(`/api/team-coverage/compare?${p.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setCompareGroups(data.groups || []);
+        setCompareTeammates(data.teammates || []);
+        if (data._debug) console.info("[team-coverage compare]", data._debug);
+      } else {
+        setCompareError(data.error || `HTTP ${res.status}`);
+        setCompareGroups([]);
+        setCompareTeammates([]);
+        console.error("[team-coverage compare] server error:", data.error, data._debug);
+      }
+    } catch (e: any) {
+      setCompareError(e?.message || "Network error");
+      setCompareGroups([]);
+      setCompareTeammates([]);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [accountFilterIds, statusFilter]);
+
+  // Fetch data based on mode
   useEffect(() => {
-    if (selectedMember) loadDrill(selectedMember.id);
-  }, [selectedMember, accountFilter, statusFilter, loadDrill]);
+    if (!isAllowed) return;
+    if (mode === "overview") loadOverview();
+  }, [isAllowed, mode, loadOverview]);
+  useEffect(() => {
+    if (!isAllowed) return;
+    if (mode === "drill" && selectedTeammateId) loadDrill(selectedTeammateId);
+  }, [isAllowed, mode, selectedTeammateId, loadDrill]);
+  useEffect(() => {
+    if (!isAllowed) return;
+    if (mode === "compare" && compareTeammateIds.length >= 2) loadCompare(compareTeammateIds);
+  }, [isAllowed, mode, compareTeammateIds, loadCompare]);
 
-  // ── Search filtering (client-side for both views) ─────────────────────
+  // ── Filtering (search box; client-side) ───────────────────────────────
   const filteredOverview = useMemo(() => {
+    let rows = overviewRows;
+    if (overviewTeammateFilter.length > 0) {
+      const set = new Set(overviewTeammateFilter);
+      rows = rows.filter(r => set.has(r.team_member.id));
+    }
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return overviewRows;
-    return overviewRows.filter(r => r.team_member.name.toLowerCase().includes(q));
-  }, [overviewRows, searchQuery]);
+    if (q) rows = rows.filter(r => r.team_member.name.toLowerCase().includes(q));
+    return rows;
+  }, [overviewRows, overviewTeammateFilter, searchQuery]);
 
   const filteredDrill = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -177,19 +299,28 @@ export default function TeamCoveragePage() {
     );
   }, [drillRows, searchQuery]);
 
-  // ── Set status on a (supplier, account) pair, with optimistic update ──
-  const setStatus = useCallback(async (
-    supplierId: string, accountId: string, statusId: string | null
-  ) => {
-    // Optimistic update: patch the row locally first, then sync.
+  const filteredCompareGroups = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return compareGroups;
+    return compareGroups
+      .map(g => ({
+        ...g,
+        rows: g.rows.filter((r: any) =>
+          (r.supplier?.name || "").toLowerCase().includes(q) ||
+          (r.supplier?.email || "").toLowerCase().includes(q)
+        ),
+      }))
+      .filter(g => g.rows.length > 0);
+  }, [compareGroups, searchQuery]);
+
+  // ── Status edit (used in drill mode) ─────────────────────────────────
+  const setStatus = useCallback(async (supplierId: string, accountId: string, statusId: string | null) => {
+    // Optimistic update
     setDrillRows(rs => rs.map(r => {
       if (r.supplier?.id !== supplierId || r.account?.id !== accountId) return r;
-      const newStatus = statusId
-        ? (availableStatuses.find(s => s.id === statusId) || null)
-        : null;
+      const newStatus = statusId ? (availableStatuses.find(s => s.id === statusId) || null) : null;
       return { ...r, status: newStatus };
     }));
-
     try {
       const res = await fetch("/api/supplier-account-status", {
         method: "PATCH",
@@ -202,16 +333,25 @@ export default function TeamCoveragePage() {
         }),
       });
       if (!res.ok) {
-        // Reload on failure to undo the optimistic patch
-        if (selectedMember) loadDrill(selectedMember.id);
-        const json = await res.json().catch(() => ({}));
-        alert("Failed to set status: " + (json.error || "Unknown error"));
+        if (selectedTeammateId) loadDrill(selectedTeammateId);
+        const j = await res.json().catch(() => ({}));
+        alert("Failed to set status: " + (j.error || "Unknown"));
       }
     } catch (e: any) {
-      if (selectedMember) loadDrill(selectedMember.id);
+      if (selectedTeammateId) loadDrill(selectedTeammateId);
       alert("Failed to set status: " + (e?.message || String(e)));
     }
-  }, [availableStatuses, currentUserId, selectedMember, loadDrill]);
+  }, [availableStatuses, currentUserId, selectedTeammateId, loadDrill]);
+
+  // ── Compare picker handler ───────────────────────────────────────────
+  const startCompare = (ids: string[]) => {
+    if (ids.length < 2) return;
+    if (ids.length > 4) {
+      alert("Comparison view supports up to 4 teammates. Pick fewer.");
+      return;
+    }
+    navigate({ teammates: ids });
+  };
 
   if (!isAllowed) {
     return (
@@ -230,50 +370,68 @@ export default function TeamCoveragePage() {
     );
   }
 
+  // ── Account filter options for the dropdown ─────────────────────────
+  const accountOptions = accounts.map(a => ({ id: a.id, label: a.name }));
+  // Teammate filter options for the overview-row filter
+  const teammateOptions = overviewRows.map(r => ({
+    id: r.team_member.id,
+    label: r.team_member.name,
+    sublabel: r.team_member.role || undefined,
+  }));
+
+  // The header title arrow: in any non-overview mode, goes to overview.
+  // In overview mode, goes home.
+  const titleArrowHref = mode === "overview" ? "/" : "/team-coverage";
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]">
       <div className="max-w-7xl mx-auto px-6 py-5">
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+            <Link href={titleArrowHref} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
               <ArrowLeft size={16} />
             </Link>
             <h1 className="text-[18px] font-semibold flex items-center gap-2">
               <Users size={18} />
               Team Coverage
-              {selectedMember && (
+              {mode === "drill" && drillTeamMember && (
                 <>
                   <ChevronRight size={14} className="text-[var(--text-muted)]" />
-                  <span className="text-[var(--text-primary)]">{selectedMember.name}</span>
+                  <span className="text-[var(--text-primary)]">{drillTeamMember.name}</span>
+                </>
+              )}
+              {mode === "compare" && (
+                <>
+                  <ChevronRight size={14} className="text-[var(--text-muted)]" />
+                  <span className="text-[var(--text-primary)]">Compare {compareTeammates.length || compareTeammateIds.length}</span>
                 </>
               )}
             </h1>
           </div>
-          {selectedMember && (
-            <button
-              onClick={() => { setSelectedMember(null); setSearchQuery(""); }}
+          {mode !== "overview" && (
+            <Link
+              href="/team-coverage"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
             >
               <ArrowLeft size={12} /> Back to overview
-            </button>
+            </Link>
           )}
         </div>
 
         {/* ── Filter bar ─────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          {/* Account filter */}
-          <select
-            value={accountFilter}
-            onChange={(e) => setAccountFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[12px] outline-none"
-          >
-            <option value="">All accounts</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          {/* Account multi-select */}
+          <MultiSelectDropdown
+            options={accountOptions}
+            selected={accountFilterIds}
+            onChange={(ids) => navigate({ accounts: ids })}
+            placeholder="All accounts"
+            searchPlaceholder="Search account..."
+          />
 
-          {/* Status filter — only in drill-in view */}
-          {selectedMember && (
+          {/* Status filter — drill + compare only */}
+          {(mode === "drill" || mode === "compare") && (
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -285,13 +443,34 @@ export default function TeamCoveragePage() {
             </select>
           )}
 
+          {/* Teammate filter — overview only */}
+          {mode === "overview" && (
+            <MultiSelectDropdown
+              options={teammateOptions}
+              selected={overviewTeammateFilter}
+              onChange={setOverviewTeammateFilter}
+              placeholder="All teammates"
+              searchPlaceholder="Search teammate..."
+              maxLabel={1}
+            />
+          )}
+
+          {/* Compare picker — overview only. Opens a multi-select and on
+              confirming 2+ choices, navigates to compare URL. */}
+          {mode === "overview" && (
+            <CompareLauncher
+              options={teammateOptions}
+              onCompare={startCompare}
+            />
+          )}
+
           {/* Search */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] flex-1 max-w-md">
             <Search size={13} className="text-[var(--text-muted)]" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={selectedMember ? "Search supplier..." : "Search teammate..."}
+              placeholder={mode === "overview" ? "Search teammate..." : "Search supplier..."}
               className="flex-1 bg-transparent outline-none text-[12px] text-[var(--text-primary)]"
             />
             {searchQuery && (
@@ -300,224 +479,439 @@ export default function TeamCoveragePage() {
               </button>
             )}
           </div>
-
-          {(accountFilter || statusFilter || searchQuery) && (
-            <button
-              onClick={() => { setAccountFilter(""); setStatusFilter(""); setSearchQuery(""); }}
-              className="px-2.5 py-1.5 rounded-lg text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            >
-              Clear filters
-            </button>
-          )}
         </div>
 
-        {/* ── Body: overview OR drill-in ─────────────────────────────── */}
-        {!selectedMember ? (
-          // Overview table
-          overviewLoading ? (
-            <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center">
-              <Loader2 size={14} className="animate-spin" /> Loading team coverage…
-            </div>
-          ) : (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-              <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
-                <table className="w-full text-[12px]">
-                  <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">TEAMMATE</th>
-                    {accounts
-                      .filter(a => !accountFilter || a.id === accountFilter)
-                      .map(a => (
-                        <th key={a.id} className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] uppercase">
-                          {a.name}
-                        </th>
-                      ))}
-                    <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)]">TOTAL</th>
-                    <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)]">LATEST</th>
-                    <th className="w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredOverview.length === 0 ? (
-                    <tr>
-                      <td colSpan={accounts.length + 4} className="text-center py-10 text-[var(--text-muted)]">
-                        No teammates match.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredOverview.map((r) => (
-                      <tr
-                        key={r.team_member.id}
-                        onClick={() => setSelectedMember(r.team_member)}
-                        className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)] cursor-pointer transition-colors"
-                      >
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                              style={{ backgroundColor: r.team_member.color || "#6B7280" }}
-                            >
-                              {memberInitials(r.team_member)}
-                            </span>
-                            <div>
-                              <div className="font-medium">{r.team_member.name}</div>
-                              {r.team_member.role && (
-                                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">{r.team_member.role}</div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        {accounts
-                          .filter(a => !accountFilter || a.id === accountFilter)
-                          .map(a => (
-                            <td key={a.id} className="text-right px-3 py-2.5 tabular-nums">
-                              {r.counts[a.id] > 0
-                                ? <span className="text-[var(--text-primary)] font-medium">{r.counts[a.id]}</span>
-                                : <span className="text-[var(--text-muted)]">0</span>}
-                            </td>
-                          ))}
-                        <td className="text-right px-3 py-2.5 tabular-nums font-bold">
-                          {r.total > 0 ? r.total : <span className="text-[var(--text-muted)] font-normal">0</span>}
-                        </td>
-                        <td className="text-right px-3 py-2.5 text-[var(--text-muted)]">{fmtRelative(r.latest_at)}</td>
-                        <td className="px-2 text-[var(--text-muted)]"><ChevronRight size={14} /></td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-              </div>
-            </div>
-          )
-        ) : (
-          // Drill-in supplier list
-          drillLoading ? (
-            <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center">
-              <Loader2 size={14} className="animate-spin" /> Loading {selectedMember.name}'s suppliers…
-            </div>
-          ) : drillError ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
-              <div className="text-[12px] font-semibold text-red-500 mb-1">Drill-in failed</div>
-              <div className="text-[12px] text-[var(--text-secondary)] mb-2">{drillError}</div>
-              <div className="text-[10px] text-[var(--text-muted)]">
-                Open DevTools → Console and look for the "[team-coverage drill-in]" log entry to see the full debug info.
-              </div>
-              <button
-                onClick={() => selectedMember && loadDrill(selectedMember.id)}
-                className="mt-3 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
-              >
-                Retry
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="text-[11px] text-[var(--text-muted)] mb-2">
-                {filteredDrill.length} supplier{filteredDrill.length === 1 ? "" : "s"} contacted
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
-                  <table className="w-full text-[12px]">
-                    <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">SUPPLIER</th>
-                      <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">ACCOUNT</th>
-                      <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)] w-56">STATUS</th>
-                      <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">LABELS</th>
-                      <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] w-24">OUTBOUND</th>
-                      <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] w-24">LAST</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredDrill.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="text-center py-10 text-[var(--text-muted)]">
-                          No suppliers match the current filters.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredDrill.map((r, i) => (
-                        <tr key={`${r.supplier?.id}-${r.account?.id}-${i}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)]">
-                          <td className="px-3 py-2">
-                            <div className="font-medium">{r.supplier?.name || "—"}</div>
-                            <div className="text-[10px] text-[var(--text-muted)]">{r.supplier?.email}</div>
-                          </td>
-                          <td className="px-3 py-2 text-[var(--text-secondary)]">{r.account?.name || "—"}</td>
-                          <td className="px-3 py-2">
-                            <StatusPicker
-                              currentStatus={r.status}
-                              availableStatuses={availableStatuses}
-                              onChange={(statusId) => {
-                                if (r.supplier && r.account) {
-                                  setStatus(r.supplier.id, r.account.id, statusId);
-                                }
-                              }}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-1.5">
-                              {(r.latest_conversation?.labels || []).slice(0, 5).map(l => (
-                                <span
-                                  key={l.id}
-                                  className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]"
-                                >
-                                  <span
-                                    className="w-1.5 h-1.5 rounded-full"
-                                    style={{ background: l.color }}
-                                  />
-                                  {l.name}
-                                </span>
-                              ))}
-                              {(r.latest_conversation?.labels?.length || 0) > 5 && (
-                                <span className="text-[10px] text-[var(--text-muted)]">+{(r.latest_conversation!.labels.length - 5)}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="text-right px-3 py-2 tabular-nums">{r.total_outbound}</td>
-                          <td className="text-right px-3 py-2 text-[var(--text-muted)]">
-                            {r.latest_conversation ? (
-                              <Link
-                                href={`/?convo=${r.latest_conversation.id}`}
-                                className="hover:text-[var(--text-primary)] inline-flex items-center gap-1"
-                                title={r.latest_conversation.subject || ""}
-                              >
-                                {fmtRelative(r.last_contact_at)}
-                                <ExternalLink size={10} />
-                              </Link>
-                            ) : (
-                              fmtRelative(r.last_contact_at)
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-                </div>
-              </div>
-            </>
-          )
+        {/* ── Body: overview / drill / compare ───────────────────────── */}
+        {mode === "overview" && (
+          <OverviewTable
+            loading={overviewLoading}
+            accounts={accounts}
+            rows={filteredOverview}
+            accountFilterIds={accountFilterIds}
+            onSelectTeammate={(id) => navigate({ teammate: id })}
+          />
+        )}
+
+        {mode === "drill" && (
+          <DrillTable
+            loading={drillLoading}
+            error={drillError}
+            rows={filteredDrill}
+            availableStatuses={availableStatuses}
+            onSetStatus={setStatus}
+            onRetry={() => selectedTeammateId && loadDrill(selectedTeammateId)}
+          />
+        )}
+
+        {mode === "compare" && (
+          <CompareView
+            loading={compareLoading}
+            error={compareError}
+            teammates={compareTeammates}
+            groups={filteredCompareGroups}
+            onRetry={() => loadCompare(compareTeammateIds)}
+          />
         )}
       </div>
     </div>
   );
 }
 
+// ── Compare launcher (multi-select that triggers navigation when confirmed) ─
+function CompareLauncher({ options, onCompare }: {
+  options: { id: string; label: string; sublabel?: string }[];
+  onCompare: (ids: string[]) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-compare-launcher]")) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const toggle = (id: string) => {
+    setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  };
+
+  return (
+    <div className="relative" data-compare-launcher>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--info)]/10 border border-[var(--info)]/30 text-[12px] text-[var(--info)] hover:bg-[var(--info)]/15"
+      >
+        Compare teammates
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 left-0 w-64 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl py-2">
+          <div className="px-3 pb-2 text-[10px] text-[var(--text-muted)] border-b border-[var(--border)] mb-1">
+            Pick 2–4 teammates to compare. You'll see who exclusively contacted which suppliers, and which overlap.
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {options.map(o => {
+              const checked = picked.includes(o.id);
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => toggle(o.id)}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2 text-[11px]"
+                >
+                  <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                    checked ? "bg-[var(--info)] border-[var(--info)]" : "border-[var(--border)]"
+                  }`}>
+                    {checked && <span className="text-[8px] text-white font-bold">✓</span>}
+                  </span>
+                  <span>{o.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="border-t border-[var(--border)] mt-1 pt-2 px-3 flex items-center justify-between">
+            <span className="text-[10px] text-[var(--text-muted)]">
+              {picked.length} selected
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => { setPicked([]); setOpen(false); }}
+                className="px-2 py-1 rounded text-[10px] text-[var(--text-muted)] hover:bg-[var(--bg)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (picked.length < 2) { alert("Pick at least 2 teammates"); return; }
+                  setOpen(false);
+                  onCompare(picked);
+                  setPicked([]);
+                }}
+                disabled={picked.length < 2}
+                className="px-2.5 py-1 rounded text-[10px] font-semibold bg-[var(--info)] text-white disabled:opacity-40"
+              >
+                Compare
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Overview table ────────────────────────────────────────────────────
+function OverviewTable({ loading, accounts, rows, accountFilterIds, onSelectTeammate }: {
+  loading: boolean;
+  accounts: AccountLite[];
+  rows: OverviewRow[];
+  accountFilterIds: string[];
+  onSelectTeammate: (id: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center">
+        <Loader2 size={14} className="animate-spin" /> Loading team coverage…
+      </div>
+    );
+  }
+  const visibleAccounts = accountFilterIds.length === 0
+    ? accounts
+    : accounts.filter(a => accountFilterIds.includes(a.id));
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
+            <tr>
+              <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">TEAMMATE</th>
+              {visibleAccounts.map(a => (
+                <th key={a.id} className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] uppercase">{a.name}</th>
+              ))}
+              <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)]">TOTAL</th>
+              <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)]">LATEST</th>
+              <th className="w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={visibleAccounts.length + 4} className="text-center py-10 text-[var(--text-muted)]">No teammates match.</td></tr>
+            ) : (
+              rows.map(r => (
+                <tr
+                  key={r.team_member.id}
+                  onClick={() => onSelectTeammate(r.team_member.id)}
+                  className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)] cursor-pointer transition-colors"
+                >
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ backgroundColor: r.team_member.color || "#6B7280" }}>
+                        {memberInitials(r.team_member)}
+                      </span>
+                      <div>
+                        <div className="font-medium">{r.team_member.name}</div>
+                        {r.team_member.role && <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">{r.team_member.role}</div>}
+                      </div>
+                    </div>
+                  </td>
+                  {visibleAccounts.map(a => (
+                    <td key={a.id} className="text-right px-3 py-2.5 tabular-nums">
+                      {r.counts[a.id] > 0
+                        ? <span className="text-[var(--text-primary)] font-medium">{r.counts[a.id]}</span>
+                        : <span className="text-[var(--text-muted)]">0</span>}
+                    </td>
+                  ))}
+                  <td className="text-right px-3 py-2.5 tabular-nums font-bold">
+                    {r.total > 0 ? r.total : <span className="text-[var(--text-muted)] font-normal">0</span>}
+                  </td>
+                  <td className="text-right px-3 py-2.5 text-[var(--text-muted)]">{fmtRelative(r.latest_at)}</td>
+                  <td className="px-2 text-[var(--text-muted)]"><ChevronRight size={14} /></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Drill-in table ────────────────────────────────────────────────────
+function DrillTable({ loading, error, rows, availableStatuses, onSetStatus, onRetry }: {
+  loading: boolean;
+  error: string | null;
+  rows: DrillRow[];
+  availableStatuses: SupplierStatus[];
+  onSetStatus: (supplierId: string, accountId: string, statusId: string | null) => void;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center"><Loader2 size={14} className="animate-spin" /> Loading suppliers…</div>;
+  }
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+        <div className="text-[12px] font-semibold text-red-500 mb-1">Drill-in failed</div>
+        <div className="text-[12px] text-[var(--text-secondary)] mb-2">{error}</div>
+        <button onClick={onRetry} className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]">Retry</button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="text-[11px] text-[var(--text-muted)] mb-2">{rows.length} supplier{rows.length === 1 ? "" : "s"} contacted</div>
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+        <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">SUPPLIER</th>
+                <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">ACCOUNT</th>
+                <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)] w-56">STATUS</th>
+                <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">LABELS</th>
+                <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] w-24">OUTBOUND</th>
+                <th className="text-right px-3 py-2 font-semibold text-[var(--text-secondary)] w-24">LAST</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={6} className="text-center py-10 text-[var(--text-muted)]">No suppliers match the current filters.</td></tr>
+              ) : (
+                rows.map((r, i) => (
+                  <tr key={`${r.supplier?.id}-${r.account?.id}-${i}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)]">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{r.supplier?.name || "—"}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">{r.supplier?.email}</div>
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{r.account?.name || "—"}</td>
+                    <td className="px-3 py-2">
+                      <StatusPicker
+                        currentStatus={r.status}
+                        availableStatuses={availableStatuses}
+                        onChange={(statusId) => { if (r.supplier && r.account) onSetStatus(r.supplier.id, r.account.id, statusId); }}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {(r.latest_conversation?.labels || []).slice(0, 5).map(l => (
+                          <span key={l.id} className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: l.color }} />
+                            {l.name}
+                          </span>
+                        ))}
+                        {(r.latest_conversation?.labels?.length || 0) > 5 && (
+                          <span className="text-[10px] text-[var(--text-muted)]">+{(r.latest_conversation!.labels.length - 5)}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="text-right px-3 py-2 tabular-nums">{r.total_outbound}</td>
+                    <td className="text-right px-3 py-2 text-[var(--text-muted)]">
+                      {r.latest_conversation ? (
+                        <Link href={`/?convo=${r.latest_conversation.id}`} className="hover:text-[var(--text-primary)] inline-flex items-center gap-1" title={r.latest_conversation.subject || ""}>
+                          {fmtRelative(r.last_contact_at)}
+                          <ExternalLink size={10} />
+                        </Link>
+                      ) : (
+                        fmtRelative(r.last_contact_at)
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Compare (Venn) view ───────────────────────────────────────────────
+function CompareView({ loading, error, teammates, groups, onRetry }: {
+  loading: boolean;
+  error: string | null;
+  teammates: TeamMember[];
+  groups: CompareGroup[];
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center"><Loader2 size={14} className="animate-spin" /> Loading comparison…</div>;
+  }
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+        <div className="text-[12px] font-semibold text-red-500 mb-1">Compare failed</div>
+        <div className="text-[12px] text-[var(--text-secondary)] mb-2">{error}</div>
+        <button onClick={onRetry} className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]">Retry</button>
+      </div>
+    );
+  }
+  const totalRows = groups.reduce((acc, g) => acc + g.rows.length, 0);
+  return (
+    <>
+      {/* Teammate chips at top */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Comparing:</span>
+        {teammates.map(t => (
+          <span key={t.id} className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-[var(--border)] text-[11px]">
+            <span className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white" style={{ backgroundColor: t.color || "#6B7280" }}>
+              {memberInitials(t)}
+            </span>
+            {t.name}
+          </span>
+        ))}
+        <span className="text-[10px] text-[var(--text-muted)] ml-2">{totalRows} supplier-account pair{totalRows === 1 ? "" : "s"} total</span>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-10 text-center text-[var(--text-muted)] text-[12px]">
+          No suppliers match the current filters.
+        </div>
+      ) : (
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {groups.map(group => (
+            <CompareGroupCard key={group.key} group={group} teammates={teammates} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function CompareGroupCard({ group, teammates }: { group: CompareGroup; teammates: TeamMember[] }) {
+  const groupMembers = group.teammate_ids
+    .map(id => teammates.find(t => t.id === id))
+    .filter(Boolean) as TeamMember[];
+  const isAll = group.teammate_ids.length === teammates.length;
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+      <div className={`px-4 py-2 border-b border-[var(--border)] flex items-center gap-2 ${isAll ? "bg-[var(--info)]/8" : "bg-[var(--bg)]"}`}>
+        <div className="flex items-center -space-x-1">
+          {groupMembers.map(m => (
+            <span key={m.id} className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white border-2 border-[var(--surface)]" style={{ backgroundColor: m.color || "#6B7280" }}>
+              {memberInitials(m)}
+            </span>
+          ))}
+        </div>
+        <div className="text-[12px] font-semibold">{group.label}</div>
+        <div className="text-[10px] text-[var(--text-muted)] ml-auto">{group.rows.length} supplier{group.rows.length === 1 ? "" : "s"}</div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead className="bg-[var(--bg)] border-b border-[var(--border)]">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-semibold text-[var(--text-secondary)]">SUPPLIER</th>
+              <th className="text-left px-3 py-1.5 font-semibold text-[var(--text-secondary)]">ACCOUNT</th>
+              <th className="text-left px-3 py-1.5 font-semibold text-[var(--text-secondary)]">STATUS</th>
+              <th className="text-left px-3 py-1.5 font-semibold text-[var(--text-secondary)]">LABELS</th>
+              {groupMembers.map(m => (
+                <th key={m.id} className="text-right px-3 py-1.5 font-semibold text-[var(--text-secondary)] uppercase">{memberInitials(m)}</th>
+              ))}
+              <th className="text-right px-3 py-1.5 font-semibold text-[var(--text-secondary)] w-20">LAST</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.rows.map((r: any, i: number) => (
+              <tr key={`${r.supplier?.id}-${r.account?.id}-${i}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)]">
+                <td className="px-3 py-1.5">
+                  <div className="font-medium">{r.supplier?.name || "—"}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{r.supplier?.email}</div>
+                </td>
+                <td className="px-3 py-1.5 text-[var(--text-secondary)]">{r.account?.name || "—"}</td>
+                <td className="px-3 py-1.5">
+                  {r.status ? (
+                    <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ color: `#${r.status.color}`, backgroundColor: `#${r.status.background_color}` }}>
+                      {r.status.name}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-[var(--text-muted)] italic">no status</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(r.labels || []).slice(0, 4).map((l: any) => (
+                      <span key={l.id} className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: l.color }} />
+                        {l.name}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                {groupMembers.map(m => (
+                  <td key={m.id} className="text-right px-3 py-1.5 tabular-nums">
+                    {r.per_teammate_outbound?.[m.id] || 0}
+                  </td>
+                ))}
+                <td className="text-right px-3 py-1.5 text-[var(--text-muted)]">
+                  {r.latest_conversation ? (
+                    <Link href={`/?convo=${r.latest_conversation.id}`} className="hover:text-[var(--text-primary)] inline-flex items-center gap-1">
+                      {fmtRelative(r.last_contact_at)}
+                      <ExternalLink size={10} />
+                    </Link>
+                  ) : (
+                    fmtRelative(r.last_contact_at)
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Inline status picker ──────────────────────────────────────────────
-// Click to expand a dropdown of all active statuses (plus a "Clear" option).
-// Closes on outside click. Optimistic update is handled by the parent's
-// setStatus function; this is a thin presentational dropdown.
-function StatusPicker({
-  currentStatus,
-  availableStatuses,
-  onChange,
-}: {
+function StatusPicker({ currentStatus, availableStatuses, onChange }: {
   currentStatus: SupplierStatus | null;
   availableStatuses: SupplierStatus[];
   onChange: (statusId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -526,7 +920,6 @@ function StatusPicker({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
-
   return (
     <div className="relative inline-block" data-status-picker>
       <button
@@ -543,28 +936,16 @@ function StatusPicker({
       </button>
       {open && (
         <div className="absolute z-50 mt-1 left-0 w-60 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg py-1">
-          <button
-            onClick={() => { onChange(null); setOpen(false); }}
-            className="w-full text-left px-3 py-1.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg)] italic"
-          >
+          <button onClick={() => { onChange(null); setOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg)] italic">
             Clear status
           </button>
           <div className="border-t border-[var(--border)] my-1" />
           {availableStatuses.map(s => (
-            <button
-              key={s.id}
-              onClick={() => { onChange(s.id); setOpen(false); }}
-              className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2"
-            >
-              <span
-                className="px-1.5 py-0.5 rounded text-[10px] font-semibold inline-block"
-                style={{ color: `#${s.color}`, backgroundColor: `#${s.background_color}` }}
-              >
+            <button key={s.id} onClick={() => { onChange(s.id); setOpen(false); }} className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold inline-block" style={{ color: `#${s.color}`, backgroundColor: `#${s.background_color}` }}>
                 {s.name}
               </span>
-              {currentStatus?.id === s.id && (
-                <span className="ml-auto text-[10px] text-[var(--accent)]">✓</span>
-              )}
+              {currentStatus?.id === s.id && <span className="ml-auto text-[10px] text-[var(--accent)]">✓</span>}
             </button>
           ))}
         </div>
