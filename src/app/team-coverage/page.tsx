@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -87,8 +87,26 @@ function memberInitials(m: TeamMember): string {
   return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
 }
 
-// ── Main page component ────────────────────────────────────────────────
+// ── Default export: wraps the page in <Suspense> ──────────────────────
+// Required because the inner component uses `useSearchParams()`, which
+// triggers a CSR bailout during Next.js 14 static generation. Without
+// the Suspense boundary, the production build fails.
 export default function TeamCoveragePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
+        <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px]">
+          <Loader2 size={14} className="animate-spin" /> Loading Team Coverage…
+        </div>
+      </div>
+    }>
+      <TeamCoveragePageInner />
+    </Suspense>
+  );
+}
+
+// ── Main page component ────────────────────────────────────────────────
+function TeamCoveragePageInner() {
   const { data: session } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
