@@ -44,7 +44,9 @@ export async function GET(req: NextRequest) {
     .split(",").map(s => s.trim()).filter(Boolean);
   const sort       = params.get("sort")  || "last_contact";
   const order      = (params.get("order") || "desc") === "asc" ? "asc" : "desc";
-  const limit      = Math.min(parseInt(params.get("limit")  || "50", 10), 200);
+  // Cap raised: Batch 7 follow-up — Rod prefers no pagination, just scroll.
+  // Default request from the UI is now `limit=5000` (effectively "all").
+  const limit      = Math.min(parseInt(params.get("limit")  || "50", 10), 5000);
   const offset     = Math.max(parseInt(params.get("offset") || "0", 10), 0);
 
   // ── Parallel raw data fetches ─────────────────────────────────────
@@ -53,6 +55,7 @@ export async function GET(req: NextRequest) {
     conversationsRes,
     messagesRes,
     accountsRes,
+    teamMembersRes,
     statusAssignsRes,
     statusDefsRes,
   ] = await Promise.all([
@@ -75,6 +78,9 @@ export async function GET(req: NextRequest) {
       .from("email_accounts")
       .select("id, name"),
     supabase
+      .from("team_members")
+      .select("id, name, initials, color"),
+    supabase
       .from("supplier_account_statuses")
       .select("supplier_contact_id, email_account_id, status_id"),
     supabase
@@ -82,7 +88,7 @@ export async function GET(req: NextRequest) {
       .select("id, name, color, background_color"),
   ]);
 
-  for (const r of [suppliersRes, conversationsRes, messagesRes, accountsRes, statusAssignsRes, statusDefsRes]) {
+  for (const r of [suppliersRes, conversationsRes, messagesRes, accountsRes, teamMembersRes, statusAssignsRes, statusDefsRes]) {
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   }
 
@@ -90,11 +96,13 @@ export async function GET(req: NextRequest) {
   const conversations  = (conversationsRes.data  || []) as any[];
   const messages       = (messagesRes.data       || []) as any[];
   const accounts       = (accountsRes.data       || []) as any[];
+  const teamMembers    = (teamMembersRes.data    || []) as any[];
   const statusAssigns  = (statusAssignsRes.data  || []) as any[];
   const statusDefs     = (statusDefsRes.data     || []) as any[];
 
-  const accountById = new Map<string, any>(accounts.map(a => [a.id, a]));
-  const statusById  = new Map<string, any>(statusDefs.map(s => [s.id, s]));
+  const accountById   = new Map<string, any>(accounts.map(a => [a.id, a]));
+  const teamMemberById = new Map<string, any>(teamMembers.map(t => [t.id, t]));
+  const statusById    = new Map<string, any>(statusDefs.map(s => [s.id, s]));
 
   // Conversation lookup — supplier_contact_id + email_account_id per conversation
   const convoById = new Map<string, any>(conversations.map(c => [c.id, c]));
@@ -221,16 +229,37 @@ export async function GET(req: NextRequest) {
   const paged = rows.slice(offset, offset + limit);
 
   return NextResponse.json({
-    suppliers: paged.map(a => ({
-      id: a.id,
-      name: a.name,
-      email: a.email,
-      account_count: a.account_set.size,
-      teammate_count: a.teammate_set.size,
-      total_outbound: a.total_outbound,
-      last_contact_at: a.last_contact_at,
-      statuses_by_account: a.statuses_by_account,
-    })),
+    suppliers: paged.map(a => {
+      // Resolve account_set IDs → {id, name} objects (sorted by name for stable display)
+      const accountList = Array.from(a.account_set)
+        .map(id => {
+          const acct = accountById.get(id);
+          return acct ? { id: acct.id, name: acct.name } : null;
+        })
+        .filter(Boolean)
+        .sort((x: any, y: any) => (x.name || "").localeCompare(y.name || ""));
+      // Resolve teammate_set IDs → {id, name, initials, color} objects
+      const teammateList = Array.from(a.teammate_set)
+        .map(id => {
+          const tm = teamMemberById.get(id);
+          return tm ? { id: tm.id, name: tm.name, initials: tm.initials, color: tm.color } : null;
+        })
+        .filter(Boolean)
+        .sort((x: any, y: any) => (x.name || "").localeCompare(y.name || ""));
+      return {
+        id: a.id,
+        name: a.name,
+        email: a.email,
+        accounts: accountList,
+        teammates: teammateList,
+        // Counts retained for sort stability + backward compatibility
+        account_count: accountList.length,
+        teammate_count: teammateList.length,
+        total_outbound: a.total_outbound,
+        last_contact_at: a.last_contact_at,
+        statuses_by_account: a.statuses_by_account,
+      };
+    }),
     total,
     limit,
     offset,

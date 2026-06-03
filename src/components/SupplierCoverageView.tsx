@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  Search, X, Download, Loader2, AlertCircle, ChevronRight, ChevronLeft, ArrowLeft,
+  Search, X, Download, Loader2, AlertCircle, ArrowLeft,
   ExternalLink, Building2, Users as UsersIcon, ArrowUpDown,
 } from "lucide-react";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
@@ -31,6 +31,8 @@ type SupplierListRow = {
   id: string;
   name: string | null;
   email: string | null;
+  accounts: { id: string; name: string }[];
+  teammates: { id: string; name: string; initials: string | null; color: string | null }[];
   account_count: number;
   teammate_count: number;
   total_outbound: number;
@@ -163,11 +165,9 @@ function SupplierListView({
   const [statusFilter, setStatusFilter] = useState("");
   const [sort, setSort] = useState<ListSort>("last_contact");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [offset, setOffset] = useState(0);
   const [data, setData] = useState<SupplierListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const PAGE_SIZE = 50;
 
   // Debounce search input
   useEffect(() => {
@@ -175,10 +175,9 @@ function SupplierListView({
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset to page 0 whenever filters/sort change
-  useEffect(() => { setOffset(0); }, [debouncedSearch, statusFilter, sort, order, accountFilterIds.join(",")]);
-
-  const fetchPage = useCallback(async () => {
+  // No pagination — Rod prefers a single scrollable page. Load up to 5000
+  // suppliers in one request (server hard cap).
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -188,8 +187,8 @@ function SupplierListView({
       if (statusFilter) p.set("status_id", statusFilter);
       p.set("sort", sort);
       p.set("order", order);
-      p.set("limit", String(PAGE_SIZE));
-      p.set("offset", String(offset));
+      p.set("limit", "5000");
+      p.set("offset", "0");
       const res = await fetch(`/api/team-coverage/suppliers?${p.toString()}`);
       const j = await res.json();
       if (!res.ok) { setError(j.error || `HTTP ${res.status}`); setData(null); }
@@ -199,9 +198,9 @@ function SupplierListView({
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, accountFilterIds, statusFilter, sort, order, offset]);
+  }, [debouncedSearch, accountFilterIds, statusFilter, sort, order]);
 
-  useEffect(() => { fetchPage(); }, [fetchPage]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const toggleSort = (newSort: ListSort) => {
     if (sort === newSort) {
@@ -212,53 +211,27 @@ function SupplierListView({
     }
   };
 
-  // CSV — exports all currently-filtered suppliers (not just current page).
-  // Hits the endpoint with a high limit to get them all in one go.
-  const downloadListCsv = async () => {
-    try {
-      const p = new URLSearchParams();
-      if (debouncedSearch) p.set("q", debouncedSearch);
-      if (accountFilterIds.length > 0) p.set("account_ids", accountFilterIds.join(","));
-      if (statusFilter) p.set("status_id", statusFilter);
-      p.set("sort", sort);
-      p.set("order", order);
-      p.set("limit", "200");
-      p.set("offset", "0");
-      // Page through if there are more
-      const allRows: SupplierListRow[] = [];
-      let cursor = 0;
-      while (true) {
-        p.set("offset", String(cursor));
-        const res = await fetch(`/api/team-coverage/suppliers?${p.toString()}`);
-        const j = await res.json();
-        if (!res.ok) { alert("CSV export failed: " + (j.error || res.status)); return; }
-        allRows.push(...(j.suppliers || []));
-        cursor += (j.suppliers || []).length;
-        if (allRows.length >= (j.total || 0)) break;
-        if ((j.suppliers || []).length === 0) break;
-        if (cursor > 5000) break; // hard cap
-      }
-      const csvRows = allRows.map(r => ({
-        supplier_name: r.name || "",
-        supplier_email: r.email || "",
-        accounts_count: r.account_count,
-        teammates_count: r.teammate_count,
-        total_outbound: r.total_outbound,
-        last_contact_at: r.last_contact_at || "",
-        statuses: r.statuses_by_account
-          .filter(s => s.status_name)
-          .map(s => `${s.account_name}: ${s.status_name}`)
-          .join("; "),
-      }));
-      downloadCSV(`suppliers-${new Date().toISOString().slice(0,10)}.csv`, csvRows);
-    } catch (e: any) {
-      alert("CSV export failed: " + (e?.message || String(e)));
-    }
+  // CSV — exports the currently-loaded supplier list (everything in `data`,
+  // since pagination is gone).
+  const downloadListCsv = () => {
+    const allRows = data?.suppliers || [];
+    if (allRows.length === 0) return;
+    const csvRows = allRows.map(r => ({
+      supplier_name: r.name || "",
+      supplier_email: r.email || "",
+      accounts: r.accounts.map(a => a.name).join("; "),
+      teammates: r.teammates.map(t => t.name).join("; "),
+      total_outbound: r.total_outbound,
+      last_contact_at: r.last_contact_at || "",
+      statuses: r.statuses_by_account
+        .filter(s => s.status_name)
+        .map(s => `${s.account_name}: ${s.status_name}`)
+        .join("; "),
+    }));
+    downloadCSV(`suppliers-${new Date().toISOString().slice(0,10)}.csv`, csvRows);
   };
 
   const total = data?.total || 0;
-  const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div>
@@ -316,18 +289,18 @@ function SupplierListView({
             <AlertCircle size={14} /> Failed to load suppliers
           </div>
           <div className="text-[12px] text-[var(--text-secondary)] mb-2">{error}</div>
-          <button onClick={fetchPage} className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]">Retry</button>
+          <button onClick={fetchAll} className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--surface)]">Retry</button>
         </div>
       )}
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-        <div className="max-h-[65vh] overflow-y-auto overflow-x-auto">
+        <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
           <table className="w-full text-[12px]">
             <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
               <tr>
                 <SortableHeader label="SUPPLIER" sortKey="name" current={sort} order={order} onClick={() => toggleSort("name")} />
-                <SortableHeader label="ACCOUNTS" sortKey="accounts" current={sort} order={order} onClick={() => toggleSort("accounts")} align="right" />
-                <SortableHeader label="TEAMMATES" sortKey="teammates" current={sort} order={order} onClick={() => toggleSort("teammates")} align="right" />
+                <SortableHeader label="ACCOUNTS" sortKey="accounts" current={sort} order={order} onClick={() => toggleSort("accounts")} />
+                <SortableHeader label="TEAMMATES" sortKey="teammates" current={sort} order={order} onClick={() => toggleSort("teammates")} />
                 <SortableHeader label="OUTBOUND" sortKey="outbound" current={sort} order={order} onClick={() => toggleSort("outbound")} align="right" />
                 <SortableHeader label="LAST CONTACT" sortKey="last_contact" current={sort} order={order} onClick={() => toggleSort("last_contact")} align="right" />
                 <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)] uppercase">STATUSES</th>
@@ -355,8 +328,41 @@ function SupplierListView({
                       </div>
                     </div>
                   </td>
-                  <td className="text-right px-3 py-2 tabular-nums">{s.account_count}</td>
-                  <td className="text-right px-3 py-2 tabular-nums">{s.teammate_count}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {s.accounts.length === 0 ? (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      ) : s.accounts.map(a => (
+                        <span
+                          key={a.id}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--bg)] border border-[var(--border)] text-[var(--text-secondary)]"
+                        >
+                          {a.name}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {s.teammates.length === 0 ? (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      ) : s.teammates.map(t => (
+                        <span
+                          key={t.id}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--bg)] border border-[var(--border)]"
+                          title={t.name}
+                        >
+                          <span
+                            className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                            style={{ backgroundColor: t.color || "#6B7280" }}
+                          >
+                            {t.initials || "?"}
+                          </span>
+                          <span className="text-[var(--text-secondary)]">{t.name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
                   <td className="text-right px-3 py-2 tabular-nums font-medium">{s.total_outbound}</td>
                   <td className="text-right px-3 py-2 text-[var(--text-muted)]" title={s.last_contact_at || ""}>
                     {fmtRelative(s.last_contact_at)}
@@ -390,29 +396,6 @@ function SupplierListView({
           </table>
         </div>
       </div>
-
-      {/* ── Pagination ─────────────────────────────────────────── */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-3 text-[11px] text-[var(--text-muted)]">
-          <span>Page {page} of {totalPages}</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              disabled={offset === 0 || loading}
-              className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] hover:bg-[var(--surface)] disabled:opacity-40"
-            >
-              <ChevronLeft size={12} /> Prev
-            </button>
-            <button
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-              disabled={offset + PAGE_SIZE >= total || loading}
-              className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] hover:bg-[var(--surface)] disabled:opacity-40"
-            >
-              Next <ChevronRight size={12} />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
