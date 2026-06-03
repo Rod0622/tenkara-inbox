@@ -3,7 +3,51 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 
-// ── /api/supplier-account-status — set / clear a supplier's status for one account ──
+// ── GET /api/supplier-account-status ───────────────────────────────────
+//
+// Returns the current status assignment for a (supplier, account) pair.
+// Used by the SupplierStatusBadge in the conversation header to load
+// the current status when a conversation opens.
+//
+// Query params:
+//   supplier_contact_id   required
+//   email_account_id      required
+//
+// Response: { status: { id, name, color, background_color } | null }
+//   - null means no status set
+export async function GET(req: NextRequest) {
+  const url = req.nextUrl;
+  const supplierId = url.searchParams.get("supplier_contact_id");
+  const accountId  = url.searchParams.get("email_account_id");
+  if (!supplierId || !accountId) {
+    return NextResponse.json(
+      { error: "supplier_contact_id and email_account_id are required" },
+      { status: 400 }
+    );
+  }
+  const supabase = createServerClient();
+  // Look up the assignment row (if any), then JOIN to the status lookup.
+  // maybeSingle so it returns null cleanly when there's no row yet.
+  const { data: row, error } = await supabase
+    .from("supplier_account_statuses")
+    .select("status_id")
+    .eq("supplier_contact_id", supplierId)
+    .eq("email_account_id", accountId)
+    .maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!row || !row.status_id) {
+    return NextResponse.json({ status: null });
+  }
+  const { data: status, error: stErr } = await supabase
+    .from("supplier_statuses")
+    .select("id, name, color, background_color")
+    .eq("id", row.status_id)
+    .maybeSingle();
+  if (stErr) return NextResponse.json({ error: stErr.message }, { status: 500 });
+  return NextResponse.json({ status: status || null });
+}
+
+// ── /api/supplier-account-status ───────────────────────────────────────
 //
 // PATCH body: { supplier_contact_id, email_account_id, status_id | null, actor_id?, notes? }
 //
