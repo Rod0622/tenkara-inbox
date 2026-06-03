@@ -8,7 +8,7 @@ import {
   ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X, BarChart3,
 } from "lucide-react";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
-import StatusReportsView from "@/components/team-coverage/StatusReportsView";
+import StatusReportsView from "@/components/StatusReportsView";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface TeamMember {
