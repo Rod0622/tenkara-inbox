@@ -8,6 +8,7 @@ import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/att
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { mergeConversation } from "@/lib/merge-conversations";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -100,6 +101,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
     errors: [],
     lastUid: null,
   };
+
+  // Load internal context once per sync run — used by every new-conversation
+  // insert below to classify the supplier email correctly. Cheap (~few rows
+  // from team_members + email_accounts) but doing this per-message would be
+  // wasteful.
+  const internalCtx: InternalContext = await loadInternalContext(supabase);
 
   try {
     // 1. Get account credentials
@@ -394,6 +401,20 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             }
 
             if (!conversationId) {
+              // Resolve supplier_contact_id at conversation-create time.
+              // For inbound messages, the supplier is the sender (fromEmail).
+              // For outbound messages, the supplier is the primary recipient
+              // (first email extracted from to_addresses).
+              const supplierEmailForLookup = isOutbound
+                ? extractFirstEmail(toAddresses)
+                : fromEmail;
+              const supplierContactId = await ensureSupplierContact(
+                supabase,
+                supplierEmailForLookup,
+                isOutbound ? null : fromName,
+                internalCtx
+              );
+
               const { data: nc, error: ce } = await supabase.from("conversations").insert({
                 email_account_id: accountId,
                 thread_id: `gmail:${msgData.threadId || msgId}`,
@@ -411,6 +432,8 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 // conversation is inbound — otherwise the conversation would
                 // misclassify as Sent until the next inbound reply arrives.
                 last_inbound_at: !isOutbound ? sentAt : null,
+                // Link to supplier_contacts (may be null if internal/transactional/noreply)
+                supplier_contact_id: supplierContactId,
               }).select("id").single();
               if (ce) continue;
               conversationId = nc.id;

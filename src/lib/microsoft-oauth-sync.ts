@@ -1,6 +1,7 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -21,6 +22,9 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     }
   );
   const result = { success: false, newMessages: 0, newConversations: 0, errors: [] as string[] };
+
+  // Load internal context once per sync run for supplier classification
+  const internalCtx: InternalContext = await loadInternalContext(supabase);
 
   try {
     const { data: account, error: accErr } = await supabase
@@ -161,16 +165,31 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         // Create conversation
         if (!conversationId) {
           const subj = cleanSubjectFn(email.subject || "") || "(No Subject)";
+          // Resolve supplier_contact_id at insert time. Compute the
+          // to-addresses string here (the existing version below was AFTER
+          // the insert) so we can use it for outbound classification.
+          const fromEmailForInsert = email.from?.emailAddress?.address || "";
+          const fromNameForInsert  = email.from?.emailAddress?.name    || "";
+          const toAddrForLookup    = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
+          const supplierEmailForLookup = isOutbound ? extractFirstEmail(toAddrForLookup) : fromEmailForInsert;
+          const supplierContactId = await ensureSupplierContact(
+            supabase,
+            supplierEmailForLookup,
+            isOutbound ? null : fromNameForInsert,
+            internalCtx
+          );
           const { data: nc, error: ce } = await supabase.from("conversations").insert({
             email_account_id: accountId,
             thread_id: email.conversationId ? "ms:" + email.conversationId : "ms:" + email.id,
             subject: subj,
-            from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
-            from_email: email.from?.emailAddress?.address || "",
+            from_name: fromNameForInsert || fromEmailForInsert || "Unknown",
+            from_email: fromEmailForInsert,
             preview: (email.bodyPreview || "").slice(0, 200),
             is_unread: !isOutbound,
             status: "open",
             last_message_at: email.receivedDateTime || new Date().toISOString(),
+            // Link to supplier_contacts (may be null if internal/transactional/noreply)
+            supplier_contact_id: supplierContactId,
           }).select("id").single();
 
           if (ce) {

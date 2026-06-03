@@ -2,6 +2,7 @@ import { createServerClient } from "@/lib/supabase";
 import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -245,6 +246,9 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
   const supabase = createServerClient();
   const result = { success: false, newMessages: 0, newConversations: 0, errors: [] as string[], hasMore: false };
 
+  // Load internal context once per sync run (used for supplier classification)
+  const internalCtx: InternalContext = await loadInternalContext(supabase);
+
   try {
     const { data: account, error: accErr } = await supabase
       .from("email_accounts").select("*").eq("id", accountId).single();
@@ -364,17 +368,30 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           if (!conversationId) {
             const subj = cleanSubjectFn(email.subject || "") || "(No Subject)";
             const inboundTs = email.receivedDateTime || new Date().toISOString();
+            // Resolve supplier_contact_id: from sender if inbound, first recipient if outbound.
+            const fromEmail = email.from?.emailAddress?.address || "";
+            const fromName  = email.from?.emailAddress?.name    || "";
+            const toAddrForLookup = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
+            const supplierEmailForLookup = isOutbound ? extractFirstEmail(toAddrForLookup) : fromEmail;
+            const supplierContactId = await ensureSupplierContact(
+              supabase,
+              supplierEmailForLookup,
+              isOutbound ? null : fromName,
+              internalCtx
+            );
             const { data: nc, error: ce } = await supabase.from("conversations").insert({
               email_account_id: accountId,
               thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
               subject: subj,
-              from_name: email.from?.emailAddress?.name || email.from?.emailAddress?.address || "Unknown",
-              from_email: email.from?.emailAddress?.address || "",
+              from_name: fromName || fromEmail || "Unknown",
+              from_email: fromEmail,
               preview: decodeEmailText(email.bodyPreview || "").slice(0, 200),
               is_unread: !isOutbound, status: "open",
               last_message_at: inboundTs,
               // Seed last_inbound_at for new INBOUND conversations.
               last_inbound_at: !isOutbound ? inboundTs : null,
+              // Link to supplier_contacts (may be null if internal/transactional/noreply)
+              supplier_contact_id: supplierContactId,
             }).select("id").single();
             if (ce) { result.errors.push(ce.message); continue; }
             conversationId = nc.id;
