@@ -5,27 +5,62 @@ import { createServerClient } from "@/lib/supabase";
 
 // ── GET /api/supplier-account-status ───────────────────────────────────
 //
-// Returns the current status assignment for a (supplier, account) pair.
-// Used by the SupplierStatusBadge in the conversation header to load
-// the current status when a conversation opens.
+// Two modes:
+//
+// Mode 1 — Single status (existing): both supplier_contact_id and
+//   email_account_id provided → returns one status object for the pair.
+//   Used by SupplierStatusBadge in the conversation header.
+//   Response: { status: {...} | null }
+//
+// Mode 2 — All statuses for a supplier (new in Batch 6, Feature 1):
+//   only supplier_contact_id provided → returns an array of statuses,
+//   one per account that has a status set for this supplier. Accounts
+//   with no status row don't appear. Used by SupplierStatusCard on the
+//   supplier command-center page.
+//   Response: { statuses: [{ email_account_id, status: {...} }, ...] }
 //
 // Query params:
 //   supplier_contact_id   required
-//   email_account_id      required
-//
-// Response: { status: { id, name, color, background_color } | null }
-//   - null means no status set
+//   email_account_id      optional (forces Mode 1 if present)
 export async function GET(req: NextRequest) {
   const url = req.nextUrl;
   const supplierId = url.searchParams.get("supplier_contact_id");
   const accountId  = url.searchParams.get("email_account_id");
-  if (!supplierId || !accountId) {
+  if (!supplierId) {
     return NextResponse.json(
-      { error: "supplier_contact_id and email_account_id are required" },
+      { error: "supplier_contact_id is required" },
       { status: 400 }
     );
   }
   const supabase = createServerClient();
+
+  // ── Mode 2: supplier-only → return per-account statuses array ────────
+  if (!accountId) {
+    const { data: rows, error: lookupErr } = await supabase
+      .from("supplier_account_statuses")
+      .select("email_account_id, status_id")
+      .eq("supplier_contact_id", supplierId);
+    if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 });
+    const statusIds = Array.from(new Set((rows || []).map((r: any) => r.status_id).filter(Boolean)));
+    let statusById = new Map<string, any>();
+    if (statusIds.length > 0) {
+      const { data: statuses, error: stErr } = await supabase
+        .from("supplier_statuses")
+        .select("id, name, color, background_color")
+        .in("id", statusIds);
+      if (stErr) return NextResponse.json({ error: stErr.message }, { status: 500 });
+      statusById = new Map((statuses || []).map((s: any) => [s.id, s]));
+    }
+    const out = (rows || [])
+      .filter((r: any) => r.status_id)
+      .map((r: any) => ({
+        email_account_id: r.email_account_id,
+        status: statusById.get(r.status_id) || null,
+      }));
+    return NextResponse.json({ statuses: out });
+  }
+
+  // ── Mode 1: single (supplier, account) pair ──────────────────────────
   // Look up the assignment row (if any), then JOIN to the status lookup.
   // maybeSingle so it returns null cleanly when there's no row yet.
   const { data: row, error } = await supabase

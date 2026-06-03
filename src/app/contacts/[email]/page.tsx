@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, GitMerge, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
+import SupplierStatusCard from "@/components/SupplierStatusCard";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -362,6 +363,27 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
     ...(cross_account_threads || []),
     ...(domain_threads || []),
   ];
+
+  // Unique email accounts this supplier has been contacted from. Used by
+  // SupplierStatusCard to render one status row per account. Cross-account
+  // threads count too — if a supplier shows up under multiple accounts,
+  // each gets its own status. Pulls from same-account + cross-account
+  // (NOT domain threads, since those may not belong to this specific
+  // supplier_contact_id even if the domain matches).
+  const supplierAccounts = useMemo<{ id: string; name: string }[]>(() => {
+    const byId = new Map<string, string>();
+    const ingest = (t: any) => {
+      const id = t?.email_account_id;
+      const name = t?.account_name;
+      if (id && name && !byId.has(id)) byId.set(id, name);
+    };
+    (threads || []).forEach(ingest);
+    (cross_account_threads || []).forEach(ingest);
+    return Array.from(byId.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [threads, cross_account_threads]);
+
   const now = new Date();
   const openTasks = tasks.filter((t: any) => !["completed","done","dismissed"].includes((t.status||"").toLowerCase()) && !t.is_done);
   const dismissedTasks = tasks.filter((t: any) => t.status === "dismissed");
@@ -485,6 +507,15 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             </div>
           )}
         </div>
+
+        {/* Supplier Status card (Batch 6, Feature 1) — one row per email
+            account that has conversations with this supplier, each with
+            an inline status picker. Loads its own statuses on mount. */}
+        <SupplierStatusCard
+          supplierContactId={data.supplier_contact_id || data.supplier_hours?.id || null}
+          accounts={supplierAccounts}
+          actorId={null}
+        />
 
         {/* Contact People */}
         <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
