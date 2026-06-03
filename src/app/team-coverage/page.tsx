@@ -320,8 +320,9 @@ export default function TeamCoveragePage() {
             </div>
           ) : (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-              <table className="w-full text-[12px]">
-                <thead className="bg-[var(--bg)] border-b border-[var(--border)]">
+              <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
                   <tr>
                     <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">TEAMMATE</th>
                     {accounts
@@ -385,6 +386,7 @@ export default function TeamCoveragePage() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           )
         ) : (
@@ -413,8 +415,9 @@ export default function TeamCoveragePage() {
                 {filteredDrill.length} supplier{filteredDrill.length === 1 ? "" : "s"} contacted
               </div>
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                <table className="w-full text-[12px]">
-                  <thead className="bg-[var(--bg)] border-b border-[var(--border)]">
+                <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+                  <table className="w-full text-[12px]">
+                    <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
                     <tr>
                       <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">SUPPLIER</th>
                       <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">ACCOUNT</th>
@@ -489,6 +492,7 @@ export default function TeamCoveragePage() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </>
           )
