@@ -5,10 +5,11 @@ import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X, BarChart3,
+  ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X, BarChart3, Building2,
 } from "lucide-react";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
 import StatusReportsView from "@/components/StatusReportsView";
+import SupplierCoverageView from "@/components/SupplierCoverageView";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface TeamMember {
@@ -189,17 +190,20 @@ function TeamCoveragePageInner() {
   }, [selectedTeammateId]);
 
 
-  // Current mode. `view=reports` overrides the others (you can't be in
-  // "drill" and "reports" at the same time).
+  // Current mode. `view=reports` and `view=suppliers` override the others.
+  // For suppliers view, presence of `supplier=<id>` further switches the
+  // SupplierCoverageView into its drill state (handled inside the component).
   const viewParam = searchParams.get("view") || null;
-  const mode: "overview" | "drill" | "compare" | "reports" =
+  const supplierIdParam = searchParams.get("supplier") || null;
+  const mode: "overview" | "drill" | "compare" | "reports" | "suppliers" =
     viewParam === "reports" ? "reports"
+    : viewParam === "suppliers" ? "suppliers"
     : compareTeammateIds.length >= 2 ? "compare"
     : selectedTeammateId ? "drill"
     : "overview";
 
   // ── URL update helpers ───────────────────────────────────────────────
-  const buildUrl = useCallback((overrides: { teammate?: string | null; teammates?: string[] | null; accounts?: string[] | null; view?: string | null }) => {
+  const buildUrl = useCallback((overrides: { teammate?: string | null; teammates?: string[] | null; accounts?: string[] | null; view?: string | null; supplier?: string | null }) => {
     const params = new URLSearchParams(searchParams.toString());
     if ("teammate" in overrides) {
       if (overrides.teammate) {
@@ -227,14 +231,25 @@ function TeamCoveragePageInner() {
     if ("view" in overrides) {
       if (overrides.view) {
         params.set("view", overrides.view);
-        // Switching to Reports clears any teammate/compare selection so
-        // the page header doesn't show stale "back to overview" hints.
-        if (overrides.view === "reports") {
+        // Switching to Reports / Suppliers clears any teammate/compare
+        // selection so the page header doesn't show stale breadcrumbs.
+        if (overrides.view === "reports" || overrides.view === "suppliers") {
           params.delete("teammate");
           params.delete("teammates");
         }
+        // Switching views also clears any supplier drill cursor unless
+        // we're explicitly setting the supplier in the same call.
+        if (!("supplier" in overrides)) params.delete("supplier");
       } else {
         params.delete("view");
+        params.delete("supplier");
+      }
+    }
+    if ("supplier" in overrides) {
+      if (overrides.supplier) {
+        params.set("supplier", overrides.supplier);
+      } else {
+        params.delete("supplier");
       }
     }
     const qs = params.toString();
@@ -577,9 +592,27 @@ function TeamCoveragePageInner() {
                   <span className="text-[var(--text-primary)]">Reports</span>
                 </>
               )}
+              {mode === "suppliers" && (
+                <>
+                  <ChevronRight size={14} className="text-[var(--text-muted)]" />
+                  <span className="text-[var(--text-primary)]">{supplierIdParam ? "Supplier drill" : "Suppliers"}</span>
+                </>
+              )}
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            {/* Suppliers tab (Batch 7). Supplier-first cut of the same data. */}
+            <Link
+              href={mode === "suppliers" ? "/team-coverage" : buildUrl({ view: "suppliers" })}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] transition-colors ${
+                mode === "suppliers"
+                  ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]"
+                  : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-muted)]"
+              }`}
+            >
+              <Building2 size={12} />
+              {mode === "suppliers" ? "Exit suppliers" : "Suppliers"}
+            </Link>
             {/* Reports tab (Batch 6, Feature 5). Always visible in the
                 header so users can jump in/out of the analytics view
                 from any other mode. */}
@@ -594,7 +627,7 @@ function TeamCoveragePageInner() {
               <BarChart3 size={12} />
               {mode === "reports" ? "Exit reports" : "Reports"}
             </Link>
-            {mode !== "overview" && mode !== "reports" && (
+            {mode !== "overview" && mode !== "reports" && mode !== "suppliers" && (
               <Link
                 href="/team-coverage"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
@@ -605,8 +638,8 @@ function TeamCoveragePageInner() {
           </div>
         </div>
 
-        {/* ── Filter bar — not shown in reports mode (it has its own controls) ── */}
-        {mode !== "reports" && (
+        {/* ── Filter bar — not shown in reports/suppliers modes (each has its own controls) ── */}
+        {mode !== "reports" && mode !== "suppliers" && (
         <div className="flex flex-wrap items-center gap-2 mb-4">
           {/* Account multi-select */}
           <MultiSelectDropdown
@@ -740,6 +773,18 @@ function TeamCoveragePageInner() {
 
         {mode === "reports" && (
           <StatusReportsView />
+        )}
+
+        {mode === "suppliers" && (
+          <SupplierCoverageView
+            supplierId={supplierIdParam}
+            accounts={accounts}
+            availableStatuses={availableStatuses}
+            accountFilterIds={accountFilterIds}
+            onSelectSupplier={(id) => navigate({ view: "suppliers", supplier: id })}
+            onClearSupplier={() => navigate({ view: "suppliers", supplier: null })}
+            onChangeAccounts={(ids) => navigate({ accounts: ids })}
+          />
         )}
       </div>
 
