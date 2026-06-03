@@ -800,8 +800,9 @@ export function useActions() {
 }
 // ── useSupplierAccountStatuses (Batch 6, Feature 3) ───────────────────
 //
-// Fetches all supplier_account_statuses rows and resolves their status_id
-// values via supplier_statuses. Returns:
+// Fetches all supplier_account_statuses + their resolved status definitions
+// via /api/supplier-status-overview (server-side, bypasses RLS on these
+// internal workflow tables). Returns:
 //   - statusMap: lookup keyed by `${supplier_contact_id}::${email_account_id}`
 //   - allStatuses: list of available status options for filter UI
 //   - loading: initial load state
@@ -809,11 +810,7 @@ export function useActions() {
 //
 // Refetches every 30 seconds in the background so that recent status
 // changes from other team members surface in the inbox filter without
-// requiring a page reload. Initial load returns immediately with empty
-// data; the inbox renders fine without statuses (just no status filter).
-//
-// Note: status IS pulled in one round-trip — supplier_account_statuses
-// is small (a few thousand rows max) so we just fetch the whole table.
+// requiring a page reload.
 export type SupplierStatusOption = {
   id: string;
   name: string;
@@ -827,23 +824,19 @@ export function useSupplierAccountStatuses() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [assignRes, statusRes] = await Promise.all([
-        supabase
-          .from("supplier_account_statuses")
-          .select("supplier_contact_id, email_account_id, status_id"),
-        supabase
-          .from("supplier_statuses")
-          .select("id, name, color, background_color")
-          .eq("is_active", true)
-          .order("sort_order", { ascending: true }),
-      ]);
-
-      const statuses = (statusRes.data || []) as SupplierStatusOption[];
+      const res = await fetch("/api/supplier-status-overview");
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error("[useSupplierAccountStatuses] fetch failed:", res.status, errText);
+        return;
+      }
+      const data = await res.json();
+      const statuses = (data.statuses || []) as SupplierStatusOption[];
       const statusById = new Map<string, SupplierStatusOption>(
         statuses.map(s => [s.id, s])
       );
       const map = new Map<string, SupplierStatusOption>();
-      for (const r of (assignRes.data || []) as any[]) {
+      for (const r of (data.assignments || []) as any[]) {
         if (!r.status_id) continue;
         const s = statusById.get(r.status_id);
         if (!s) continue;
