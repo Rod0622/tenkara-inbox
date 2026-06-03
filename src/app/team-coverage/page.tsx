@@ -157,6 +157,37 @@ function TeamCoveragePageInner() {
 
   const [availableStatuses, setAvailableStatuses] = useState<SupplierStatus[]>([]);
 
+  // ── Bulk edit state (Batch 6, Feature 2) ─────────────────────────────
+  // Only the drill-in view has bulk edit. Keys are `${supplier_id}::${account_id}`.
+  const [bulkEditMode, setBulkEditMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [bulkApplying, setBulkApplying] = useState(false);
+  // After a bulk apply, this holds the inverse op (previous statuses) so
+  // the user can undo within 30 seconds. null when nothing to undo.
+  const [undoState, setUndoState] = useState<{
+    label: string;
+    previousItems: { supplier_contact_id: string; email_account_id: string; status_id: string | null }[];
+    expiresAt: number;
+  } | null>(null);
+
+  // Auto-dismiss the undo toast after expiresAt passes.
+  useEffect(() => {
+    if (!undoState) return;
+    const ms = undoState.expiresAt - Date.now();
+    if (ms <= 0) { setUndoState(null); return; }
+    const t = setTimeout(() => setUndoState(null), ms);
+    return () => clearTimeout(t);
+  }, [undoState]);
+
+  // Clear selection + exit bulk mode when leaving drill view.
+  useEffect(() => {
+    if (!selectedTeammateId) {
+      setBulkEditMode(false);
+      setBulkSelected(new Set());
+    }
+  }, [selectedTeammateId]);
+
+
   // Current mode
   const mode: "overview" | "drill" | "compare" =
     compareTeammateIds.length >= 2 ? "compare"
@@ -361,6 +392,104 @@ function TeamCoveragePageInner() {
     }
   }, [availableStatuses, currentUserId, selectedTeammateId, loadDrill]);
 
+  // ── Bulk apply (Batch 6, Feature 2) ──────────────────────────────────
+  //
+  // Sends the selected (supplier × account) pairs to /api/supplier-account-status/bulk
+  // with the given statusId (or null to clear). On success:
+  //   - Captures prior status of each affected row for undo
+  //   - Optimistically updates drillRows in memory
+  //   - Shows undo toast for 30 seconds
+  //   - Clears selection but keeps bulk mode on for chaining
+  // On failure: reloads drill to true server state, no undo.
+  const applyBulkStatus = useCallback(async (statusId: string | null) => {
+    if (bulkSelected.size === 0) return;
+    if (bulkApplying) return;
+
+    // Build the items array AND capture previous statuses for undo
+    const items: { supplier_contact_id: string; email_account_id: string; status_id: string | null }[] = [];
+    const previousItems: { supplier_contact_id: string; email_account_id: string; status_id: string | null }[] = [];
+    for (const r of drillRows) {
+      const k = `${r.supplier?.id}::${r.account?.id}`;
+      if (!bulkSelected.has(k)) continue;
+      if (!r.supplier?.id || !r.account?.id) continue;
+      items.push({ supplier_contact_id: r.supplier.id, email_account_id: r.account.id, status_id: statusId });
+      previousItems.push({
+        supplier_contact_id: r.supplier.id,
+        email_account_id: r.account.id,
+        status_id: r.status?.id || null,
+      });
+    }
+    if (items.length === 0) return;
+
+    setBulkApplying(true);
+    try {
+      const res = await fetch("/api/supplier-account-status/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, actor_id: currentUserId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert("Bulk update failed: " + (data.error || `HTTP ${res.status}`));
+        if (selectedTeammateId) loadDrill(selectedTeammateId);
+        return;
+      }
+      if ((data.errors || []).length > 0) {
+        console.warn("[bulk-update] partial errors:", data.errors);
+      }
+
+      // Optimistic in-memory update
+      const newStatus = statusId ? (availableStatuses.find(s => s.id === statusId) || null) : null;
+      const labelStatusName = newStatus?.name || "no status";
+      setDrillRows(rs => rs.map(r => {
+        const k = `${r.supplier?.id}::${r.account?.id}`;
+        if (!bulkSelected.has(k)) return r;
+        return { ...r, status: newStatus };
+      }));
+
+      // Show 30-second undo toast
+      setUndoState({
+        label: `Updated ${data.applied} supplier${data.applied === 1 ? "" : "s"} to "${labelStatusName}"`,
+        previousItems,
+        expiresAt: Date.now() + 30000,
+      });
+
+      // Clear selection but keep bulk mode on
+      setBulkSelected(new Set());
+    } catch (e: any) {
+      alert("Bulk update failed: " + (e?.message || String(e)));
+      if (selectedTeammateId) loadDrill(selectedTeammateId);
+    } finally {
+      setBulkApplying(false);
+    }
+  }, [bulkSelected, bulkApplying, drillRows, currentUserId, selectedTeammateId, loadDrill, availableStatuses]);
+
+  // ── Undo last bulk apply (Batch 6, Feature 2) ────────────────────────
+  //
+  // Sends the captured `previousItems` back through the bulk endpoint to
+  // restore prior statuses. Dismisses the toast on success or failure.
+  const undoBulkApply = useCallback(async () => {
+    if (!undoState) return;
+    const { previousItems } = undoState;
+    setUndoState(null);
+    if (previousItems.length === 0) return;
+    try {
+      const res = await fetch("/api/supplier-account-status/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: previousItems, actor_id: currentUserId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert("Undo failed: " + (d.error || `HTTP ${res.status}`));
+      }
+      if (selectedTeammateId) loadDrill(selectedTeammateId);
+    } catch (e: any) {
+      alert("Undo failed: " + (e?.message || String(e)));
+      if (selectedTeammateId) loadDrill(selectedTeammateId);
+    }
+  }, [undoState, currentUserId, selectedTeammateId, loadDrill]);
+
   // ── Compare picker handler ───────────────────────────────────────────
   const startCompare = (ids: string[]) => {
     if (ids.length < 2) return;
@@ -461,6 +590,25 @@ function TeamCoveragePageInner() {
             </select>
           )}
 
+          {/* Bulk Edit toggle — drill only (Batch 6, Feature 2). Toggle reveals
+              a checkbox column on the table and a floating action bar at the
+              bottom of the screen. */}
+          {mode === "drill" && (
+            <button
+              onClick={() => {
+                setBulkEditMode(v => !v);
+                setBulkSelected(new Set());
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] border transition-colors ${
+                bulkEditMode
+                  ? "bg-[var(--info)]/10 border-[var(--info)]/40 text-[var(--info)]"
+                  : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-muted)]"
+              }`}
+            >
+              {bulkEditMode ? "Done editing" : "Bulk edit"}
+            </button>
+          )}
+
           {/* Teammate filter — overview only */}
           {mode === "overview" && (
             <MultiSelectDropdown
@@ -518,6 +666,24 @@ function TeamCoveragePageInner() {
             availableStatuses={availableStatuses}
             onSetStatus={setStatus}
             onRetry={() => selectedTeammateId && loadDrill(selectedTeammateId)}
+            bulkEditMode={bulkEditMode}
+            selectedKeys={bulkSelected}
+            onToggleSelection={(supplierId, accountId) => {
+              const key = `${supplierId}::${accountId}`;
+              setBulkSelected(prev => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key); else next.add(key);
+                return next;
+              });
+            }}
+            onToggleSelectAll={(checked) => {
+              if (!checked) { setBulkSelected(new Set()); return; }
+              const next = new Set<string>();
+              for (const r of filteredDrill) {
+                if (r.supplier?.id && r.account?.id) next.add(`${r.supplier.id}::${r.account.id}`);
+              }
+              setBulkSelected(next);
+            }}
           />
         )}
 
@@ -531,6 +697,26 @@ function TeamCoveragePageInner() {
           />
         )}
       </div>
+
+      {/* Floating bulk action bar — visible only when items are selected */}
+      {mode === "drill" && bulkEditMode && bulkSelected.size > 0 && (
+        <BulkActionBar
+          selectedCount={bulkSelected.size}
+          availableStatuses={availableStatuses}
+          applying={bulkApplying}
+          onApply={applyBulkStatus}
+          onClear={() => setBulkSelected(new Set())}
+        />
+      )}
+
+      {/* Undo toast — auto-dismisses after 30 seconds */}
+      {undoState && (
+        <UndoToast
+          message={undoState.label}
+          onUndo={undoBulkApply}
+          onDismiss={() => setUndoState(null)}
+        />
+      )}
     </div>
   );
 }
@@ -698,13 +884,23 @@ function OverviewTable({ loading, accounts, rows, accountFilterIds, onSelectTeam
 }
 
 // ── Drill-in table ────────────────────────────────────────────────────
-function DrillTable({ loading, error, rows, availableStatuses, onSetStatus, onRetry }: {
+function DrillTable({
+  loading, error, rows, availableStatuses, onSetStatus, onRetry,
+  bulkEditMode, selectedKeys, onToggleSelection, onToggleSelectAll,
+}: {
   loading: boolean;
   error: string | null;
   rows: DrillRow[];
   availableStatuses: SupplierStatus[];
   onSetStatus: (supplierId: string, accountId: string, statusId: string | null) => void;
   onRetry: () => void;
+  // Bulk-edit props (Batch 6, Feature 2). When bulkEditMode is true the
+  // table shows a leading checkbox column; selectedKeys uses the same
+  // `${supplierId}::${accountId}` key shape as the parent state.
+  bulkEditMode: boolean;
+  selectedKeys: Set<string>;
+  onToggleSelection: (supplierId: string, accountId: string) => void;
+  onToggleSelectAll: (checked: boolean) => void;
 }) {
   if (loading) {
     return <div className="flex items-center gap-2 text-[var(--text-muted)] text-[12px] py-10 justify-center"><Loader2 size={14} className="animate-spin" /> Loading suppliers…</div>;
@@ -718,14 +914,39 @@ function DrillTable({ loading, error, rows, availableStatuses, onSetStatus, onRe
       </div>
     );
   }
+
+  // For the "select all" header checkbox state. Indeterminate when some
+  // but not all rows are selected.
+  const allKeys = rows
+    .filter(r => r.supplier?.id && r.account?.id)
+    .map(r => `${r.supplier!.id}::${r.account!.id}`);
+  const selectedInTable = allKeys.filter(k => selectedKeys.has(k)).length;
+  const allSelected = allKeys.length > 0 && selectedInTable === allKeys.length;
+
   return (
     <>
-      <div className="text-[11px] text-[var(--text-muted)] mb-2">{rows.length} supplier{rows.length === 1 ? "" : "s"} contacted</div>
+      <div className="text-[11px] text-[var(--text-muted)] mb-2">
+        {rows.length} supplier{rows.length === 1 ? "" : "s"} contacted
+        {bulkEditMode && selectedKeys.size > 0 && (
+          <span className="text-[var(--info)] font-medium"> · {selectedKeys.size} selected</span>
+        )}
+      </div>
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
         <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
           <table className="w-full text-[12px]">
             <thead className="bg-[var(--bg)] border-b border-[var(--border)] sticky top-0 z-10">
               <tr>
+                {bulkEditMode && (
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={(e) => onToggleSelectAll(e.target.checked)}
+                      className="cursor-pointer"
+                      title="Select all visible"
+                    />
+                  </th>
+                )}
                 <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">SUPPLIER</th>
                 <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)]">ACCOUNT</th>
                 <th className="text-left px-3 py-2 font-semibold text-[var(--text-secondary)] w-56">STATUS</th>
@@ -736,35 +957,52 @@ function DrillTable({ loading, error, rows, availableStatuses, onSetStatus, onRe
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-10 text-[var(--text-muted)]">No suppliers match the current filters.</td></tr>
+                <tr><td colSpan={bulkEditMode ? 7 : 6} className="text-center py-10 text-[var(--text-muted)]">No suppliers match the current filters.</td></tr>
               ) : (
-                rows.map((r, i) => (
-                  <tr key={`${r.supplier?.id}-${r.account?.id}-${i}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--bg)]">
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{r.supplier?.name || "—"}</div>
-                      <div className="text-[10px] text-[var(--text-muted)]">{r.supplier?.email}</div>
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-secondary)]">{r.account?.name || "—"}</td>
-                    <td className="px-3 py-2">
-                      <StatusPicker
-                        currentStatus={r.status}
-                        availableStatuses={availableStatuses}
-                        onChange={(statusId) => { if (r.supplier && r.account) onSetStatus(r.supplier.id, r.account.id, statusId); }}
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        {(r.latest_conversation?.labels || []).slice(0, 5).map(l => (
-                          <span key={l.id} className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: l.color }} />
-                            {l.name}
-                          </span>
-                        ))}
-                        {(r.latest_conversation?.labels?.length || 0) > 5 && (
-                          <span className="text-[10px] text-[var(--text-muted)]">+{(r.latest_conversation!.labels.length - 5)}</span>
-                        )}
-                      </div>
-                    </td>
+                rows.map((r, i) => {
+                  const key = (r.supplier?.id && r.account?.id) ? `${r.supplier.id}::${r.account.id}` : null;
+                  const isSelected = key ? selectedKeys.has(key) : false;
+                  return (
+                    <tr
+                      key={`${r.supplier?.id}-${r.account?.id}-${i}`}
+                      className={`border-b border-[var(--border)] last:border-0 ${isSelected ? "bg-[var(--info)]/5" : "hover:bg-[var(--bg)]"}`}
+                    >
+                      {bulkEditMode && (
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={!key}
+                            onChange={() => { if (r.supplier?.id && r.account?.id) onToggleSelection(r.supplier.id, r.account.id); }}
+                            className="cursor-pointer"
+                          />
+                        </td>
+                      )}
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{r.supplier?.name || "—"}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{r.supplier?.email}</div>
+                      </td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{r.account?.name || "—"}</td>
+                      <td className="px-3 py-2">
+                        <StatusPicker
+                          currentStatus={r.status}
+                          availableStatuses={availableStatuses}
+                          onChange={(statusId) => { if (r.supplier && r.account) onSetStatus(r.supplier.id, r.account.id, statusId); }}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {(r.latest_conversation?.labels || []).slice(0, 5).map(l => (
+                            <span key={l.id} className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: l.color }} />
+                              {l.name}
+                            </span>
+                          ))}
+                          {(r.latest_conversation?.labels?.length || 0) > 5 && (
+                            <span className="text-[10px] text-[var(--text-muted)]">+{(r.latest_conversation!.labels.length - 5)}</span>
+                          )}
+                        </div>
+                      </td>
                     <td className="text-right px-3 py-2 tabular-nums">{r.total_outbound}</td>
                     <td className="text-right px-3 py-2 text-[var(--text-muted)]">
                       {r.latest_conversation ? (
@@ -777,7 +1015,8 @@ function DrillTable({ loading, error, rows, availableStatuses, onSetStatus, onRe
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -968,6 +1207,153 @@ function StatusPicker({ currentStatus, availableStatuses, onChange }: {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── BulkActionBar (Batch 6, Feature 2) ────────────────────────────────
+//
+// Floating bar pinned to the bottom of the viewport. Visible only when
+// the drill-in view has 1+ selected rows AND bulk edit mode is on.
+// Provides:
+//   - Selected count
+//   - Status picker (same options as elsewhere) + "Clear status" option
+//   - Apply button (calls onApply with the chosen statusId or null)
+//   - Clear-selection button (deselects all but keeps bulk mode on)
+function BulkActionBar({
+  selectedCount,
+  availableStatuses,
+  applying,
+  onApply,
+  onClear,
+}: {
+  selectedCount: number;
+  availableStatuses: SupplierStatus[];
+  applying: boolean;
+  onApply: (statusId: string | null) => void;
+  onClear: () => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<SupplierStatus | null>(null);
+  const [pendingClear, setPendingClear] = useState(false);
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-bulk-action-bar]")) setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pickerOpen]);
+
+  const handleApply = () => {
+    if (pendingClear) onApply(null);
+    else if (pendingStatus) onApply(pendingStatus.id);
+  };
+
+  const readyToApply = pendingClear || pendingStatus !== null;
+
+  return (
+    <div
+      data-bulk-action-bar
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+      style={{ minWidth: 420 }}
+    >
+      <div className="text-[12px] text-[var(--text-primary)] font-semibold">
+        {selectedCount} selected
+      </div>
+      <div className="w-px h-5 bg-[var(--border)]" />
+      <div className="relative">
+        <button
+          onClick={() => setPickerOpen(o => !o)}
+          disabled={applying}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors disabled:opacity-50"
+          style={
+            pendingClear
+              ? { color: "var(--text-muted)", backgroundColor: "var(--bg)", border: "1px dashed var(--border)" }
+              : pendingStatus
+              ? { color: `#${pendingStatus.color}`, backgroundColor: `#${pendingStatus.background_color}` }
+              : { color: "var(--text-secondary)", backgroundColor: "var(--bg)", border: "1px solid var(--border)" }
+          }
+        >
+          {pendingClear ? "Clear status" : pendingStatus?.name || "Pick status"}
+          <ChevronDown size={12} />
+        </button>
+        {pickerOpen && (
+          <div className="absolute bottom-full mb-1 left-0 w-60 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl py-1">
+            <button
+              onClick={() => { setPendingClear(true); setPendingStatus(null); setPickerOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg)] italic"
+            >
+              Clear status
+            </button>
+            <div className="border-t border-[var(--border)] my-1" />
+            {availableStatuses.map(s => (
+              <button
+                key={s.id}
+                onClick={() => { setPendingStatus(s); setPendingClear(false); setPickerOpen(false); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2"
+              >
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold inline-block"
+                  style={{ color: `#${s.color}`, backgroundColor: `#${s.background_color}` }}
+                >
+                  {s.name}
+                </span>
+                {pendingStatus?.id === s.id && <span className="ml-auto text-[10px] text-[var(--accent)]">✓</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={handleApply}
+        disabled={!readyToApply || applying}
+        className="px-3 py-1.5 rounded-md text-[12px] font-semibold bg-[var(--info)] text-white disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {applying ? <Loader2 size={12} className="animate-spin" /> : `Apply to ${selectedCount}`}
+      </button>
+      <button
+        onClick={onClear}
+        disabled={applying}
+        className="px-2 py-1.5 rounded-md text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg)] disabled:opacity-50"
+      >
+        Clear selection
+      </button>
+    </div>
+  );
+}
+
+// ── UndoToast (Batch 6, Feature 2) ────────────────────────────────────
+//
+// Top-right toast shown for 30 seconds after a bulk apply. Click "Undo"
+// to reverse the bulk operation. Click X to dismiss without undoing.
+// Auto-dismisses on the parent's timer.
+function UndoToast({
+  message,
+  onUndo,
+  onDismiss,
+}: {
+  message: string;
+  onUndo: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl max-w-md">
+      <div className="text-[12px] text-[var(--text-primary)]">{message}</div>
+      <button
+        onClick={onUndo}
+        className="px-3 py-1 rounded-md text-[11px] font-semibold text-[var(--info)] border border-[var(--info)]/30 hover:bg-[var(--info)]/10"
+      >
+        Undo
+      </button>
+      <button
+        onClick={onDismiss}
+        className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+        title="Dismiss"
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }
