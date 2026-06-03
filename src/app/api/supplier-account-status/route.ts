@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { logSupplierStatusChange } from "@/lib/supplier-status-activity";
 
 // ── GET /api/supplier-account-status ───────────────────────────────────
 //
@@ -111,26 +112,30 @@ export async function PATCH(req: NextRequest) {
 
   const supabase = createServerClient();
 
-  // Upsert on the unique (supplier_contact_id, email_account_id) pair.
-  // We can't use Supabase's `.upsert()` directly because the conflict
-  // target needs to match a constraint name and the helper is finicky —
-  // simpler to do "try update; if no row, insert".
+  // Capture previous status_id before mutating — needed by the activity
+  // logger (Batch 6, Feature 4) so the activity entry can describe
+  // "from X → to Y". Selecting id + status_id so we can branch update vs
+  // insert below.
   const { data: existing, error: lookupErr } = await supabase
     .from("supplier_account_statuses")
-    .select("id")
+    .select("id, status_id")
     .eq("supplier_contact_id", supplier_contact_id)
     .eq("email_account_id", email_account_id)
     .maybeSingle();
 
   if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 });
 
+  const previousStatusId: string | null = (existing as any)?.status_id || null;
+  const newStatusId: string | null = status_id || null;
+
   const payload: any = {
-    status_id: status_id || null,
+    status_id: newStatusId,
     updated_by: actor_id || null,
     updated_at: new Date().toISOString(),
   };
   if (notes !== undefined) payload.notes = notes || null;
 
+  let assignmentRow: any = null;
   if (existing) {
     const { data, error } = await supabase
       .from("supplier_account_statuses")
@@ -139,19 +144,34 @@ export async function PATCH(req: NextRequest) {
       .select("id, supplier_contact_id, email_account_id, status_id, notes, updated_at")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ assignment: data });
+    assignmentRow = data;
+  } else {
+    const insertPayload = {
+      supplier_contact_id,
+      email_account_id,
+      ...payload,
+    };
+    const { data, error } = await supabase
+      .from("supplier_account_statuses")
+      .insert(insertPayload)
+      .select("id, supplier_contact_id, email_account_id, status_id, notes, updated_at")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    assignmentRow = data;
   }
 
-  const insertPayload = {
-    supplier_contact_id,
-    email_account_id,
-    ...payload,
-  };
-  const { data, error } = await supabase
-    .from("supplier_account_statuses")
-    .insert(insertPayload)
-    .select("id, supplier_contact_id, email_account_id, status_id, notes, updated_at")
-    .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ assignment: data });
+  // Best-effort activity logging — Feature 4. Errors don't propagate;
+  // the assignment write is the primary operation.
+  await logSupplierStatusChange(
+    supabase,
+    {
+      supplier_contact_id,
+      email_account_id,
+      previous_status_id: previousStatusId,
+      new_status_id: newStatusId,
+    },
+    actor_id || null
+  );
+
+  return NextResponse.json({ assignment: assignmentRow });
 }

@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { logSupplierStatusChanges, type StatusChange } from "@/lib/supplier-status-activity";
 
 // ── POST /api/supplier-account-status/bulk ─────────────────────────────
 //
@@ -64,39 +65,50 @@ export async function POST(req: NextRequest) {
   const errors: { index: number; message: string }[] = [];
 
   // Look up all existing rows in a single query to know which to update vs
-  // insert. Builds a (supplier_contact_id, email_account_id) → id map.
+  // insert AND to capture the previous status_id for activity logging
+  // (Batch 6, Feature 4). Builds a (supplier_contact_id, email_account_id)
+  // → { id, status_id } map.
   const supplierIds = Array.from(new Set(items.map((it: any) => it.supplier_contact_id)));
   const accountIds  = Array.from(new Set(items.map((it: any) => it.email_account_id)));
   const { data: existingRows, error: lookupErr } = await supabase
     .from("supplier_account_statuses")
-    .select("id, supplier_contact_id, email_account_id")
+    .select("id, supplier_contact_id, email_account_id, status_id")
     .in("supplier_contact_id", supplierIds)
     .in("email_account_id", accountIds);
   if (lookupErr) {
     return NextResponse.json({ error: lookupErr.message }, { status: 500 });
   }
-  const existingByKey = new Map<string, string>();
+  const existingByKey = new Map<string, { id: string; status_id: string | null }>();
   for (const row of existingRows || []) {
     const r = row as any;
-    existingByKey.set(`${r.supplier_contact_id}::${r.email_account_id}`, r.id);
+    existingByKey.set(
+      `${r.supplier_contact_id}::${r.email_account_id}`,
+      { id: r.id, status_id: r.status_id || null }
+    );
   }
+
+  // Capture changes for activity logging — only items that actually
+  // succeed get logged. Built up during the loop, flushed after.
+  const changesToLog: StatusChange[] = [];
 
   // Process each item sequentially. Cheap on small batches (typical bulk
   // edit is <50 items). Easy to attribute per-item errors.
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const key = `${it.supplier_contact_id}::${it.email_account_id}`;
-    const existingId = existingByKey.get(key);
+    const existing = existingByKey.get(key);
+    const newStatusId: string | null = it.status_id || null;
+    const previousStatusId: string | null = existing?.status_id || null;
     const payload = {
-      status_id: it.status_id || null,
+      status_id: newStatusId,
       updated_by: actorId,
       updated_at: now,
     };
-    if (existingId) {
+    if (existing) {
       const { error } = await supabase
         .from("supplier_account_statuses")
         .update(payload)
-        .eq("id", existingId);
+        .eq("id", existing.id);
       if (error) { errors.push({ index: i, message: error.message }); continue; }
     } else {
       const { error } = await supabase
@@ -109,7 +121,17 @@ export async function POST(req: NextRequest) {
       if (error) { errors.push({ index: i, message: error.message }); continue; }
     }
     applied++;
+    changesToLog.push({
+      supplier_contact_id: it.supplier_contact_id,
+      email_account_id: it.email_account_id,
+      previous_status_id: previousStatusId,
+      new_status_id: newStatusId,
+    });
   }
+
+  // Best-effort activity logging — the helper filters no-ops internally
+  // and writes one row per affected conversation per change.
+  await logSupplierStatusChanges(supabase, changesToLog, actorId);
 
   return NextResponse.json({ applied, errors });
 }

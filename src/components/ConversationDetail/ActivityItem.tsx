@@ -63,6 +63,10 @@ const ACTION_MAP: Record<string, { label: string; color: string; icon: any }> = 
   // Conversation lifecycle
   conversation_created: { label: "Conversation created", color: "var(--info)", icon: Mail },
   status_changed: { label: "Status changed", color: "#A371F7", icon: Flag },
+  // Batch 6, Feature 4 — supplier-level status (distinct from the
+  // conversation-level open/closed `status_changed`). Same flag icon but
+  // tinted teal so it's visually distinguishable in a busy timeline.
+  supplier_status_changed: { label: "Supplier status changed", color: "#5DD3C8", icon: Flag },
   moved_to_folder: { label: "Moved to folder", color: "var(--info)", icon: FolderOpen },
   subject_renamed: { label: "Subject renamed", color: "var(--info)", icon: Pencil },
 
@@ -180,6 +184,43 @@ function renderDetail(activity: any, lookups?: LookupMaps): React.ReactNode {
           {from && <span className="text-[var(--text-secondary)]">{from}</span>}
           {from && to && <span className="text-[var(--text-muted)] mx-1">→</span>}
           {to && <span className="text-[var(--text-primary)] font-medium">{to}</span>}
+        </span>
+      );
+    }
+    // Batch 6, Feature 4 — supplier (workflow) status change. Details
+    // shape comes from src/lib/supplier-status-activity.ts and always
+    // includes account_name; either prev or new can be null (cleared /
+    // initial set).
+    case "supplier_status_changed": {
+      const acct = details.account_name;
+      const prev = details.previous_status_name;
+      const next = details.new_status_name;
+      if (!prev && !next) return null;
+      return (
+        <span>
+          {acct && (
+            <span className="text-[var(--text-muted)]">({acct}) </span>
+          )}
+          {prev && next && (
+            <>
+              <span className="text-[var(--text-secondary)]">{prev}</span>
+              <span className="text-[var(--text-muted)] mx-1">→</span>
+              <span className="text-[var(--text-primary)] font-medium">{next}</span>
+            </>
+          )}
+          {!prev && next && (
+            <>
+              <span className="text-[var(--text-muted)]">set to </span>
+              <span className="text-[var(--text-primary)] font-medium">{next}</span>
+            </>
+          )}
+          {prev && !next && (
+            <>
+              <span className="text-[var(--text-muted)]">cleared (was </span>
+              <span className="text-[var(--text-secondary)]">{prev}</span>
+              <span className="text-[var(--text-muted)]">)</span>
+            </>
+          )}
         </span>
       );
     }
