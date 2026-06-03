@@ -5,9 +5,10 @@ import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X,
+  ArrowLeft, ChevronRight, Loader2, Users, ExternalLink, ChevronDown, Search, X, BarChart3,
 } from "lucide-react";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
+import StatusReportsView from "@/components/team-coverage/StatusReportsView";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface TeamMember {
@@ -188,14 +189,17 @@ function TeamCoveragePageInner() {
   }, [selectedTeammateId]);
 
 
-  // Current mode
-  const mode: "overview" | "drill" | "compare" =
-    compareTeammateIds.length >= 2 ? "compare"
+  // Current mode. `view=reports` overrides the others (you can't be in
+  // "drill" and "reports" at the same time).
+  const viewParam = searchParams.get("view") || null;
+  const mode: "overview" | "drill" | "compare" | "reports" =
+    viewParam === "reports" ? "reports"
+    : compareTeammateIds.length >= 2 ? "compare"
     : selectedTeammateId ? "drill"
     : "overview";
 
   // ── URL update helpers ───────────────────────────────────────────────
-  const buildUrl = useCallback((overrides: { teammate?: string | null; teammates?: string[] | null; accounts?: string[] | null }) => {
+  const buildUrl = useCallback((overrides: { teammate?: string | null; teammates?: string[] | null; accounts?: string[] | null; view?: string | null }) => {
     const params = new URLSearchParams(searchParams.toString());
     if ("teammate" in overrides) {
       if (overrides.teammate) {
@@ -218,6 +222,19 @@ function TeamCoveragePageInner() {
         params.set("accounts", overrides.accounts.join(","));
       } else {
         params.delete("accounts");
+      }
+    }
+    if ("view" in overrides) {
+      if (overrides.view) {
+        params.set("view", overrides.view);
+        // Switching to Reports clears any teammate/compare selection so
+        // the page header doesn't show stale "back to overview" hints.
+        if (overrides.view === "reports") {
+          params.delete("teammate");
+          params.delete("teammates");
+        }
+      } else {
+        params.delete("view");
       }
     }
     const qs = params.toString();
@@ -554,19 +571,42 @@ function TeamCoveragePageInner() {
                   <span className="text-[var(--text-primary)]">Compare {compareTeammates.length || compareTeammateIds.length}</span>
                 </>
               )}
+              {mode === "reports" && (
+                <>
+                  <ChevronRight size={14} className="text-[var(--text-muted)]" />
+                  <span className="text-[var(--text-primary)]">Reports</span>
+                </>
+              )}
             </h1>
           </div>
-          {mode !== "overview" && (
+          <div className="flex items-center gap-2">
+            {/* Reports tab (Batch 6, Feature 5). Always visible in the
+                header so users can jump in/out of the analytics view
+                from any other mode. */}
             <Link
-              href="/team-coverage"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
+              href={mode === "reports" ? "/team-coverage" : buildUrl({ view: "reports" })}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] transition-colors ${
+                mode === "reports"
+                  ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]"
+                  : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-muted)]"
+              }`}
             >
-              <ArrowLeft size={12} /> Back to overview
+              <BarChart3 size={12} />
+              {mode === "reports" ? "Exit reports" : "Reports"}
             </Link>
-          )}
+            {mode !== "overview" && mode !== "reports" && (
+              <Link
+                href="/team-coverage"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface)]"
+              >
+                <ArrowLeft size={12} /> Back to overview
+              </Link>
+            )}
+          </div>
         </div>
 
-        {/* ── Filter bar ─────────────────────────────────────────────── */}
+        {/* ── Filter bar — not shown in reports mode (it has its own controls) ── */}
+        {mode !== "reports" && (
         <div className="flex flex-wrap items-center gap-2 mb-4">
           {/* Account multi-select */}
           <MultiSelectDropdown
@@ -646,8 +686,9 @@ function TeamCoveragePageInner() {
             )}
           </div>
         </div>
+        )}
 
-        {/* ── Body: overview / drill / compare ───────────────────────── */}
+        {/* ── Body: overview / drill / compare / reports ─────────────── */}
         {mode === "overview" && (
           <OverviewTable
             loading={overviewLoading}
@@ -695,6 +736,10 @@ function TeamCoveragePageInner() {
             groups={filteredCompareGroups}
             onRetry={() => loadCompare(compareTeammateIds)}
           />
+        )}
+
+        {mode === "reports" && (
+          <StatusReportsView />
         )}
       </div>
 
