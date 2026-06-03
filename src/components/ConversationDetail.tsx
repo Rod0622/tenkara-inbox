@@ -77,6 +77,7 @@ import ThreadAttachmentBar from "./ConversationDetail/ThreadAttachmentBar";
 import MessageAttachments from "./ConversationDetail/MessageAttachments";
 import MessageBody from "./ConversationDetail/MessageBody";
 import WatchToggle from "./WatchToggle";
+import SupplierStatusBadge from "./SupplierStatusBadge";
 import CallTimelineEntry, { type CallEntry } from "./ConversationDetail/CallTimelineEntry";
 import QuickCallModal from "./QuickCallModal";
 import type { SuggestedTaskItem, OpenActionItemState, CompletedItemState } from "./ConversationDetail/types";
@@ -3330,6 +3331,15 @@ export default function ConversationDetail({
             onReopened={() => {
               window.location.reload();
             }}
+          />
+
+          {/* Supplier status badge (Batch 4) — manual workflow status for this
+              (supplier × email_account) pair. Visible in the header alongside
+              the conversation Open/Closed status, click to change. */}
+          <SupplierStatusBadge
+            supplierContactId={convo.supplier_contact_id || null}
+            emailAccountId={convo.email_account_id || null}
+            actorId={currentUser?.id || null}
           />
 
           <div className="flex gap-1">
