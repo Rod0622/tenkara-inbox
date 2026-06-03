@@ -11,6 +11,7 @@ import {
   useFolders,
   useTasks,
   useTeamMembers,
+  useSupplierAccountStatuses,
 } from "@/lib/hooks";
 import Sidebar from "@/components/Sidebar";
 import ConversationList from "@/components/ConversationList";
@@ -49,6 +50,10 @@ export default function InboxPage() {
   const emailAccounts = useEmailAccounts(session?.user?.email);
   const folders = useFolders();
   const actions = useActions();
+  // Batch 6, Feature 3: supplier status map for the conversation list filter.
+  // Refetches in the background every 30s; safe to render the list before
+  // it loads since the filter just shows no options until ready.
+  const { statusMap: supplierStatusMap, allStatuses: allSupplierStatuses } = useSupplierAccountStatuses();
 
   const [activeMailbox, setActiveMailbox] = useState<string | null>(null);
   const [activeView, setActiveView] = useState("inbox");
@@ -791,6 +796,8 @@ export default function InboxPage() {
                 searchTaskResults={searchTaskResults}
                 onOpenConversation={openConversationFromTask}
                 currentUserId={currentUser?.id || null}
+                supplierStatusMap={supplierStatusMap}
+                allSupplierStatuses={allSupplierStatuses}
               />
             </Panel>
 

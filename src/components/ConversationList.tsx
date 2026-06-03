@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Search, Filter, X, Calendar, User, Mail, ChevronDown, Star, MailOpen, Archive, Trash2, Check, Paperclip, AlarmClock, Tag, RotateCcw, Pin, FolderInput, AlertCircle } from "lucide-react";
 import type { ConversationListProps, Conversation, TeamMember } from "@/types";
 import { createBrowserClient } from "@/lib/supabase";
@@ -83,6 +83,11 @@ interface Filters {
   fromEmail: string;
   labelIds: string[];
   labelLogic: "and" | "or";
+  // Batch 6, Feature 3: supplier status filter. Array of selected status
+  // UUIDs, plus the special sentinel "__none__" meaning "no status set".
+  // Multi-select OR: a conversation matches if its status is in this list.
+  // Persisted to URL hash (`#status=<id>,<id>` or `#status=__none__,<id>`).
+  statusIds: string[];
 }
 
 const defaultFilters: Filters = {
@@ -95,6 +100,7 @@ const defaultFilters: Filters = {
   fromEmail: "",
   labelIds: [],
   labelLogic: "or",
+  statusIds: [],
 };
 
 // Compact dropdown for the Assigned-to filter. Replaces the previous wall-
@@ -472,16 +478,145 @@ function renderLabelRow(
   );
 }
 
+// ── StatusFilter (Batch 6, Feature 3) ────────────────────────────────
+//
+// Multi-select filter UI for supplier statuses. Lives inside the
+// FilterPanel alongside LabelFilter. Includes a "No status set"
+// pseudo-option (sentinel id `__none__`) for finding conversations
+// without a tracked supplier status.
+function StatusFilter({
+  filters,
+  setFilters,
+  allStatuses,
+  onChange,
+}: {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  allStatuses: { id: string; name: string; color: string; background_color: string }[];
+  // Called whenever statusIds changes — used by the parent to write
+  // the new value to the URL hash. Receives the new array.
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Outside-click close
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const selected = filters.statusIds || [];
+  const toggleStatus = (id: string) => {
+    const next = selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id];
+    setFilters({ ...filters, statusIds: next });
+    onChange(next);
+  };
+  const clearAll = () => {
+    setFilters({ ...filters, statusIds: [] });
+    onChange([]);
+  };
+
+  // Trigger label
+  let triggerLabel = "All statuses";
+  if (selected.length === 1) {
+    if (selected[0] === "__none__") triggerLabel = "No status set";
+    else triggerLabel = allStatuses.find(s => s.id === selected[0])?.name || "1 status";
+  } else if (selected.length > 1) {
+    triggerLabel = `${selected.length} statuses`;
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-all ${
+          selected.length > 0
+            ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]"
+            : "bg-[var(--bg)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-muted)]"
+        }`}
+      >
+        <Tag size={10} />
+        <span>{triggerLabel}</span>
+        <ChevronDown size={9} />
+      </button>
+      {selected.length > 0 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); clearAll(); }}
+          className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          title="Clear status filter"
+        >
+          <X size={8} />
+        </button>
+      )}
+      {open && (
+        <div className="absolute z-50 mt-1 left-0 w-56 max-h-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl py-1">
+          <button
+            onClick={() => toggleStatus("__none__")}
+            className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2 text-[11px]"
+          >
+            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+              selected.includes("__none__")
+                ? "bg-[var(--accent)] border-[var(--accent)]"
+                : "border-[var(--border)]"
+            }`}>
+              {selected.includes("__none__") && <Check size={9} className="text-[var(--bg)]" strokeWidth={3} />}
+            </span>
+            <span className="text-[var(--text-secondary)] italic">No status set</span>
+          </button>
+          {allStatuses.length > 0 && <div className="border-t border-[var(--border)] my-1" />}
+          {allStatuses.map(s => {
+            const isSelected = selected.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                onClick={() => toggleStatus(s.id)}
+                className="w-full text-left px-3 py-1.5 hover:bg-[var(--bg)] flex items-center gap-2 text-[11px]"
+              >
+                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                  isSelected ? "bg-[var(--accent)] border-[var(--accent)]" : "border-[var(--border)]"
+                }`}>
+                  {isSelected && <Check size={9} className="text-[var(--bg)]" strokeWidth={3} />}
+                </span>
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                  style={{ color: `#${s.color}`, backgroundColor: `#${s.background_color}` }}
+                >
+                  {s.name}
+                </span>
+              </button>
+            );
+          })}
+          {allStatuses.length === 0 && (
+            <div className="px-3 py-2 text-[10px] text-[var(--text-muted)] italic">
+              No statuses defined. Add them in Settings → Supplier Statuses.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FilterPanel({
   filters,
   setFilters,
   teamMembers,
   onClose,
+  allSupplierStatuses,
+  onStatusFilterChange,
 }: {
   filters: Filters;
   setFilters: (f: Filters) => void;
   teamMembers: TeamMember[];
   onClose: () => void;
+  // Batch 6, Feature 3 — status filter data + URL-hash writer.
+  allSupplierStatuses: { id: string; name: string; color: string; background_color: string }[];
+  onStatusFilterChange: (ids: string[]) => void;
 }) {
   const handlePresetClick = (preset: string) => {
     if (preset === "custom") {
@@ -600,6 +735,12 @@ function FilterPanel({
       </div>
 
       {/* Labels filter */}
+      <StatusFilter
+        filters={filters}
+        setFilters={setFilters}
+        allStatuses={allSupplierStatuses}
+        onChange={onStatusFilterChange}
+      />
       <LabelFilter filters={filters} setFilters={setFilters} />
 
       {/* Quick toggles */}
@@ -633,6 +774,7 @@ export default function ConversationList({
   searchScope = "all", setSearchScope, activeMailbox, activeFolder, folderSubView = "unassigned", emailAccounts = [], folders = [],
   teamMembers, onBulkAction, searchSnippets, searchTaskResults = [], onOpenConversation,
   currentUserId,
+  supplierStatusMap, allSupplierStatuses,
 }: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void; currentUserId?: string | null }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -904,6 +1046,41 @@ export default function ConversationList({
     }
   }, [highlightedConvoId]);
 
+  // Batch 6, Feature 3: read `status` from URL hash on mount + when it changes.
+  // Format: `#...&status=<id>,<id>` or `#...&status=__none__,<id>`. Empty/absent
+  // means no filter active.
+  useEffect(() => {
+    const syncFromHash = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      const params = new URLSearchParams(hash);
+      const raw = params.get("status") || "";
+      const ids = raw.split(",").map(s => s.trim()).filter(Boolean);
+      setFilters(prev => {
+        // Only update if the set of ids changed — avoids render loops.
+        const prevIds = (prev.statusIds || []);
+        if (prevIds.length === ids.length && prevIds.every(id => ids.includes(id))) return prev;
+        return { ...prev, statusIds: ids };
+      });
+    };
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
+
+  // Write status filter back to URL hash whenever it changes.
+  // Preserves other hash params (conversation, mailbox, folder, etc.).
+  const writeStatusToHash = useCallback((ids: string[]) => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(hash);
+    if (ids.length > 0) params.set("status", ids.join(","));
+    else params.delete("status");
+    const next = params.toString();
+    // Avoid creating an entry in browser history for every selection.
+    const newUrl = `${window.location.pathname}${window.location.search}${next ? "#" + next : ""}`;
+    window.history.replaceState(null, "", newUrl);
+  }, []);
+
   const hasActiveFilters =
     filters.dateRange !== "all" ||
     filters.assignedTo !== null ||
@@ -912,7 +1089,8 @@ export default function ConversationList({
     filters.fromEmail !== "" ||
     filters.dateFrom !== "" ||
     filters.dateTo !== "" ||
-    (filters.labelIds || []).length > 0;
+    (filters.labelIds || []).length > 0 ||
+    (filters.statusIds || []).length > 0;
 
   // Apply filters
   const filteredConversations = useMemo(() => {
@@ -1056,8 +1234,29 @@ export default function ConversationList({
       });
     }
 
+    // ── Supplier status filter (Batch 6, Feature 3) ──
+    // statusIds = [] → no filter.
+    // statusIds contains "__none__" → match conversations with NO status row.
+    // statusIds contains real ids → match conversations whose (supplier × account)
+    //   maps to one of those statuses.
+    // Multi-select is OR — any match passes.
+    if ((filters.statusIds || []).length > 0 && supplierStatusMap) {
+      const sel = new Set(filters.statusIds);
+      const wantsNone = sel.has("__none__");
+      result = result.filter((c: any) => {
+        if (!c.supplier_contact_id || !c.email_account_id) {
+          // Conversation has no supplier link at all — counts as "no status"
+          return wantsNone;
+        }
+        const key = `${c.supplier_contact_id}::${c.email_account_id}`;
+        const status = supplierStatusMap.get(key);
+        if (!status) return wantsNone;
+        return sel.has(status.id);
+      });
+    }
+
     return result;
-  }, [conversations, filters, folderSubView, activeFolder, closedConvos, folders]);
+  }, [conversations, filters, folderSubView, activeFolder, closedConvos, folders, supplierStatusMap]);
 
   // Compute the unique set of email_account_ids across currently-selected
   // conversations. Used by the bulk move picker to decide whether to show
@@ -1588,6 +1787,8 @@ export default function ConversationList({
           setFilters={setFilters}
           teamMembers={teamMembers}
           onClose={() => setShowFilters(false)}
+          allSupplierStatuses={allSupplierStatuses || []}
+          onStatusFilterChange={writeStatusToHash}
         />
       )}
 

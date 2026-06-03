@@ -278,6 +278,12 @@ export interface ConversationListProps {
   teamMembers: TeamMember[];
   onBulkAction?: (ids: string[], action: string, payload?: any) => Promise<void>;
   searchSnippets?: Record<string, string>;
+  // Batch 6, Feature 3: supplier status filter support. Map keyed on
+  // `${supplier_contact_id}::${email_account_id}`. Allows the list to
+  // filter conversations by their current supplier status, including a
+  // "No status set" pseudo-option.
+  supplierStatusMap?: Map<string, { id: string; name: string; color: string; background_color: string }>;
+  allSupplierStatuses?: { id: string; name: string; color: string; background_color: string }[];
 }
 
 export interface ConversationDetailProps {

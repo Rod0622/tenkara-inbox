@@ -798,3 +798,72 @@ export function useActions() {
     syncEmails,
   };
 }
+// ── useSupplierAccountStatuses (Batch 6, Feature 3) ───────────────────
+//
+// Fetches all supplier_account_statuses rows and resolves their status_id
+// values via supplier_statuses. Returns:
+//   - statusMap: lookup keyed by `${supplier_contact_id}::${email_account_id}`
+//   - allStatuses: list of available status options for filter UI
+//   - loading: initial load state
+//   - refetch: manual re-fetch trigger
+//
+// Refetches every 30 seconds in the background so that recent status
+// changes from other team members surface in the inbox filter without
+// requiring a page reload. Initial load returns immediately with empty
+// data; the inbox renders fine without statuses (just no status filter).
+//
+// Note: status IS pulled in one round-trip — supplier_account_statuses
+// is small (a few thousand rows max) so we just fetch the whole table.
+export type SupplierStatusOption = {
+  id: string;
+  name: string;
+  color: string;
+  background_color: string;
+};
+export function useSupplierAccountStatuses() {
+  const [statusMap, setStatusMap] = useState<Map<string, SupplierStatusOption>>(new Map());
+  const [allStatuses, setAllStatuses] = useState<SupplierStatusOption[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [assignRes, statusRes] = await Promise.all([
+        supabase
+          .from("supplier_account_statuses")
+          .select("supplier_contact_id, email_account_id, status_id"),
+        supabase
+          .from("supplier_statuses")
+          .select("id, name, color, background_color")
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true }),
+      ]);
+
+      const statuses = (statusRes.data || []) as SupplierStatusOption[];
+      const statusById = new Map<string, SupplierStatusOption>(
+        statuses.map(s => [s.id, s])
+      );
+      const map = new Map<string, SupplierStatusOption>();
+      for (const r of (assignRes.data || []) as any[]) {
+        if (!r.status_id) continue;
+        const s = statusById.get(r.status_id);
+        if (!s) continue;
+        const key = `${r.supplier_contact_id}::${r.email_account_id}`;
+        map.set(key, s);
+      }
+      setStatusMap(map);
+      setAllStatuses(statuses);
+    } catch (e) {
+      console.error("[useSupplierAccountStatuses] fetch failed:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+    const id = setInterval(fetchAll, 30000);
+    return () => clearInterval(id);
+  }, [fetchAll]);
+
+  return { statusMap, allStatuses, loading, refetch: fetchAll };
+}
