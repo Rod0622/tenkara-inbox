@@ -131,6 +131,18 @@ export default forwardRef<RichTextEditorHandle, RichTextEditorProps>(function Ri
   const [currentSize, setCurrentSize] = useState("13px");
   const [initialized, setInitialized] = useState(false);
 
+  // ── Image resize feature ───────────────────────────────────────────
+  // When the user clicks an <img> inside the editor we "select" it. A
+  // selection ring + 4 corner drag handles get rendered as siblings of
+  // the contenteditable (in the relative wrapper) so they don't pollute
+  // the editor's DOM. Dragging a corner updates the image's inline width;
+  // height stays auto so aspect ratio is preserved by the browser.
+  const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
+  const [imgRect, setImgRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // Constants for the paste-resize feature
+  const PASTE_MAX_DIMENSION = 1200; // longest side, in CSS px
+
   // Helper: build a signature block with a stable marker so we can find/replace it later.
   // Wrapping in [data-signature-block] lets us swap the signature when the user changes
   // From accounts, without clobbering content they've typed.
@@ -289,6 +301,203 @@ export default forwardRef<RichTextEditorHandle, RichTextEditorProps>(function Ri
   const trackSelection = () => {
     saveSelection();
   };
+
+  // ── Paste handler: detect images, resize before insert ──────────────
+  // When the user pastes a screenshot (or any image from clipboard), we
+  // intercept BEFORE the browser inserts it. The default contenteditable
+  // behavior would inline the raw image as <img src="data:...">, which
+  // for a typical 1920×1080 screenshot is ~400-800KB of base64. The
+  // recipient sees a giant page-width image, and we waste bandwidth on
+  // every page render until /api/send extracts it to a CID attachment.
+  //
+  // Instead, we downscale to PASTE_MAX_DIMENSION on the longest side
+  // (preserving aspect ratio), keep the original mime type, and insert
+  // the smaller data URL. The image is still pasted at full visual width
+  // in the editor — we just clamp the underlying pixel dimensions.
+  //
+  // We only intercept actual file items (kind="file"). Text/HTML paste
+  // (e.g. from ChatGPT) falls through to default behavior — those don't
+  // contain image bytes, just HTML with external image URLs.
+  const handleEditorPaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    let imageFile: File | null = null;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        imageFile = it.getAsFile();
+        if (imageFile) break;
+      }
+    }
+    if (!imageFile) return; // No image — let default paste happen (text/html)
+
+    e.preventDefault();
+
+    try {
+      // Read clipboard image as data URL
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = reject;
+        r.readAsDataURL(imageFile as Blob);
+      });
+
+      // Decode to learn original dimensions
+      const imgEl: HTMLImageElement = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = reject;
+        im.src = dataUrl;
+      });
+
+      const origW = imgEl.naturalWidth;
+      const origH = imgEl.naturalHeight;
+
+      let finalDataUrl = dataUrl;
+
+      // Only resize if either dimension exceeds the cap. Smaller images
+      // pass through unmodified (no re-encode artifacts, no overhead).
+      if (Math.max(origW, origH) > PASTE_MAX_DIMENSION) {
+        const scale = PASTE_MAX_DIMENSION / Math.max(origW, origH);
+        const newW = Math.round(origW * scale);
+        const newH = Math.round(origH * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = newW;
+        canvas.height = newH;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(imgEl, 0, 0, newW, newH);
+          // Keep source mime type. PNG screenshots stay PNG, JPEGs stay JPEG.
+          finalDataUrl = canvas.toDataURL(imageFile.type || "image/png");
+        }
+      }
+
+      // Insert at the user's cursor position. max-width:100% keeps the
+      // image visually inside the editor even when its intrinsic width
+      // exceeds the editor pane; height:auto preserves aspect ratio.
+      const html = `<img src="${finalDataUrl}" style="max-width:100%;height:auto;" alt="">`;
+
+      // Restore cursor if we have one saved
+      const savedRange = savedSelectionRef.current;
+      const sel = window.getSelection();
+      if (savedRange && editorRef.current?.contains(savedRange.startContainer) && sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+      }
+      document.execCommand("insertHTML", false, html);
+      handleInput();
+
+      // Save the post-insert cursor as the new baseline
+      const newSel = window.getSelection();
+      if (newSel && newSel.rangeCount > 0 && editorRef.current?.contains(newSel.anchorNode)) {
+        savedSelectionRef.current = newSel.getRangeAt(0).cloneRange();
+      }
+    } catch (err) {
+      console.error("[RichTextEditor] paste image failed:", err);
+    }
+  }, [handleInput]);
+
+  // ── Click handler: select an image for resize ────────────────────────
+  // Clicking an <img> in the editor "selects" it (rings it + shows corner
+  // drag handles). Clicking anywhere else (or another image) deselects.
+  const handleEditorClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target?.tagName === "IMG" && editorRef.current?.contains(target)) {
+      setSelectedImage(target as HTMLImageElement);
+    } else {
+      setSelectedImage(null);
+    }
+  }, []);
+
+  // Track the image's position so the handle overlay stays glued to it
+  // through scrolls, typing, window resizes, etc. We use rAF instead of
+  // ResizeObserver+MutationObserver+scroll listeners because a single
+  // rAF loop covers all of those cases with ~3 lines and minimal perf
+  // cost (only active while an image is selected).
+  useEffect(() => {
+    if (!selectedImage || !editorRef.current) {
+      setImgRect(null);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      if (!selectedImage.isConnected) {
+        // Image was deleted from DOM — drop selection
+        setSelectedImage(null);
+        return;
+      }
+      const wrapper = editorRef.current?.parentElement;
+      if (!wrapper) return;
+      const imgR = selectedImage.getBoundingClientRect();
+      const wrR = wrapper.getBoundingClientRect();
+      setImgRect({
+        top: imgR.top - wrR.top,
+        left: imgR.left - wrR.left,
+        width: imgR.width,
+        height: imgR.height,
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [selectedImage]);
+
+  // Click-outside to deselect. Handles + the image itself are exempt.
+  useEffect(() => {
+    if (!selectedImage) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target === selectedImage) return;
+      if (target?.closest?.("[data-resize-handle]")) return;
+      // Click on another image inside the same editor is handled by handleEditorClick
+      // (which sets a new selectedImage). Click anywhere else → deselect.
+      if (target?.tagName === "IMG" && editorRef.current?.contains(target)) return;
+      setSelectedImage(null);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [selectedImage]);
+
+  // Drag a corner handle to resize. Aspect ratio is locked — the larger
+  // of horizontal/vertical mouse delta drives width; height stays auto.
+  const startResizeDrag = useCallback((e: React.MouseEvent, corner: "nw" | "ne" | "sw" | "se") => {
+    if (!selectedImage) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startWidth = selectedImage.getBoundingClientRect().width;
+    // Sign per corner: when dragging "outward" the delta should be positive.
+    const signX = corner.includes("e") ? 1 : -1;
+    const signY = corner.includes("s") ? 1 : -1;
+
+    const minWidth = 50;
+    // Cap at the editor's inner width so the image never overflows.
+    const editorWidth = editorRef.current?.clientWidth || 9999;
+    const maxWidth = editorWidth - 16; // small breathing room
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = (ev.clientX - startX) * signX;
+      const dy = (ev.clientY - startY) * signY;
+      // Use the bigger axis — feels natural for aspect-locked resize.
+      const delta = Math.max(dx, dy);
+      const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + delta));
+      selectedImage.style.width = `${newWidth}px`;
+      selectedImage.style.height = "auto";
+      // Clear max-width so the inline width actually applies (default
+      // paste-inserted images set max-width:100% which would otherwise
+      // cap any larger drag).
+      selectedImage.style.maxWidth = "none";
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      handleInput(); // commit to onChange
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [selectedImage, handleInput]);
 
   // Expose imperative methods to parent components via ref. Lets the
   // ConversationDetail template / Drive pickers insert HTML at the exact
@@ -651,6 +860,8 @@ export default forwardRef<RichTextEditorHandle, RichTextEditorProps>(function Ri
           onKeyUp={trackSelection}
           onMouseUp={trackSelection}
           onBlur={trackSelection}
+          onPaste={handleEditorPaste}
+          onClick={handleEditorClick}
           onKeyDown={(e) => {
             // Keyboard shortcuts
             if (e.metaKey || e.ctrlKey) {
@@ -703,6 +914,61 @@ export default forwardRef<RichTextEditorHandle, RichTextEditorProps>(function Ri
             </button>
           );
         })()}
+
+        {/* Image resize overlay — rendered as a sibling of the
+            contenteditable in the relative wrapper. The selection ring
+            sits over the image; four corner handles let the user drag
+            to resize. Both stay glued to the image via the rAF position
+            loop above. pointer-events on the ring are off so clicks fall
+            through to the image (re-selecting it on each click is fine —
+            useful when the user wants to click then drag a handle). */}
+        {selectedImage && imgRect && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                top: imgRect.top,
+                left: imgRect.left,
+                width: imgRect.width,
+                height: imgRect.height,
+                border: "2px solid var(--accent)",
+                pointerEvents: "none",
+                boxSizing: "border-box",
+                zIndex: 15,
+              }}
+            />
+            {(["nw", "ne", "sw", "se"] as const).map((corner) => {
+              const HANDLE = 10;
+              const top = corner.includes("n")
+                ? imgRect.top - HANDLE / 2
+                : imgRect.top + imgRect.height - HANDLE / 2;
+              const left = corner.includes("w")
+                ? imgRect.left - HANDLE / 2
+                : imgRect.left + imgRect.width - HANDLE / 2;
+              const cursor =
+                corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
+              return (
+                <div
+                  key={corner}
+                  data-resize-handle="true"
+                  onMouseDown={(e) => startResizeDrag(e, corner)}
+                  style={{
+                    position: "absolute",
+                    top,
+                    left,
+                    width: HANDLE,
+                    height: HANDLE,
+                    background: "var(--accent)",
+                    border: "1.5px solid white",
+                    borderRadius: 2,
+                    cursor,
+                    zIndex: 16,
+                  }}
+                />
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
