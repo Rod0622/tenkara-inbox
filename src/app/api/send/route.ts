@@ -35,6 +35,34 @@ export async function POST(req: NextRequest) {
     let emailBody: string = body.body;
     let conversationId: string | null = body.conversation_id || null;
 
+    // ── ChatGPT paste fix ───────────────────────────────────────────────
+    // When users paste content from ChatGPT (or any source) into the
+    // RichTextEditor, the contenteditable renders \n as visible line breaks
+    // via white-space:pre-wrap styling — but the underlying innerHTML keeps
+    // those \n characters AS-IS, without converting them to <br>/<p>.
+    // The composer LOOKS right, but on send the body arrives here as plain
+    // text with raw \n boundaries. When that gets stored in body_html and
+    // later rendered via dangerouslySetInnerHTML, the browser collapses all
+    // whitespace per HTML rules and the entire message becomes one blob
+    // (no visible paragraph breaks). On refresh the Gmail/Graph sync
+    // re-fetches the sent email — at which point the provider has already
+    // wrapped paragraphs in proper HTML — and the render looks correct.
+    //
+    // We catch the plain-text-shaped case here and reconstruct paragraph
+    // structure so:
+    //   1. The recipient's mail client gets a properly-formatted email
+    //   2. Our own UI's HTML render doesn't collapse whitespace
+    //   3. The body_text derivation below also gets newline-preserving input
+    //
+    // The same trick is used in the AI Draft path (see ConversationDetail's
+    // onInsert handler) — applying it here covers manual paste too.
+    if (emailBody && /\n/.test(emailBody) && !/<(p|div|br|h[1-6]|blockquote|ul|ol|li|table)\b/i.test(emailBody)) {
+      emailBody = emailBody
+        .split(/\n{2,}/)
+        .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+        .join("");
+    }
+
     if (isReply) {
       // Get conversation to find account and recipient
       const { data: convo, error: convoErr } = await supabase
@@ -368,7 +396,26 @@ export async function POST(req: NextRequest) {
 
     // Store sent message locally
     if (conversationId) {
-      const cleanBodyText = finalBody.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+      // Newline-preserving HTML→text strip. The previous naive
+      // `replace(/<[^>]*>/g, "")` collapsed paragraph boundaries — pasted
+      // ChatGPT content rendered as "well.I wanted to" with no break, even
+      // though the HTML had <p> tags. We now convert block-level closers to
+      // \n\n and <br> to \n BEFORE stripping tags, so the resulting
+      // body_text retains visible structure for any UI path that falls
+      // through to plain-text rendering with white-space:pre-wrap.
+      const cleanBodyText = finalBody
+        .replace(/<\/(p|div|h[1-6]|blockquote|li)>/gi, "\n\n")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&apos;/gi, "'")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
       await supabase.from("messages").insert({
         conversation_id: conversationId,
         provider_message_id: messageId || "sent:" + Date.now(),
