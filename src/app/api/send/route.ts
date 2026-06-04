@@ -6,6 +6,7 @@ import { sendGraphEmail } from "@/lib/microsoft-graph";
 import { notifyWatchers } from "@/lib/notifications";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { dispatchDraftWebhook } from "@/lib/api-token-webhook";
+import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
 
@@ -416,7 +417,7 @@ export async function POST(req: NextRequest) {
         .replace(/&apos;/gi, "'")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      await supabase.from("messages").insert({
+      const { data: insertedMsg } = await supabase.from("messages").insert({
         conversation_id: conversationId,
         provider_message_id: messageId || "sent:" + Date.now(),
         from_name: account.name,
@@ -428,10 +429,51 @@ export async function POST(req: NextRequest) {
         body_html: finalBody,
         snippet: cleanBodyText.slice(0, 200),
         is_outbound: true,
-        has_attachments: (body.attachments || []).length > 0,
+        has_attachments: (body.attachments || []).length > 0 || cidAttachments.length > 0,
         sent_at: new Date().toISOString(),
         sent_by_user_id: body.actor_id || null,
-      });
+      })
+      .select("id")
+      .single();
+
+      // ── Persist CID inline attachments to inbox.attachments ───────────
+      // Background: the body_html we just stored contains
+      //   <img src="cid:img1_...@tenkara">
+      // references (we rewrote pasted base64 images to CID upstream so the
+      // outgoing email stays small enough to avoid Gmail's 102KB clip).
+      // Browsers can't resolve `cid:` URIs natively, so MessageBody.tsx
+      // looks up each cid in inbox.attachments (by content_id) and
+      // rewrites the <img src> at render time to a Tenkara /api/attachments
+      // URL. For that lookup to work, the attachment row must exist.
+      //
+      // Inbound emails get this for free via the IMAP / Gmail / Graph sync
+      // path — that path also calls uploadAttachmentToStorage. We just need
+      // to do the same here for outbound, otherwise the sender's own UI
+      // shows broken images until the provider's sync re-fetches the sent
+      // email (which CAN take many minutes).
+      if (insertedMsg?.id && cidAttachments.length > 0) {
+        await Promise.all(cidAttachments.map((cid, i) =>
+          uploadAttachmentToStorage(supabase, {
+            accountId: account.id,
+            messageId: insertedMsg.id,
+            indexInMessage: i,
+            attachment: {
+              filename: cid.filename,
+              contentType: cid.contentType,
+              size: cid.content.length,
+              isInline: true,
+              contentId: cid.cid,
+              checksum: null,
+              content: cid.content,
+            },
+          }).catch((e: any) => {
+            // Best-effort: a failed inline-attachment upload just means the
+            // image stays broken in our UI until the provider's sync runs.
+            // Don't fail the whole send over it.
+            console.error("[send] CID attachment upload failed:", cid.cid, e?.message);
+          })
+        ));
+      }
 
       // Update conversation
       await supabase
