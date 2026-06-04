@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, Send, AtSign, Users, X, MoreVertical, Edit2, Trash2, SmilePlus, Check } from "lucide-react";
+import { MessageSquare, Send, AtSign, Users, X, MoreVertical, Edit2, Trash2, SmilePlus, Check, Paperclip, FileText, Download, Loader2, Image as ImageIcon } from "lucide-react";
 import type { TeamMember } from "@/types";
 import Avatar from "./Avatar";
 
@@ -17,6 +17,14 @@ const GROUP_PREFIX = "group:";
 // Kept small and universally-supported (no skin-tone modifiers, no compound
 // ZWJ sequences). Order matches common Slack/Linear conventions.
 const QUICK_REACTIONS = ["👍", "❤️", "😄", "🎉", "👀", "🙏"];
+
+// Format a byte count as a friendly size string (KB / MB)
+function fmtFileSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface MentionEntry {
   // For "user":     team_member.id (UUID)
@@ -48,6 +56,105 @@ export default function TeamChat({
   const [comments, setComments] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // ── Attachments (Batch 8) ──────────────────────────────────────────
+  // Files uploaded into a pending tray while composing. Each has been
+  // POSTed to Storage already; comment_id is null until the parent
+  // comment is sent. The `signed_url` here is a short-lived URL for
+  // preview rendering.
+  type PendingAttachment = {
+    id: string;
+    filename: string;
+    mime_type: string | null;
+    size_bytes: number;
+    signed_url: string | null;
+  };
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Upload one or more files. Each kicks off a fetch in parallel and the
+  // pending tray populates as uploads complete. Failures show a banner
+  // but other files in the same batch can still succeed.
+  const uploadFiles = async (files: File[]) => {
+    if (!currentUser) return;
+    if (files.length === 0) return;
+    setUploadError(null);
+    setUploadingCount(c => c + files.length);
+    await Promise.all(files.map(async (file) => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("author_id", currentUser.id);
+        const res = await fetch("/api/comments/attachments", { method: "POST", body: fd });
+        const j = await res.json();
+        if (!res.ok || !j.attachment) {
+          setUploadError(j.error || `Upload failed (HTTP ${res.status})`);
+          return;
+        }
+        setPendingAttachments(prev => [...prev, {
+          id: j.attachment.id,
+          filename: j.attachment.filename,
+          mime_type: j.attachment.mime_type,
+          size_bytes: j.attachment.size_bytes,
+          signed_url: j.attachment.signed_url,
+        }]);
+      } catch (e: any) {
+        setUploadError(e?.message || "Upload failed");
+      } finally {
+        setUploadingCount(c => c - 1);
+      }
+    }));
+  };
+
+  // Unattach a pending file before sending. Calls the DELETE endpoint
+  // which removes both the storage object and the DB row.
+  const removePendingAttachment = async (attachmentId: string) => {
+    if (!currentUser) return;
+    setPendingAttachments(prev => prev.filter(a => a.id !== attachmentId));
+    try {
+      await fetch(`/api/comments/attachments?id=${attachmentId}&author_id=${currentUser.id}`, {
+        method: "DELETE",
+      });
+    } catch (_e) { /* best-effort */ }
+  };
+
+  // Paste handler — grabs any file/image off the clipboard. Used on the
+  // textarea. Works for paste-screenshot-from-clipboard on every major OS.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      uploadFiles(files);
+    }
+    // Otherwise let the default paste happen (text into the textarea)
+  };
+
+  // Drag-and-drop handlers on the input wrapper
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+  const handleDragLeave = () => setIsDragOver(false);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length > 0) uploadFiles(files);
+  };
   const [isTeamChatOpen, setIsTeamChatOpen] = useState(false);
 
   // Per-message UI state — track which message is being edited, which one has
@@ -340,7 +447,11 @@ export default function TeamChat({
   };
 
   const sendComment = async () => {
-    if (!input.trim() || !currentUser) return;
+    // Allow sending when there's text OR at least one attachment
+    const hasText = input.trim().length > 0;
+    const hasAttachments = pendingAttachments.length > 0;
+    if ((!hasText && !hasAttachments) || !currentUser) return;
+    if (uploadingCount > 0) return; // wait for in-flight uploads
     setSending(true);
     try {
       // Recompute mentions from final input — drop any that no longer appear in the text
@@ -363,12 +474,15 @@ export default function TeamChat({
           author_id: currentUser.id,
           body: input.trim(),
           mentions: finalMentions,
+          attachment_ids: pendingAttachments.map(a => a.id),
         }),
       });
       setInput("");
       setMentions([]);
       setPickerOpen(false);
       setPickerStart(null);
+      setPendingAttachments([]);
+      setUploadError(null);
       fetchComments();
     } catch (error) {
       console.error("Failed to send comment:", error);
@@ -825,6 +939,49 @@ export default function TeamChat({
                               </div>
                             )}
 
+                            {/* Attachments (Batch 8) — inline thumbnails for
+                                images, file pills for everything else. */}
+                            {!isEditing && Array.isArray(comment.attachments) && comment.attachments.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {comment.attachments.map((att: any) => {
+                                  const isImage = att.mime_type?.startsWith("image/");
+                                  if (isImage && att.signed_url) {
+                                    return (
+                                      <button
+                                        key={att.id}
+                                        onClick={() => setLightboxUrl(att.signed_url)}
+                                        className="block rounded-md overflow-hidden border border-[var(--border)] hover:border-[var(--accent)] transition-colors"
+                                        title={att.filename}
+                                      >
+                                        <img
+                                          src={att.signed_url}
+                                          alt={att.filename}
+                                          className="max-w-[240px] max-h-[180px] object-cover block"
+                                        />
+                                      </button>
+                                    );
+                                  }
+                                  return (
+                                    <a
+                                      key={att.id}
+                                      href={att.signed_url || "#"}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      download={att.filename}
+                                      className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors max-w-[240px]"
+                                      title={att.filename}
+                                    >
+                                      <FileText size={14} className="shrink-0" />
+                                      <span className="flex-1 truncate text-[11px]">{att.filename}</span>
+                                      <span className="text-[10px] text-[var(--text-muted)] shrink-0">
+                                        {fmtFileSize(att.size_bytes)}
+                                      </span>
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            )}
+
                             {/* Reactions row — shows aggregated counts per
                                 emoji. Clicking an existing reaction toggles
                                 the current user's participation. */}
@@ -981,7 +1138,80 @@ export default function TeamChat({
                 </div>
               )}
 
-              <div className="flex items-end gap-2">
+              {/* ── Pending attachments tray (Batch 8) ──────────────
+                  Shows uploaded-but-not-yet-sent files. Each has a
+                  remove button. Below: any upload error + uploading
+                  spinner. */}
+              {(pendingAttachments.length > 0 || uploadingCount > 0 || uploadError) && (
+                <div className="mb-2 px-1">
+                  <div className="flex flex-wrap gap-2">
+                    {pendingAttachments.map(att => {
+                      const isImage = att.mime_type?.startsWith("image/");
+                      return (
+                        <div
+                          key={att.id}
+                          className="relative flex items-center gap-2 px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)]"
+                          title={att.filename}
+                        >
+                          {isImage && att.signed_url ? (
+                            <img src={att.signed_url} alt="" className="w-8 h-8 object-cover rounded" />
+                          ) : (
+                            <FileText size={14} className="text-[var(--text-muted)]" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-[var(--text-primary)] truncate max-w-[140px]">{att.filename}</div>
+                            <div className="text-[9px] text-[var(--text-muted)]">{fmtFileSize(att.size_bytes)}</div>
+                          </div>
+                          <button
+                            onClick={() => removePendingAttachment(att.id)}
+                            className="text-[var(--text-muted)] hover:text-[var(--danger)]"
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {uploadingCount > 0 && (
+                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[10px] text-[var(--text-muted)]">
+                        <Loader2 size={11} className="animate-spin" />
+                        Uploading {uploadingCount}…
+                      </div>
+                    )}
+                  </div>
+                  {uploadError && (
+                    <div className="text-[10px] text-[var(--danger)] mt-1">{uploadError}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Hidden file input — triggered by paperclip button. */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  uploadFiles(files);
+                  e.target.value = ""; // allow re-selecting same file
+                }}
+                className="hidden"
+              />
+
+              <div
+                className={`flex items-end gap-2 ${isDragOver ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--bg)] rounded-lg" : ""}`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {/* Paperclip — opens file picker (Batch 8) */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] flex items-center justify-center shrink-0"
+                  title="Attach file"
+                >
+                  <Paperclip size={14} />
+                </button>
                 {/* Textarea (not input) — Enter sends, Shift+Enter inserts a
                     newline. Single-line <input> elements can't render line
                     breaks at all, so multi-line drafts were impossible. */}
@@ -990,21 +1220,47 @@ export default function TeamChat({
                   value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
-                  placeholder="@ Chat with your team... (type @ to mention, Shift+Enter for new line)"
+                  onPaste={handlePaste}
+                  placeholder={isDragOver ? "Drop files to attach…" : "@ Chat with your team... (type @ to mention, paste/drop files, Shift+Enter for new line)"}
                   rows={1}
                   className="flex-1 max-h-32 min-h-[40px] rounded-lg bg-[var(--bg)] border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[#30363D] resize-none leading-snug"
                 />
                 <button
                   onClick={sendComment}
-                  disabled={sending || !input.trim()}
+                  disabled={sending || (!input.trim() && pendingAttachments.length === 0) || uploadingCount > 0}
                   className="w-10 h-10 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 flex items-center justify-center shrink-0"
-                  title="Send"
+                  title={uploadingCount > 0 ? "Waiting for uploads to finish…" : "Send"}
                 >
                   <Send size={14} />
                 </button>
               </div>
             </div>
           </aside>
+
+          {/* Image lightbox (Batch 8) — clicking an inline image in a
+              comment bubble opens it full-size with a backdrop. Esc or
+              backdrop-click closes. */}
+          {lightboxUrl && (
+            <div
+              className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4"
+              onClick={() => setLightboxUrl(null)}
+              onKeyDown={(e) => { if (e.key === "Escape") setLightboxUrl(null); }}
+            >
+              <img
+                src={lightboxUrl}
+                alt="Attachment"
+                className="max-w-full max-h-full object-contain rounded-md shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                onClick={() => setLightboxUrl(null)}
+                className="absolute top-4 right-4 text-white/80 hover:text-white"
+                title="Close (Esc)"
+              >
+                <X size={24} />
+              </button>
+            </div>
+          )}
         </>
       )}
     </>
