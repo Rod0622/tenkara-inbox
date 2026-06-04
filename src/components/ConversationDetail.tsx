@@ -481,13 +481,65 @@ export default function ConversationDetail({
           const data = await res.json();
           const myDraft = (data.drafts || []).find((d: any) => d.author_id === currentUser.id) || (data.drafts || [])[0];
           if (myDraft) {
+            // CROSS-SUPPLIER SAFETY: a draft saved before the state-leak
+            // fix went live can have a to_addresses pointing at a TOTALLY
+            // unrelated supplier (state from a prior conversation's reply
+            // editor was leaked into this conversation's auto-save). We
+            // validate the draft's primary recipient against this
+            // conversation's known participants before preloading it.
+            //
+            // Rule: the recipient's email DOMAIN must match the convo's
+            // from_email OR primary_contact_email domain. Cross-domain
+            // drafts are treated as contaminated — body still loads (so
+            // the user can see what they wrote), but To/Cc/Bcc are dropped
+            // so the auto-init effect below repopulates them from the
+            // conversation's actual participants.
+            //
+            // Same-domain drafts (e.g. supplier sent from sales@x.com,
+            // user replies to ericyang@x.com — same company, different
+            // contact) are preserved.
+            const draftEmails = myDraft.to_addresses
+              ? extractEmails(String(myDraft.to_addresses))
+              : [];
+            const primary = draftEmails[0] || "";
+            const primaryDomain = primary.split("@")[1] || "";
+
+            const convoAnchors: string[] = [];
+            if (convo?.from_email && convo.from_email !== "internal") {
+              convoAnchors.push(...extractEmails(convo.from_email));
+            }
+            const pcRaw = (convo as any)?.primary_contact_email;
+            if (pcRaw) convoAnchors.push(String(pcRaw).toLowerCase());
+
+            // If we have nothing to compare against (e.g. internal/team
+            // conversations with from_email === "internal"), skip validation
+            // and accept the draft's recipient. The reply UI isn't the
+            // normal path for those anyway.
+            const canValidate = convoAnchors.length > 0 && primaryDomain.length > 0;
+            const recipientDomainMatches = canValidate
+              ? convoAnchors.some((a) => {
+                  const d = a.split("@")[1] || "";
+                  return d && d === primaryDomain;
+                })
+              : true;
+
+            if (canValidate && !recipientDomainMatches) {
+              // Contaminated draft detected. Log for visibility — useful
+              // for catching any subsequent bugs that re-introduce leaks.
+              console.warn(
+                `[draft-load] dropping suspicious recipient on draft ${myDraft.id}: ` +
+                `primary="${primary}" but conv anchors=${JSON.stringify(convoAnchors)}`
+              );
+            }
+
             setReplyText(myDraft.body_html || myDraft.body_text || "");
             // Preload edited To/Subject from the draft if they were customized
-            // last time. Empty values fall back to the auto-init effect below.
-            if (myDraft.to_addresses) setReplyTo(myDraft.to_addresses);
+            // last time AND the recipient passes the validation above.
+            // Empty values fall back to the auto-init effect below.
+            if (myDraft.to_addresses && recipientDomainMatches) setReplyTo(myDraft.to_addresses);
             if (myDraft.subject) setReplySubject(myDraft.subject);
-            if (myDraft.cc_addresses) { setReplyCc(myDraft.cc_addresses); setShowReplyCc(true); }
-            if (myDraft.bcc_addresses) { setReplyBcc(myDraft.bcc_addresses); setShowReplyBcc(true); }
+            if (myDraft.cc_addresses && recipientDomainMatches) { setReplyCc(myDraft.cc_addresses); setShowReplyCc(true); }
+            if (myDraft.bcc_addresses && recipientDomainMatches) { setReplyBcc(myDraft.bcc_addresses); setShowReplyBcc(true); }
             setLoadedDraftId(myDraft.id);
             // Track agent metadata so the inline editor can show a badge and
             // force the operator to pick a sender before Send.
@@ -1597,6 +1649,21 @@ export default function ConversationDetail({
     // for the new conversation, if a draft exists.
     setLoadedDraftId(null);
     setLoadedDraftMeta(null);
+    // CROSS-SUPPLIER FIX: clear all inline-reply state on conversation
+    // change. Without this, replyTo/replySubject/replyCc/replyBcc/
+    // replyAttachments leak from the previous conversation. The auto-init
+    // effect's `if (!replyTo)` gate would then skip re-initialization
+    // because the stale value is truthy, and the user's next reply would
+    // be sent to the OLD conversation's recipient — even though they're
+    // now viewing a different supplier's thread. Two users hit this in
+    // production before the fix.
+    setReplyTo("");
+    setReplySubject("");
+    setReplyCc("");
+    setReplyBcc("");
+    setShowReplyCc(false);
+    setShowReplyBcc(false);
+    setReplyAttachments([]);
     setNoteText("");
     setNewTaskText("");
     setNewTaskAssigneeIds([]);
@@ -2099,6 +2166,58 @@ export default function ConversationDetail({
   };
 
   // ── Pre-send checks ──
+
+  // Cross-supplier safety net. Returns a warning string if the primary
+  // To recipient doesn't match anyone associated with this conversation —
+  // either no message ever came from / to that address AND it isn't the
+  // primary contact AND it isn't our own account email.
+  //
+  // This catches:
+  //   • State that leaked across a conversation switch (the recent bug
+  //     where replyTo carried over from a previous supplier's thread)
+  //   • The user manually mistyping a recipient who has no relationship
+  //     to this thread
+  //
+  // It does NOT block legitimate Cc additions — only checks the first
+  // address in the To field. Adding a colleague to Cc is fine; sending
+  // the reply itself to the wrong supplier is not.
+  //
+  // Returns null when the primary recipient is recognized.
+  const checkSuspiciousRecipient = (toStr: string): string | null => {
+    if (!toStr || !toStr.trim()) return null; // empty handled by other checks
+    const targets = extractEmails(toStr);
+    if (targets.length === 0) return null; // not parseable; let server reject
+    const primary = targets[0];
+
+    // Build the set of emails legitimately attached to this conversation.
+    const known = new Set<string>();
+    if (convo?.from_email && convo.from_email !== "internal") {
+      known.add(convo.from_email.toLowerCase());
+    }
+    const pcEmail = (convo as any)?.primary_contact_email;
+    if (pcEmail) known.add(String(pcEmail).toLowerCase());
+    for (const msg of messages || []) {
+      if (msg.from_email) known.add(String(msg.from_email).toLowerCase());
+      for (const e of extractEmails(msg.to_addresses)) known.add(e);
+      for (const e of extractEmails(msg.cc_addresses)) known.add(e);
+    }
+    // Our own account is always allowed (e.g. quick self-cc patterns).
+    if (accountEmail) known.add(accountEmail.toLowerCase());
+
+    if (known.has(primary)) return null;
+
+    // What does this conversation EXPECT? Used in the warning text so the
+    // user can quickly see whether they meant to send to the convo's
+    // primary contact or to whoever they typed.
+    const expected = pcEmail || convo?.from_email || "(no recorded contact)";
+    return (
+      `⚠️ This reply is going to ${primary}, but this conversation is ` +
+      `with ${expected}.\n\n` +
+      `Sending will email ${primary} — not the supplier above.\n\n` +
+      `Send anyway?`
+    );
+  };
+
   const checkMissingAttachments = (bodyHtml: string, attachmentCount: number): string | null => {
     const text = bodyHtml.replace(/<[^>]*>/g, "").toLowerCase();
     const attachmentKeywords = [
@@ -2127,6 +2246,11 @@ export default function ConversationDetail({
     if (!convo) return;
     const textContent = replyText.replace(/<[^>]*>/g, "").trim();
     if (!textContent && replyAttachments.length === 0) return;
+
+    // Cross-supplier safety check. Fires when the primary To recipient
+    // doesn't match anyone associated with this conversation.
+    const recipientWarning = checkSuspiciousRecipient(replyTo);
+    if (recipientWarning && !confirm(recipientWarning)) return;
 
     // Check for missing attachments
     const warning = checkMissingAttachments(replyText, replyAttachments.length);
@@ -2209,6 +2333,10 @@ export default function ConversationDetail({
   const handleSendReplyModal = async () => {
     if (!convo) return;
     if (!replyModalTo.trim() || !replyModalSubject.trim() || !replyModalBody.trim()) return;
+
+    // Cross-supplier safety check (same rules as inline reply).
+    const recipientWarning = checkSuspiciousRecipient(replyModalTo);
+    if (recipientWarning && !confirm(recipientWarning)) return;
 
     // Pass the attachment count to checkMissingAttachments so the "you said
     // attached but didn't attach anything" warning doesn't false-positive
