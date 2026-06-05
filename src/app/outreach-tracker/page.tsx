@@ -213,22 +213,25 @@ export default function OutreachTrackerPage() {
       {/* ── Filter bar ──────────────────────────────────────────── */}
       <div className="px-6 py-3 border-b border-[var(--surface-2)] flex flex-wrap items-center gap-2">
         <MultiSelectDropdown
-          label="Account"
-          options={accounts.map((a) => ({ value: a.id, label: a.name || a.email }))}
+          options={accounts.map((a) => ({ id: a.id, label: a.name || a.email }))}
           selected={accountFilter}
           onChange={setAccountFilter}
+          placeholder="All accounts"
+          searchPlaceholder="Search account..."
         />
         <MultiSelectDropdown
-          label="Status"
-          options={statuses.map((s) => ({ value: s.id, label: s.name }))}
+          options={statuses.map((s) => ({ id: s.id, label: s.name }))}
           selected={statusFilter}
           onChange={setStatusFilter}
+          placeholder="All statuses"
+          searchPlaceholder="Search status..."
         />
         <MultiSelectDropdown
-          label="Assignee"
-          options={assignees.map((u) => ({ value: u.id, label: u.name }))}
+          options={assignees.map((u) => ({ id: u.id, label: u.name }))}
           selected={assigneeFilter}
           onChange={setAssigneeFilter}
+          placeholder="All assignees"
+          searchPlaceholder="Search assignee..."
         />
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
