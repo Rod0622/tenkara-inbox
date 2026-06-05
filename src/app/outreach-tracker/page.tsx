@@ -62,7 +62,7 @@ export default function OutreachTrackerPage() {
   const [assignees, setAssignees] = useState<UserLite[]>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
 
-  // Active filters
+  // Active filters (global bar — sent to server)
   const [accountFilter,  setAccountFilter]  = useState<string[]>([]);
   const [statusFilter,   setStatusFilter]   = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
@@ -70,6 +70,25 @@ export default function OutreachTrackerPage() {
   const [searchDebounced, setSearchDebounced] = useState("");
   const [createdFrom,    setCreatedFrom]    = useState("");
   const [createdTo,      setCreatedTo]      = useState("");
+
+  // ── Per-column filters (applied client-side on top of the global bar) ─
+  // These don't refetch from the server — they narrow the already-loaded
+  // row set. The set is capped at 5000 server-side, which is plenty of
+  // headroom for any team's active outreach pipeline; the in-browser
+  // filter pass is microseconds even at that size.
+  const [colSubject,     setColSubject]     = useState("");
+  const [colLabels,      setColLabels]      = useState<string[]>([]);  // label names
+  const [colSublabels,   setColSublabels]   = useState<string[]>([]);  // sublabel names
+  const [colCreatedFrom, setColCreatedFrom] = useState("");
+  const [colCreatedTo,   setColCreatedTo]   = useState("");
+  const [colSupplier,    setColSupplier]    = useState("");
+  const [colAssignees,   setColAssignees]   = useState<string[]>([]);  // team_member ids
+  const [colCallers,     setColCallers]     = useState<string[]>([]);  // team_member ids
+  const [colStatuses,    setColStatuses]    = useState<string[]>([]);  // outreach_status ids
+  const [colLastFrom,    setColLastFrom]    = useState("");
+  const [colLastTo,      setColLastTo]      = useState("");
+  const [colMaterial,    setColMaterial]    = useState("");
+  const [colFollowUp,    setColFollowUp]    = useState("");
 
   // Data
   const [rows, setRows] = useState<Row[]>([]);
@@ -133,6 +152,91 @@ export default function OutreachTrackerPage() {
     if (!optionsLoaded) return;
     loadRows();
   }, [loadRows, optionsLoaded]);
+
+  // ── Derived sets for column-filter dropdowns ────────────────────────
+  // We use whatever's currently in `rows` so dropdowns only offer values
+  // that actually exist in the data — saves users from picking a label
+  // that would produce zero results.
+  const uniqueLabels = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) for (const l of r.labels) set.add(l);
+    return Array.from(set).sort();
+  }, [rows]);
+  const uniqueSublabels = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) for (const l of r.sublabels) set.add(l);
+    return Array.from(set).sort();
+  }, [rows]);
+  const uniqueCallers = useMemo(() => {
+    const seen = new Map<string, UserLite>();
+    for (const r of rows) if (r.caller) seen.set(r.caller.id, r.caller);
+    return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
+  // ── Apply per-column filters to the server-loaded rows ──────────────
+  const filteredRows = useMemo(() => {
+    // Pre-lowercase the text filters once — saves N comparisons per
+    // keystroke at scale. (At 5000 rows this matters for input responsiveness.)
+    const sSubject  = colSubject.toLowerCase();
+    const sSupplier = colSupplier.toLowerCase();
+    const sMaterial = colMaterial.toLowerCase();
+    const sFollowUp = colFollowUp.toLowerCase();
+
+    // Convert date range cutoffs once. Treat the "to" as inclusive end-of-day.
+    const cFromMs = colCreatedFrom ? new Date(colCreatedFrom).getTime() : -Infinity;
+    const cToMs   = colCreatedTo   ? new Date(colCreatedTo).getTime() + 86399999 : Infinity;
+    const lFromMs = colLastFrom    ? new Date(colLastFrom).getTime() : -Infinity;
+    const lToMs   = colLastTo      ? new Date(colLastTo).getTime() + 86399999 : Infinity;
+
+    return rows.filter((r) => {
+      if (sSubject && !(r.subject || "").toLowerCase().includes(sSubject)) return false;
+      if (colLabels.length    && !colLabels.some((l)    => r.labels.includes(l)))    return false;
+      if (colSublabels.length && !colSublabels.some((l) => r.sublabels.includes(l))) return false;
+
+      if (colCreatedFrom || colCreatedTo) {
+        const t = r.created_at ? new Date(r.created_at).getTime() : NaN;
+        if (isNaN(t) || t < cFromMs || t > cToMs) return false;
+      }
+      if (sSupplier) {
+        const email = (r.supplier.email || "").toLowerCase();
+        const name  = (r.supplier.name  || "").toLowerCase();
+        if (!email.includes(sSupplier) && !name.includes(sSupplier)) return false;
+      }
+      if (colAssignees.length && !colAssignees.includes(r.assignee?.id || "__none__")) return false;
+      if (colCallers.length   && !colCallers.includes(r.caller?.id     || "__none__")) return false;
+      if (colStatuses.length  && !colStatuses.includes(r.outreach_status?.id || "__none__")) return false;
+
+      if (colLastFrom || colLastTo) {
+        const t = r.last_message_at ? new Date(r.last_message_at).getTime() : NaN;
+        if (isNaN(t) || t < lFromMs || t > lToMs) return false;
+      }
+      if (sMaterial && !(r.material_inquiry || "").toLowerCase().includes(sMaterial)) return false;
+      if (sFollowUp && !(r.follow_up_log    || "").toLowerCase().includes(sFollowUp)) return false;
+
+      return true;
+    });
+  }, [
+    rows,
+    colSubject, colLabels, colSublabels,
+    colCreatedFrom, colCreatedTo,
+    colSupplier, colAssignees, colCallers, colStatuses,
+    colLastFrom, colLastTo, colMaterial, colFollowUp,
+  ]);
+
+  const clearColumnFilters = () => {
+    setColSubject(""); setColLabels([]); setColSublabels([]);
+    setColCreatedFrom(""); setColCreatedTo("");
+    setColSupplier(""); setColAssignees([]); setColCallers([]); setColStatuses([]);
+    setColLastFrom(""); setColLastTo("");
+    setColMaterial(""); setColFollowUp("");
+  };
+
+  const hasColumnFilters =
+    !!colSubject || colLabels.length > 0 || colSublabels.length > 0 ||
+    !!colCreatedFrom || !!colCreatedTo ||
+    !!colSupplier || colAssignees.length > 0 || colCallers.length > 0 || colStatuses.length > 0 ||
+    !!colLastFrom || !!colLastTo ||
+    !!colMaterial || !!colFollowUp;
 
   // ── PATCH a single conversation field, optimistic ────────────────────
   const patchConversation = useCallback(async (id: string, fields: Record<string, any>) => {
@@ -276,8 +380,20 @@ export default function OutreachTrackerPage() {
             Clear filters
           </button>
         )}
+        {hasColumnFilters && (
+          <button
+            onClick={clearColumnFilters}
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] px-2 py-1"
+          >
+            Clear column filters
+          </button>
+        )}
         <div className="ml-auto text-xs text-[var(--text-muted)]">
-          {loading ? "Loading…" : `${rows.length} conversation${rows.length === 1 ? "" : "s"}`}
+          {loading ? "Loading…" :
+            hasColumnFilters
+              ? `${filteredRows.length} of ${rows.length} conversation${rows.length === 1 ? "" : "s"}`
+              : `${rows.length} conversation${rows.length === 1 ? "" : "s"}`
+          }
         </div>
       </div>
 
@@ -308,16 +424,132 @@ export default function OutreachTrackerPage() {
                 <Th style={{ minWidth: 220 }}>Material inquiry</Th>
                 <Th style={{ minWidth: 240 }}>Follow-up log</Th>
               </tr>
+              {/* ── Per-column filter row ───────────────────────────
+                  Compact inputs aligned with each column header. All
+                  filtering here is client-side on the already-loaded
+                  row set; narrowing is instant. */}
+              <tr className="text-left">
+                <FilterCell sticky>
+                  <input
+                    type="text"
+                    value={colSubject}
+                    onChange={(e) => setColSubject(e.target.value)}
+                    placeholder="Filter…"
+                    className="w-full bg-[var(--surface)] border border-[var(--surface-2)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <MiniMultiSelect
+                    placeholder="Any"
+                    options={uniqueLabels.map((l) => ({ id: l, label: l }))}
+                    selected={colLabels}
+                    onChange={setColLabels}
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <MiniMultiSelect
+                    placeholder="Any"
+                    options={uniqueSublabels.map((l) => ({ id: l, label: l }))}
+                    selected={colSublabels}
+                    onChange={setColSublabels}
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      type="date"
+                      value={colCreatedFrom}
+                      onChange={(e) => setColCreatedFrom(e.target.value)}
+                      className="w-[110px] bg-[var(--surface)] border border-[var(--surface-2)] rounded px-1 py-1 text-[11px] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    <span className="text-[10px] text-[var(--text-muted)]">→</span>
+                    <input
+                      type="date"
+                      value={colCreatedTo}
+                      onChange={(e) => setColCreatedTo(e.target.value)}
+                      className="w-[110px] bg-[var(--surface)] border border-[var(--surface-2)] rounded px-1 py-1 text-[11px] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                  </div>
+                </FilterCell>
+                <FilterCell>
+                  <input
+                    type="text"
+                    value={colSupplier}
+                    onChange={(e) => setColSupplier(e.target.value)}
+                    placeholder="Filter…"
+                    className="w-full bg-[var(--surface)] border border-[var(--surface-2)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <MiniMultiSelect
+                    placeholder="Any"
+                    options={assignees.map((u) => ({ id: u.id, label: u.name }))}
+                    selected={colAssignees}
+                    onChange={setColAssignees}
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <MiniMultiSelect
+                    placeholder="Any"
+                    options={uniqueCallers.map((u) => ({ id: u.id, label: u.name }))}
+                    selected={colCallers}
+                    onChange={setColCallers}
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <MiniMultiSelect
+                    placeholder="Any"
+                    options={statuses.map((s) => ({ id: s.id, label: s.name }))}
+                    selected={colStatuses}
+                    onChange={setColStatuses}
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      type="date"
+                      value={colLastFrom}
+                      onChange={(e) => setColLastFrom(e.target.value)}
+                      className="w-[110px] bg-[var(--surface)] border border-[var(--surface-2)] rounded px-1 py-1 text-[11px] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    <span className="text-[10px] text-[var(--text-muted)]">→</span>
+                    <input
+                      type="date"
+                      value={colLastTo}
+                      onChange={(e) => setColLastTo(e.target.value)}
+                      className="w-[110px] bg-[var(--surface)] border border-[var(--surface-2)] rounded px-1 py-1 text-[11px] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                  </div>
+                </FilterCell>
+                <FilterCell>
+                  <input
+                    type="text"
+                    value={colMaterial}
+                    onChange={(e) => setColMaterial(e.target.value)}
+                    placeholder="Filter…"
+                    className="w-full bg-[var(--surface)] border border-[var(--surface-2)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </FilterCell>
+                <FilterCell>
+                  <input
+                    type="text"
+                    value={colFollowUp}
+                    onChange={(e) => setColFollowUp(e.target.value)}
+                    placeholder="Filter…"
+                    className="w-full bg-[var(--surface)] border border-[var(--surface-2)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </FilterCell>
+              </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && !loading ? (
+              {filteredRows.length === 0 && !loading ? (
                 <tr>
                   <td colSpan={11} className="text-center py-8 text-[var(--text-muted)]">
                     No conversations match the current filters.
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
+                filteredRows.map((row) => (
                   <TrackerRow
                     key={row.id}
                     row={row}
@@ -354,6 +586,129 @@ function Th({
     >
       {children}
     </th>
+  );
+}
+
+// ── Filter row cell (matches Th sticky behavior) ──────────────────────
+function FilterCell({
+  children,
+  sticky = false,
+}: {
+  children: React.ReactNode;
+  sticky?: boolean;
+}) {
+  return (
+    <th
+      className={`px-3 pt-1 pb-2 border-b border-[var(--surface-2)] font-normal align-top ${
+        sticky ? "sticky left-0 z-10 bg-[var(--bg)] shadow-[2px_0_0_0_var(--surface-2)]" : ""
+      }`}
+    >
+      {children}
+    </th>
+  );
+}
+
+// ── Compact multi-select for column filters ───────────────────────────
+// Button shows "Any" or a count; clicking opens a checkbox list. Designed
+// to fit inside a table header cell — width is content-driven, not the
+// big MultiSelectDropdown which assumes its own row of real estate.
+function MiniMultiSelect({
+  options,
+  selected,
+  onChange,
+  placeholder = "Any",
+}: {
+  options: { id: string; label: string }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const toggle = (id: string) => {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+
+  const visible = search
+    ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
+    : options;
+
+  const buttonLabel =
+    selected.length === 0
+      ? placeholder
+      : selected.length === 1
+        ? options.find((o) => o.id === selected[0])?.label || "1 selected"
+        : `${selected.length} selected`;
+
+  return (
+    <div ref={ref} className="relative inline-block w-full">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center justify-between gap-1 w-full bg-[var(--surface)] border border-[var(--surface-2)] hover:border-[var(--text-muted)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+      >
+        <span className={`truncate ${selected.length === 0 ? "text-[var(--text-muted)]" : "text-[var(--text-primary)]"}`}>
+          {buttonLabel}
+        </span>
+        <ChevronDown size={11} className="flex-shrink-0 text-[var(--text-muted)]" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 bg-[var(--surface)] border border-[var(--surface-2)] rounded-md shadow-lg z-50 min-w-[200px] max-w-[280px] max-h-[280px] overflow-hidden flex flex-col">
+          {options.length > 8 && (
+            <div className="p-1.5 border-b border-[var(--surface-2)] flex-shrink-0">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search…"
+                className="w-full bg-[var(--bg)] border border-[var(--surface-2)] rounded px-2 py-1 text-[12px] focus:outline-none focus:border-[var(--accent)]"
+                autoFocus
+              />
+            </div>
+          )}
+          <div className="overflow-auto py-1 flex-1">
+            {visible.length === 0 ? (
+              <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">No options</div>
+            ) : (
+              visible.map((o) => (
+                <label
+                  key={o.id}
+                  className="flex items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-[var(--surface-2)] cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(o.id)}
+                    onChange={() => toggle(o.id)}
+                    className="accent-[var(--accent)]"
+                  />
+                  <span className="truncate">{o.label}</span>
+                </label>
+              ))
+            )}
+          </div>
+          {selected.length > 0 && (
+            <div className="border-t border-[var(--surface-2)] flex-shrink-0">
+              <button
+                onClick={() => { onChange([]); setSearch(""); }}
+                className="w-full text-left px-3 py-1.5 text-[12px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
