@@ -71,10 +71,11 @@ export default function OutreachTrackerPage() {
   const [createdFrom,    setCreatedFrom]    = useState("");
   const [createdTo,      setCreatedTo]      = useState("");
 
-  // ── Sublabel filter ────────────────────────────────────────────────
-  // Lives in the top filter bar alongside Account/Status/Assignee.
-  // Applied client-side because sublabel info isn't in the server query
+  // ── Label + Sublabel filters ───────────────────────────────────────
+  // Both live in the top filter bar alongside Account/Status/Assignee.
+  // Applied client-side because label info isn't in the server query
   // filter set — we already have it on each row from the joined labels.
+  const [labelFilter,    setLabelFilter]    = useState<string[]>([]);  // top-level label names
   const [sublabelFilter, setSublabelFilter] = useState<string[]>([]);  // sublabel names
 
   // Data
@@ -140,22 +141,31 @@ export default function OutreachTrackerPage() {
     loadRows();
   }, [loadRows, optionsLoaded]);
 
-  // ── Derived set for the Sublabel dropdown ─────────────────────────
-  // Computed from current rows so we only show sublabels that actually
+  // ── Derived sets for the Label/Sublabel dropdowns ─────────────────
+  // Computed from current rows so we only show values that actually
   // appear in the data. Recomputes when rows change.
+  const uniqueLabels = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) for (const l of r.labels) set.add(l);
+    return Array.from(set).sort();
+  }, [rows]);
   const uniqueSublabels = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) for (const l of r.sublabels) set.add(l);
     return Array.from(set).sort();
   }, [rows]);
 
-  // ── Apply the Sublabel filter to the server-loaded rows ──────────
-  // A row passes when AT LEAST ONE of its sublabels matches the picker.
-  // When the picker is empty, all rows pass through unchanged.
+  // ── Apply Label + Sublabel filters to the server-loaded rows ──────
+  // A row passes a filter when AT LEAST ONE of its labels/sublabels
+  // matches the picker. Empty pickers are no-ops.
   const filteredRows = useMemo(() => {
-    if (sublabelFilter.length === 0) return rows;
-    return rows.filter((r) => sublabelFilter.some((s) => r.sublabels.includes(s)));
-  }, [rows, sublabelFilter]);
+    if (labelFilter.length === 0 && sublabelFilter.length === 0) return rows;
+    return rows.filter((r) => {
+      if (labelFilter.length    > 0 && !labelFilter.some((l)    => r.labels.includes(l)))    return false;
+      if (sublabelFilter.length > 0 && !sublabelFilter.some((l) => r.sublabels.includes(l))) return false;
+      return true;
+    });
+  }, [rows, labelFilter, sublabelFilter]);
 
   // ── PATCH a single conversation field, optimistic ────────────────────
   const patchConversation = useCallback(async (id: string, fields: Record<string, any>) => {
@@ -211,6 +221,7 @@ export default function OutreachTrackerPage() {
     setAccountFilter([]);
     setStatusFilter([]);
     setAssigneeFilter([]);
+    setLabelFilter([]);
     setSublabelFilter([]);
     setSearch("");
     setCreatedFrom("");
@@ -220,6 +231,7 @@ export default function OutreachTrackerPage() {
     accountFilter.length > 0 ||
     statusFilter.length > 0 ||
     assigneeFilter.length > 0 ||
+    labelFilter.length > 0 ||
     sublabelFilter.length > 0 ||
     search.trim().length > 0 ||
     !!createdFrom ||
@@ -257,6 +269,13 @@ export default function OutreachTrackerPage() {
           onChange={setAssigneeFilter}
           placeholder="All assignees"
           searchPlaceholder="Search assignee..."
+        />
+        <MultiSelectDropdown
+          options={uniqueLabels.map((l) => ({ id: l, label: l }))}
+          selected={labelFilter}
+          onChange={setLabelFilter}
+          placeholder="All labels"
+          searchPlaceholder="Search label..."
         />
         <MultiSelectDropdown
           options={uniqueSublabels.map((s) => ({ id: s, label: s }))}
@@ -310,7 +329,7 @@ export default function OutreachTrackerPage() {
         )}
         <div className="ml-auto text-xs text-[var(--text-muted)]">
           {loading ? "Loading…" :
-            sublabelFilter.length > 0
+            (labelFilter.length > 0 || sublabelFilter.length > 0)
               ? `${filteredRows.length} of ${rows.length} conversation${rows.length === 1 ? "" : "s"}`
               : `${rows.length} conversation${rows.length === 1 ? "" : "s"}`
           }
