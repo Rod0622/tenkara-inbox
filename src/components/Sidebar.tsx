@@ -25,10 +25,7 @@ import {
   Eye,
   Sun,
   Moon,
-  Phone,
-  Pin,
-  Mic,
-  Users,
+  Target,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -40,12 +37,10 @@ function QuickCreateMenu({
   onCompose,
   onNewTask,
   onNewConversation,
-  onMakeCall,
 }: {
   onCompose: () => void;
   onNewTask: () => void;
   onNewConversation: () => void;
-  onMakeCall?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -120,19 +115,6 @@ function QuickCreateMenu({
               Create conversation
             </button>
 
-            {onMakeCall && (
-              <button
-                onClick={() => {
-                  onMakeCall();
-                  setOpen(false);
-                }}
-                className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
-              >
-                <Phone size={14} className="text-[var(--info)]" />
-                Make a call
-              </button>
-            )}
-
             <Link
               href="/settings"
               className="w-full px-3 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] flex items-center gap-2"
@@ -164,8 +146,6 @@ export default function Sidebar({
   taskInProgressCount = 0,
   mySentCount: mySentCountProp,
   onMoveToFolder,
-  onMakeCall,
-  onOpenTranscripts,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -187,7 +167,6 @@ export default function Sidebar({
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [watchingCount, setWatchingCount] = useState(0);
-  const [pinnedCount, setPinnedCount] = useState(0);
   // Own OOO popover (anchored to user-name button at bottom of sidebar)
   const [showOwnOOO, setShowOwnOOO] = useState(false);
   const [ownOOOAnchor, setOwnOOOAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -252,29 +231,6 @@ export default function Sidebar({
     fetchWatching();
     const id = setInterval(fetchWatching, 30000);
     return () => clearInterval(id);
-  }, [currentUser?.id]);
-
-  // Fetch count of conversations the user has pinned. Refreshes on the
-  // global "pins:changed" event so changes from any surface (the conversation
-  // header pin button, list-row pin button) update the sidebar count instantly.
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    const fetchPinned = async () => {
-      try {
-        const res = await fetch(`/api/conversations/pin?user_id=${currentUser.id}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setPinnedCount((data.pinned || []).length);
-      } catch (_e) {}
-    };
-    fetchPinned();
-    const onPinsChanged = () => fetchPinned();
-    window.addEventListener("pins:changed", onPinsChanged);
-    const id = setInterval(fetchPinned, 60000);
-    return () => {
-      window.removeEventListener("pins:changed", onPinsChanged);
-      clearInterval(id);
-    };
   }, [currentUser?.id]);
 
   const markAllRead = async () => {
@@ -557,17 +513,6 @@ export default function Sidebar({
       <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
     </button>
 
-    {/* Granola transcripts side panel trigger */}
-    {onOpenTranscripts && (
-      <button
-        onClick={onOpenTranscripts}
-        className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-all"
-        title="Call transcripts"
-      >
-        <Mic size={14} />
-      </button>
-    )}
-
     <QuickCreateMenu
       onCompose={() => setActiveView("compose")}
       onNewTask={() => {
@@ -580,7 +525,6 @@ export default function Sidebar({
         setActiveMailbox(null);
         setActiveFolder(null);
       }}
-      onMakeCall={onMakeCall}
     />
   </div>
 </div>
@@ -642,7 +586,6 @@ export default function Sidebar({
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
-          { id: "pinned", label: "Pinned", icon: Pin, count: pinnedCount, unread: 0 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -998,6 +941,13 @@ export default function Sidebar({
             <BarChart3 size={16} />
             <span>My Performance</span>
           </Link>
+          <Link
+            href="/outreach-tracker"
+            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
+          >
+            <Target size={16} />
+            <span>Outreach Tracker</span>
+          </Link>
           {currentUser.role === "admin" && (
             <>
               <Link
@@ -1006,13 +956,6 @@ export default function Sidebar({
               >
                 <BarChart3 size={16} />
                 <span>Dashboard</span>
-              </Link>
-              <Link
-                href="/team-coverage"
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
-              >
-                <Users size={16} />
-                <span>Team Coverage</span>
               </Link>
               <Link
                 href="/settings"
