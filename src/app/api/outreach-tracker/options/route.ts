@@ -27,9 +27,9 @@ export async function GET() {
       .eq("is_active", true)
       .order("sort_order", { ascending: true }),
     supabase
-      .from("users")
+      .from("team_members")
       .select("id, name, initials, color, avatar_url, role")
-      .neq("role", "disabled")
+      .eq("is_active", true)
       .order("name", { ascending: true }),
   ]);
 

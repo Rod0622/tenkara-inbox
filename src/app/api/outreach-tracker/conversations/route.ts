@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       follow_up_log,
       status,
       email_account:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
-      assignee:users!conversations_assignee_id_fkey ( id, name, initials, color, avatar_url ),
+      assignee:team_members!conversations_assignee_id_fkey ( id, name, initials, color, avatar_url ),
       outreach_status:outreach_statuses!conversations_outreach_status_id_fkey ( id, name, sort_order, color )
       `
     )
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
       `
       conversation_id,
       created_at,
-      assignee:users!tasks_assignee_id_fkey ( id, name, initials, color, avatar_url )
+      assignee:team_members!tasks_assignee_id_fkey ( id, name, initials, color, avatar_url )
       `
     )
     .in("conversation_id", conversationIds)
