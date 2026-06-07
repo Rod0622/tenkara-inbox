@@ -276,8 +276,10 @@ export async function POST(req: NextRequest) {
           // Apply [account, Inbox] auto-labels + set folder_id, same
           // call the regular sync makes. Without this, the new convo
           // is invisible to the inbox list view despite existing in
-          // the DB. Idempotent — safe to call again later.
-          await onNewConversationFromSync(conversationId, account.id, isOutbound)
+          // the DB. Idempotent — safe to call again later. Use nc.id
+          // directly so TS narrows it as non-null (conversationId is
+          // typed string|null from earlier in the function).
+          await onNewConversationFromSync(nc.id, account.id, isOutbound)
             .catch((e: any) =>
               console.error("[backfill-account] label apply failed:", e?.message || e)
             );
