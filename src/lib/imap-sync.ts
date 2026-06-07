@@ -165,10 +165,18 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         }
         console.log(`IMAP sync ${accountId}: Gmail profile: ${profileEmail}`);
 
-        // Fetch recent messages via Gmail API
+        // ── Window selection ─────────────────────────────────────
+        // Incremental: use last_sync_at as the `after:` cutoff.
+        // First sync (no last_sync_at): default to 365 days back. Old
+        // default of 30 was too narrow for newly-added group inboxes
+        // that had months of history — most messages would never be
+        // pulled because the next sync would advance last_sync_at past
+        // them. For accounts that need >1 year of history, use
+        // `POST /api/admin/backfill-account` separately.
+        const isFirstSync = !account.last_sync_at;
         const sinceDate = account.last_sync_at
           ? new Date(account.last_sync_at)
-          : (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })();
+          : (() => { const d = new Date(); d.setDate(d.getDate() - 365); return d; })();
         const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
         // `in:anywhere -in:trash` — by default Gmail's API excludes Spam and
         // Trash. That meant legitimate emails Gmail mis-classified as spam
@@ -178,18 +186,44 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         // review them rather than lose them silently.
         const query = `after:${afterEpoch} in:anywhere -in:trash`;
 
-        // maxResults=100 (was 25). When an account has been stale for hours
-        // or days (e.g., starved by the cron loop's time budget), 25 was not
-        // enough to catch up in a single pass. The existence-check below
-        // skips already-synced IDs cheaply, so over-fetching is safe.
-        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`;
-        const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
-        if (!listRes.ok) {
-          const err = await listRes.json().catch(() => ({}));
-          throw new Error(`Gmail API list error: ${err.error?.message || listRes.statusText}`);
+        // ── Pagination ──────────────────────────────────────────
+        // Incremental syncs (last_sync_at set): one page only. Catching
+        // up is normally well within 100 messages; the next cron pass
+        // grabs anything more.
+        // First sync: paginate fully up to 2000 messages, so a freshly-
+        // added inbox actually gets its year of history imported in one
+        // pass instead of being silently truncated by the maxResults=100
+        // ceiling. Beyond 2000, use the admin backfill endpoint.
+        const FIRST_SYNC_CAP = 2000;
+        let messageIds: string[] = [];
+        let pageToken: string | undefined;
+        do {
+          const url =
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages` +
+            `?q=${encodeURIComponent(query)}&maxResults=100` +
+            (pageToken ? `&pageToken=${pageToken}` : "");
+          const listRes = await fetch(url, { headers: { Authorization: `Bearer ${gmailToken}` } });
+          if (!listRes.ok) {
+            const err = await listRes.json().catch(() => ({}));
+            throw new Error(`Gmail API list error: ${err.error?.message || listRes.statusText}`);
+          }
+          const listData = await listRes.json();
+          const pageIds: string[] = (listData.messages || []).map((m: any) => m.id);
+          messageIds.push(...pageIds);
+          pageToken = listData.nextPageToken;
+          // Only paginate on first sync. Stop once we hit cap or the
+          // last page (no nextPageToken). Incremental sync always exits
+          // after the first iteration regardless.
+          if (!isFirstSync) break;
+          if (messageIds.length >= FIRST_SYNC_CAP) break;
+        } while (pageToken);
+
+        if (isFirstSync && messageIds.length >= FIRST_SYNC_CAP) {
+          console.log(
+            `IMAP sync ${accountId}: first-sync cap hit (${FIRST_SYNC_CAP}); ` +
+            `older messages need /api/admin/backfill-account`
+          );
         }
-        const listData = await listRes.json();
-        const messageIds: string[] = (listData.messages || []).map((m: any) => m.id);
         console.log(`IMAP sync ${accountId}: Gmail API found ${messageIds.length} messages`);
 
         if (messageIds.length === 0) {
