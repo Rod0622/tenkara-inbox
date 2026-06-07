@@ -463,8 +463,12 @@ export async function swapFolderLabel(
 //
 //   • Inbound mail (isOutbound=false): folder_id = account's Inbox folder,
 //     labels = [account_label, "Inbox"]
-//   • Outbound mail (isOutbound=true): folder_id stays null, labels = [account_label]
-//     (outbound conversations belong in Sent, not Inbox)
+//   • Outbound mail (isOutbound=true): folder_id = account's Sent folder,
+//     labels = [account_label]
+//     (mirrors the send route's behavior at /api/send/route.ts — outbound
+//      conversations belong in Sent. Without setting folder_id here,
+//      outbound-first conversations are stranded: not in Inbox, not in
+//      Sent — only reachable via the account label.)
 //
 // Setting folder_id is critical so future moves can correctly identify and
 // strip the old folder's label.
@@ -499,6 +503,29 @@ export async function onNewConversationFromSync(
         await supabase
           .from("conversations")
           .update({ folder_id: inboxFolder.id })
+          .eq("id", conversationId);
+      }
+    } else {
+      // Outbound: set folder_id to the account's Sent folder. This mirrors
+      // /api/send/route.ts which sets folder_id = sent_folder_id when a
+      // compose creates a brand-new conversation. Without this, outbound-
+      // first conversations created by the sync (e.g., historical email
+      // backfilled from a newly-added group inbox) end up with folder_id
+      // = null and don't render in NutriPro Group → Sent (or any folder
+      // view), even though the account label is applied.
+      const { data: sentFolder } = await supabase
+        .from("folders")
+        .select("id")
+        .eq("email_account_id", accountId)
+        .ilike("name", "sent")
+        .eq("is_system", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (sentFolder?.id) {
+        await supabase
+          .from("conversations")
+          .update({ folder_id: sentFolder.id })
           .eq("id", conversationId);
       }
     }
