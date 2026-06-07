@@ -62,6 +62,7 @@ import { createServerClient } from "@/lib/supabase";
 import { refreshGoogleToken } from "@/lib/google-oauth";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 const HARD_CAP_PER_INVOCATION = 500;
 
@@ -271,6 +272,15 @@ export async function POST(req: NextRequest) {
             return;
           }
           conversationId = nc.id;
+
+          // Apply [account, Inbox] auto-labels + set folder_id, same
+          // call the regular sync makes. Without this, the new convo
+          // is invisible to the inbox list view despite existing in
+          // the DB. Idempotent — safe to call again later.
+          await onNewConversationFromSync(conversationId, account.id, isOutbound)
+            .catch((e: any) =>
+              console.error("[backfill-account] label apply failed:", e?.message || e)
+            );
         }
 
         // ── Insert the message ──────────────────────────────────
