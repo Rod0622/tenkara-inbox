@@ -5,8 +5,7 @@ import { createServerClient } from "@/lib/supabase";
  * /api/outreach-tracker/conversations
  *
  * Powers the Outreach Tracker page — one row per conversation, with all the
- * joined data the table renders. Replaces the old per-(supplier × account)
- * view that lived under /api/team-coverage.
+ * joined data the table renders.
  *
  * GET   — list conversations with filters + joined data
  * PATCH — update outreach_status_id / material_inquiry / follow_up_log
@@ -15,18 +14,18 @@ import { createServerClient } from "@/lib/supabase";
  * Auth: relies on createServerClient's RLS-aware client. Anyone with read
  * access to a conversation can see it in the tracker.
  *
- * Sort priority (applied after the DB fetch, before returning):
- *   tier 0: conv has an outreach_status set (actively tracked)
- *   tier 1: conv has any label (parent or child) — categorized
- *   tier 2: everything else — uncategorized noise
- * Within each tier, ordered by last_message_at DESC.
- * This keeps outreach work visible at the top regardless of how recent
- * unlabeled noise (OTPs, security alerts, promos) churn the inbox.
+ * Sort order (handled at SQL layer):
+ *   has_outreach_status DESC  — statused convs first
+ *   has_any_label       DESC  — within each tier, labeled before unlabeled
+ *   last_message_at     DESC  — within each tier, newest first
+ *
+ * The PostgREST max-rows cap (default 1000) clamps result size, but with
+ * this ordering the top-1000 returned are always the most actionable —
+ * statused/labeled work surfaces above noise (OTPs, security alerts,
+ * promotional emails) that would otherwise dominate a recency-only sort.
  */
 
-// Up to this many conversations are returned in one GET. The PostgREST
-// server-side cap (max-rows) must be set at least this high in the
-// Supabase dashboard, otherwise the .limit() below is silently clamped.
+// Hard ceiling; the PostgREST server cap (max-rows) may clamp this lower.
 const MAX_ROWS = 5000;
 
 export async function GET(req: NextRequest) {
@@ -50,7 +49,6 @@ export async function GET(req: NextRequest) {
   // conversation set BEFORE the main fetch. Semantics:
   //   • OR within a single filter (any of the picked labels matches)
   //   • AND across the two filters (must match both label AND sublabel)
-  // This mirrors how account / status / assignee filters compose.
   // Performance: each pre-query reads conversation_labels rows for
   // the picked label ids only — usually a small set, fast.
   let labelFilteredIds: string[] | null = null;
@@ -90,9 +88,8 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Base query against conversations ────────────────────────────
-  // We fetch the convo row with primary contact, assignee, account,
-  // outreach status, all joined in. Labels and the call task come via
-  // secondary queries so the row count stays predictable.
+  // The three ORDER BY clauses below push outreach-worthy convs to the
+  // top at the SQL layer, so the row-cap selects the right rows.
   let q = supabase
     .from("conversations")
     .select(
@@ -115,10 +112,12 @@ export async function GET(req: NextRequest) {
       outreach_status:outreach_statuses!conversations_outreach_status_id_fkey ( id, name, sort_order, color )
       `
     )
-    // Hide trash/spam from the tracker — outreach is a positive-direction
-    // workflow, those don't belong on the board.
+    // Hide trash/spam — outreach is a positive-direction workflow.
     .not("status", "in", "(trash,spam)")
-    .order("last_message_at", { ascending: false, nullsFirst: false })
+    // Tiered ordering: statused → labeled → recency
+    .order("has_outreach_status", { ascending: false })
+    .order("has_any_label",       { ascending: false })
+    .order("last_message_at",     { ascending: false, nullsFirst: false })
     .limit(MAX_ROWS);
 
   if (accountIds.length)             q = q.in("email_account_id", accountIds);
@@ -202,6 +201,8 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Assemble final rows ─────────────────────────────────────────
+  // Order is already correct from the SQL ORDER BY; we just map
+  // the joined data into the row shape the page expects.
   const rows = (convos || []).map((c: any) => {
     const labelEntry = labelsByConvo.get(c.id) || { parents: [], children: [] };
     return {
@@ -225,30 +226,6 @@ export async function GET(req: NextRequest) {
       material_inquiry: c.material_inquiry || "",
       follow_up_log:    c.follow_up_log    || "",
     };
-  });
-
-  // ── Final ordering: tiers, then recency within tier ─────────────
-  // Postgres returned in last_message_at DESC order, but for the
-  // outreach tracker we want outreach work surfaced above the noise —
-  // even when the noise (OTPs, security alerts, promos) is technically
-  // more recent. Three tiers: statused, labeled, neither.
-  // Stable enough at ~5000 rows; sort cost is negligible vs the
-  // round-trip to Postgres.
-  rows.sort((a, b) => {
-    const tierA =
-      a.outreach_status ? 0
-      : ((a.labels.length > 0 || a.sublabels.length > 0) ? 1 : 2);
-    const tierB =
-      b.outreach_status ? 0
-      : ((b.labels.length > 0 || b.sublabels.length > 0) ? 1 : 2);
-    if (tierA !== tierB) return tierA - tierB;
-    // Tie-break by last_message_at DESC, NULLs last.
-    const aT = a.last_message_at || "";
-    const bT = b.last_message_at || "";
-    if (!aT && !bT) return 0;
-    if (!aT) return 1;
-    if (!bT) return -1;
-    return bT.localeCompare(aT);
   });
 
   return NextResponse.json({ rows });
