@@ -40,7 +40,9 @@ const ID_CHUNK = 150;
 // queries below.
 async function fetchInChunks<T = any>(
   ids: string[],
-  fetchOne: (chunk: string[]) => Promise<{ data: T[] | null; error: any }>
+  // PromiseLike (not Promise) so the supabase-js builder — which is
+  // thenable but not a true Promise — passes the type check directly.
+  fetchOne: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: any }>
 ): Promise<T[]> {
   if (ids.length === 0) return [];
   const chunks: string[][] = [];
