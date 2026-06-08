@@ -14,12 +14,19 @@ import { createServerClient } from "@/lib/supabase";
  *
  * Auth: relies on createServerClient's RLS-aware client. Anyone with read
  * access to a conversation can see it in the tracker.
+ *
+ * Sort priority (applied after the DB fetch, before returning):
+ *   tier 0: conv has an outreach_status set (actively tracked)
+ *   tier 1: conv has any label (parent or child) — categorized
+ *   tier 2: everything else — uncategorized noise
+ * Within each tier, ordered by last_message_at DESC.
+ * This keeps outreach work visible at the top regardless of how recent
+ * unlabeled noise (OTPs, security alerts, promos) churn the inbox.
  */
 
-// Up to this many conversations are returned in one GET. Far above any
-// realistic active workload; the page also has client-side filters that
-// narrow the list before render. If you ever cross this ceiling, add
-// cursor pagination — keys would be (last_message_at DESC, id DESC).
+// Up to this many conversations are returned in one GET. The PostgREST
+// server-side cap (max-rows) must be set at least this high in the
+// Supabase dashboard, otherwise the .limit() below is silently clamped.
 const MAX_ROWS = 5000;
 
 export async function GET(req: NextRequest) {
@@ -218,6 +225,30 @@ export async function GET(req: NextRequest) {
       material_inquiry: c.material_inquiry || "",
       follow_up_log:    c.follow_up_log    || "",
     };
+  });
+
+  // ── Final ordering: tiers, then recency within tier ─────────────
+  // Postgres returned in last_message_at DESC order, but for the
+  // outreach tracker we want outreach work surfaced above the noise —
+  // even when the noise (OTPs, security alerts, promos) is technically
+  // more recent. Three tiers: statused, labeled, neither.
+  // Stable enough at ~5000 rows; sort cost is negligible vs the
+  // round-trip to Postgres.
+  rows.sort((a, b) => {
+    const tierA =
+      a.outreach_status ? 0
+      : ((a.labels.length > 0 || a.sublabels.length > 0) ? 1 : 2);
+    const tierB =
+      b.outreach_status ? 0
+      : ((b.labels.length > 0 || b.sublabels.length > 0) ? 1 : 2);
+    if (tierA !== tierB) return tierA - tierB;
+    // Tie-break by last_message_at DESC, NULLs last.
+    const aT = a.last_message_at || "";
+    const bT = b.last_message_at || "";
+    if (!aT && !bT) return 0;
+    if (!aT) return 1;
+    if (!bT) return -1;
+    return bT.localeCompare(aT);
   });
 
   return NextResponse.json({ rows });
