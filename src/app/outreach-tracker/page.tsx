@@ -3,13 +3,15 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2, Search, X, ChevronDown, Pencil, Check } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Search, X, ChevronDown, Pencil, Check, ArrowLeft } from "lucide-react";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface UserLite { id: string; name: string; initials?: string | null; color?: string | null; avatar_url?: string | null; }
 interface AccountLite { id: string; name: string; email: string; }
 interface OutreachStatus { id: string; name: string; sort_order: number; color: string | null; }
+interface LabelLite { id: string; name: string; parent_label_id: string | null; color: string | null; }
 interface Row {
   id: string;
   subject: string;
@@ -60,9 +62,10 @@ export default function OutreachTrackerPage() {
   const [accounts,  setAccounts]  = useState<AccountLite[]>([]);
   const [statuses,  setStatuses]  = useState<OutreachStatus[]>([]);
   const [assignees, setAssignees] = useState<UserLite[]>([]);
+  const [labels,    setLabels]    = useState<LabelLite[]>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
 
-  // Active filters (global bar — sent to server)
+  // Active filters (global bar — all sent to server)
   const [accountFilter,  setAccountFilter]  = useState<string[]>([]);
   const [statusFilter,   setStatusFilter]   = useState<string[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string[]>([]);
@@ -73,10 +76,12 @@ export default function OutreachTrackerPage() {
 
   // ── Label + Sublabel filters ───────────────────────────────────────
   // Both live in the top filter bar alongside Account/Status/Assignee.
-  // Applied client-side because label info isn't in the server query
-  // filter set — we already have it on each row from the joined labels.
-  const [labelFilter,    setLabelFilter]    = useState<string[]>([]);  // top-level label names
-  const [sublabelFilter, setSublabelFilter] = useState<string[]>([]);  // sublabel names
+  // Server-side filtered via label_ids / sublabel_ids query params.
+  // State holds label UUIDs (not names) so we can ship the actual ids
+  // to the API; the dropdowns display the names but their `id` field
+  // is the label UUID.
+  const [labelFilter,    setLabelFilter]    = useState<string[]>([]);  // top-level label ids
+  const [sublabelFilter, setSublabelFilter] = useState<string[]>([]);  // sublabel ids
 
   // Data
   const [rows, setRows] = useState<Row[]>([]);
@@ -99,6 +104,7 @@ export default function OutreachTrackerPage() {
         setAccounts(data.accounts || []);
         setStatuses(data.statuses || []);
         setAssignees(data.assignees || []);
+        setLabels(data.labels || []);
         setOptionsLoaded(true);
       } catch (e: any) {
         console.error("[outreach-tracker] options load failed:", e);
@@ -106,6 +112,20 @@ export default function OutreachTrackerPage() {
       }
     })();
   }, []);
+
+  // ── Split label catalog into the two dropdowns ───────────────────────
+  // Top-level labels (parent_label_id === null) drive the Label filter;
+  // children drive the Sublabel filter. Computed from the server-loaded
+  // catalog, so the dropdowns always show every available label even
+  // when no convs match the other filters.
+  const parentLabels = useMemo(
+    () => labels.filter((l) => !l.parent_label_id),
+    [labels]
+  );
+  const childLabels = useMemo(
+    () => labels.filter((l) => !!l.parent_label_id),
+    [labels]
+  );
 
   // ── Rows fetch whenever filters change ───────────────────────────────
   const loadRows = useCallback(async () => {
@@ -116,6 +136,8 @@ export default function OutreachTrackerPage() {
       if (accountFilter.length)  params.set("account_ids",  accountFilter.join(","));
       if (statusFilter.length)   params.set("status_ids",   statusFilter.join(","));
       if (assigneeFilter.length) params.set("assignee_ids", assigneeFilter.join(","));
+      if (labelFilter.length)    params.set("label_ids",    labelFilter.join(","));
+      if (sublabelFilter.length) params.set("sublabel_ids", sublabelFilter.join(","));
       if (searchDebounced)       params.set("q", searchDebounced);
       if (createdFrom)           params.set("created_from", createdFrom);
       if (createdTo)             params.set("created_to",   createdTo);
@@ -134,38 +156,12 @@ export default function OutreachTrackerPage() {
     } finally {
       setLoading(false);
     }
-  }, [accountFilter, statusFilter, assigneeFilter, searchDebounced, createdFrom, createdTo]);
+  }, [accountFilter, statusFilter, assigneeFilter, labelFilter, sublabelFilter, searchDebounced, createdFrom, createdTo]);
 
   useEffect(() => {
     if (!optionsLoaded) return;
     loadRows();
   }, [loadRows, optionsLoaded]);
-
-  // ── Derived sets for the Label/Sublabel dropdowns ─────────────────
-  // Computed from current rows so we only show values that actually
-  // appear in the data. Recomputes when rows change.
-  const uniqueLabels = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) for (const l of r.labels) set.add(l);
-    return Array.from(set).sort();
-  }, [rows]);
-  const uniqueSublabels = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) for (const l of r.sublabels) set.add(l);
-    return Array.from(set).sort();
-  }, [rows]);
-
-  // ── Apply Label + Sublabel filters to the server-loaded rows ──────
-  // A row passes a filter when AT LEAST ONE of its labels/sublabels
-  // matches the picker. Empty pickers are no-ops.
-  const filteredRows = useMemo(() => {
-    if (labelFilter.length === 0 && sublabelFilter.length === 0) return rows;
-    return rows.filter((r) => {
-      if (labelFilter.length    > 0 && !labelFilter.some((l)    => r.labels.includes(l)))    return false;
-      if (sublabelFilter.length > 0 && !sublabelFilter.some((l) => r.sublabels.includes(l))) return false;
-      return true;
-    });
-  }, [rows, labelFilter, sublabelFilter]);
 
   // ── PATCH a single conversation field, optimistic ────────────────────
   const patchConversation = useCallback(async (id: string, fields: Record<string, any>) => {
@@ -241,7 +237,17 @@ export default function OutreachTrackerPage() {
     <div className="flex flex-col h-screen bg-[var(--bg)] text-[var(--text-primary)]">
       {/* ── Header ──────────────────────────────────────────────── */}
       <div className="border-b border-[var(--surface-2)] px-6 py-4">
-        <h1 className="text-xl font-semibold">Outreach Tracker</h1>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            aria-label="Back to inbox"
+          >
+            <ArrowLeft size={16} /> Back to inbox
+          </Link>
+          <div className="h-4 w-px bg-[var(--surface-2)]" />
+          <h1 className="text-xl font-semibold">Outreach Tracker</h1>
+        </div>
         <p className="text-sm text-[var(--text-muted)] mt-0.5">
           One row per conversation. Status, material inquiry, and follow-up log are editable inline.
         </p>
@@ -271,14 +277,14 @@ export default function OutreachTrackerPage() {
           searchPlaceholder="Search assignee..."
         />
         <MultiSelectDropdown
-          options={uniqueLabels.map((l) => ({ id: l, label: l }))}
+          options={parentLabels.map((l) => ({ id: l.id, label: l.name }))}
           selected={labelFilter}
           onChange={setLabelFilter}
           placeholder="All labels"
           searchPlaceholder="Search label..."
         />
         <MultiSelectDropdown
-          options={uniqueSublabels.map((s) => ({ id: s, label: s }))}
+          options={childLabels.map((l) => ({ id: l.id, label: l.name }))}
           selected={sublabelFilter}
           onChange={setSublabelFilter}
           placeholder="All sublabels"
@@ -328,11 +334,7 @@ export default function OutreachTrackerPage() {
           </button>
         )}
         <div className="ml-auto text-xs text-[var(--text-muted)]">
-          {loading ? "Loading…" :
-            (labelFilter.length > 0 || sublabelFilter.length > 0)
-              ? `${filteredRows.length} of ${rows.length} conversation${rows.length === 1 ? "" : "s"}`
-              : `${rows.length} conversation${rows.length === 1 ? "" : "s"}`
-          }
+          {loading ? "Loading…" : `${rows.length} conversation${rows.length === 1 ? "" : "s"}`}
         </div>
       </div>
 
@@ -365,14 +367,14 @@ export default function OutreachTrackerPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.length === 0 && !loading ? (
+              {rows.length === 0 && !loading ? (
                 <tr>
                   <td colSpan={11} className="text-center py-8 text-[var(--text-muted)]">
                     No conversations match the current filters.
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((row) => (
+                rows.map((row) => (
                   <TrackerRow
                     key={row.id}
                     row={row}

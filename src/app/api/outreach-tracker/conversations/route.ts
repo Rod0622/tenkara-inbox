@@ -32,9 +32,55 @@ export async function GET(req: NextRequest) {
   const accountIds   = (searchParams.get("account_ids")  || "").split(",").filter(Boolean);
   const statusIds    = (searchParams.get("status_ids")   || "").split(",").filter(Boolean);
   const assigneeIds  = (searchParams.get("assignee_ids") || "").split(",").filter(Boolean);
+  const labelIds     = (searchParams.get("label_ids")    || "").split(",").filter(Boolean);
+  const sublabelIds  = (searchParams.get("sublabel_ids") || "").split(",").filter(Boolean);
   const search       = (searchParams.get("q") || "").trim();
   const createdFrom  = searchParams.get("created_from"); // ISO date
   const createdTo    = searchParams.get("created_to");
+
+  // ── Pre-filter by labels (server-side) ──────────────────────────
+  // If the user picked label_ids and/or sublabel_ids, narrow the
+  // conversation set BEFORE the main fetch. Semantics:
+  //   • OR within a single filter (any of the picked labels matches)
+  //   • AND across the two filters (must match both label AND sublabel)
+  // This mirrors how account / status / assignee filters compose.
+  // Performance: each pre-query reads conversation_labels rows for
+  // the picked label ids only — usually a small set, fast.
+  let labelFilteredIds: string[] | null = null;
+
+  if (labelIds.length > 0) {
+    const { data, error } = await supabase
+      .from("conversation_labels")
+      .select("conversation_id")
+      .in("label_id", labelIds);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    labelFilteredIds = Array.from(new Set((data || []).map((r: any) => r.conversation_id)));
+  }
+
+  if (sublabelIds.length > 0) {
+    const { data, error } = await supabase
+      .from("conversation_labels")
+      .select("conversation_id")
+      .in("label_id", sublabelIds);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    const sublabelSet = new Set((data || []).map((r: any) => r.conversation_id));
+    if (labelFilteredIds === null) {
+      labelFilteredIds = Array.from(sublabelSet);
+    } else {
+      // Intersect: must match BOTH a chosen label AND a chosen sublabel
+      labelFilteredIds = labelFilteredIds.filter((id) => sublabelSet.has(id));
+    }
+  }
+
+  // Short-circuit: label filters that resolve to zero matches don't
+  // need the main fetch.
+  if (labelFilteredIds !== null && labelFilteredIds.length === 0) {
+    return NextResponse.json({ rows: [] });
+  }
 
   // ── Base query against conversations ────────────────────────────
   // We fetch the convo row with primary contact, assignee, account,
@@ -68,11 +114,12 @@ export async function GET(req: NextRequest) {
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(MAX_ROWS);
 
-  if (accountIds.length)  q = q.in("email_account_id", accountIds);
-  if (statusIds.length)   q = q.in("outreach_status_id", statusIds);
-  if (assigneeIds.length) q = q.in("assignee_id", assigneeIds);
-  if (createdFrom)        q = q.gte("created_at", createdFrom);
-  if (createdTo)          q = q.lte("created_at", createdTo);
+  if (accountIds.length)             q = q.in("email_account_id", accountIds);
+  if (statusIds.length)              q = q.in("outreach_status_id", statusIds);
+  if (assigneeIds.length)            q = q.in("assignee_id", assigneeIds);
+  if (labelFilteredIds !== null)     q = q.in("id", labelFilteredIds);
+  if (createdFrom)                   q = q.gte("created_at", createdFrom);
+  if (createdTo)                     q = q.lte("created_at", createdTo);
   if (search) {
     // ilike on subject + from_email + primary_contact_email gives a
     // friendly "search by what you see" feel. Tightly bounded with %.
