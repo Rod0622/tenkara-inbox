@@ -117,54 +117,85 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Base query against conversations ────────────────────────────
-  let q = supabase
-    .from("conversations")
-    .select(
-      `
-      id,
-      subject,
-      created_at,
-      last_message_at,
-      from_email,
-      from_name,
-      primary_contact_email,
-      assignee_id,
-      email_account_id,
-      outreach_status_id,
-      material_inquiry,
-      follow_up_log,
-      status,
-      email_account:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
-      assignee:team_members!conversations_assignee_id_fkey ( id, name, initials, color, avatar_url ),
-      outreach_status:outreach_statuses!conversations_outreach_status_id_fkey ( id, name, sort_order, color )
-      `
-    )
-    .not("status", "in", "(trash,spam)")
-    // Tiered ordering: statused → labeled → recency
-    .order("has_outreach_status", { ascending: false })
-    .order("has_any_label",       { ascending: false })
-    .order("last_message_at",     { ascending: false, nullsFirst: false })
-    .limit(MAX_ROWS);
+  // PostgREST clamps each request to its max-rows ceiling (default 1000
+  // on Supabase). To reach MAX_ROWS we issue sequential .range() calls
+  // and concatenate. Same ORDER BY on each chunk so Postgres returns
+  // rows in a deterministic, stable order across calls.
+  const CONV_CHUNK = 1000;
 
-  if (accountIds.length)             q = q.in("email_account_id", accountIds);
-  if (statusIds.length)              q = q.in("outreach_status_id", statusIds);
-  if (assigneeIds.length)            q = q.in("assignee_id", assigneeIds);
-  if (labelFilteredIds !== null)     q = q.in("id", labelFilteredIds);
-  if (createdFrom)                   q = q.gte("created_at", createdFrom);
-  if (createdTo)                     q = q.lte("created_at", createdTo);
-  if (search) {
-    const pattern = `%${search.replace(/[%_]/g, "\\$&")}%`;
-    q = q.or(
-      `subject.ilike.${pattern},from_email.ilike.${pattern},primary_contact_email.ilike.${pattern},from_name.ilike.${pattern}`
-    );
+  // Apply every filter to a builder. Called per chunk because each
+  // chunk needs its own builder instance (.range() finalizes the slice).
+  const applyConvFilters = (builder: any) => {
+    if (accountIds.length)         builder = builder.in("email_account_id", accountIds);
+    if (statusIds.length)          builder = builder.in("outreach_status_id", statusIds);
+    if (assigneeIds.length)        builder = builder.in("assignee_id", assigneeIds);
+    if (labelFilteredIds !== null) builder = builder.in("id", labelFilteredIds);
+    if (createdFrom)               builder = builder.gte("created_at", createdFrom);
+    if (createdTo)                 builder = builder.lte("created_at", createdTo);
+    if (search) {
+      const pattern = `%${search.replace(/[%_]/g, "\\$&")}%`;
+      builder = builder.or(
+        `subject.ilike.${pattern},from_email.ilike.${pattern},primary_contact_email.ilike.${pattern},from_name.ilike.${pattern}`
+      );
+    }
+    return builder;
+  };
+
+  const convos: any[] = [];
+  for (let from = 0; from < MAX_ROWS; from += CONV_CHUNK) {
+    const to = Math.min(from + CONV_CHUNK - 1, MAX_ROWS - 1);
+
+    let chunkQ = supabase
+      .from("conversations")
+      .select(
+        `
+        id,
+        subject,
+        created_at,
+        last_message_at,
+        from_email,
+        from_name,
+        primary_contact_email,
+        assignee_id,
+        email_account_id,
+        outreach_status_id,
+        material_inquiry,
+        follow_up_log,
+        status,
+        email_account:email_accounts!conversations_email_account_id_fkey ( id, name, email ),
+        assignee:team_members!conversations_assignee_id_fkey ( id, name, initials, color, avatar_url ),
+        outreach_status:outreach_statuses!conversations_outreach_status_id_fkey ( id, name, sort_order, color )
+        `
+      )
+      .not("status", "in", "(trash,spam)")
+      // Tiered ordering: statused → labeled → recency. Must match across
+      // chunks for concatenation to produce a coherent ordered list.
+      .order("has_outreach_status", { ascending: false })
+      .order("has_any_label",       { ascending: false })
+      .order("last_message_at",     { ascending: false, nullsFirst: false })
+      .range(from, to);
+
+    chunkQ = applyConvFilters(chunkQ);
+
+    const { data, error } = await chunkQ;
+    if (error) {
+      // PostgREST returns 416 / PGRST103 when the requested range is
+      // past the end of the result set — treat as "no more rows" rather
+      // than failing the request.
+      const code = (error as any).code;
+      const msg  = (error.message || "").toLowerCase();
+      if (code === "PGRST103" || msg.includes("range") || msg.includes("not satisfiable")) {
+        break;
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (!data || data.length === 0) break;
+    convos.push(...data);
+    // Short chunk means we've reached the end of the result set.
+    if (data.length < CONV_CHUNK) break;
   }
 
-  const { data: convos, error } = await q;
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  const conversationIds = (convos || []).map((c: any) => c.id);
+  const conversationIds = convos.map((c: any) => c.id);
   if (conversationIds.length === 0) {
     return NextResponse.json({ rows: [] });
   }
