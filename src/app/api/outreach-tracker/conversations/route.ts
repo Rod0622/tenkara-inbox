@@ -28,6 +28,38 @@ import { createServerClient } from "@/lib/supabase";
 // Hard ceiling; the PostgREST server cap (max-rows) may clamp this lower.
 const MAX_ROWS = 5000;
 
+// Kong / PostgREST cap URL length around 8KB. With 36-char UUIDs plus
+// commas plus URL encoding, a single .in() clause exceeds that around
+// 200 ids. 150 keeps us well under the limit even with extra params.
+// Chunks are dispatched in parallel via Promise.all, so latency cost
+// is ~one round trip regardless of chunk count.
+const ID_CHUNK = 150;
+
+// Run an .in("conversation_id", chunk) query in parallel chunks and
+// concatenate the results. Used for both the labels and tasks enrichment
+// queries below.
+async function fetchInChunks<T = any>(
+  ids: string[],
+  fetchOne: (chunk: string[]) => Promise<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    chunks.push(ids.slice(i, i + ID_CHUNK));
+  }
+  const results = await Promise.all(chunks.map((c) => fetchOne(c)));
+  const out: T[] = [];
+  for (const r of results) {
+    if (r.error) {
+      // Log but don't throw — partial enrichment is better than no rows at all
+      console.error("[outreach-tracker] chunk fetch error:", r.error);
+      continue;
+    }
+    if (r.data) out.push(...r.data);
+  }
+  return out;
+}
+
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
@@ -49,8 +81,6 @@ export async function GET(req: NextRequest) {
   // conversation set BEFORE the main fetch. Semantics:
   //   • OR within a single filter (any of the picked labels matches)
   //   • AND across the two filters (must match both label AND sublabel)
-  // Performance: each pre-query reads conversation_labels rows for
-  // the picked label ids only — usually a small set, fast.
   let labelFilteredIds: string[] | null = null;
 
   if (labelIds.length > 0) {
@@ -76,20 +106,15 @@ export async function GET(req: NextRequest) {
     if (labelFilteredIds === null) {
       labelFilteredIds = Array.from(sublabelSet);
     } else {
-      // Intersect: must match BOTH a chosen label AND a chosen sublabel
       labelFilteredIds = labelFilteredIds.filter((id) => sublabelSet.has(id));
     }
   }
 
-  // Short-circuit: label filters that resolve to zero matches don't
-  // need the main fetch.
   if (labelFilteredIds !== null && labelFilteredIds.length === 0) {
     return NextResponse.json({ rows: [] });
   }
 
   // ── Base query against conversations ────────────────────────────
-  // The three ORDER BY clauses below push outreach-worthy convs to the
-  // top at the SQL layer, so the row-cap selects the right rows.
   let q = supabase
     .from("conversations")
     .select(
@@ -112,7 +137,6 @@ export async function GET(req: NextRequest) {
       outreach_status:outreach_statuses!conversations_outreach_status_id_fkey ( id, name, sort_order, color )
       `
     )
-    // Hide trash/spam — outreach is a positive-direction workflow.
     .not("status", "in", "(trash,spam)")
     // Tiered ordering: statused → labeled → recency
     .order("has_outreach_status", { ascending: false })
@@ -127,8 +151,6 @@ export async function GET(req: NextRequest) {
   if (createdFrom)                   q = q.gte("created_at", createdFrom);
   if (createdTo)                     q = q.lte("created_at", createdTo);
   if (search) {
-    // ilike on subject + from_email + primary_contact_email gives a
-    // friendly "search by what you see" feel. Tightly bounded with %.
     const pattern = `%${search.replace(/[%_]/g, "\\$&")}%`;
     q = q.or(
       `subject.ilike.${pattern},from_email.ilike.${pattern},primary_contact_email.ilike.${pattern},from_name.ilike.${pattern}`
@@ -145,21 +167,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ rows: [] });
   }
 
-  // ── Labels (parents and children separately for the two columns) ──
-  // The page wants two columns: Label (top-level) and Sublabel (children).
-  // We resolve label.parent_label_id NULL = top-level.
-  const { data: convLabels } = await supabase
-    .from("conversation_labels")
-    .select(
-      `
-      conversation_id,
-      label:labels ( id, name, parent_label_id, color )
-      `
-    )
-    .in("conversation_id", conversationIds);
+  // ── Labels (chunked .in() to stay under URL length limit) ───────
+  // Kong caps URL length around 8KB. A 1000-id .in() clause is ~37KB
+  // and was previously failing silently — labels arrays came back
+  // empty even when conversations DID have labels in the DB.
+  // We chunk into batches of ID_CHUNK and run in parallel.
+  const convLabels = await fetchInChunks<any>(
+    conversationIds,
+    (chunk) =>
+      supabase
+        .from("conversation_labels")
+        .select(
+          `
+          conversation_id,
+          label:labels ( id, name, parent_label_id, color )
+          `
+        )
+        .in("conversation_id", chunk)
+  );
 
   const labelsByConvo: Map<string, { parents: string[]; children: string[] }> = new Map();
-  for (const cl of (convLabels || []) as any[]) {
+  for (const cl of convLabels as any[]) {
     const cid = cl.conversation_id;
     const label = cl.label;
     if (!label) continue;
@@ -175,34 +203,42 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Caller (derived from tasks where category = 'call') ─────────
-  // One row per (conversation, caller). Conversations with no call
-  // task have no caller. The latest-by-created_at call task wins if
-  // a conversation somehow has multiple.
-  const { data: callTasks } = await supabase
-    .from("tasks")
-    .select(
-      `
-      conversation_id,
-      created_at,
-      assignee:team_members!tasks_assignee_id_fkey ( id, name, initials, color, avatar_url )
-      `
-    )
-    .in("conversation_id", conversationIds)
-    .eq("category", "call")
-    .order("created_at", { ascending: false });
+  // ── Caller (chunked same way) ───────────────────────────────────
+  // Tasks have the same URL-length risk as labels. The query orders
+  // each chunk's results DESC so the per-chunk "first" is the latest
+  // call task; we then dedupe by conversation_id at merge time.
+  const callTasks = await fetchInChunks<any>(
+    conversationIds,
+    (chunk) =>
+      supabase
+        .from("tasks")
+        .select(
+          `
+          conversation_id,
+          created_at,
+          assignee:team_members!tasks_assignee_id_fkey ( id, name, initials, color, avatar_url )
+          `
+        )
+        .in("conversation_id", chunk)
+        .eq("category", "call")
+        .order("created_at", { ascending: false })
+  );
 
   const callerByConvo = new Map<string, any>();
-  for (const t of (callTasks || []) as any[]) {
-    // First-write-wins (we ordered DESC, so this is the latest task)
+  // Sort the combined chunks DESC again — within each chunk it was DESC
+  // but the chunks themselves may interleave. One global pass is cheap.
+  (callTasks as any[]).sort((a, b) => {
+    const aT = a.created_at || "";
+    const bT = b.created_at || "";
+    return bT.localeCompare(aT);
+  });
+  for (const t of callTasks as any[]) {
     if (!callerByConvo.has(t.conversation_id) && t.assignee) {
       callerByConvo.set(t.conversation_id, t.assignee);
     }
   }
 
   // ── Assemble final rows ─────────────────────────────────────────
-  // Order is already correct from the SQL ORDER BY; we just map
-  // the joined data into the row shape the page expects.
   const rows = (convos || []).map((c: any) => {
     const labelEntry = labelsByConvo.get(c.id) || { parents: [], children: [] };
     return {
@@ -213,9 +249,6 @@ export async function GET(req: NextRequest) {
       labels:                labelEntry.parents,
       sublabels:             labelEntry.children,
       supplier: {
-        // The "supplier involved" cell — primary_contact_email wins over
-        // raw from_email when present (it's the curated contact). Falls
-        // back to from_email which is the raw header sender.
         email: c.primary_contact_email || c.from_email || null,
         name:  c.from_name || null,
       },
@@ -255,9 +288,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
   }
 
-  // Whitelist updatable fields. Anything not in this set is silently
-  // dropped — prevents accidental writes to e.g. assignee_id from a
-  // mis-targeted PATCH.
   const allowed: Record<string, true> = {
     outreach_status_id: true,
     material_inquiry:   true,
@@ -271,8 +301,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "no updatable fields provided" }, { status: 400 });
   }
 
-  // Length caps on the free-text columns. The textareas in the UI also
-  // soft-cap; this is the backend guard.
   if (typeof update.material_inquiry === "string" && update.material_inquiry.length > 5000) {
     return NextResponse.json({ error: "material_inquiry too long (max 5000)" }, { status: 400 });
   }
@@ -280,7 +308,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "follow_up_log too long (max 10000)" }, { status: 400 });
   }
 
-  // Fetch prior values for the activity log diff. One row, cheap.
   const { data: pre } = await supabase
     .from("conversations")
     .select("outreach_status_id, material_inquiry, follow_up_log")
@@ -303,9 +330,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Activity log — only audit status changes (material/follow-up notes
-  // get edited constantly; logging every keystroke is noise). Resolve
-  // the status name on both sides for human-readable history.
   if ("outreach_status_id" in update && pre?.outreach_status_id !== update.outreach_status_id) {
     const ids = [pre?.outreach_status_id, update.outreach_status_id].filter(Boolean) as string[];
     let nameMap = new Map<string, string>();
