@@ -508,7 +508,10 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             // Phase 3 — agent reply loop. Fire message.received for new
             // inbound MS Graph messages. Webhook side filters to convs with
             // agent involvement, so no-op for non-agent convs.
-            if (!isOutbound) {
+            // (conversationId is `string | null` at this scope; by here a
+            // successful insert means it isn't null in practice — narrow
+            // explicitly for TypeScript.)
+            if (!isOutbound && conversationId) {
               dispatchMessageReceivedWebhook({
                 conversationId,
                 messageId: insMs.id,

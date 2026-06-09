@@ -639,7 +639,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             // compose a reply. The webhook side filters to convs that have
             // current/sent agent drafts, so this is a cheap no-op for the
             // vast majority of inbound traffic. Fire-and-forget.
-            if (!reconciledMessageId && !isOutbound) {
+            // (conversationId is typed `string | null` here from the find-or-
+            // create flow; by this point a message insert has already
+            // succeeded with it, so it cannot be null in practice — narrow
+            // explicitly to keep TypeScript happy.)
+            if (!reconciledMessageId && !isOutbound && conversationId) {
               dispatchMessageReceivedWebhook({
                 conversationId,
                 messageId: insertedGmailMsg.id,
