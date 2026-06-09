@@ -19,6 +19,7 @@ import ConversationDetail from "@/components/ConversationDetail";
 import ComposeEmail from "@/components/ComposeEmail";
 import TaskBoard from "@/components/TaskBoard";
 import DraftsPanel from "@/components/DraftsPanel";
+import PendingOutreachPanel from "@/components/PendingOutreachPanel";
 import CreateConversation from "@/components/CreateConversation";
 import QuickCallModal from "@/components/QuickCallModal";
 import TranscriptsSlideOver from "@/components/TranscriptsSlideOver";
@@ -261,6 +262,10 @@ export default function InboxPage() {
   // Drafts row under an account in the sidebar. Shows ALL team members'
   // drafts on that account.
   const isAccountDraftsView = activeView === "account-drafts" && !!activeMailbox && !activeFolder;
+  // Pending Outreach: agent-created drafts where requires_sender_selection
+  // is TRUE. Sidebar entry between Drafts and Sent. Global scope (across all
+  // accounts), so account/folder filters don't apply.
+  const isPendingOutreachView = activeView === "pending-outreach" && !activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
   const displayConversations = useMemo(() => {
@@ -793,6 +798,20 @@ export default function InboxPage() {
                 window.location.hash = `#conversation=${conversationId}`;
               }}
               onOpenCompose={() => setActiveView("compose")}
+            />
+          </Panel>
+        ) : isPendingOutreachView ? (
+          // Pending Outreach view — agent-created drafts awaiting an
+          // operator's sender-account choice. Single full-width panel,
+          // no sidebar/list (global scope across all email accounts).
+          <Panel defaultSize={86} minSize={50} order={2} id="content-pending-outreach">
+            <PendingOutreachPanel
+              currentUser={currentUser}
+              emailAccounts={emailAccounts}
+              onOpenConversation={(conversationId) => {
+                setActiveView("inbox");
+                window.location.hash = `#conversation=${conversationId}`;
+              }}
             />
           </Panel>
         ) : isAccountDraftsView ? (

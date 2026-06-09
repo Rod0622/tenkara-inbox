@@ -163,6 +163,10 @@ export default function Sidebar({
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [reorderTargetId, setReorderTargetId] = useState<string | null>(null);
   const [draftsCount, setDraftsCount] = useState(0);
+  // Pending Outreach: count of agent-created drafts where
+  // requires_sender_selection = true. Fetched by /api/drafts/pending-outreach
+  // alongside draftsCount in the same 15s polling effect.
+  const [pendingOutreachCount, setPendingOutreachCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -191,6 +195,12 @@ export default function Sidebar({
         // Fetch drafts count
         const draftsRes = await fetch(`/api/drafts?author_id=${currentUser.id}`);
         if (draftsRes.ok) { const d = await draftsRes.json(); setDraftsCount((d.drafts || []).length); }
+
+        // Fetch pending outreach count (global — agent drafts awaiting sender
+        // selection across all accounts). Uses the lightweight count_only=true
+        // mode so we're not transferring full draft bodies every 15s.
+        const poRes = await fetch(`/api/drafts/pending-outreach?count_only=true`);
+        if (poRes.ok) { const po = await poRes.json(); setPendingOutreachCount(po.count || 0); }
 
         // Check for due follow-up reminders
         await fetch("/api/reminders?user_id=" + currentUser.id + "&check_due=true");
@@ -584,6 +594,7 @@ export default function Sidebar({
           { id: "inbox", label: "Inbox", icon: Inbox, count: myTotalCount, unread: myUnreadCount },
           { id: "tasks", label: "Tasks", icon: CheckSquare, count: taskTodoCount + taskInProgressCount, unread: 0 },
           { id: "drafts", label: "Drafts", icon: FileEdit, count: draftsCount, unread: 0 },
+          { id: "pending-outreach", label: "Pending Outreach", icon: Bell, count: pendingOutreachCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
         ].map((item) => {
