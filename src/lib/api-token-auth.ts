@@ -9,10 +9,12 @@
 // can't disclose a live secret.
 //
 // Scope strings used so far:
-//   - "drafts:write"        create new drafts
-//   - "drafts:read"         list / read own drafts
-//   - "drafts:update"       update existing drafts
-//   - "conversations:read"  (Phase 2) read inbound message history
+//   - "drafts:write"          create new drafts
+//   - "drafts:read"           list / read own drafts
+//   - "drafts:update"         update existing drafts
+//   - "conversations:read"    (Phase 2) read inbound message history
+//   - "conversations:write"   (Phase 3) create new conversations for cold
+//                             outreach via POST /api/external/conversations
 //
 // Each route checks both authentication AND scope. A token without
 // "drafts:write" can't POST to /api/drafts even if the auth header is valid.
@@ -95,6 +97,7 @@ export const VALID_SCOPES = [
   "drafts:read",
   "drafts:update",
   "conversations:read",
+  "conversations:write",
 ] as const;
 
 export type ScopeName = typeof VALID_SCOPES[number];

@@ -6,10 +6,16 @@
 // partner can verify authenticity.
 //
 // Events fired today:
-//   - draft.sent        (operator sent an agent-drafted email)
-//   - draft.discarded   (operator deleted an agent draft without sending)
-//   - message.received  (new inbound message in a conv with agent involvement;
-//                        unblocks the partner's reply-loop agent)
+//   - draft.sent                  (operator sent an agent-drafted email)
+//   - draft.discarded             (operator deleted an agent draft without sending)
+//   - message.received            (new inbound message in a conv with agent
+//                                  involvement; unblocks the partner's
+//                                  reply-loop agent)
+//   - conversation.agent_created  (a cold-outreach conv was created via
+//                                  POST /api/external/conversations;
+//                                  Sam asked for this as a resilience
+//                                  signal in case his POST response
+//                                  is lost in transit)
 //
 // Best-effort: every call is wrapped in try/catch and writes a row to
 // api_webhook_deliveries for audit. A failed webhook NEVER blocks the
@@ -22,10 +28,14 @@
 import { createHmac } from "crypto";
 import { createServerClient } from "@/lib/supabase";
 
-export type WebhookEvent = "draft.sent" | "draft.discarded" | "message.received";
+export type WebhookEvent =
+  | "draft.sent"
+  | "draft.discarded"
+  | "message.received"
+  | "conversation.agent_created";
 
 // ── Shared low-level signed POST + audit ────────────────────────────────
-// All three event types use this. Kept module-private; callers go through
+// All event types use this. Kept module-private; callers go through
 // the typed dispatch* functions below.
 async function postSignedWebhook(
   tokenRow: { id: string; webhook_url: string; webhook_secret: string | null },
@@ -102,6 +112,24 @@ async function lookupTokenByAgentName(
     .is("revoked_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
+    .maybeSingle();
+  if (!data?.webhook_url) return null;
+  return data as { id: string; webhook_url: string; webhook_secret: string | null };
+}
+
+// ── Token lookup by id ──────────────────────────────────────────────────
+// Used by the conversation.agent_created dispatcher, which already knows
+// the token id from the authenticated request (no name → token lookup
+// needed). Saves an extra query.
+async function lookupTokenById(
+  tokenId: string
+): Promise<{ id: string; webhook_url: string; webhook_secret: string | null } | null> {
+  const supabase = createServerClient();
+  const { data } = await supabase
+    .from("api_tokens")
+    .select("id, webhook_url, webhook_secret")
+    .eq("id", tokenId)
+    .is("revoked_at", null)
     .maybeSingle();
   if (!data?.webhook_url) return null;
   return data as { id: string; webhook_url: string; webhook_secret: string | null };
@@ -239,4 +267,55 @@ export async function dispatchMessageReceivedWebhook(args: {
       await postSignedWebhook(tokenRow, "message.received", payload);
     })
   );
+}
+
+// ── conversation.agent_created ──────────────────────────────────────────
+/**
+ * Fire conversation.agent_created to the agent that just used
+ * POST /api/external/conversations.
+ *
+ * Sam asked for this so his agent can confirm the create succeeded even if
+ * the synchronous 201 response is lost in transit (e.g. network blip
+ * between his Vercel function and ours). With this webhook, his side
+ * always has a durable signal of "your create landed at conv_id X".
+ *
+ * NOT fired on idempotent replays (200 responses) — those are returning an
+ * existing record, not creating a new one. Re-firing on replay would defeat
+ * the resilience purpose.
+ */
+export async function dispatchConversationCreatedWebhook(args: {
+  conversationId: string;
+  draftId: string;
+  /** UUID of the api_token used to authenticate the request. */
+  tokenId: string;
+  agentName: string;
+  externalId: string;
+  toEmail: string;
+  toName: string | null;
+  subject: string;
+  requiresSenderSelection: boolean;
+  /** ISO timestamp of when the draft (and conv) were created. */
+  createdAt: string;
+  /** Optional metadata passed in the original request body. */
+  context: Record<string, any> | null;
+}): Promise<void> {
+  const tokenRow = await lookupTokenById(args.tokenId);
+  if (!tokenRow) return;
+
+  const payload = {
+    event: "conversation.agent_created" as const,
+    agent_name: args.agentName,
+    conversation_id: args.conversationId,
+    draft_id: args.draftId,
+    external_id: args.externalId,
+    to_email: args.toEmail,
+    to_name: args.toName,
+    subject: args.subject,
+    requires_sender_selection: args.requiresSenderSelection,
+    created_at: args.createdAt,
+    context: args.context,
+    timestamp: new Date().toISOString(),
+  };
+
+  await postSignedWebhook(tokenRow, "conversation.agent_created", payload);
 }
