@@ -1,0 +1,15 @@
+﻿
+{
+
+  "external_id": "rod-smoketest-2026-06-09-01",
+
+  "to_email": "smoketest@example.com",
+
+  "to_name": "Smoke Test",
+
+  "subject": "Smoke test cold outreach",
+
+  "body_html": "<p>This is a smoke test from Rod.</p>"
+
+}
+

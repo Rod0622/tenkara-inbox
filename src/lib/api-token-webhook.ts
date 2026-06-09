@@ -80,9 +80,13 @@ async function postSignedWebhook(
     errorMsg = e?.message || String(e);
   }
 
-  // Audit log row. Best-effort — don't throw if this insert fails.
+  // Audit log row. Awaited (rather than fire-and-forget) because in
+  // Vercel serverless the function may terminate immediately after the
+  // calling route returns its response, and an orphan insert promise
+  // can be killed before it lands. ~50ms cost; worth it for a reliable
+  // delivery audit trail.
   const supabase = createServerClient();
-  supabase
+  const { error: deliveryInsertErr } = await supabase
     .from("api_webhook_deliveries")
     .insert({
       token_id: tokenRow.id,
@@ -92,10 +96,10 @@ async function postSignedWebhook(
       status_code: statusCode,
       response_body: responseBody,
       error: errorMsg,
-    })
-    .then(({ error }) => {
-      if (error) console.error(`[webhook] ${event} delivery log insert failed:`, error.message);
     });
+  if (deliveryInsertErr) {
+    console.error(`[webhook] ${event} delivery log insert failed:`, deliveryInsertErr.message);
+  }
 }
 
 // ── Token lookup by agent name ──────────────────────────────────────────
