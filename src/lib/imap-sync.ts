@@ -9,6 +9,7 @@ import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-e
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { mergeConversation } from "@/lib/merge-conversations";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 
 // ── Types ────────────────────────────────────────────
 interface EmailAccount {
@@ -632,6 +633,24 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               result.errors.push(`Gmail message ${msgId}: ${gmailInsertErr?.message || "insert failed"}`);
               continue;
             }
+            // Phase 3 — agent reply loop. For NEW inbound messages (i.e. not
+            // a reconciliation of a previously-stored local outbound), fire
+            // message.received so any agent involved in the conversation can
+            // compose a reply. The webhook side filters to convs that have
+            // current/sent agent drafts, so this is a cheap no-op for the
+            // vast majority of inbound traffic. Fire-and-forget.
+            if (!reconciledMessageId && !isOutbound) {
+              dispatchMessageReceivedWebhook({
+                conversationId,
+                messageId: insertedGmailMsg.id,
+                fromEmail,
+                fromName,
+                subject,
+                bodyText: bodyText.slice(0, 5000),
+                bodyHtml,
+                receivedAt: sentAt,
+              }).catch((e) => console.error("[gmail-sync] agent webhook failed:", e?.message));
+            }
 
             // Gmail API: walk MIME parts and capture each attachment's bytes.
             //
@@ -1017,6 +1036,21 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         if (msgError || !insertedMsg) {
           result.errors.push(`Message ${email.uid}: ${msgError?.message || "insert failed"}`);
           continue;
+        }
+        // Phase 3 — agent reply loop. Fire message.received for new inbound
+        // IMAP messages. The webhook side filters to convs with agent
+        // involvement, so this is a no-op for non-agent convs.
+        if (!isOutbound(email.fromEmail, account.email)) {
+          dispatchMessageReceivedWebhook({
+            conversationId,
+            messageId: insertedMsg.id,
+            fromEmail: email.fromEmail,
+            fromName: email.fromName,
+            subject: email.subject,
+            bodyText: email.bodyText,
+            bodyHtml: email.bodyHtml,
+            receivedAt: email.sentAt.toISOString(),
+          }).catch((e) => console.error("[imap-sync] agent webhook failed:", e?.message));
         }
 
         // Upload attachments to Supabase Storage. Best-effort: a failure on

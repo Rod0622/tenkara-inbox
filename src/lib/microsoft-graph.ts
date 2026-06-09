@@ -3,6 +3,7 @@ import { onNewConversationFromSync } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -491,7 +492,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           }
 
           if (!reconciledMsMessageId) {
-            const { error: me } = await supabase.from("messages").insert({
+            const { data: insMs, error: me } = await supabase.from("messages").insert({
               conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
               from_name: email.from?.emailAddress?.name || "Unknown",
               from_email: email.from?.emailAddress?.address || "",
@@ -502,8 +503,23 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               snippet: bodyText.slice(0, 200),
               is_outbound: isOutbound, has_attachments: email.hasAttachments || false,
               sent_at: msSentAt,
-            });
-            if (me) { result.errors.push(me.message); continue; }
+            }).select("id").single();
+            if (me || !insMs) { result.errors.push(me?.message || "ms insert failed"); continue; }
+            // Phase 3 — agent reply loop. Fire message.received for new
+            // inbound MS Graph messages. Webhook side filters to convs with
+            // agent involvement, so no-op for non-agent convs.
+            if (!isOutbound) {
+              dispatchMessageReceivedWebhook({
+                conversationId,
+                messageId: insMs.id,
+                fromEmail: email.from?.emailAddress?.address || "",
+                fromName: email.from?.emailAddress?.name || null,
+                subject: email.subject || null,
+                bodyText: bodyText.slice(0, 5000),
+                bodyHtml: emailBodyHtml,
+                receivedAt: msSentAt,
+              }).catch((e) => console.error("[ms-graph-sync] agent webhook failed:", e?.message));
+            }
           }
 
           const convoUpdate: any = {
