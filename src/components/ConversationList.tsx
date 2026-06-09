@@ -1911,6 +1911,22 @@ export default function ConversationList({
                       : isActive ? "bg-[var(--border)]" : isSelected ? "bg-[rgba(74,222,128,0.06)]" : "hover:bg-[var(--surface-2)]"
                   }`}
                   onClick={() => setActiveConvo(c)}
+                  onDoubleClick={(e) => {
+                    // Gmail-style: double-click opens the conversation in a
+                    // separate popup window scoped to just that conv. The
+                    // popup loads the same inbox page with a `&fullscreen=1`
+                    // hash flag that hides the sidebar + list panes, giving
+                    // operators a standalone window they can keep open while
+                    // triaging the main list. Multiple popups can be open
+                    // simultaneously (each gets a unique window name).
+                    e.preventDefault();
+                    const url = `${window.location.origin}/#conversation=${c.id}&fullscreen=1`;
+                    window.open(
+                      url,
+                      `conv-${c.id}`,
+                      "popup=1,noopener=1,width=1100,height=800,scrollbars=1,resizable=1"
+                    );
+                  }}
                 >
                   {/* Checkbox */}
                   <div

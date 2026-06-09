@@ -31,6 +31,7 @@ import {
   PhoneOutgoing,
   Pencil,
   Plus,
+  Printer,
   Reply,
   RotateCcw,
   Search,
@@ -3744,6 +3745,57 @@ export default function ConversationDetail({
                     >
                       <GitMerge size={13} className="text-[var(--text-secondary)]" />
                       <span>Merge another conversation by link</span>
+                    </button>
+                    {/* ── Print / Save as PDF ── Three modes, each opens
+                        /conversations/[id]/print?content=... in a new tab.
+                        The print page auto-fires the browser's print dialog
+                        once data loads; user picks "Save as PDF" from the
+                        dialog or sends to a physical printer. */}
+                    <div className="my-1 h-px bg-[var(--border)]" />
+                    <button
+                      onClick={() => {
+                        if (!convo?.id) return;
+                        setShowOverflowMenu(false);
+                        window.open(
+                          `/conversations/${convo.id}/print?content=conversation`,
+                          "_blank",
+                          "noopener=1"
+                        );
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] text-left"
+                    >
+                      <Printer size={13} className="text-[var(--text-secondary)]" />
+                      <span>Print conversation</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!convo?.id) return;
+                        setShowOverflowMenu(false);
+                        window.open(
+                          `/conversations/${convo.id}/print?content=full`,
+                          "_blank",
+                          "noopener=1"
+                        );
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] text-left"
+                    >
+                      <Printer size={13} className="text-[var(--text-secondary)]" />
+                      <span>Print conversation + notes</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!convo?.id) return;
+                        setShowOverflowMenu(false);
+                        window.open(
+                          `/conversations/${convo.id}/print?content=notes`,
+                          "_blank",
+                          "noopener=1"
+                        );
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--border)] text-left"
+                    >
+                      <StickyNote size={13} className="text-[var(--text-secondary)]" />
+                      <span>Print notes only</span>
                     </button>
                   </div>
                 </>

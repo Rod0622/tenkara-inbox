@@ -31,6 +31,7 @@ function parseHashParams() {
       conversation: null as string | null,
       mailbox: null as string | null,
       folder: null as string | null,
+      fullscreen: null as string | null,
     };
   }
 
@@ -41,6 +42,7 @@ function parseHashParams() {
     conversation: params.get("conversation"),
     mailbox: params.get("mailbox"),
     folder: params.get("folder"),
+    fullscreen: params.get("fullscreen"),
   };
 }
 
@@ -58,6 +60,10 @@ export default function InboxPage() {
   const [activeMailbox, setActiveMailbox] = useState<string | null>(null);
   const [activeView, setActiveView] = useState("inbox");
   const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
+  // Fullscreen mode: when the URL hash includes `&fullscreen=1`, render
+  // only the ConversationDetail pane (no sidebar, no list). Used by the
+  // double-click-to-popout behavior on ConversationList rows.
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   // Phase 3: which sub-view of the active folder to show.
   //   • "unassigned" (default) — folder name itself: open + unassigned + in this folder
@@ -453,7 +459,10 @@ export default function InboxPage() {
     const handleHashNav = async () => {
       if (activeView === "new-conversation" || activeView === "compose" || activeView === "new-task") return;
 
-      const { conversation, mailbox, folder } = parseHashParams();
+      const { conversation, mailbox, folder, fullscreen } = parseHashParams();
+      // Sync fullscreen flag from the URL on every hashchange so popouts
+      // toggle correctly when the user navigates the popup itself.
+      setIsFullscreen(fullscreen === "1");
       if (!conversation) return;
 
       // Don't re-process the same hash
@@ -648,6 +657,34 @@ export default function InboxPage() {
 
   if (!session) {
     redirect("/login");
+  }
+
+  // ── Fullscreen / popout mode ───────────────────────────────────────────
+  // When the URL hash carries `&fullscreen=1` (set by double-clicking a row
+  // in ConversationList), render only the ConversationDetail pane in a
+  // standalone full-window layout. This makes the popup browser window
+  // feel like a dedicated Gmail-style conversation view. All callbacks and
+  // state still come from this same page instance, so reply, notes, tasks,
+  // status changes etc. work identically to the embedded view.
+  if (isFullscreen) {
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text-primary)]">
+        <ConversationDetail
+          conversation={activeConvo}
+          currentUser={currentUser}
+          teamMembers={teamMembers}
+          emailAccounts={emailAccounts}
+          onAddNote={actions.addNote}
+          onToggleTask={handleToggleTask}
+          onAddTask={handleAddTask}
+          onUpdateTask={handleUpdateTask}
+          onAssign={handleAssign}
+          onSendReply={actions.sendReply}
+          onMoveToFolder={handleMoveToFolder}
+          globalSearchQuery=""
+        />
+      </div>
+    );
   }
 
   return (
