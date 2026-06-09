@@ -235,6 +235,33 @@ export default function OutreachTrackerPage() {
 
   return (
     <div className="flex flex-col h-screen bg-[var(--bg)] text-[var(--text-primary)]">
+      {/* Always-visible scrollbars on the table container — overrides
+          macOS auto-hide so users can see scroll position and drag the
+          thumb. Scoped to .tracker-scroll, no leak to other pages. */}
+      <style jsx global>{`
+        .tracker-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: var(--surface-2) transparent;
+        }
+        .tracker-scroll::-webkit-scrollbar {
+          width: 12px;
+          height: 12px;
+        }
+        .tracker-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .tracker-scroll::-webkit-scrollbar-thumb {
+          background: var(--surface-2);
+          border-radius: 6px;
+          border: 2px solid var(--bg);
+        }
+        .tracker-scroll::-webkit-scrollbar-thumb:hover {
+          background: var(--text-muted);
+        }
+        .tracker-scroll::-webkit-scrollbar-corner {
+          background: transparent;
+        }
+      `}</style>
       {/* ── Header ──────────────────────────────────────────────── */}
       <div className="border-b border-[var(--surface-2)] px-6 py-4">
         <div className="flex items-center gap-3">
@@ -339,7 +366,7 @@ export default function OutreachTrackerPage() {
       </div>
 
       {/* ── Table ───────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto tracker-scroll">
         {error && (
           <div className="m-4 p-3 bg-[var(--surface)] border border-[#F85149] text-[#F85149] rounded-md text-sm">
             {error}
