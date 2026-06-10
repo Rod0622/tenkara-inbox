@@ -1191,9 +1191,12 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
         if (lastUid > 0) {
           searchCriteria = [["UID", `${lastUid + 1}:*`]];
         } else {
-          // Initial sync: fetch last 30 days instead of ALL to avoid Gmail IMAP hanging
+          // Initial sync: fetch the last 365 days (was 30). 30 days silently
+          // truncated history for mailboxes added long after their mail
+          // arrived. We page through the rest oldest-first across successive
+          // cron runs (see fetchUids below), so the window can be wide.
           const since = new Date();
-          since.setDate(since.getDate() - 30);
+          since.setDate(since.getDate() - 365);
           searchCriteria = [["SINCE", since]];
         }
 
@@ -1208,16 +1211,32 @@ function fetchEmailsViaImap(account: EmailAccount): Promise<ParsedEmail[]> {
             return resolve([]);
           }
 
-          // Filter out UIDs we've already seen
-          const newUids = lastUid > 0 ? uids.filter((u) => u > lastUid) : uids;
+          // Filter out UIDs we've already seen, then sort ascending so the
+          // oldest-first slice below is guaranteed regardless of the order the
+          // IMAP server returned search results in.
+          const newUids = (lastUid > 0 ? uids.filter((u) => u > lastUid) : uids)
+            .slice()
+            .sort((a, b) => a - b);
           if (newUids.length === 0) {
             imap.end();
             return resolve([]);
           }
 
-          // First sync: take last 50. Incremental: take last 100.
-          const limit = lastUid > 0 ? 100 : 50;
-          const fetchUids = newUids.slice(-limit);
+          // Batch selection.
+          //   • Incremental (lastUid > 0): take the newest 100 of whatever is
+          //     newer than our high-water mark — recent mail, as before.
+          //   • First sync (lastUid === 0): take the OLDEST 150 within the
+          //     365-day window. Oldest-first is deliberate: the caller advances
+          //     last_sync_uid to the highest UID it fetched, so taking the
+          //     oldest chunk lets the high-water mark walk *forward* through
+          //     history over successive cron runs (150/run) until it reaches
+          //     present. Taking the newest chunk instead would seal off every
+          //     older message permanently — the original truncation bug.
+          //     150 keeps both the IMAP fetch and the per-message downstream
+          //     work (insert + attachments + rules + response-time) inside the
+          //     function budget; larger batches risk re-introducing a timeout.
+          const fetchUids =
+            lastUid > 0 ? newUids.slice(-100) : newUids.slice(0, 150);
 
           // For Gmail, also fetch X-GM-LABELS to enable post-fetch filtering
           const fetchOptions: any = {
