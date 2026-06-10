@@ -5,7 +5,16 @@ import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
 // Runs every hour to check for unreplied conversations and execute follow-up rules
+// Secured by CRON_SECRET header check (matches /api/cron/sync). Vercel Cron
+// attaches this header automatically; manual invocations must supply it.
 export async function GET(req: NextRequest) {
+  // Verify the request is from Vercel Cron. This route can send live follow-up
+  // emails, so it must not be openly invokable.
+  const authHeader = req.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const startTime = Date.now();
   const supabase = createClient(
