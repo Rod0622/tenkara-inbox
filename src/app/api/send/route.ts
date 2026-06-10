@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 import { runRulesForMessage } from "@/lib/rule-engine";
@@ -19,6 +21,18 @@ function shouldSendViaGraph(account: any): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // Require an authenticated team member. This route sends live email, so it
+  // must not be invokable without a session. Attribution is taken from the
+  // session below — never trusted from the request body.
+  const session: any = await getServerSession(authOptions);
+  if (!session?.teamMember) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Session-derived actor for all attribution (sent_by_user_id, activity log,
+  // agent-draft webhook). Falls back to null if teamMember.id is somehow
+  // missing, matching the prior behavior rather than failing the send.
+  const actorId: string | null = session.teamMember.id || null;
+
   const supabase = createServerClient();
   const body = await req.json();
 
@@ -431,7 +445,7 @@ export async function POST(req: NextRequest) {
         is_outbound: true,
         has_attachments: (body.attachments || []).length > 0 || cidAttachments.length > 0,
         sent_at: new Date().toISOString(),
-        sent_by_user_id: body.actor_id || null,
+        sent_by_user_id: actorId,
       })
       .select("id")
       .single();
@@ -487,7 +501,7 @@ export async function POST(req: NextRequest) {
       // Log activity
       await supabase.from("activity_log").insert({
         conversation_id: conversationId,
-        actor_id: body.actor_id || null,
+        actor_id: actorId,
         action: isReply ? "reply_sent" : "email_composed",
         details: { to, subject, preview: emailBody.slice(0, 80) },
       });
@@ -515,7 +529,7 @@ export async function POST(req: NextRequest) {
         await notifyWatchers(conversationId, "new_message", {
           title: `${senderName} sent a reply`,
           body: subject || undefined,
-          actorId: body.actor_id || null,
+          actorId: actorId,
         });
       } catch (_e) { /* best-effort */ }
 
@@ -535,14 +549,14 @@ export async function POST(req: NextRequest) {
         if (agentDraft) {
           // Fire webhook before deleting so audit row references a real draft id.
           dispatchDraftWebhook("draft.sent", agentDraft, {
-            sent_by_user_id: body.actor_id || null,
+            sent_by_user_id: actorId,
             message_id: messageId || null,
           }).catch((e) => console.error("[send] draft.sent webhook error:", e?.message));
 
           // Audit log
           supabase.from("activity_log").insert({
             conversation_id: conversationId,
-            actor_id: body.actor_id || null,
+            actor_id: actorId,
             action: "agent_draft_sent",
             details: {
               agent_name: agentDraft.created_by_agent,
