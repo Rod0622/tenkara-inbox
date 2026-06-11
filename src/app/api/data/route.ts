@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 
 // GET /api/data — Public data API for external dashboard integration
@@ -12,6 +14,16 @@ import { createServerClient } from "@/lib/supabase";
 //   status: filter conversations/tasks by status
 
 export async function GET(req: NextRequest) {
+  // Require an authenticated team member. This endpoint returns conversations,
+  // message bodies, and team data via the service-role client (RLS bypassed),
+  // so it must not be openly readable. The legacy external Sheets/Apps Script
+  // consumer was migrated into the app; if a machine consumer is ever needed
+  // again, use an api_tokens bearer guard rather than reopening this.
+  const session: any = await getServerSession(authOptions);
+  if (!session?.teamMember) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = createServerClient();
   const params = req.nextUrl.searchParams;
   const dataset = params.get("dataset") || "all";
