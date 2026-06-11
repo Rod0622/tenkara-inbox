@@ -272,7 +272,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         // Reopen rule: inbound message on an existing CLOSED conversation
         // reopens it (auto-assign to last closer if unassigned & closed within
         // 3 business days). Self-guards on status==="closed". Best-effort.
-        if (!isOutbound) {
+        if (!isOutbound && conversationId) {
           await onIncomingMessageReopenCheck(conversationId, false);
         }
 
