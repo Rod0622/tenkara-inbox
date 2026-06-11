@@ -82,7 +82,7 @@ function salvageJson(input: string): any | null {
   // Candidate 2: drop an obviously-partial trailing key/value, then close.
   {
     let head = input
-      .replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/s, "")
+      .replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/, "")
       .replace(/,\s*$/, "");
     const closers = computeOpenClosers(head);
     if (closers !== null && closers.length > 0) candidates.push(head + closers);
