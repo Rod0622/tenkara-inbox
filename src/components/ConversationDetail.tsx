@@ -5396,6 +5396,184 @@ export default function ConversationDetail({
                   </div>
                 </div>
 
+                {/* ── Supplier Information (extracted from this thread) ── */}
+                {(() => {
+                  const si = threadSummary.summary.supplier_information || {};
+                  const dash = (v: any) =>
+                    v === null || v === undefined || v === "" ? "—" : String(v);
+                  const Field = ({ label, value }: { label: string; value: any }) => (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        {label}
+                      </span>
+                      <span className="text-sm text-[var(--text-primary)] break-words">{dash(value)}</span>
+                    </div>
+                  );
+                  const acc = si.accessorial_charges || {};
+                  const payInfo = si.payment_information || {};
+                  const payTerms = si.payment_terms || {};
+                  return (
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                          Supplier Information
+                        </div>
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          Extracted from this thread — review before relying on it
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-3">
+                        <Field label="Type" value={si.type ? String(si.type).replace(/_/g, " ") : "unknown"} />
+                        <Field label="Website" value={si.website} />
+                        <Field label="Pick-up Address" value={si.pickup_address} />
+                        <Field label="Purchasing Thresholds" value={si.purchasing_thresholds} />
+                        <Field label="Contact Name" value={si.contact_name} />
+                        <Field label="Contact Email" value={si.contact_email} />
+                        <Field label="Contact Phone" value={si.contact_phone} />
+                        <Field label="Additional Contacts" value={si.additional_contacts} />
+                        <Field label="Shipping Terms" value={si.shipping_terms} />
+                        <Field label="Shipping Email" value={si.shipping_email} />
+                        <Field label="Billing Email" value={si.billing_email} />
+                        <Field label="Facility Certifications / Compliances" value={si.facility_certifications_compliances} />
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[var(--border)]">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                          Accessorial Charges
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                          <Field label="Hazmat Handling Rate" value={acc.hazmat_handling_rate} />
+                          <Field label="Temp-Controlled Storage Rate" value={acc.temperature_controlled_storage_rate} />
+                          <Field label="Liftgate Service Rate" value={acc.liftgate_service_rate} />
+                          <Field label="Special Packaging Rate" value={acc.special_packaging_rate} />
+                          <Field label="Other" value={acc.other} />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[var(--border)]">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                          <Field label="Payment Method" value={payInfo.method} />
+                          <Field label="Payment Details" value={payInfo.details} />
+                          <Field label="Payment Terms" value={payTerms.type} />
+                          <Field label="Payment Terms Details" value={payTerms.details} />
+                        </div>
+                      </div>
+
+                      {si.other_notes && (
+                        <div className="mt-4 pt-3 border-t border-[var(--border)]">
+                          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
+                            Other Notes
+                          </div>
+                          <div className="text-sm text-[var(--text-primary)]">{si.other_notes}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Quotes (one card per material, extracted from this thread) ── */}
+                {(() => {
+                  const quotes = Array.isArray(threadSummary.summary.quotes)
+                    ? threadSummary.summary.quotes
+                    : [];
+                  const dash = (v: any) =>
+                    v === null || v === undefined || v === "" ? "—" : String(v);
+                  const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
+                  const Field = ({ label, value }: { label: string; value: any }) => (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        {label}
+                      </span>
+                      <span className="text-sm text-[var(--text-primary)] break-words">{value}</span>
+                    </div>
+                  );
+                  const DocChip = ({ label, on }: { label: string; on: boolean }) => (
+                    <span
+                      className={
+                        "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold " +
+                        (on
+                          ? "bg-[rgba(74,222,128,0.12)] text-[var(--accent)]"
+                          : "bg-[var(--bg)] border border-[var(--border)] text-[var(--text-muted)]")
+                      }
+                    >
+                      {label} {on ? "✓" : "—"}
+                    </span>
+                  );
+                  return (
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                          Quotes ({quotes.length})
+                        </div>
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          Extracted from this thread — review before relying on it
+                        </div>
+                      </div>
+                      {quotes.length === 0 ? (
+                        <div className="text-sm text-[var(--text-secondary)]">
+                          No quote information available in this thread
+                        </div>
+                      ) : (
+                      <div className="space-y-3">
+                        {quotes.map((q: any, qi: number) => {
+                          const docs = q.docs_supplied || {};
+                          const priceLine = [q.price, q.price_qty, q.price_unit].some(
+                            (x) => x !== null && x !== undefined && x !== ""
+                          )
+                            ? `${dash(q.price)} / ${dash(q.price_qty)} / ${dash(q.price_unit)}`
+                            : "—";
+                          return (
+                            <div
+                              key={qi}
+                              className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3"
+                            >
+                              <div className="text-sm font-semibold text-[var(--text-primary)] mb-2">
+                                {dash(q.material_name)}
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                <Field label="INCI / Trade Name" value={dash(q.inci_trade_name)} />
+                                <Field label="Grade(s)" value={dash(q.grade)} />
+                                <Field label="Price / Qty / Unit" value={priceLine} />
+                                <Field label="Material ID" value={dash(q.material_id)} />
+                                <Field
+                                  label="Case W / H / L"
+                                  value={`${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`}
+                                />
+                                <Field label="Case Weight" value={dash(q.case_weight)} />
+                                <Field label="Case Size" value={dash(q.case_size)} />
+                                <Field label="Pack Size" value={dash(q.pack_size)} />
+                                <Field label="Quote Provided" value={dash(q.quote_provided_date)} />
+                                <Field label="Quote Expiry / Valid Until" value={dash(q.quote_expiry)} />
+                                <Field label="Lead Time" value={dash(q.lead_time)} />
+                                <Field label="MOQ" value={dash(q.moq)} />
+                                <Field label="Max Inventory" value={dash(q.max_inventory)} />
+                                <Field label="Hazardous" value={yn(q.hazardous)} />
+                                <Field label="Refrigerated" value={yn(q.refrigerated)} />
+                                <Field label="Equipment Accessorials" value={dash(q.equipment_accessorials)} />
+                                <Field label="Sample Handling" value={dash(q.sample_handling)} />
+                              </div>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                                  Docs Supplied
+                                </span>
+                                <DocChip label="COA" on={docs.coa === true} />
+                                <DocChip label="SDS" on={docs.sds === true} />
+                                <DocChip label="TDS" on={docs.tds === true} />
+                              </div>
+                              {q.other_notes && (
+                                <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                                  {q.other_notes}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
                     Current Status
@@ -5624,180 +5802,6 @@ export default function ConversationDetail({
                     {threadSummary.summary.next_step || "No next step identified"}
                   </div>
                 </div>
-
-                {/* ── Supplier Information (extracted from this thread) ── */}
-                {(() => {
-                  const si = threadSummary.summary.supplier_information;
-                  if (!si) return null;
-                  const dash = (v: any) =>
-                    v === null || v === undefined || v === "" ? "—" : String(v);
-                  const Field = ({ label, value }: { label: string; value: any }) => (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                        {label}
-                      </span>
-                      <span className="text-sm text-[var(--text-primary)] break-words">{dash(value)}</span>
-                    </div>
-                  );
-                  const acc = si.accessorial_charges || {};
-                  const payInfo = si.payment_information || {};
-                  const payTerms = si.payment_terms || {};
-                  return (
-                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                          Supplier Information
-                        </div>
-                        <div className="text-[11px] text-[var(--text-muted)]">
-                          Extracted from this thread — review before relying on it
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-3">
-                        <Field label="Type" value={si.type ? String(si.type).replace(/_/g, " ") : "unknown"} />
-                        <Field label="Website" value={si.website} />
-                        <Field label="Pick-up Address" value={si.pickup_address} />
-                        <Field label="Purchasing Thresholds" value={si.purchasing_thresholds} />
-                        <Field label="Contact Name" value={si.contact_name} />
-                        <Field label="Contact Email" value={si.contact_email} />
-                        <Field label="Contact Phone" value={si.contact_phone} />
-                        <Field label="Additional Contacts" value={si.additional_contacts} />
-                        <Field label="Shipping Terms" value={si.shipping_terms} />
-                        <Field label="Shipping Email" value={si.shipping_email} />
-                        <Field label="Billing Email" value={si.billing_email} />
-                        <Field label="Facility Certifications / Compliances" value={si.facility_certifications_compliances} />
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-[var(--border)]">
-                        <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                          Accessorial Charges
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                          <Field label="Hazmat Handling Rate" value={acc.hazmat_handling_rate} />
-                          <Field label="Temp-Controlled Storage Rate" value={acc.temperature_controlled_storage_rate} />
-                          <Field label="Liftgate Service Rate" value={acc.liftgate_service_rate} />
-                          <Field label="Special Packaging Rate" value={acc.special_packaging_rate} />
-                          <Field label="Other" value={acc.other} />
-                        </div>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-[var(--border)]">
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                          <Field label="Payment Method" value={payInfo.method} />
-                          <Field label="Payment Details" value={payInfo.details} />
-                          <Field label="Payment Terms" value={payTerms.type} />
-                          <Field label="Payment Terms Details" value={payTerms.details} />
-                        </div>
-                      </div>
-
-                      {si.other_notes && (
-                        <div className="mt-4 pt-3 border-t border-[var(--border)]">
-                          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
-                            Other Notes
-                          </div>
-                          <div className="text-sm text-[var(--text-primary)]">{si.other_notes}</div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* ── Quotes (one card per material, extracted from this thread) ── */}
-                {(() => {
-                  const quotes = Array.isArray(threadSummary.summary.quotes)
-                    ? threadSummary.summary.quotes
-                    : [];
-                  if (quotes.length === 0) return null;
-                  const dash = (v: any) =>
-                    v === null || v === undefined || v === "" ? "—" : String(v);
-                  const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
-                  const Field = ({ label, value }: { label: string; value: any }) => (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                        {label}
-                      </span>
-                      <span className="text-sm text-[var(--text-primary)] break-words">{value}</span>
-                    </div>
-                  );
-                  const DocChip = ({ label, on }: { label: string; on: boolean }) => (
-                    <span
-                      className={
-                        "inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold " +
-                        (on
-                          ? "bg-[rgba(74,222,128,0.12)] text-[var(--accent)]"
-                          : "bg-[var(--bg)] border border-[var(--border)] text-[var(--text-muted)]")
-                      }
-                    >
-                      {label} {on ? "✓" : "—"}
-                    </span>
-                  );
-                  return (
-                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                          Quotes ({quotes.length})
-                        </div>
-                        <div className="text-[11px] text-[var(--text-muted)]">
-                          Extracted from this thread — review before relying on it
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {quotes.map((q: any, qi: number) => {
-                          const docs = q.docs_supplied || {};
-                          const priceLine = [q.price, q.price_qty, q.price_unit].some(
-                            (x) => x !== null && x !== undefined && x !== ""
-                          )
-                            ? `${dash(q.price)} / ${dash(q.price_qty)} / ${dash(q.price_unit)}`
-                            : "—";
-                          return (
-                            <div
-                              key={qi}
-                              className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3"
-                            >
-                              <div className="text-sm font-semibold text-[var(--text-primary)] mb-2">
-                                {dash(q.material_name)}
-                              </div>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                                <Field label="INCI / Trade Name" value={dash(q.inci_trade_name)} />
-                                <Field label="Grade(s)" value={dash(q.grade)} />
-                                <Field label="Price / Qty / Unit" value={priceLine} />
-                                <Field label="Material ID" value={dash(q.material_id)} />
-                                <Field
-                                  label="Case W / H / L"
-                                  value={`${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`}
-                                />
-                                <Field label="Case Weight" value={dash(q.case_weight)} />
-                                <Field label="Case Size" value={dash(q.case_size)} />
-                                <Field label="Pack Size" value={dash(q.pack_size)} />
-                                <Field label="Quote Provided" value={dash(q.quote_provided_date)} />
-                                <Field label="Quote Expiry / Valid Until" value={dash(q.quote_expiry)} />
-                                <Field label="Lead Time" value={dash(q.lead_time)} />
-                                <Field label="MOQ" value={dash(q.moq)} />
-                                <Field label="Max Inventory" value={dash(q.max_inventory)} />
-                                <Field label="Hazardous" value={yn(q.hazardous)} />
-                                <Field label="Refrigerated" value={yn(q.refrigerated)} />
-                                <Field label="Equipment Accessorials" value={dash(q.equipment_accessorials)} />
-                                <Field label="Sample Handling" value={dash(q.sample_handling)} />
-                              </div>
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                                  Docs Supplied
-                                </span>
-                                <DocChip label="COA" on={docs.coa === true} />
-                                <DocChip label="SDS" on={docs.sds === true} />
-                                <DocChip label="TDS" on={docs.tds === true} />
-                              </div>
-                              {q.other_notes && (
-                                <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
-                                  {q.other_notes}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 <div className="text-[11px] text-[var(--text-muted)] px-1">
                   Last generated:{" "}

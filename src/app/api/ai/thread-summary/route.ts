@@ -22,6 +22,107 @@ function truncate(value: string, max = 4000) {
   return value.slice(0, max) + "\n...[truncated]";
 }
 
+// Attempt to recover a usable object from a possibly-truncated JSON string.
+// Long multi-material extractions can exceed the output token budget and cut
+// off mid-object/array. Rather than throw away the entire (otherwise excellent)
+// extraction, we walk the string tracking structural depth and string state,
+// drop any trailing incomplete token, and close open braces/brackets so the
+// valid prefix parses. Returns null if nothing usable can be recovered.
+function salvageJson(input: string): any | null {
+  if (!input) return null;
+  // Fast path: already valid.
+  try {
+    return JSON.parse(input);
+  } catch {
+    /* fall through to salvage */
+  }
+
+  // Walk the string tracking depth and string state. Record, at every point,
+  // the index just after a closing brace/bracket together with the depth we
+  // returned TO. This lets us truncate at the last complete element at ANY
+  // depth (e.g. the last complete quote object inside the quotes array) and
+  // then close the remaining open structures — instead of discarding a long
+  // array just because it was cut off mid-element.
+  let inString = false;
+  let escaped = false;
+  let depth = 0;
+  let lastCloseIndex = -1; // index (exclusive) right after the last completed value
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      // A value just completed at this point; safe to truncate here and close.
+      lastCloseIndex = i + 1;
+    }
+  }
+
+  const candidates: string[] = [];
+
+  // Candidate 1: truncate right after the last completed value, drop any
+  // trailing comma, and close all still-open structures.
+  if (lastCloseIndex > 0) {
+    const head = input.slice(0, lastCloseIndex).replace(/,\s*$/, "");
+    const closers = computeOpenClosers(head);
+    if (closers !== null) candidates.push(head + closers);
+  }
+
+  // Candidate 2: drop an obviously-partial trailing key/value, then close.
+  {
+    let head = input
+      .replace(/,\s*"[^"]*"\s*:\s*("[^"]*)?$/s, "")
+      .replace(/,\s*$/, "");
+    const closers = computeOpenClosers(head);
+    if (closers !== null && closers.length > 0) candidates.push(head + closers);
+  }
+
+  for (const c of candidates) {
+    try {
+      return JSON.parse(c);
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+// Given a JSON prefix, return the string of closing brackets/braces needed to
+// balance it (ignoring brackets inside strings). Returns null if the prefix
+// ends inside an unterminated string (cannot be safely closed).
+function computeOpenClosers(prefix: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  // If we ended inside a string, we can't safely close — signal no recovery.
+  if (inString) return null;
+  return stack.reverse().join("");
+}
+
 // Coerce a value to a trimmed string or null (no guessing, no defaults).
 function strOrNull(v: any): string | null {
   if (typeof v === "string") {
@@ -410,7 +511,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 2000,
+      max_tokens: 16000,
       temperature: 0,
       messages: [{ role: "user", content: prompt }],
     });
@@ -424,12 +525,29 @@ export async function POST(req: NextRequest) {
     // Strip markdown code fences if present
     const text = rawText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
+    const wasTruncated = response.stop_reason === "max_tokens";
+
+    let parsed: any = salvageJson(text);
+
+    if (!parsed || typeof parsed !== "object") {
+      // Could not recover anything usable. Rather than wipe a previously-good
+      // summary, return the existing cached one (if any) so the UI still shows
+      // something, and signal the failure for diagnostics.
+      const { data: existingOnFail } = await supabase
+        .from("thread_summaries")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .maybeSingle();
+
+      if (existingOnFail) {
+        return NextResponse.json({
+          summary: existingOnFail,
+          cached: true,
+          warning: "Model output could not be parsed; showing previous summary.",
+        });
+      }
       return NextResponse.json(
-        { error: "Model returned invalid JSON", raw: rawText },
+        { error: "Model returned invalid JSON", truncated: wasTruncated, raw: rawText.slice(0, 2000) },
         { status: 500 }
       );
     }
