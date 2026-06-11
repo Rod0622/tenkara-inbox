@@ -1,5 +1,5 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
-import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 
@@ -268,6 +268,13 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           last_message_at: email.receivedDateTime || new Date().toISOString(),
           is_unread: !isOutbound,
         }).eq("id", conversationId);
+
+        // Reopen rule: inbound message on an existing CLOSED conversation
+        // reopens it (auto-assign to last closer if unassigned & closed within
+        // 3 business days). Self-guards on status==="closed". Best-effort.
+        if (!isOutbound) {
+          await onIncomingMessageReopenCheck(conversationId, false);
+        }
 
         // Run rules
         if (runRulesFn) {

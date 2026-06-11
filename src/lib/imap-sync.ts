@@ -3,7 +3,7 @@ import { simpleParser, ParsedMail } from "mailparser";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForMessage } from "@/lib/rule-engine";
 import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
-import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
@@ -656,6 +656,15 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               }).catch((e) => console.error("[gmail-sync] agent webhook failed:", e?.message));
             }
 
+            // Reopen rule: if this inbound message landed on an existing
+            // CLOSED conversation, reopen it (and auto-assign to the last
+            // closer if it's unassigned and was closed within 3 business
+            // days). Self-guards on status==="closed", so it's a cheap no-op
+            // for the common open/new-conversation case. Best-effort.
+            if (!isOutbound && conversationId) {
+              await onIncomingMessageReopenCheck(conversationId, isOutbound);
+            }
+
             // Gmail API: walk MIME parts and capture each attachment's bytes.
             //
             // Two delivery shapes exist (per Gmail API docs):
@@ -1055,6 +1064,13 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             bodyHtml: email.bodyHtml,
             receivedAt: email.sentAt.toISOString(),
           }).catch((e) => console.error("[imap-sync] agent webhook failed:", e?.message));
+        }
+
+        // Reopen rule: inbound message on an existing CLOSED conversation
+        // reopens it (auto-assign to last closer if unassigned & closed within
+        // 3 business days). Self-guards on status==="closed". Best-effort.
+        if (!isOutbound(email.fromEmail, account.email)) {
+          await onIncomingMessageReopenCheck(conversationId, false);
         }
 
         // Upload attachments to Supabase Storage. Best-effort: a failure on

@@ -1,5 +1,5 @@
 import { createServerClient } from "@/lib/supabase";
-import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
@@ -565,6 +565,13 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
           if (email.hasAttachments) convoUpdate.has_attachments = true;
 
           await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
+
+          // Reopen rule: inbound message on an existing CLOSED conversation
+          // reopens it (auto-assign to last closer if unassigned & closed
+          // within 3 business days). Self-guards on status==="closed".
+          if (!isOutbound && conversationId) {
+            await onIncomingMessageReopenCheck(conversationId, false);
+          }
 
           if (runRulesFn && conversationId) {
             try {
