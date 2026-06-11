@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@/lib/supabase";
 
@@ -18,6 +20,107 @@ function cleanText(value?: string | null) {
 function truncate(value: string, max = 4000) {
   if (value.length <= max) return value;
   return value.slice(0, max) + "\n...[truncated]";
+}
+
+// Coerce a value to a trimmed string or null (no guessing, no defaults).
+function strOrNull(v: any): string | null {
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t.length > 0 ? t : null;
+  }
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return null;
+}
+
+// Coerce a value to boolean or null (unknown stays null).
+function boolOrNull(v: any): boolean | null {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") {
+    const t = v.trim().toLowerCase();
+    if (["yes", "y", "true"].includes(t)) return true;
+    if (["no", "n", "false"].includes(t)) return false;
+  }
+  return null;
+}
+
+// Defensive coercion of the supplier_information block to a known shape.
+const ALLOWED_SUPPLIER_TYPES = ["distributor", "direct_manufacturer", "broker", "unknown"];
+function coerceSupplierInformation(si: any) {
+  const obj = si && typeof si === "object" ? si : {};
+  const acc = obj.accessorial_charges && typeof obj.accessorial_charges === "object" ? obj.accessorial_charges : {};
+  const payInfo = obj.payment_information && typeof obj.payment_information === "object" ? obj.payment_information : {};
+  const payTerms = obj.payment_terms && typeof obj.payment_terms === "object" ? obj.payment_terms : {};
+  const rawType = strOrNull(obj.type);
+  const type = rawType && ALLOWED_SUPPLIER_TYPES.includes(rawType.toLowerCase()) ? rawType.toLowerCase() : "unknown";
+  return {
+    type,
+    pickup_address: strOrNull(obj.pickup_address),
+    contact_name: strOrNull(obj.contact_name),
+    contact_email: strOrNull(obj.contact_email),
+    contact_phone: strOrNull(obj.contact_phone),
+    additional_contacts: strOrNull(obj.additional_contacts),
+    website: strOrNull(obj.website),
+    purchasing_thresholds: strOrNull(obj.purchasing_thresholds),
+    shipping_terms: strOrNull(obj.shipping_terms),
+    shipping_email: strOrNull(obj.shipping_email),
+    billing_email: strOrNull(obj.billing_email),
+    accessorial_charges: {
+      hazmat_handling_rate: strOrNull(acc.hazmat_handling_rate),
+      temperature_controlled_storage_rate: strOrNull(acc.temperature_controlled_storage_rate),
+      liftgate_service_rate: strOrNull(acc.liftgate_service_rate),
+      special_packaging_rate: strOrNull(acc.special_packaging_rate),
+      other: strOrNull(acc.other),
+    },
+    payment_information: {
+      method: strOrNull(payInfo.method),
+      details: strOrNull(payInfo.details),
+    },
+    payment_terms: {
+      type: strOrNull(payTerms.type),
+      details: strOrNull(payTerms.details),
+    },
+    facility_certifications_compliances: strOrNull(obj.facility_certifications_compliances),
+    other_notes: strOrNull(obj.other_notes),
+  };
+}
+
+// Defensive coercion of the quotes array — one object per material.
+function coerceQuotes(quotes: any) {
+  if (!Array.isArray(quotes)) return [];
+  return quotes.map((q: any) => {
+    const obj = q && typeof q === "object" ? q : {};
+    const docs = obj.docs_supplied && typeof obj.docs_supplied === "object" ? obj.docs_supplied : {};
+    return {
+      material_name: strOrNull(obj.material_name),
+      inci_trade_name: strOrNull(obj.inci_trade_name),
+      grade: strOrNull(obj.grade),
+      price: strOrNull(obj.price),
+      price_qty: strOrNull(obj.price_qty),
+      price_unit: strOrNull(obj.price_unit),
+      case_width: strOrNull(obj.case_width),
+      case_height: strOrNull(obj.case_height),
+      case_length: strOrNull(obj.case_length),
+      case_weight: strOrNull(obj.case_weight),
+      case_size: strOrNull(obj.case_size),
+      pack_size: strOrNull(obj.pack_size),
+      quote_provided_date: strOrNull(obj.quote_provided_date),
+      quote_expiry: strOrNull(obj.quote_expiry),
+      lead_time: strOrNull(obj.lead_time),
+      moq: strOrNull(obj.moq),
+      max_inventory: strOrNull(obj.max_inventory),
+      hazardous: boolOrNull(obj.hazardous),
+      refrigerated: boolOrNull(obj.refrigerated),
+      equipment_accessorials: strOrNull(obj.equipment_accessorials),
+      material_id: strOrNull(obj.material_id),
+      docs_supplied: {
+        coa: boolOrNull(docs.coa) === true,
+        sds: boolOrNull(docs.sds) === true,
+        tds: boolOrNull(docs.tds) === true,
+      },
+      sample_handling: strOrNull(obj.sample_handling),
+      other_notes: strOrNull(obj.other_notes),
+    };
+  });
 }
 
 function buildPrompt(params: {
@@ -77,7 +180,59 @@ Return ONLY valid JSON with this exact shape:
   "open_action_items": ["item 1", "item 2"],
   "completed_items": ["item 1", "item 2"],
   "suggested_tasks": ["task 1", "task 2"],
-  "next_step": "single best next step"
+  "next_step": "single best next step",
+  "supplier_information": {
+    "type": "distributor | direct_manufacturer | broker | unknown",
+    "pickup_address": null,
+    "contact_name": null,
+    "contact_email": null,
+    "contact_phone": null,
+    "additional_contacts": null,
+    "website": null,
+    "purchasing_thresholds": null,
+    "shipping_terms": null,
+    "shipping_email": null,
+    "billing_email": null,
+    "accessorial_charges": {
+      "hazmat_handling_rate": null,
+      "temperature_controlled_storage_rate": null,
+      "liftgate_service_rate": null,
+      "special_packaging_rate": null,
+      "other": null
+    },
+    "payment_information": { "method": null, "details": null },
+    "payment_terms": { "type": null, "details": null },
+    "facility_certifications_compliances": null,
+    "other_notes": null
+  },
+  "quotes": [
+    {
+      "material_name": null,
+      "inci_trade_name": null,
+      "grade": null,
+      "price": null,
+      "price_qty": null,
+      "price_unit": null,
+      "case_width": null,
+      "case_height": null,
+      "case_length": null,
+      "case_weight": null,
+      "case_size": null,
+      "pack_size": null,
+      "quote_provided_date": null,
+      "quote_expiry": null,
+      "lead_time": null,
+      "moq": null,
+      "max_inventory": null,
+      "hazardous": null,
+      "refrigerated": null,
+      "equipment_accessorials": null,
+      "material_id": null,
+      "docs_supplied": { "coa": false, "sds": false, "tds": false },
+      "sample_handling": null,
+      "other_notes": null
+    }
+  ]
 }
 
 Rules:
@@ -93,6 +248,16 @@ Rules:
   "quote received"
   "ready to reply"
   "in progress"
+
+Supplier information & quotes extraction rules (IMPORTANT):
+- Extract supplier_information and quotes ONLY from facts explicitly stated in the thread, notes, or tasks.
+- NEVER guess, infer, or fill any field from general knowledge. If a field is not explicitly stated, use null (for booleans use null when unknown, not false).
+- Do not invent addresses, emails, phone numbers, prices, certifications, or terms. A blank/null is correct and expected when the thread does not state it.
+- "type" must be one of: distributor, direct_manufacturer, broker, unknown. Use "unknown" unless the thread clearly indicates which.
+- "quotes" is an array with ONE object per distinct material/product quoted in the thread. If no quote/pricing appears in the thread, return an empty array [].
+- For each quote: "quote_provided_date" = the date the supplier actually provided/sent this quote or price (use the message date if the price is stated in that message). "quote_expiry" = the date or duration the quote is stated to remain valid until (e.g. "valid for 30 days", "expires 2026-07-01"). These are different fields — fill each only if supported.
+- For docs_supplied, set coa/sds/tds to true only if the thread indicates that document was provided or offered; otherwise false.
+- For prices, put the numeric/text price in "price", the quantity it applies to in "price_qty", and the unit in "price_unit" (e.g. price "12.50", price_qty "1", price_unit "kg").
 
 Thread subject: ${params.subject}
 Conversation from: ${params.fromName || ""} <${params.fromEmail || ""}>
@@ -110,6 +275,11 @@ ${messagesText}
 
 export async function GET(req: NextRequest) {
   try {
+    const session: any = await getServerSession(authOptions);
+    if (!session?.teamMember) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const supabase = createServerClient();
     const conversationId = req.nextUrl.searchParams.get("conversation_id");
 
@@ -139,6 +309,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session: any = await getServerSession(authOptions);
+    if (!session?.teamMember) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     if (!anthropic) {
       return NextResponse.json(
         { error: "ANTHROPIC_API_KEY is not configured" },
@@ -235,7 +410,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 900,
+      max_tokens: 2000,
       temperature: 0,
       messages: [{ role: "user", content: prompt }],
     });
@@ -279,6 +454,8 @@ export async function POST(req: NextRequest) {
           ? parsed.suggested_tasks
           : [],
         next_step: typeof parsed.next_step === "string" ? parsed.next_step : "",
+        supplier_information: coerceSupplierInformation(parsed.supplier_information),
+        quotes: coerceQuotes(parsed.quotes),
       },
       source_message_count: messageCount,
       source_note_count: noteCount,
