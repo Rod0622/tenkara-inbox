@@ -140,6 +140,27 @@ export async function GET(req: NextRequest) {
       contactPersons = persons || [];
     }
 
+    // ── Fetch persistent supplier profile + quotes (Step 3) ──
+    // Both new tables are keyed on supplier_contacts.id. Best-effort: if the
+    // tables don't exist yet (migration not run), don't fail the page.
+    let supplierProfile: any = null;
+    let supplierQuotes: any[] = [];
+    if (supplierContact?.id) {
+      const profileRes = await supabase
+        .from("supplier_profiles")
+        .select("*")
+        .eq("supplier_contact_id", supplierContact.id)
+        .maybeSingle();
+      if (!profileRes.error) supplierProfile = profileRes.data || null;
+
+      const quotesRes = await supabase
+        .from("supplier_quotes")
+        .select("*")
+        .eq("supplier_contact_id", supplierContact.id)
+        .order("created_at", { ascending: false });
+      if (!quotesRes.error) supplierQuotes = quotesRes.data || [];
+    }
+
     // ── Fetch threads from current account ──
     let convoQuery = supabase
       .from("conversations")
@@ -266,6 +287,10 @@ export async function GET(req: NextRequest) {
         },
         threads: [], cross_account_threads: [], domain_threads: [], domain_contacts: [], tasks: [], notes: [],
         activities: [], thread_summaries: [],
+        supplier_contact_id: supplierContact?.id || null,
+        contact_persons: contactPersons,
+        supplier_profile: supplierProfile,
+        supplier_quotes: supplierQuotes,
       });
     }
 
@@ -544,6 +569,8 @@ export async function GET(req: NextRequest) {
       notes: notes || [],
       activities,
       thread_summaries: threadSummaries,
+      supplier_profile: supplierProfile,
+      supplier_quotes: supplierQuotes,
     });
   } catch (error: any) {
     console.error("GET /api/contact-command-center failed:", error);

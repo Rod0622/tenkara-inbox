@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, GitMerge, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
 import SupplierStatusCard from "@/components/SupplierStatusCard";
+import SupplierProfilePanel from "@/components/SupplierProfilePanel";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -514,6 +515,14 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
           supplierContactId={data.supplier_contact_id || data.supplier_hours?.id || null}
           accounts={supplierAccounts}
           actorId={null}
+        />
+
+        {/* Persistent supplier profile + quotes (Step 3) */}
+        <SupplierProfilePanel
+          supplierContactId={data.supplier_contact_id || data.supplier_hours?.id || null}
+          email={decodedEmail}
+          initialProfile={data.supplier_profile || null}
+          initialQuotes={data.supplier_quotes || []}
         />
 
         {/* Contact People */}
