@@ -26,6 +26,7 @@ import {
   Sun,
   Moon,
   Target,
+  Pin,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -597,6 +598,7 @@ export default function Sidebar({
           { id: "pending-outreach", label: "Pending Outreach", icon: Bell, count: pendingOutreachCount, unread: 0 },
           { id: "sent", label: "Sent", icon: Send, count: mySentCount, unread: 0 },
           { id: "watching", label: "Watching", icon: Eye, count: watchingCount, unread: 0 },
+          { id: "pinned", label: "Pinned", icon: Pin, count: 0, unread: 0 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive =
