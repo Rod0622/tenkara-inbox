@@ -237,28 +237,42 @@ async function autoPromoteToSupplierProfile(
         );
     }
 
-    // ── Quotes: insert-if-not-exists per (material, thread) ──
+    // ── Quotes: insert new, and FILL-ONLY-IF-EMPTY on existing rows ──
+    // Keyed per (supplier, material, thread). New materials are inserted. For a
+    // material already promoted from this thread, we fill in any columns that
+    // are currently null/empty with freshly-extracted values, but never
+    // overwrite a non-empty (possibly human-edited) value. This lets a later,
+    // better extraction backfill fields (e.g. prices) that an earlier run missed.
     const quotes = coerceQuotes(parsed.quotes);
     if (quotes.length > 0) {
       const { data: existingQuotes } = await supabase
         .from("supplier_quotes")
-        .select("id, material_name")
+        .select("*")
         .eq("supplier_contact_id", supplierContactId)
         .eq("source_conversation_id", conversation.id);
-      const existingNames = new Set(
-        (existingQuotes || []).map((q: any) => String(q.material_name || "").trim().toLowerCase())
+      const existingByName = new Map<string, any>(
+        (existingQuotes || []).map((q: any) => [String(q.material_name || "").trim().toLowerCase(), q])
       );
 
-      const rows: any[] = [];
+      // Columns we never auto-fill (identity / bookkeeping).
+      const FILL_SKIP = new Set([
+        "id",
+        "supplier_contact_id",
+        "source_conversation_id",
+        "material_name",
+        "created_by",
+        "created_at",
+        "updated_at",
+      ]);
+
+      const isEmpty = (v: any) => v === null || v === undefined || v === "";
+
+      const newRows: any[] = [];
       for (const q of quotes) {
         const name = String(q.material_name || "").trim();
         if (!name) continue; // material_name is required
-        if (existingNames.has(name.toLowerCase())) continue; // don't clobber existing/edited
-        rows.push({
-          supplier_contact_id: supplierContactId,
-          source_conversation_id: conversation.id,
-          created_by: actorId,
-          material_name: name,
+
+        const extractedCols: Record<string, any> = {
           inci_trade_name: q.inci_trade_name,
           grade: q.grade,
           price_raw: q.price,
@@ -285,10 +299,40 @@ async function autoPromoteToSupplierProfile(
           doc_tds: q.docs_supplied?.tds === true,
           sample_handling: q.sample_handling,
           other_notes: q.other_notes,
-        });
+        };
+
+        const existing = existingByName.get(name.toLowerCase());
+        if (!existing) {
+          // New material from this thread → insert full row.
+          newRows.push({
+            supplier_contact_id: supplierContactId,
+            source_conversation_id: conversation.id,
+            created_by: actorId,
+            material_name: name,
+            ...extractedCols,
+          });
+        } else {
+          // Existing row → fill only the columns that are currently empty.
+          // Booleans for docs are treated as "fillable" only when the existing
+          // value is false AND the extraction says true (so a doc that becomes
+          // available gets recorded, but an explicit edit to false is kept only
+          // if the extraction also has nothing to add).
+          const fill: Record<string, any> = {};
+          for (const [col, val] of Object.entries(extractedCols)) {
+            if (FILL_SKIP.has(col)) continue;
+            if (col === "doc_coa" || col === "doc_sds" || col === "doc_tds") {
+              if (existing[col] !== true && val === true) fill[col] = true;
+              continue;
+            }
+            if (isEmpty(existing[col]) && !isEmpty(val)) fill[col] = val;
+          }
+          if (Object.keys(fill).length > 0) {
+            await supabase.from("supplier_quotes").update(fill).eq("id", existing.id);
+          }
+        }
       }
-      if (rows.length > 0) {
-        await supabase.from("supplier_quotes").insert(rows);
+      if (newRows.length > 0) {
+        await supabase.from("supplier_quotes").insert(newRows);
       }
     }
   } catch (e: any) {

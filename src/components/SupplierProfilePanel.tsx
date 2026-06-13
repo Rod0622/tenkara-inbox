@@ -66,7 +66,7 @@ const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
 
 const inputCls =
   "w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/50";
-const labelCls = "text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]";
+const labelCls = "text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]";
 
 export default function SupplierProfilePanel({
   supplierContactId,
@@ -316,7 +316,7 @@ export default function SupplierProfilePanel({
             {PROFILE_TEXT_FIELDS.map((f) => (
               <div key={f.key} className={"flex flex-col gap-0.5 " + (f.full ? "col-span-2" : "")}>
                 <span className={labelCls}>{f.label}</span>
-                <span className="text-sm text-[var(--text-primary)] break-words">{dash(profile[f.key])}</span>
+                <span className="text-sm text-[var(--text-primary)] break-words [overflow-wrap:anywhere]">{dash(profile[f.key])}</span>
               </div>
             ))}
           </div>
@@ -417,7 +417,7 @@ function Field({ label, value, full }: { label: string; value: any; full?: boole
   return (
     <div className={"flex flex-col gap-0.5 " + (full ? "col-span-2" : "")}>
       <span className={labelCls}>{label}</span>
-      <span className="text-sm text-[var(--text-primary)] break-words">{value}</span>
+      <span className="text-sm text-[var(--text-primary)] break-words [overflow-wrap:anywhere]">{value}</span>
     </div>
   );
 }

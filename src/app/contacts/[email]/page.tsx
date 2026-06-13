@@ -652,10 +652,10 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                     <span className="text-xs text-[var(--text-muted)]">avg response</span>
                   </div>
                   <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-secondary)]">
-                    <span>Median: <span className="text-[#C9D1D9] font-medium">{fmtMinutes(responsiveness.supplier.median_minutes)}</span></span>
+                    <span>Median: <span className="text-[var(--text-primary)] font-medium">{fmtMinutes(responsiveness.supplier.median_minutes)}</span></span>
                     <span>Fastest: <span className="text-[var(--accent)] font-medium">{fmtMinutes(responsiveness.supplier.fastest_minutes)}</span></span>
                     <span>Slowest: <span className="text-[var(--danger)] font-medium">{fmtMinutes(responsiveness.supplier.slowest_minutes)}</span></span>
-                    <span>Total: <span className="text-[#C9D1D9] font-medium">{responsiveness.supplier.total} replies</span></span>
+                    <span>Total: <span className="text-[var(--text-primary)] font-medium">{responsiveness.supplier.total} replies</span></span>
                   </div>
                 </div>
               )}
@@ -667,10 +667,10 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                     <span className="text-xs text-[var(--text-muted)]">avg response</span>
                   </div>
                   <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-secondary)]">
-                    <span>Median: <span className="text-[#C9D1D9] font-medium">{fmtMinutes(responsiveness.team.median_minutes)}</span></span>
+                    <span>Median: <span className="text-[var(--text-primary)] font-medium">{fmtMinutes(responsiveness.team.median_minutes)}</span></span>
                     <span>Fastest: <span className="text-[var(--accent)] font-medium">{fmtMinutes(responsiveness.team.fastest_minutes)}</span></span>
                     <span>Slowest: <span className="text-[var(--danger)] font-medium">{fmtMinutes(responsiveness.team.slowest_minutes)}</span></span>
-                    <span>Total: <span className="text-[#C9D1D9] font-medium">{responsiveness.team.total} replies</span></span>
+                    <span>Total: <span className="text-[var(--text-primary)] font-medium">{responsiveness.team.total} replies</span></span>
                   </div>
                 </div>
               )}
@@ -693,7 +693,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             {/* Summary */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-3 flex items-center gap-2"><MessageSquare size={16} className="text-[var(--info)]" /><span className="text-sm font-semibold">Summary</span></div>
-              <div className="text-sm leading-6 text-[#C9D1D9]">{summary.rollup || "No summary."}</div>
+              <div className="text-sm leading-6 text-[var(--text-primary)] [overflow-wrap:anywhere]">{summary.rollup || "No summary."}</div>
               {summary.risk_signals?.length > 0 && <div className="mt-4"><div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--highlight)]"><ShieldAlert size={16} /> Risk Signals</div><div className="flex flex-wrap gap-2">{summary.risk_signals.map((r: string) => <span key={r} className="inline-flex items-center rounded-full border border-[var(--highlight)]/20 bg-[var(--highlight-bg)] px-3 py-1 text-xs font-semibold text-[var(--highlight)]">{r}</span>)}</div></div>}
             </section>
 
@@ -736,7 +736,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             {thread_summaries.length > 0 && (
               <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
                 <div className="mb-4 flex items-center gap-2"><FileText size={16} className="text-[var(--info)]" /><span className="text-sm font-semibold">Thread Summaries</span></div>
-                <div className="space-y-3">{thread_summaries.map((item: any) => <div key={item.conversation_id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="text-xs text-[var(--text-secondary)] mb-2">Generated: {fmtDt(item.generated_at)}</div><div className="text-sm font-semibold text-[var(--text-primary)]">{item.summary?.status||"No status"}</div><div className="mt-2 text-sm leading-6 text-[#C9D1D9]">{item.summary?.overview||"No overview"}</div></div>)}</div>
+                <div className="space-y-3">{thread_summaries.map((item: any) => <div key={item.conversation_id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"><div className="text-xs text-[var(--text-secondary)] mb-2">Generated: {fmtDt(item.generated_at)}</div><div className="text-sm font-semibold text-[var(--text-primary)]">{item.summary?.status||"No status"}</div><div className="mt-2 text-sm leading-6 text-[var(--text-primary)] [overflow-wrap:anywhere]">{item.summary?.overview||"No overview"}</div></div>)}</div>
               </section>
             )}
           </div>
@@ -780,7 +780,7 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             {/* Notes */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-4 flex items-center gap-2"><CheckCircle2 size={16} className="text-[var(--info)]" /><span className="text-sm font-semibold">Recent Notes</span></div>
-              <div className="space-y-2">{notes.length === 0 ? <div className="text-sm text-[var(--text-secondary)]">No notes.</div> : notes.slice(0,8).map((n: any) => <div key={n.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"><div className="mb-1 text-[10px] text-[var(--text-muted)]">{fmtRel(n.created_at)}</div><div className="text-sm leading-6 text-[#C9D1D9] whitespace-pre-wrap">{n.text}</div></div>)}</div>
+              <div className="space-y-2">{notes.length === 0 ? <div className="text-sm text-[var(--text-secondary)]">No notes.</div> : notes.slice(0,8).map((n: any) => <div key={n.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"><div className="mb-1 text-[10px] text-[var(--text-muted)]">{fmtRel(n.created_at)}</div><div className="text-sm leading-6 text-[var(--text-primary)] [overflow-wrap:anywhere] whitespace-pre-wrap">{n.text}</div></div>)}</div>
             </section>
           </div>
         </div>

@@ -5403,10 +5403,10 @@ export default function ConversationDetail({
                     v === null || v === undefined || v === "" ? "—" : String(v);
                   const Field = ({ label, value }: { label: string; value: any }) => (
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                         {label}
                       </span>
-                      <span className="text-sm text-[var(--text-primary)] break-words">{dash(value)}</span>
+                      <span className="text-sm text-[var(--text-primary)] break-words [overflow-wrap:anywhere]">{dash(value)}</span>
                     </div>
                   );
                   const acc = si.accessorial_charges || {};
@@ -5481,10 +5481,10 @@ export default function ConversationDetail({
                   const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
                   const Field = ({ label, value }: { label: string; value: any }) => (
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                         {label}
                       </span>
-                      <span className="text-sm text-[var(--text-primary)] break-words">{value}</span>
+                      <span className="text-sm text-[var(--text-primary)] break-words [overflow-wrap:anywhere]">{value}</span>
                     </div>
                   );
                   const DocChip = ({ label, on }: { label: string; on: boolean }) => (
@@ -5553,7 +5553,7 @@ export default function ConversationDetail({
                                 <Field label="Sample Handling" value={dash(q.sample_handling)} />
                               </div>
                               <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                                   Docs Supplied
                                 </span>
                                 <DocChip label="COA" on={docs.coa === true} />
