@@ -123,6 +123,180 @@ function computeOpenClosers(prefix: string): string | null {
   return stack.reverse().join("");
 }
 
+// ── Auto-promote extracted supplier info + quotes into the persistent,
+// editable supplier_profiles / supplier_quotes tables (Step 4 / model "Y").
+// Rules:
+//   • Profile: FILL-ONLY-IF-EMPTY — write an extracted field only when the
+//     saved profile's field is currently blank. Never overwrites existing or
+//     human-edited values.
+//   • Quotes: INSERT-IF-NOT-EXISTS keyed on (supplier_contact_id, material_name,
+//     source_conversation_id). If a row for that material+thread already exists
+//     (possibly human-edited), leave it untouched.
+// Best-effort: any failure here must NOT break the summary response.
+const PROMOTE_PROFILE_FIELDS = [
+  "type",
+  "pickup_address",
+  "website",
+  "purchasing_thresholds",
+  "shipping_terms",
+  "shipping_email",
+  "billing_email",
+  "acc_hazmat_handling_rate",
+  "acc_temperature_controlled_rate",
+  "acc_liftgate_service_rate",
+  "acc_special_packaging_rate",
+  "acc_other",
+  "payment_method",
+  "payment_details",
+  "payment_terms_type",
+  "payment_terms_details",
+  "facility_certifications",
+  "other_notes",
+];
+
+// Map the extracted supplier_information object onto the flat profile columns.
+function mapExtractedProfile(si: any): Record<string, any> {
+  if (!si || typeof si !== "object") return {};
+  const acc = si.accessorial_charges || {};
+  const payInfo = si.payment_information || {};
+  const payTerms = si.payment_terms || {};
+  return {
+    type: si.type && si.type !== "unknown" ? si.type : null,
+    pickup_address: si.pickup_address,
+    website: si.website,
+    purchasing_thresholds: si.purchasing_thresholds,
+    shipping_terms: si.shipping_terms,
+    shipping_email: si.shipping_email,
+    billing_email: si.billing_email,
+    acc_hazmat_handling_rate: acc.hazmat_handling_rate,
+    acc_temperature_controlled_rate: acc.temperature_controlled_storage_rate,
+    acc_liftgate_service_rate: acc.liftgate_service_rate,
+    acc_special_packaging_rate: acc.special_packaging_rate,
+    acc_other: acc.other,
+    payment_method: payInfo.method,
+    payment_details: payInfo.details,
+    payment_terms_type: payTerms.type,
+    payment_terms_details: payTerms.details,
+    facility_certifications: si.facility_certifications_compliances,
+    other_notes: si.other_notes,
+  };
+}
+
+// Parse a best-effort lowest/base numeric price from the extracted price string.
+function parsePriceNumeric(price: any): number | null {
+  if (price === null || price === undefined) return null;
+  const s = String(price);
+  const matches = s.match(/[0-9]+(?:\.[0-9]+)?/g);
+  if (!matches || matches.length === 0) return null;
+  const nums = matches.map((m) => parseFloat(m)).filter((n) => Number.isFinite(n));
+  if (nums.length === 0) return null;
+  return Math.min(...nums);
+}
+
+async function autoPromoteToSupplierProfile(
+  supabase: any,
+  conversation: any,
+  parsed: any,
+  actorId: string | null
+): Promise<void> {
+  try {
+    // Resolve the supplier this thread belongs to.
+    let supplierContactId: string | null = conversation.supplier_contact_id || null;
+    if (!supplierContactId && conversation.from_email) {
+      const { data: sc } = await supabase
+        .from("supplier_contacts")
+        .select("id")
+        .eq("email", String(conversation.from_email).trim().toLowerCase())
+        .maybeSingle();
+      supplierContactId = sc?.id || null;
+    }
+    if (!supplierContactId) return; // not a supplier thread — nothing to promote
+
+    // ── Profile: fill-only-if-empty ──
+    const extracted = mapExtractedProfile(coerceSupplierInformation(parsed.supplier_information));
+    const { data: existingProfile } = await supabase
+      .from("supplier_profiles")
+      .select("*")
+      .eq("supplier_contact_id", supplierContactId)
+      .maybeSingle();
+
+    const profileUpdate: Record<string, any> = {};
+    for (const f of PROMOTE_PROFILE_FIELDS) {
+      const incoming = extracted[f];
+      const hasIncoming = incoming !== null && incoming !== undefined && incoming !== "";
+      const existingVal = existingProfile ? existingProfile[f] : null;
+      const existingEmpty = existingVal === null || existingVal === undefined || existingVal === "";
+      if (hasIncoming && existingEmpty) profileUpdate[f] = incoming;
+    }
+    if (Object.keys(profileUpdate).length > 0 || !existingProfile) {
+      await supabase
+        .from("supplier_profiles")
+        .upsert(
+          { supplier_contact_id: supplierContactId, updated_by: actorId, ...profileUpdate },
+          { onConflict: "supplier_contact_id" }
+        );
+    }
+
+    // ── Quotes: insert-if-not-exists per (material, thread) ──
+    const quotes = coerceQuotes(parsed.quotes);
+    if (quotes.length > 0) {
+      const { data: existingQuotes } = await supabase
+        .from("supplier_quotes")
+        .select("id, material_name")
+        .eq("supplier_contact_id", supplierContactId)
+        .eq("source_conversation_id", conversation.id);
+      const existingNames = new Set(
+        (existingQuotes || []).map((q: any) => String(q.material_name || "").trim().toLowerCase())
+      );
+
+      const rows: any[] = [];
+      for (const q of quotes) {
+        const name = String(q.material_name || "").trim();
+        if (!name) continue; // material_name is required
+        if (existingNames.has(name.toLowerCase())) continue; // don't clobber existing/edited
+        rows.push({
+          supplier_contact_id: supplierContactId,
+          source_conversation_id: conversation.id,
+          created_by: actorId,
+          material_name: name,
+          inci_trade_name: q.inci_trade_name,
+          grade: q.grade,
+          price_raw: q.price,
+          price_numeric: parsePriceNumeric(q.price),
+          price_qty: q.price_qty,
+          price_unit: q.price_unit,
+          case_width: q.case_width,
+          case_height: q.case_height,
+          case_length: q.case_length,
+          case_weight: q.case_weight,
+          case_size: q.case_size,
+          pack_size: q.pack_size,
+          quote_provided_date: q.quote_provided_date,
+          quote_expiry: q.quote_expiry,
+          lead_time: q.lead_time,
+          moq: q.moq,
+          max_inventory: q.max_inventory,
+          hazardous: q.hazardous,
+          refrigerated: q.refrigerated,
+          equipment_accessorials: q.equipment_accessorials,
+          material_id: q.material_id,
+          doc_coa: q.docs_supplied?.coa === true,
+          doc_sds: q.docs_supplied?.sds === true,
+          doc_tds: q.docs_supplied?.tds === true,
+          sample_handling: q.sample_handling,
+          other_notes: q.other_notes,
+        });
+      }
+      if (rows.length > 0) {
+        await supabase.from("supplier_quotes").insert(rows);
+      }
+    }
+  } catch (e: any) {
+    // Best-effort: never break the summary because promotion failed.
+    console.error("[thread-summary] auto-promote failed:", e?.message || e);
+  }
+}
+
 // Coerce a value to a trimmed string or null (no guessing, no defaults).
 function strOrNull(v: any): string | null {
   if (typeof v === "string") {
@@ -433,7 +607,7 @@ export async function POST(req: NextRequest) {
 
     const { data: conversation, error: convoError } = await supabase
       .from("conversations")
-      .select("id, subject, from_name, from_email, last_message_at")
+      .select("id, subject, from_name, from_email, last_message_at, supplier_contact_id")
       .eq("id", conversationId)
       .single();
 
@@ -593,6 +767,12 @@ export async function POST(req: NextRequest) {
     if (saveError) {
       return NextResponse.json({ error: saveError.message }, { status: 500 });
     }
+
+    // Auto-promote the extracted supplier info + quotes into the persistent,
+    // editable supplier_profiles / supplier_quotes tables. Awaited (so it
+    // completes before the serverless function returns) but best-effort —
+    // it never throws back into the response.
+    await autoPromoteToSupplierProfile(supabase, conversation, parsed, session.teamMember.id || null);
 
     return NextResponse.json({ summary: saved, cached: false });
   } catch (error: any) {
