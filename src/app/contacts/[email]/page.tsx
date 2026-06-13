@@ -768,13 +768,13 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
             {/* Completed */}
             {completedTasks.length > 0 && <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-4 flex items-center gap-2"><CheckCircle2 size={16} className="text-[var(--accent)]" /><span className="text-sm font-semibold">Completed ({completedTasks.length})</span></div>
-              <div className="space-y-2">{completedTasks.slice(0,5).map((t: any) => <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"><div className="text-sm text-[var(--text-secondary)] line-through">{t.text}</div></div>)}{completedTasks.length > 5 && <div className="text-[10px] text-[var(--text-muted)]">+{completedTasks.length-5} more</div>}</div>
+              <div className="space-y-2">{completedTasks.slice(0,5).map((t: any) => <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3"><div className="text-sm text-[var(--text-secondary)] line-through [overflow-wrap:anywhere]">{t.text}</div></div>)}{completedTasks.length > 5 && <div className="text-[10px] text-[var(--text-muted)]">+{completedTasks.length-5} more</div>}</div>
             </section>}
 
             {/* Dismissed */}
             {dismissedTasks.length > 0 && <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <div className="mb-4 flex items-center gap-2"><Clock3 size={16} className="text-[var(--warning)]" /><span className="text-sm font-semibold">Dismissed ({dismissedTasks.length})</span></div>
-              <div className="space-y-2">{dismissedTasks.map((t: any) => <div key={t.id} className="rounded-xl border border-[var(--warning)]/15 bg-[var(--surface)] p-3"><div className="text-sm text-[var(--warning)] italic">{t.text}</div>{t.dismiss_reason && <div className="text-[10px] text-[var(--text-secondary)] mt-1">Reason: {t.dismiss_reason}</div>}</div>)}</div>
+              <div className="space-y-2">{dismissedTasks.map((t: any) => <div key={t.id} className="rounded-xl border border-[var(--warning)]/15 bg-[var(--surface)] p-3"><div className="text-sm text-[var(--warning)] italic [overflow-wrap:anywhere]">{t.text}</div>{t.dismiss_reason && <div className="text-[10px] text-[var(--text-secondary)] mt-1">Reason: {t.dismiss_reason}</div>}</div>)}</div>
             </section>}
 
             {/* Notes */}
