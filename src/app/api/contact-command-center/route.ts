@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { isNonGroupingDomain } from "@/lib/supplier-contact-resolver";
 
 export const dynamic = "force-dynamic";
 
@@ -122,11 +123,34 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Fetch supplier contact info (business hours + responsiveness score) ──
-    const { data: supplierContact } = await supabase
+    const SUPPLIER_COLS = "id, name, email, company, timezone, work_start, work_end, work_days, responsiveness_score, responsiveness_tier, score_updated_at, recent_median_minutes, all_time_median_minutes, weighted_median_minutes, qualifying_exchanges, last_exchange_at";
+    let { data: supplierContact } = await supabase
       .from("supplier_contacts")
-      .select("id, name, email, company, timezone, work_start, work_end, work_days, responsiveness_score, responsiveness_tier, score_updated_at, recent_median_minutes, all_time_median_minutes, weighted_median_minutes, qualifying_exchanges, last_exchange_at")
+      .select(SUPPLIER_COLS)
       .eq("email", email)
       .maybeSingle();
+
+    // Domain fallback: if no exact-email supplier exists but the address is on
+    // a real company domain, resolve to the canonical same-domain supplier.
+    // This makes /contacts/<any address @domain> land on the merged supplier
+    // (e.g. egbert@mudybio.com → info@mudybio.com), matching the resolver's
+    // domain-grouping. Skipped for public/marketplace/notification domains.
+    if (!supplierContact) {
+      const domain = email.split("@")[1]?.toLowerCase() || "";
+      if (domain && !isNonGroupingDomain(domain)) {
+        const { data: candidates } = await supabase
+          .from("supplier_contacts")
+          .select(SUPPLIER_COLS)
+          .ilike("email", `%@${domain}`)
+          .order("created_at", { ascending: true });
+        if (candidates && candidates.length > 0) {
+          const exact = candidates.find(
+            (c: any) => ((c.email || "").toLowerCase().split("@")[1] || "") === domain
+          );
+          if (exact) supplierContact = exact as any;
+        }
+      }
+    }
 
     // Fetch contact people for this supplier (humans at the supplier company)
     let contactPersons: any[] = [];

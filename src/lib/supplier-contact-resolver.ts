@@ -71,6 +71,55 @@ const PUBLIC_EMAIL_PROVIDERS = new Set<string>([
 
 const NOREPLY_REGEX = /^(noreply|no-reply|notifications)@/i;
 
+// ── Non-grouping domains ──────────────────────────────────────────────
+//
+// Domains where MANY UNRELATED suppliers legitimately share the same
+// domain, so we must NOT group contacts by domain (doing so would merge
+// distinct suppliers into one). This is used only by the domain-grouping
+// step in ensureSupplierContact — exact-email matching is unaffected.
+//
+// Public providers and transactional domains are also non-grouping, but
+// they're handled via their own sets below; this set is the marketplace /
+// aggregator / B2B-platform layer surfaced by the supplier-split audit.
+const NON_GROUPING_DOMAINS = new Set<string>([
+  "ingredientsonline.com",
+  "indiamart.com",
+  "tradeindia.com", "rfis.tradeindia.com",
+  "made-in-china.com",
+  "globalsources.com",
+  "alibaba.com", "service.alibaba.com", "notice.alibaba.com",
+  "globalresourcesdirect.com",
+  "faire.com", "orders.faire.com",
+  "ulprospector.com",
+  "covalo.com",
+  "lookchem.com",
+  "tenderapp.com",
+  "company.com",
+]);
+
+// Notification / transactional / platform SUBDOMAIN patterns. A domain
+// matching any of these is treated as non-grouping (and generally not a
+// real per-company supplier domain).
+export function isNonGroupingDomain(domain: string): boolean {
+  if (!domain) return true;
+  if (NON_GROUPING_DOMAINS.has(domain)) return true;
+  if (PUBLIC_EMAIL_PROVIDERS.has(domain)) return true;
+  if (TRANSACTIONAL_DOMAINS.has(domain)) return true;
+  // Notification / bulk-mail subdomains, e.g. mail.anthropic.com,
+  // email.specialchem.com, notice.x.com, orders.x.com, t.shopifyemail.com.
+  if (
+    domain.startsWith("mail.") ||
+    domain.startsWith("email.") ||
+    domain.startsWith("notice.") ||
+    domain.startsWith("orders.") ||
+    domain.startsWith("e.") ||
+    domain.endsWith(".shopifyemail.com")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 // ── Internal context ──────────────────────────────────────────────────
 //
 // The set of emails and domains considered "internal" — these are
@@ -178,6 +227,31 @@ export async function ensureSupplierContact(
     return null;
   }
   if (existing) return (existing as any).id;
+
+  // Domain-grouping (forward fix for supplier splits): if no exact-email
+  // match exists, but the sender is on a real COMPANY domain, reuse an
+  // existing supplier at the same domain rather than creating a second
+  // contact for the same company. Skipped for public providers,
+  // transactional domains, and shared marketplace/notification domains —
+  // grouping those would merge unrelated suppliers.
+  const domain = lower.split("@")[1] || "";
+  if (domain && !isNonGroupingDomain(domain)) {
+    // Match the domain exactly. We fetch same-suffix candidates with ilike
+    // (indexable-ish prefilter) then confirm the parsed domain matches
+    // exactly, so "@mudybio.com" never accidentally groups with, say,
+    // "@sub.mudybio.com" or a lookalike.
+    const { data: candidates, error: domainErr } = await supabase
+      .from("supplier_contacts")
+      .select("id, email, created_at")
+      .ilike("email", `%@${domain}`)
+      .order("created_at", { ascending: true });
+    if (!domainErr && candidates && candidates.length > 0) {
+      const exact = candidates.find(
+        (c: any) => ((c.email || "").toLowerCase().split("@")[1] || "") === domain
+      );
+      if (exact) return (exact as any).id;
+    }
+  }
 
   // Create a fresh row. Name defaults to the local-part if no display
   // name was passed in.
