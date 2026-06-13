@@ -2927,6 +2927,203 @@ export default function ConversationDetail({
     );
   }, [tasks]);
 
+  // ── Summary exports ──────────────────────────────────────────────────
+  // CSV = the quotes table (one row per material). PDF = the full summary
+  // rendered as a printable document (browser "Save as PDF"). Both are
+  // client-side, built from the already-loaded threadSummary; no server call.
+  const exportSummaryCsv = () => {
+    const s = threadSummary?.summary;
+    const quotes: any[] = Array.isArray(s?.quotes) ? s.quotes : [];
+    const subj = (convo?.subject || "summary").replace(/[^\w.-]+/g, "_").slice(0, 60);
+
+    const cols: { key: string; label: string }[] = [
+      { key: "material_name", label: "Material" },
+      { key: "inci_trade_name", label: "INCI/Trade Name" },
+      { key: "grade", label: "Grade" },
+      { key: "price", label: "Price" },
+      { key: "price_qty", label: "Price Qty" },
+      { key: "price_unit", label: "Price Unit" },
+      { key: "case_width", label: "Case Width" },
+      { key: "case_height", label: "Case Height" },
+      { key: "case_length", label: "Case Length" },
+      { key: "case_weight", label: "Case Weight" },
+      { key: "case_size", label: "Case Size" },
+      { key: "pack_size", label: "Pack Size" },
+      { key: "quote_provided_date", label: "Quote Provided" },
+      { key: "quote_expiry", label: "Quote Expiry/Valid Until" },
+      { key: "lead_time", label: "Lead Time" },
+      { key: "moq", label: "MOQ" },
+      { key: "max_inventory", label: "Max Inventory" },
+      { key: "hazardous", label: "Hazardous" },
+      { key: "refrigerated", label: "Refrigerated" },
+      { key: "equipment_accessorials", label: "Equipment Accessorials" },
+      { key: "material_id", label: "Material ID" },
+      { key: "sample_handling", label: "Sample Handling" },
+      { key: "other_notes", label: "Notes" },
+    ];
+
+    const esc = (v: any) => {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "boolean") return v ? "Yes" : "No";
+      const str = String(v);
+      // Quote-wrap and escape embedded quotes if the cell needs it.
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const headerRow = cols.map((c) => c.label).join(",");
+    const docCols = ",COA,SDS,TDS";
+    const rows = quotes.map((q) => {
+      const base = cols
+        .map((c) => esc(c.key === "price" ? q.price : q[c.key]))
+        .join(",");
+      const docs = q.docs_supplied || {};
+      return base + "," + [docs.coa, docs.sds, docs.tds].map((d) => (d === true ? "Yes" : "No")).join(",");
+    });
+
+    const csv = [headerRow + docCols, ...rows].join("\r\n");
+    // BOM so Excel reads UTF-8 correctly.
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${subj}_quotes.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSummaryPdf = () => {
+    const s = threadSummary?.summary;
+    if (!s) return;
+    const subject = convo?.subject || "Thread Summary";
+    const esc = (v: any) =>
+      String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    const dash = (v: any) => (v === null || v === undefined || v === "" ? "—" : esc(v));
+    const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
+
+    const list = (arr: any) =>
+      Array.isArray(arr) && arr.length
+        ? `<ul>${arr.map((x: any) => `<li>${esc(typeof x === "string" ? x : x?.text || "")}</li>`).join("")}</ul>`
+        : `<p class="muted">None</p>`;
+
+    const si = s.supplier_information || {};
+    const acc = si.accessorial_charges || {};
+    const payInfo = si.payment_information || {};
+    const payTerms = si.payment_terms || {};
+    const siRow = (label: string, val: any) =>
+      `<tr><td class="lbl">${esc(label)}</td><td>${dash(val)}</td></tr>`;
+
+    const quotes: any[] = Array.isArray(s.quotes) ? s.quotes : [];
+    const quoteBlocks = quotes.length
+      ? quotes
+          .map((q) => {
+            const docs = q.docs_supplied || {};
+            const f = (label: string, val: any) =>
+              `<tr><td class="lbl">${esc(label)}</td><td>${dash(val)}</td></tr>`;
+            return `<div class="quote">
+              <h4>${dash(q.material_name)}</h4>
+              <table>
+                ${f("INCI/Trade Name", q.inci_trade_name)}
+                ${f("Grade(s)", q.grade)}
+                ${f("Price", q.price)}
+                ${f("Price Qty / Unit", `${dash(q.price_qty)} / ${dash(q.price_unit)}`)}
+                ${f("Case W/H/L", `${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`)}
+                ${f("Case Weight", q.case_weight)}
+                ${f("Case Size", q.case_size)}
+                ${f("Pack Size", q.pack_size)}
+                ${f("Quote Provided", q.quote_provided_date)}
+                ${f("Quote Expiry / Valid Until", q.quote_expiry)}
+                ${f("Lead Time", q.lead_time)}
+                ${f("MOQ", q.moq)}
+                ${f("Max Inventory", q.max_inventory)}
+                ${f("Hazardous", yn(q.hazardous))}
+                ${f("Refrigerated", yn(q.refrigerated))}
+                ${f("Equipment Accessorials", q.equipment_accessorials)}
+                ${f("Material ID", q.material_id)}
+                ${f("Docs", `COA ${docs.coa ? "✓" : "—"} · SDS ${docs.sds ? "✓" : "—"} · TDS ${docs.tds ? "✓" : "—"}`)}
+                ${f("Sample Handling", q.sample_handling)}
+                ${f("Notes", q.other_notes)}
+              </table>
+            </div>`;
+          })
+          .join("")
+      : `<p class="muted">No quotes extracted from this thread.</p>`;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(subject)} — Summary</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #15140f; margin: 32px; line-height: 1.5; }
+        h1 { font-size: 20px; margin: 0 0 4px; }
+        h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: #5a544a; margin: 22px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        h4 { font-size: 13px; margin: 0 0 6px; }
+        .meta { color: #5a544a; font-size: 12px; margin-bottom: 8px; }
+        .muted { color: #8a8478; }
+        p { margin: 4px 0; font-size: 13px; }
+        ul { margin: 4px 0; padding-left: 20px; font-size: 13px; }
+        li { margin: 2px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 4px 0; }
+        td { padding: 3px 6px; vertical-align: top; border-bottom: 1px solid #f0eee8; word-break: break-word; }
+        td.lbl { width: 38%; color: #5a544a; font-weight: 600; }
+        .quote { border: 1px solid #e5e2da; border-radius: 8px; padding: 10px 12px; margin: 10px 0; page-break-inside: avoid; }
+        .grid td.lbl { width: 30%; }
+      </style></head><body>
+      <h1>${esc(subject)}</h1>
+      <div class="meta">Thread summary${threadSummary?.generated_at ? " · generated " + esc(new Date(threadSummary.generated_at).toLocaleString()) : ""}</div>
+
+      <h2>Overview</h2><p>${dash(s.overview)}</p>
+      <h2>Current Status</h2><p>${dash(s.status)}</p>
+      <h2>Supplier Intent</h2><p>${dash(s.intent)}${s.confidence ? ` (confidence: ${esc(s.confidence)})` : ""}</p>
+      <h2>Open Action Items</h2>${list(s.open_action_items)}
+      <h2>Suggested Tasks</h2>${list(s.suggested_tasks)}
+      <h2>Completed Items</h2>${list(s.completed_items)}
+      <h2>Next Step</h2><p>${dash(s.next_step)}</p>
+
+      <h2>Supplier Information</h2>
+      <table class="grid">
+        ${siRow("Type", si.type ? String(si.type).replace(/_/g, " ") : null)}
+        ${siRow("Website", si.website)}
+        ${siRow("Pick-up Address", si.pickup_address)}
+        ${siRow("Purchasing Thresholds", si.purchasing_thresholds)}
+        ${siRow("Contact Name", si.contact_name)}
+        ${siRow("Contact Email", si.contact_email)}
+        ${siRow("Contact Phone", si.contact_phone)}
+        ${siRow("Additional Contacts", si.additional_contacts)}
+        ${siRow("Shipping Terms", si.shipping_terms)}
+        ${siRow("Shipping Email", si.shipping_email)}
+        ${siRow("Billing Email", si.billing_email)}
+        ${siRow("Hazmat Handling Rate", acc.hazmat_handling_rate)}
+        ${siRow("Temp-Controlled Storage Rate", acc.temperature_controlled_storage_rate)}
+        ${siRow("Liftgate Service Rate", acc.liftgate_service_rate)}
+        ${siRow("Special Packaging Rate", acc.special_packaging_rate)}
+        ${siRow("Other Accessorials", acc.other)}
+        ${siRow("Payment Method", payInfo.method)}
+        ${siRow("Payment Details", payInfo.details)}
+        ${siRow("Payment Terms", payTerms.type)}
+        ${siRow("Payment Terms Details", payTerms.details)}
+        ${siRow("Facility Certifications", si.facility_certifications_compliances)}
+        ${siRow("Other Notes", si.other_notes)}
+      </table>
+
+      <h2>Quotes (${quotes.length})</h2>
+      ${quoteBlocks}
+
+      <script>window.onload = function(){ window.print(); }</script>
+      </body></html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) {
+      alert("Please allow pop-ups to export the PDF.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
   const suggestedTaskItems = useMemo<SuggestedTaskItem[]>(() => {
     return (threadSummary?.summary?.suggested_tasks || [])
       .filter((item: string) => typeof item === "string" && item.trim())
@@ -5353,14 +5550,36 @@ export default function ConversationDetail({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => generateSummary(true)}
-                disabled={threadSummaryGenerating}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)] disabled:opacity-60"
-              >
-                {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
-              </button>
+              <div className="flex items-center gap-2">
+                {threadSummary?.summary && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={exportSummaryPdf}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                      title="Export the full summary as a PDF"
+                    >
+                      Export PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportSummaryCsv}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                      title="Export the quotes table as a CSV"
+                    >
+                      Export CSV
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => generateSummary(true)}
+                  disabled={threadSummaryGenerating}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-semibold text-[var(--info)] hover:bg-[var(--surface-2)] disabled:opacity-60"
+                >
+                  {threadSummaryGenerating ? "Refreshing..." : "Refresh Summary"}
+                </button>
+              </div>
             </div>
 
             {threadSummaryLoading && (
