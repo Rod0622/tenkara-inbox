@@ -386,11 +386,6 @@ export default function OutreachTrackerPage() {
         </div>
       </div>
 
-      {/* TEMP DEBUG 2 — remove after diagnosing */}
-      <div className="px-6 py-1 text-[10px] font-mono text-yellow-400 bg-black/40 break-all">
-        acctFilter=[{accountFilter.join(",")}] rows={rows.length} | rowsWithoutVita={rows.filter((r) => !(r.labels || []).includes("Vita Organica")).length} | sampleBadLabels={JSON.stringify(rows.filter((r) => !(r.labels || []).includes("Vita Organica")).slice(0, 3).map((r) => ({ s: r.subject, l: r.labels })))}
-      </div>
-
       {/* ── Table ───────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto tracker-scroll">
         {error && (
@@ -419,7 +414,7 @@ export default function OutreachTrackerPage() {
                 <Th style={{ minWidth: 240 }}>Follow-up log</Th>
               </tr>
             </thead>
-            <tbody>
+            <tbody key={`${accountFilter.join(",")}|${statusFilter.join(",")}|${assigneeFilter.join(",")}|${labelFilter.join(",")}|${sublabelFilter.join(",")}|${searchDebounced}|${createdFrom}|${createdTo}`}>
               {rows.length === 0 && !loading ? (
                 <tr>
                   <td colSpan={11} className="text-center py-8 text-[var(--text-muted)]">
