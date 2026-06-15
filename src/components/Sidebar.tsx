@@ -27,6 +27,7 @@ import {
   Moon,
   Target,
   Pin,
+  Mic,
 } from "lucide-react";
 import type { SidebarProps, Folder } from "@/types";
 import UserOOOPopover from "./UserOOOPopover";
@@ -147,6 +148,7 @@ export default function Sidebar({
   taskInProgressCount = 0,
   mySentCount: mySentCountProp,
   onMoveToFolder,
+  onOpenTranscripts,
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -512,6 +514,16 @@ export default function Sidebar({
         Shared Inbox
       </div>
     </div>
+
+    {onOpenTranscripts && (
+      <button
+        onClick={onOpenTranscripts}
+        className="w-7 h-7 rounded-md flex items-center justify-center transition-all text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface)]"
+        title="Meeting transcripts"
+      >
+        <Mic size={14} />
+      </button>
+    )}
 
     <button
       onClick={handleSync}
