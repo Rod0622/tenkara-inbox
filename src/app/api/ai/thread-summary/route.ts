@@ -282,9 +282,8 @@ async function autoPromoteToSupplierProfile(
           case_width: q.case_width,
           case_height: q.case_height,
           case_length: q.case_length,
-          case_weight: q.case_weight,
-          case_size: q.case_size,
-          pack_size: q.pack_size,
+          // case/weight/pack consolidated into one field; stored in pack_size.
+          pack_size: q.case_pack_size,
           quote_provided_date: q.quote_provided_date,
           quote_expiry: q.quote_expiry,
           lead_time: q.lead_time,
@@ -419,9 +418,7 @@ function coerceQuotes(quotes: any) {
       case_width: strOrNull(obj.case_width),
       case_height: strOrNull(obj.case_height),
       case_length: strOrNull(obj.case_length),
-      case_weight: strOrNull(obj.case_weight),
-      case_size: strOrNull(obj.case_size),
-      pack_size: strOrNull(obj.pack_size),
+      case_pack_size: strOrNull(obj.case_pack_size),
       quote_provided_date: strOrNull(obj.quote_provided_date),
       quote_expiry: strOrNull(obj.quote_expiry),
       lead_time: strOrNull(obj.lead_time),
@@ -535,9 +532,7 @@ Return ONLY valid JSON with this exact shape:
       "case_width": null,
       "case_height": null,
       "case_length": null,
-      "case_weight": null,
-      "case_size": null,
-      "pack_size": null,
+      "case_pack_size": null,
       "quote_provided_date": null,
       "quote_expiry": null,
       "lead_time": null,
@@ -577,6 +572,8 @@ Supplier information & quotes extraction rules (IMPORTANT):
 - For each quote: "quote_provided_date" = the date the supplier actually provided/sent this quote or price (use the message date if the price is stated in that message). "quote_expiry" = the date or duration the quote is stated to remain valid until (e.g. "valid for 30 days", "expires 2026-07-01"). These are different fields — fill each only if supported.
 - For docs_supplied, set coa/sds/tds to true only if the thread indicates that document was provided or offered; otherwise false.
 - For prices, put the numeric/text price in "price", the quantity it applies to in "price_qty", and the unit in "price_unit" (e.g. price "12.50", price_qty "1", price_unit "kg").
+- "case_pack_size" is a SINGLE combined field for case/pack size, case weight, and pack size — capture whatever the supplier states about packaging size/weight here, together (e.g. "25kg fiber drum" or "1kg aluminum foil bag, 25 units/case"). Do not split these out.
+- "lead_time": if the supplier indicates the material is in stock / ready stock / available now / ships immediately, reflect that in lead_time (e.g. "In stock"). If they give both an in-stock note and a shipping time, capture both (e.g. "In stock — ships in 3 days"). If only a time is given, use that.
 
 Thread subject: ${params.subject}
 Conversation from: ${params.fromName || ""} <${params.fromEmail || ""}>

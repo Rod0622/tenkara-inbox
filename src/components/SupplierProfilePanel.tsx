@@ -36,9 +36,7 @@ const QUOTE_FIELDS: { key: string; label: string; type?: "text" | "bool"; full?:
   { key: "case_width", label: "Case Width" },
   { key: "case_height", label: "Case Height" },
   { key: "case_length", label: "Case Length" },
-  { key: "case_weight", label: "Case Weight" },
-  { key: "case_size", label: "Case Size" },
-  { key: "pack_size", label: "Pack Size" },
+  { key: "pack_size", label: "Case / Pack Size" },
   { key: "quote_provided_date", label: "Quote Provided" },
   { key: "quote_expiry", label: "Quote Expiry / Valid Until" },
   { key: "lead_time", label: "Lead Time" },
@@ -381,9 +379,7 @@ export default function SupplierProfilePanel({
                       label="Case W / H / L"
                       value={`${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`}
                     />
-                    <Field label="Case Weight" value={dash(q.case_weight)} />
-                    <Field label="Case Size" value={dash(q.case_size)} />
-                    <Field label="Pack Size" value={dash(q.pack_size)} />
+                    <Field label="Case / Pack Size" value={dash(q.pack_size || q.case_size || q.case_weight)} />
                     <Field label="Quote Provided" value={dash(q.quote_provided_date)} />
                     <Field label="Quote Expiry / Valid Until" value={dash(q.quote_expiry)} />
                     <Field label="Lead Time" value={dash(q.lead_time)} />

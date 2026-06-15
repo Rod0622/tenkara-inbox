@@ -2946,9 +2946,7 @@ export default function ConversationDetail({
       { key: "case_width", label: "Case Width" },
       { key: "case_height", label: "Case Height" },
       { key: "case_length", label: "Case Length" },
-      { key: "case_weight", label: "Case Weight" },
-      { key: "case_size", label: "Case Size" },
-      { key: "pack_size", label: "Pack Size" },
+      { key: "case_pack_size", label: "Case / Pack Size" },
       { key: "quote_provided_date", label: "Quote Provided" },
       { key: "quote_expiry", label: "Quote Expiry/Valid Until" },
       { key: "lead_time", label: "Lead Time" },
@@ -2974,7 +2972,11 @@ export default function ConversationDetail({
     const docCols = ",COA,SDS,TDS";
     const rows = quotes.map((q) => {
       const base = cols
-        .map((c) => esc(c.key === "price" ? q.price : q[c.key]))
+        .map((c) => {
+          if (c.key === "price") return esc(q.price);
+          if (c.key === "case_pack_size") return esc(q.case_pack_size || q.pack_size || q.case_size || q.case_weight);
+          return esc(q[c.key]);
+        })
         .join(",");
       const docs = q.docs_supplied || {};
       return base + "," + [docs.coa, docs.sds, docs.tds].map((d) => (d === true ? "Yes" : "No")).join(",");
@@ -3032,9 +3034,7 @@ export default function ConversationDetail({
                 ${f("Price", q.price)}
                 ${f("Price Qty / Unit", `${dash(q.price_qty)} / ${dash(q.price_unit)}`)}
                 ${f("Case W/H/L", `${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`)}
-                ${f("Case Weight", q.case_weight)}
-                ${f("Case Size", q.case_size)}
-                ${f("Pack Size", q.pack_size)}
+                ${f("Case / Pack Size", q.case_pack_size || q.pack_size || q.case_size || q.case_weight)}
                 ${f("Quote Provided", q.quote_provided_date)}
                 ${f("Quote Expiry / Valid Until", q.quote_expiry)}
                 ${f("Lead Time", q.lead_time)}
@@ -5758,9 +5758,7 @@ export default function ConversationDetail({
                                   label="Case W / H / L"
                                   value={`${dash(q.case_width)} / ${dash(q.case_height)} / ${dash(q.case_length)}`}
                                 />
-                                <Field label="Case Weight" value={dash(q.case_weight)} />
-                                <Field label="Case Size" value={dash(q.case_size)} />
-                                <Field label="Pack Size" value={dash(q.pack_size)} />
+                                <Field label="Case / Pack Size" value={dash(q.case_pack_size || q.pack_size || q.case_size || q.case_weight)} />
                                 <Field label="Quote Provided" value={dash(q.quote_provided_date)} />
                                 <Field label="Quote Expiry / Valid Until" value={dash(q.quote_expiry)} />
                                 <Field label="Lead Time" value={dash(q.lead_time)} />
