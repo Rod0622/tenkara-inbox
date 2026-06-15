@@ -85,6 +85,11 @@ export default function OutreachTrackerPage() {
 
   // Data
   const [rows, setRows] = useState<Row[]>([]);
+  // Guards against out-of-order fetch responses: when filters change rapidly,
+  // multiple requests can be in flight, and a slower earlier (e.g. unfiltered)
+  // response can resolve AFTER a later filtered one, overwriting the table with
+  // stale rows. Each request gets an incrementing id; only the latest applies.
+  const rowsReqSeq = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,6 +134,7 @@ export default function OutreachTrackerPage() {
 
   // ── Rows fetch whenever filters change ───────────────────────────────
   const loadRows = useCallback(async () => {
+    const seq = ++rowsReqSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -148,13 +154,18 @@ export default function OutreachTrackerPage() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
+      // Ignore if a newer request has since been issued (stale response).
+      if (seq !== rowsReqSeq.current) return;
       setRows(data.rows || []);
     } catch (e: any) {
+      if (seq !== rowsReqSeq.current) return; // stale error; newer request owns state
       console.error("[outreach-tracker] rows load failed:", e);
       setError(e?.message || "Failed to load conversations");
       setRows([]);
     } finally {
-      setLoading(false);
+      // Only the latest request clears the loading flag, so the spinner stays
+      // up until the current filter's data actually arrives.
+      if (seq === rowsReqSeq.current) setLoading(false);
     }
   }, [accountFilter, statusFilter, assigneeFilter, labelFilter, sublabelFilter, searchDebounced, createdFrom, createdTo]);
 
