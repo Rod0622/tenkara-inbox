@@ -726,7 +726,7 @@ export async function POST(req: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 16000,
+      max_tokens: 32000,
       temperature: 0,
       messages: [{ role: "user", content: prompt }],
     });
@@ -743,6 +743,17 @@ export async function POST(req: NextRequest) {
     const wasTruncated = response.stop_reason === "max_tokens";
 
     let parsed: any = salvageJson(text);
+
+    // Diagnostics: surface truncation and how many quotes survived parsing.
+    // A large multi-material thread that hits the token cap will salvage only
+    // the complete quotes, which can be fewer than the model started emitting.
+    if (wasTruncated) {
+      const recovered = Array.isArray(parsed?.quotes) ? parsed.quotes.length : 0;
+      console.warn(
+        `[thread-summary] response hit max_tokens (truncated) for conversation ${conversationId}; ` +
+          `recovered ${recovered} quote(s) after salvage. Thread may need chunked extraction.`
+      );
+    }
 
     if (!parsed || typeof parsed !== "object") {
       // Could not recover anything usable. Rather than wipe a previously-good
@@ -815,7 +826,7 @@ export async function POST(req: NextRequest) {
     // it never throws back into the response.
     await autoPromoteToSupplierProfile(supabase, conversation, parsed, session.teamMember.id || null);
 
-    return NextResponse.json({ summary: saved, cached: false });
+    return NextResponse.json({ summary: saved, cached: false, truncated: wasTruncated });
   } catch (error: any) {
     console.error("POST /api/ai/thread-summary failed:", error);
     return NextResponse.json(
