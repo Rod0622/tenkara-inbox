@@ -85,6 +85,49 @@ export async function GET(req: NextRequest) {
   //   • AND across the two filters (must match both label AND sublabel)
   let labelFilteredIds: string[] | null = null;
 
+  // ── Account filter is a LABEL filter ────────────────────────────
+  // Each email account has a brand label of the SAME NAME (e.g. account
+  // "Vita Organica" ↔ label "Vita Organica"). Filtering by account means
+  // "conversations carrying that brand's label" — NOT conversations whose
+  // email_account_id matches (those diverge: a Vita-account conversation can
+  // carry a Bobber Labs label or no brand label, and should be governed by
+  // the label). We resolve the selected account ids → their names → the
+  // labels with matching names, then restrict by those labels.
+  if (accountIds.length > 0) {
+    const { data: accs, error: accErr } = await supabase
+      .from("email_accounts")
+      .select("id, name")
+      .in("id", accountIds);
+    if (accErr) {
+      return NextResponse.json({ error: accErr.message }, { status: 500 });
+    }
+    const accountNames = (accs || []).map((a: any) => a.name).filter(Boolean);
+
+    let brandLabelConvIds = new Set<string>();
+    if (accountNames.length > 0) {
+      const { data: brandLabels, error: blErr } = await supabase
+        .from("labels")
+        .select("id")
+        .in("name", accountNames);
+      if (blErr) {
+        return NextResponse.json({ error: blErr.message }, { status: 500 });
+      }
+      const brandLabelIds = (brandLabels || []).map((l: any) => l.id);
+      if (brandLabelIds.length > 0) {
+        const { data: cl, error: clErr } = await supabase
+          .from("conversation_labels")
+          .select("conversation_id")
+          .in("label_id", brandLabelIds);
+        if (clErr) {
+          return NextResponse.json({ error: clErr.message }, { status: 500 });
+        }
+        brandLabelConvIds = new Set((cl || []).map((r: any) => r.conversation_id));
+      }
+    }
+    // Account filter is authoritative: intersect into labelFilteredIds.
+    labelFilteredIds = Array.from(brandLabelConvIds);
+  }
+
   if (labelIds.length > 0) {
     const { data, error } = await supabase
       .from("conversation_labels")
@@ -93,7 +136,13 @@ export async function GET(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    labelFilteredIds = Array.from(new Set((data || []).map((r: any) => r.conversation_id)));
+    const labelSet = new Set<string>((data || []).map((r: any) => r.conversation_id as string));
+    if (labelFilteredIds === null) {
+      labelFilteredIds = Array.from(labelSet);
+    } else {
+      // Intersect with the account-derived set (AND).
+      labelFilteredIds = labelFilteredIds.filter((id) => labelSet.has(id));
+    }
   }
 
   if (sublabelIds.length > 0) {
@@ -104,7 +153,7 @@ export async function GET(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    const sublabelSet = new Set((data || []).map((r: any) => r.conversation_id));
+    const sublabelSet = new Set<string>((data || []).map((r: any) => r.conversation_id as string));
     if (labelFilteredIds === null) {
       labelFilteredIds = Array.from(sublabelSet);
     } else {
@@ -126,7 +175,8 @@ export async function GET(req: NextRequest) {
   // Apply every filter to a builder. Called per chunk because each
   // chunk needs its own builder instance (.range() finalizes the slice).
   const applyConvFilters = (builder: any) => {
-    if (accountIds.length)         builder = builder.in("email_account_id", accountIds);
+    // NOTE: account filtering is handled via brand labels (see labelFilteredIds
+    // above), NOT via email_account_id — the brand label governs membership.
     if (statusIds.length)          builder = builder.in("outreach_status_id", statusIds);
     if (assigneeIds.length)        builder = builder.in("assignee_id", assigneeIds);
     if (labelFilteredIds !== null) builder = builder.in("id", labelFilteredIds);
