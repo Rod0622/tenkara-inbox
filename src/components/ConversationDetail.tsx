@@ -317,6 +317,13 @@ export default function ConversationDetail({
   const [followUpCustomTime, setFollowUpCustomTime] = useState("");
   const [followUpNote, setFollowUpNote] = useState("");
   const [settingFollowUp, setSettingFollowUp] = useState(false);
+  // Persistent (accumulated) quotes for this conversation, read from the
+  // supplier_quotes store and filtered to this thread. The Summary tab renders
+  // these instead of the per-extraction snapshot, so quotes already gathered
+  // are never lost when a later refresh re-extracts from a smaller message
+  // window. Refresh still re-extracts + auto-promotes (adding/filling the
+  // store); the display just reads the durable, accumulated rows.
+  const [persistedQuotes, setPersistedQuotes] = useState<any[]>([]);
   const [showInlineCompose, setShowInlineCompose] = useState(false);
   const [inlineComposeTo, setInlineComposeTo] = useState("");
   const [inlineComposeSubject, setInlineComposeSubject] = useState("");
@@ -2927,13 +2934,68 @@ export default function ConversationDetail({
     );
   }, [tasks]);
 
+  // Load accumulated quotes for this conversation's supplier, filtered to this
+  // thread. Reused on mount, on conversation change, and after a summary
+  // refresh (auto-promote may have added rows).
+  const loadPersistedQuotes = useCallback(async () => {
+    const supplierId = (convo as any)?.supplier_contact_id;
+    if (!supplierId) {
+      setPersistedQuotes([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/supplier-quotes?supplier_contact_id=${supplierId}`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const all: any[] = Array.isArray(json.quotes) ? json.quotes : [];
+      // Scope (B): only quotes that came from THIS conversation.
+      const scoped = all.filter((q) => q.source_conversation_id === convo?.id);
+      setPersistedQuotes(scoped);
+    } catch {
+      /* best-effort; leave whatever we had */
+    }
+  }, [convo]);
+
+  useEffect(() => {
+    loadPersistedQuotes();
+  }, [loadPersistedQuotes, threadSummary?.generated_at]);
+
+  // Accumulated quotes mapped into the display shape, shared by the Summary
+  // tab render and the CSV/PDF exports so all three show the same data.
+  const displayQuotes = useMemo(() => {
+    return (persistedQuotes || []).map((q: any) => ({
+      material_name: q.material_name,
+      inci_trade_name: q.inci_trade_name,
+      grade: q.grade,
+      price: q.price_raw,
+      price_qty: q.price_qty,
+      price_unit: q.price_unit,
+      case_width: q.case_width,
+      case_height: q.case_height,
+      case_length: q.case_length,
+      case_pack_size: q.pack_size || q.case_size || q.case_weight,
+      quote_provided_date: q.quote_provided_date,
+      quote_expiry: q.quote_expiry,
+      lead_time: q.lead_time,
+      moq: q.moq,
+      max_inventory: q.max_inventory,
+      hazardous: q.hazardous,
+      refrigerated: q.refrigerated,
+      equipment_accessorials: q.equipment_accessorials,
+      material_id: q.material_id,
+      docs_supplied: { coa: q.doc_coa === true, sds: q.doc_sds === true, tds: q.doc_tds === true },
+      sample_handling: q.sample_handling,
+      other_notes: q.other_notes,
+    }));
+  }, [persistedQuotes]);
+
   // ── Summary exports ──────────────────────────────────────────────────
   // CSV = the quotes table (one row per material). PDF = the full summary
   // rendered as a printable document (browser "Save as PDF"). Both are
   // client-side, built from the already-loaded threadSummary; no server call.
   const exportSummaryCsv = () => {
     const s = threadSummary?.summary;
-    const quotes: any[] = Array.isArray(s?.quotes) ? s.quotes : [];
+    const quotes: any[] = displayQuotes;
     const subj = (convo?.subject || "summary").replace(/[^\w.-]+/g, "_").slice(0, 60);
 
     const cols: { key: string; label: string }[] = [
@@ -3019,7 +3081,7 @@ export default function ConversationDetail({
     const siRow = (label: string, val: any) =>
       `<tr><td class="lbl">${esc(label)}</td><td>${dash(val)}</td></tr>`;
 
-    const quotes: any[] = Array.isArray(s.quotes) ? s.quotes : [];
+    const quotes: any[] = displayQuotes;
     const quoteBlocks = quotes.length
       ? quotes
           .map((q) => {
@@ -5690,11 +5752,11 @@ export default function ConversationDetail({
                   );
                 })()}
 
-                {/* ── Quotes (one card per material, extracted from this thread) ── */}
+                {/* ── Quotes (accumulated from this thread, durable store) ── */}
                 {(() => {
-                  const quotes = Array.isArray(threadSummary.summary.quotes)
-                    ? threadSummary.summary.quotes
-                    : [];
+                  // Render the persistent, accumulated quotes for this thread
+                  // (scope B). These never disappear on refresh.
+                  const quotes = displayQuotes;
                   const dash = (v: any) =>
                     v === null || v === undefined || v === "" ? "—" : String(v);
                   const yn = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
