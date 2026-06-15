@@ -90,6 +90,10 @@ export default function OutreachTrackerPage() {
   // response can resolve AFTER a later filtered one, overwriting the table with
   // stale rows. Each request gets an incrementing id; only the latest applies.
   const rowsReqSeq = useRef(0);
+  // Holds the in-flight rows request so a newer request can abort it. This
+  // structurally prevents a slow stale request (e.g. the unfiltered mount
+  // fetch) from resolving later and overwriting filtered results.
+  const rowsAbort = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,6 +139,10 @@ export default function OutreachTrackerPage() {
   // ── Rows fetch whenever filters change ───────────────────────────────
   const loadRows = useCallback(async () => {
     const seq = ++rowsReqSeq.current;
+    // Abort any request still in flight from a previous filter state.
+    if (rowsAbort.current) rowsAbort.current.abort();
+    const controller = new AbortController();
+    rowsAbort.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -148,7 +156,7 @@ export default function OutreachTrackerPage() {
       if (createdFrom)           params.set("created_from", createdFrom);
       if (createdTo)             params.set("created_to",   createdTo);
       const url = `/api/outreach-tracker/conversations${params.toString() ? `?${params}` : ""}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
@@ -158,6 +166,8 @@ export default function OutreachTrackerPage() {
       if (seq !== rowsReqSeq.current) return;
       setRows(data.rows || []);
     } catch (e: any) {
+      // An aborted request is expected when filters change; ignore silently.
+      if (e?.name === "AbortError") return;
       if (seq !== rowsReqSeq.current) return; // stale error; newer request owns state
       console.error("[outreach-tracker] rows load failed:", e);
       setError(e?.message || "Failed to load conversations");
