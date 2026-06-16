@@ -21,8 +21,17 @@ export default function LabelPicker({
   const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setLocalLabelIds(new Set(currentLabels.map((cl) => cl.label_id)));
-  }, [currentLabels]);
+    // Sync local checkbox state from the server-provided labels ONLY when the
+    // dropdown is closed. While it's open and the user is actively toggling,
+    // the parent refetch triggered by onToggle() can briefly return stale
+    // labels (the write may not be reflected yet), which would overwrite the
+    // optimistic tick and make the checkbox flip back. Syncing only while
+    // closed keeps the user's clicks authoritative during interaction, then
+    // reconciles with server truth once they finish.
+    if (!open) {
+      setLocalLabelIds(new Set(currentLabels.map((cl) => cl.label_id)));
+    }
+  }, [currentLabels, open]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -52,14 +61,22 @@ export default function LabelPicker({
     });
 
     try {
-      await fetch("/api/conversations/labels", {
+      const res = await fetch("/api/conversations/labels", {
         method: add ? "POST" : "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId, labelId }),
       });
+      if (!res.ok) throw new Error(`label ${add ? "add" : "remove"} failed (${res.status})`);
       onToggle();
     } catch (error) {
+      // Roll back the optimistic change so the checkbox reflects reality.
       console.error("Label toggle failed:", error);
+      setLocalLabelIds((prev) => {
+        const next = new Set(prev);
+        if (add) next.delete(labelId);
+        else next.add(labelId);
+        return next;
+      });
     }
   };
 
