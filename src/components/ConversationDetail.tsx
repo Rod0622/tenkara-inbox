@@ -2948,9 +2948,14 @@ export default function ConversationDetail({
       if (!res.ok) return;
       const json = await res.json();
       const all: any[] = Array.isArray(json.quotes) ? json.quotes : [];
-      // Scope (B): only quotes that came from THIS conversation.
-      const scoped = all.filter((q) => q.source_conversation_id === convo?.id);
-      setPersistedQuotes(scoped);
+      // Scope by SUPPLIER, not by single conversation. Quotes are a
+      // supplier-level asset (they roll up into the supplier profile), and a
+      // single email thread can be fragmented across several conversation rows
+      // by the sync engine — so tying the Summary view to one conversation id
+      // hid quotes whenever a teammate opened a different fragment of the same
+      // thread. Showing the supplier's full quote set keeps every conversation
+      // for that supplier consistent.
+      setPersistedQuotes(all);
     } catch {
       /* best-effort; leave whatever we had */
     }
