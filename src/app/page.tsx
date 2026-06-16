@@ -491,7 +491,7 @@ export default function InboxPage() {
           const sb = createBrowserClient();
           const { data } = await sb
             .from("conversations")
-            .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at")
+            .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id")
             .eq("id", conversation)
             .maybeSingle();
           if (data) match = data as any;
@@ -631,7 +631,7 @@ export default function InboxPage() {
       const sb = createBrowserClient();
       const { data } = await sb
         .from("conversations")
-        .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at")
+        .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id")
         .eq("id", conversationId)
         .maybeSingle();
 
