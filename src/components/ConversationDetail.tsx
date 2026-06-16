@@ -2939,7 +2939,8 @@ export default function ConversationDetail({
   // refresh (auto-promote may have added rows).
   const loadPersistedQuotes = useCallback(async () => {
     const supplierId = (convo as any)?.supplier_contact_id;
-    if (!supplierId) {
+    const convoId = convo?.id;
+    if (!supplierId || !convoId) {
       setPersistedQuotes([]);
       return;
     }
@@ -2948,14 +2949,11 @@ export default function ConversationDetail({
       if (!res.ok) return;
       const json = await res.json();
       const all: any[] = Array.isArray(json.quotes) ? json.quotes : [];
-      // Scope by SUPPLIER, not by single conversation. Quotes are a
-      // supplier-level asset (they roll up into the supplier profile), and a
-      // single email thread can be fragmented across several conversation rows
-      // by the sync engine — so tying the Summary view to one conversation id
-      // hid quotes whenever a teammate opened a different fragment of the same
-      // thread. Showing the supplier's full quote set keeps every conversation
-      // for that supplier consistent.
-      setPersistedQuotes(all);
+      // Scope to THIS conversation only. The Summary tab is a per-conversation
+      // view, so it shows just the quotes captured from this thread. The full
+      // per-supplier rollup lives in the supplier command center.
+      const scoped = all.filter((q) => q.source_conversation_id === convoId);
+      setPersistedQuotes(scoped);
     } catch {
       /* best-effort; leave whatever we had */
     }
