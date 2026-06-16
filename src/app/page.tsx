@@ -96,6 +96,28 @@ export default function InboxPage() {
 
   const { conversations, refetch } = useConversations(activeMailbox);
 
+  // Keep the open conversation's labels in sync with the live (realtime-
+  // updated) conversations list. activeConvo is standalone state captured when
+  // the conversation was opened, so without this its `labels` go stale: adding
+  // a label persists to the DB and the list refetches with it, but activeConvo
+  // never sees the change, so the label picker re-syncs from a frozen labels
+  // array and the checkbox appears to untick. We refresh only the labels field
+  // (by reference identity) to avoid clobbering other in-flight activeConvo
+  // updates like assignment.
+  useEffect(() => {
+    if (!activeConvo) return;
+    const fresh = conversations.find((c) => c.id === activeConvo.id);
+    if (!fresh) return;
+    const freshLabels = (fresh as any).labels || [];
+    if (freshLabels !== (activeConvo as any).labels) {
+      setActiveConvo((prev) =>
+        prev && prev.id === fresh.id
+          ? ({ ...prev, labels: freshLabels } as Conversation)
+          : prev
+      );
+    }
+  }, [conversations]);
+
   const currentUser = useMemo(
     () => teamMembers.find((m) => m.email === session?.user?.email) || null,
     [teamMembers, session]
@@ -874,6 +896,7 @@ export default function InboxPage() {
                 onSendReply={actions.sendReply}
                 onMoveToFolder={handleMoveToFolder}
                 globalSearchQuery={debouncedSearchQuery.trim().length >= 2 ? debouncedSearchQuery : ""}
+                onLabelsChange={refetch}
               />
             </Panel>
           </>

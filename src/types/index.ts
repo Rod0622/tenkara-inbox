@@ -299,4 +299,8 @@ export interface ConversationDetailProps {
   onSendReply: (conversationId: string, text: string, attachments?: { name: string; type: string; data: string }[], cc?: string, bcc?: string, to?: string, subject?: string) => Promise<void>;
   onMoveToFolder?: (conversationIds: string[], folderId: string) => Promise<void>;
   globalSearchQuery?: string;
+  // Called after a label is added/removed on the open conversation so the
+  // parent can refresh the conversation list (and thus the open conversation's
+  // labels). Without this the label picker reads a stale labels array.
+  onLabelsChange?: () => void;
 }

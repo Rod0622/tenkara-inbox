@@ -299,6 +299,7 @@ export default function ConversationDetail({
   onSendReply,
   onMoveToFolder,
   globalSearchQuery,
+  onLabelsChange,
 }: ConversationDetailProps) {
   const [replyText, setReplyText] = useState("");
   // Editable To and Subject for the inline reply. Auto-populated when the
@@ -3668,7 +3669,7 @@ export default function ConversationDetail({
             <LabelPicker
               conversationId={convo.id}
               currentLabels={convo.labels || []}
-              onToggle={() => {}}
+              onToggle={() => { onLabelsChange?.(); }}
             />
 
             {onMoveToFolder && (
