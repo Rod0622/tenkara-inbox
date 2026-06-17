@@ -120,9 +120,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "backfill_account") {
-    const { email_account_id } = body;
+    const { email_account_id, offset, limit } = body;
     if (!email_account_id) return NextResponse.json({ error: "email_account_id required" }, { status: 400 });
-    const result = await backfillAccount(supabase, email_account_id);
+    const result = await backfillAccount(
+      supabase,
+      email_account_id,
+      typeof offset === "number" ? offset : 0,
+      typeof limit === "number" ? limit : null
+    );
     return NextResponse.json(result);
   }
 
@@ -166,10 +171,10 @@ export async function POST(req: NextRequest) {
 // Use case: a new email account was connected after the original backfill,
 // or response_times rows for one account got out of sync somehow. Trigger
 // this once for the affected account.
-async function backfillAccount(supabase: any, accountId: string) {
+async function backfillAccount(supabase: any, accountId: string, offset: number = 0, limit: number | null = null) {
   // Fetch all conversation IDs for this account
   let convoIds: string[] = [];
-  let offset = 0;
+  let pageOffset = 0;
   const PAGE = 1000;
   while (true) {
     const { data: batch, error } = await supabase
@@ -177,15 +182,24 @@ async function backfillAccount(supabase: any, accountId: string) {
       .select("id")
       .eq("email_account_id", accountId)
       .neq("status", "trash")
-      .range(offset, offset + PAGE - 1);
+      .order("created_at", { ascending: true })
+      .range(pageOffset, pageOffset + PAGE - 1);
     if (error) {
       return { error: error.message, status: 500 };
     }
     if (!batch || batch.length === 0) break;
     convoIds = convoIds.concat(batch.map((c: any) => c.id));
     if (batch.length < PAGE) break;
-    offset += PAGE;
+    pageOffset += PAGE;
   }
+
+  const totalConvos = convoIds.length;
+
+  // Chunking: process only [offset, offset+limit) of the conversation list when
+  // limit is provided. This keeps each request short enough to avoid Vercel
+  // function timeouts and avoids spiking the (small) database instance. The
+  // caller pages through by re-calling with next_offset until done === true.
+  const slice = limit != null ? convoIds.slice(offset, offset + limit) : convoIds.slice(offset);
 
   // Backfill each conversation. Each call is self-contained (deletes its own
   // response_times rows before inserting new ones) so this is safely re-runnable.
@@ -194,7 +208,7 @@ async function backfillAccount(supabase: any, accountId: string) {
   let skipped = 0;
   const startTime = Date.now();
 
-  for (const cid of convoIds) {
+  for (const cid of slice) {
     try {
       const count = await backfillConversation(supabase, cid);
       if (count > 0) {
@@ -210,13 +224,20 @@ async function backfillAccount(supabase: any, accountId: string) {
   }
 
   const elapsedMs = Date.now() - startTime;
+  const nextOffset = offset + slice.length;
+  const done = nextOffset >= totalConvos;
   return {
     success: true,
     account_id: accountId,
-    conversations_found: convoIds.length,
+    total_conversations: totalConvos,
+    offset,
+    limit,
+    conversations_in_this_batch: slice.length,
     conversations_processed: processed,
     conversations_skipped: skipped,
     response_time_records_inserted: totalInserted,
+    next_offset: done ? null : nextOffset,
+    done,
     elapsed_ms: elapsedMs,
   };
 }
@@ -368,7 +389,7 @@ async function backfillAll(supabase: any) {
 // ══════════════════════════════════════════════════════
 // BACKFILL A SINGLE CONVERSATION
 // ══════════════════════════════════════════════════════
-async function backfillConversation(supabase: any, conversationId: string): Promise<number> {
+export async function backfillConversation(supabase: any, conversationId: string): Promise<number> {
   // Fetch conversation metadata
   const { data: convo } = await supabase
     .from("conversations")
