@@ -3,7 +3,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock3, Edit3, ExternalLink, FileText, GitMerge, Globe, ListTodo, Mail, MessageSquare, Phone, Plus, Save, ShieldAlert, Trash2, UserPlus, Users, X } from "lucide-react";
 import SupplierStatusCard from "@/components/SupplierStatusCard";
-import SupplierProfilePanel from "@/components/SupplierProfilePanel";
+// Temporarily hidden — supplier profile/quotes panel not currently shown.
+// import SupplierProfilePanel from "@/components/SupplierProfilePanel";
 
 const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const TZS = ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Sao_Paulo","Europe/London","Europe/Berlin","Europe/Paris","Asia/Shanghai","Asia/Tokyo","Asia/Manila","Asia/Kolkata","Asia/Dubai","Australia/Sydney","Pacific/Auckland"];
@@ -517,13 +518,16 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
           actorId={null}
         />
 
-        {/* Persistent supplier profile + quotes (Step 3) */}
-        <SupplierProfilePanel
+        {/* Persistent supplier profile + quotes (Step 3)
+            Temporarily hidden per request — not currently needed. The component,
+            its API, and all stored profile/quote data remain intact; uncomment
+            this block to restore the panel exactly as before. */}
+        {/* <SupplierProfilePanel
           supplierContactId={data.supplier_contact_id || data.supplier_hours?.id || null}
           email={decodedEmail}
           initialProfile={data.supplier_profile || null}
           initialQuotes={data.supplier_quotes || []}
-        />
+        /> */}
 
         {/* Contact People */}
         <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
