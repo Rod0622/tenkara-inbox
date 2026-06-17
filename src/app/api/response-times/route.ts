@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
+import { isAutoReply, businessMinutesBetween, type WorkHours } from "@/lib/response-time-utils";
 
 // ── GET /api/response-times ──
 // Query params:
@@ -412,7 +413,7 @@ export async function backfillConversation(supabase: any, conversationId: string
   // Fetch all messages in this conversation, ordered by sent_at
   const { data: messages } = await supabase
     .from("messages")
-    .select("id, from_email, to_addresses, is_outbound, sent_at, sent_by_user_id")
+    .select("id, from_email, to_addresses, subject, is_outbound, sent_at, sent_by_user_id")
     .eq("conversation_id", conversationId)
     .order("sent_at", { ascending: true });
 
@@ -422,6 +423,25 @@ export async function backfillConversation(supabase: any, conversationId: string
   const hasOutbound = messages.some((m: any) => m.is_outbound === true);
   const hasInbound = messages.some((m: any) => m.is_outbound === false);
   if (!hasOutbound || !hasInbound) return 0;
+
+  // Resolve the supplier's work hours (for business-minutes). The supplier is
+  // the external party on this conversation. We look them up by the inbound
+  // sender; fall back to the conversation's from_email. If no profile is
+  // found, businessMinutesBetween() applies sensible defaults.
+  const supplierLookupEmail = (
+    messages.find((m: any) => m.is_outbound === false)?.from_email ||
+    convo.from_email ||
+    ""
+  ).toLowerCase();
+  let workHours: WorkHours = { timezone: null, work_start: null, work_end: null, work_days: null };
+  if (supplierLookupEmail) {
+    const { data: sc } = await supabase
+      .from("supplier_contacts")
+      .select("timezone, work_start, work_end, work_days")
+      .eq("email", supplierLookupEmail)
+      .maybeSingle();
+    if (sc) workHours = sc as WorkHours;
+  }
 
   // Delete existing response_times for this conversation to avoid duplicates
   await supabase.from("response_times").delete().eq("conversation_id", conversationId);
@@ -438,6 +458,11 @@ export async function backfillConversation(supabase: any, conversationId: string
       // Must be in the opposite direction
       if (trigger.is_outbound === response.is_outbound) continue;
 
+      // Skip auto-replies (out-of-office, "we received your message", noreply
+      // bots). They otherwise count as an instant genuine response and inflate
+      // the score. We keep scanning for the next real human message instead.
+      if (isAutoReply(response)) continue;
+
       const triggerTime = new Date(trigger.sent_at);
       const responseTime = new Date(response.sent_at);
       const diffMinutes = (responseTime.getTime() - triggerTime.getTime()) / (1000 * 60);
@@ -447,6 +472,12 @@ export async function backfillConversation(supabase: any, conversationId: string
 
       // Skip unreasonably long gaps (> 30 days) — likely unrelated
       if (diffMinutes > 30 * 24 * 60) break;
+
+      // Business-hours elapsed time, in the responder's schedule. For a
+      // supplier_reply we use the supplier's work hours; for a team_reply we
+      // also use the supplier's hours as a stand-in (team hours aren't tracked
+      // per-member here). This removes nights/weekends from the elapsed time.
+      const businessMinutes = businessMinutesBetween(triggerTime, responseTime, workHours);
 
       // Determine the external party's email
       const supplierEmail = trigger.is_outbound
@@ -473,7 +504,7 @@ export async function backfillConversation(supabase: any, conversationId: string
         response_message_id: response.id,
         response_sent_at: response.sent_at,
         response_minutes: Math.round(diffMinutes * 10) / 10,
-        response_business_minutes: null, // Could compute with business hours if needed
+        response_business_minutes: businessMinutes,
         supplier_email: supplierEmail || null,
         supplier_domain: supplierDomain || null,
         team_member_id: teamMemberId,

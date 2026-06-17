@@ -26,9 +26,19 @@ export type Direction = "supplier_reply" | "team_reply";
 
 export interface RtRecord {
   response_minutes: number;
+  response_business_minutes?: number | null; // working-hours elapsed time (preferred for scoring)
   response_sent_at: string; // ISO timestamp
   direction: Direction;     // 'supplier_reply' = supplier responded to us
                             // 'team_reply' = we responded to supplier
+}
+
+// The metric used for scoring: business minutes when available (it strips
+// nights/weekends and respects the responder's timezone), otherwise the raw
+// calendar minutes as a fallback for records not yet recomputed.
+function scoreMinutes(r: RtRecord): number {
+  return (r.response_business_minutes !== null && r.response_business_minutes !== undefined)
+    ? r.response_business_minutes
+    : r.response_minutes;
 }
 
 export interface ScoreResult {
@@ -103,7 +113,7 @@ export function computeSupplierScore(records: RtRecord[], now: Date = new Date()
       score: 0,
       tier: "no_response",
       recentMedianMinutes: null,
-      allTimeMedianMinutes: supplierReplyCount > 0 ? median(supplierReplies.map(r => r.response_minutes)) : null,
+      allTimeMedianMinutes: supplierReplyCount > 0 ? median(supplierReplies.map(r => scoreMinutes(r))) : null,
       weightedMedianMinutes: null,
       qualifyingExchanges: total,
       supplierReplyCount,
@@ -116,8 +126,8 @@ export function computeSupplierScore(records: RtRecord[], now: Date = new Date()
   // Compute medians from supplier_replies (regardless of forced/real path)
   const cutoff = now.getTime() - RECENCY_WINDOW_MS;
   const recentSupplierReplies = supplierReplies.filter(r => new Date(r.response_sent_at).getTime() >= cutoff);
-  const recentMins = recentSupplierReplies.map(r => r.response_minutes);
-  const allMins = supplierReplies.map(r => r.response_minutes);
+  const recentMins = recentSupplierReplies.map(r => scoreMinutes(r));
+  const allMins = supplierReplies.map(r => scoreMinutes(r));
 
   const recentMedianMinutes = median(recentMins);
   const allTimeMedianMinutes = median(allMins);
@@ -147,7 +157,7 @@ export function computeSupplierScore(records: RtRecord[], now: Date = new Date()
     weighted = allMins.slice();
   } else {
     weighted = allMins.slice();
-    for (const r of recentSupplierReplies) weighted.push(r.response_minutes);
+    for (const r of recentSupplierReplies) weighted.push(scoreMinutes(r));
   }
 
   // Edge case: if we got here with zero supplier replies, all medians are null

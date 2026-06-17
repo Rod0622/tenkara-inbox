@@ -52,13 +52,13 @@ export async function GET(req: NextRequest) {
     //
     // We load BOTH directions (supplier_reply + team_reply) because the threshold
     // counts total messages exchanged, not just supplier replies (spec-literal interpretation).
-    let allRecords: { supplier_email: string; response_minutes: number; response_sent_at: string; direction: "supplier_reply" | "team_reply" }[] = [];
+    let allRecords: { supplier_email: string; response_minutes: number; response_business_minutes: number | null; response_sent_at: string; direction: "supplier_reply" | "team_reply" }[] = [];
     let offset = 0;
     const PAGE = 1000;
     while (true) {
       const { data: batch, error: batchErr } = await supabase
         .from("response_times")
-        .select("supplier_email, response_minutes, response_sent_at, direction")
+        .select("supplier_email, response_minutes, response_business_minutes, response_sent_at, direction")
         .not("supplier_email", "is", null)
         .range(offset, offset + PAGE - 1);
 
@@ -104,6 +104,7 @@ export async function GET(req: NextRequest) {
       if (!bySupplier[email]) bySupplier[email] = [];
       bySupplier[email].push({
         response_minutes: r.response_minutes,
+        response_business_minutes: r.response_business_minutes,
         response_sent_at: r.response_sent_at,
         direction: r.direction,
       });
