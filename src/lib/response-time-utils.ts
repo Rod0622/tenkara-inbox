@@ -49,7 +49,7 @@ export interface WorkHours {
   work_days: number[] | null;     // ISO weekdays worked: 1=Mon .. 7=Sun
 }
 
-const DEFAULT_HOURS: Required<WorkHours> = {
+const DEFAULT_HOURS: { timezone: string; work_start: string; work_end: string; work_days: number[] } = {
   timezone: "America/New_York",
   work_start: "09:00:00",
   work_end: "17:00:00",
