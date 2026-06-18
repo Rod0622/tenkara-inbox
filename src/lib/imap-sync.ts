@@ -423,7 +423,29 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             const cleanSubject = cleanSubjectFn(subject);
             let conversationId: string | null = null;
 
-            if (cleanSubject) {
+            // Match #1 — Gmail thread id (the reliable key). Gmail groups a real
+            // email thread under one threadId regardless of how the subject
+            // mutates (stacked "Re:"/"Fwd:" chains, foreign-language reply
+            // prefixes like "回复：", edited subjects). Matching on subject alone
+            // fragmented one thread into several conversations whenever the
+            // subject drifted; threadId-first prevents that. Subject is only a
+            // fallback for messages that arrive without a usable threadId.
+            const gmailThreadId = msgData.threadId
+              ? `gmail:${msgData.threadId}`
+              : null;
+            if (gmailThreadId) {
+              const { data: t } = await supabase.from("conversations").select("id, merged_into")
+                .eq("email_account_id", accountId).eq("thread_id", gmailThreadId)
+                .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+              if (t) {
+                conversationId = t.merged_into
+                  ? await resolveMergedInto(supabase, t.merged_into)
+                  : t.id;
+              }
+            }
+
+            // Match #2 — cleaned-subject fallback (only if no threadId match).
+            if (!conversationId && cleanSubject) {
               const { data: c } = await supabase.from("conversations").select("id, merged_into")
                 .eq("email_account_id", accountId).eq("subject", cleanSubject)
                 .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
@@ -512,6 +534,51 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 r?.conversation?.email_account_id === accountId
               );
               if (sameAccountMatch && sameAccountMatch.conversation_id !== conversationId) {
+                // SAFETY GUARD (critical): an rfc822 Message-ID match is NOT
+                // sufficient justification to merge two whole conversations.
+                // Merging unrelated suppliers leaks confidential email between
+                // them. Before merging, require that the two conversations are
+                // genuinely the same thread: same supplier contact, OR matching
+                // cleaned subject. If neither holds, we DO NOT merge — a stray
+                // duplicate message is far less harmful than a cross-supplier leak.
+                const [primaryConvoRes, dupConvoRes] = await Promise.all([
+                  supabase.from("conversations")
+                    .select("id, supplier_contact_id, subject, from_email")
+                    .eq("id", sameAccountMatch.conversation_id).maybeSingle(),
+                  supabase.from("conversations")
+                    .select("id, supplier_contact_id, subject, from_email")
+                    .eq("id", conversationId).maybeSingle(),
+                ]);
+                const pc: any = primaryConvoRes.data;
+                const dc: any = dupConvoRes.data;
+
+                const sameSupplier =
+                  !!pc && !!dc &&
+                  ((pc.supplier_contact_id && dc.supplier_contact_id &&
+                    pc.supplier_contact_id === dc.supplier_contact_id) ||
+                   (pc.from_email && dc.from_email &&
+                    pc.from_email.toLowerCase() === dc.from_email.toLowerCase()));
+
+                const sameSubject =
+                  !!pc && !!dc &&
+                  cleanSubjectFn(pc.subject || "") !== "" &&
+                  cleanSubjectFn(pc.subject || "") === cleanSubjectFn(dc.subject || "");
+
+                const safeToMerge = sameSupplier || sameSubject;
+
+                if (!safeToMerge) {
+                  // Conversations are not demonstrably the same thread. Skip the
+                  // merge to avoid a cross-supplier leak. Keep working in the
+                  // subject-matched conversation (the reconcile below still
+                  // upgrades the local outbound row's id if applicable).
+                  console.warn(
+                    "imap-sync: SKIPPED unsafe auto-merge (different supplier/subject) " +
+                    "primary=" + sameAccountMatch.conversation_id +
+                    " dup=" + conversationId +
+                    " primarySupplier=" + (pc?.supplier_contact_id || "?") +
+                    " dupSupplier=" + (dc?.supplier_contact_id || "?")
+                  );
+                } else {
                 // The local outbound row lives in a different conversation.
                 // Treat that conversation as canonical (it has the send-side
                 // context); merge the subject-matched conversation into it.
@@ -544,6 +611,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 } catch (mergeErr: any) {
                   console.error(`[sync-merge] exception: ${mergeErr?.message}`);
                 }
+                } // end else (safeToMerge)
               }
             }
 
