@@ -26,19 +26,21 @@ export type Direction = "supplier_reply" | "team_reply";
 
 export interface RtRecord {
   response_minutes: number;
-  response_business_minutes?: number | null; // working-hours elapsed time (preferred for scoring)
+  response_business_minutes?: number | null; // working-hours elapsed time (computed + stored, not used for scoring)
   response_sent_at: string; // ISO timestamp
   direction: Direction;     // 'supplier_reply' = supplier responded to us
                             // 'team_reply' = we responded to supplier
 }
 
-// The metric used for scoring: business minutes when available (it strips
-// nights/weekends and respects the responder's timezone), otherwise the raw
-// calendar minutes as a fallback for records not yet recomputed.
+// The metric used for scoring is the wall-clock response time, per the
+// documented Supplier Responsiveness spec: median of (email sent → response)
+// in real hours, bucketed Excellent <24h / Good 24-48h / Fair 48-96h / Low 96h+.
+// The median itself absorbs weekend/one-off outliers, which is why the spec
+// uses calendar time rather than a business-hours calculation.
+// (response_business_minutes is still computed and stored for reference, but is
+// intentionally NOT used here.)
 function scoreMinutes(r: RtRecord): number {
-  return (r.response_business_minutes !== null && r.response_business_minutes !== undefined)
-    ? r.response_business_minutes
-    : r.response_minutes;
+  return r.response_minutes;
 }
 
 export interface ScoreResult {
