@@ -1446,7 +1446,10 @@ export default function ConversationDetail({
         setMergeDataLoaded(false); // trigger refetch of merge data
       } else {
         const err = await res.json();
-        alert("Unmerge failed: " + (err.error || "Unknown error"));
+        // The API returns a detailed `message` for known cases (e.g. an
+        // untracked merge whose messages can't be auto-restored); prefer it
+        // over the short error code so the user sees what to do next.
+        alert("Unmerge failed: " + (err.message || err.error || "Unknown error"));
       }
     } catch (e: any) { alert("Unmerge failed: " + e.message); }
     setUnmergingId(null);

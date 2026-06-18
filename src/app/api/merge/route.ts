@@ -330,6 +330,30 @@ export async function DELETE(req: NextRequest) {
       .select("*")
       .eq("merge_id", mergeId);
 
+    // SAFETY GUARD: unmerge can only move records back if the original merge
+    // recorded what it moved. Some legacy/system merges (e.g. the buggy
+    // sync auto-merge) did NOT write merge_moved_records, so there is nothing
+    // to restore — the merged conversation's messages were relocated to the
+    // primary with no recoverable origin marker. In that case, silently
+    // reporting "success" is itself the bug: it tells the user the unmerge
+    // worked when the messages are actually still stranded in the primary.
+    // Detect this and return a clear, actionable error instead of a false
+    // success, so the user knows a manual split is required.
+    if (!movedRecords || movedRecords.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: "untracked_merge",
+        message:
+          "This merge has no tracked records, so its messages cannot be " +
+          "automatically moved back (it predates record tracking or was a " +
+          "system merge). The conversation has been marked unmerged, but its " +
+          "messages remain in the primary conversation and must be separated " +
+          "manually. Contact an admin to split them.",
+        primary_conversation_id: merge.primary_conversation_id,
+        merged_conversation_id: merge.merged_conversation_id,
+      }, { status: 409 });
+    }
+
     // Group by table for batch updates
     const byTable: Record<string, any[]> = {};
     for (const r of (movedRecords || [])) {
