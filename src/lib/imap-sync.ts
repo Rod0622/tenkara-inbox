@@ -445,15 +445,86 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             }
 
             // Match #2 — cleaned-subject fallback (only if no threadId match).
+            // GUARD: subject equality alone is NOT enough to thread a message
+            // into an existing conversation. A different supplier can reply (or
+            // be emailed) with a subject that equals another supplier's thread
+            // subject (e.g. a quoted/forwarded "Re: <Company> …" line). Matching
+            // on account+subject only would glue that foreign supplier's message
+            // onto the wrong conversation — a cross-supplier leak. So before
+            // attaching, require that the matched conversation already involves
+            // THIS message's supplier (same sender/recipient email or domain).
+            // If it doesn't, skip the subject match and fall through to create a
+            // new conversation.
             if (!conversationId && cleanSubject) {
-              const { data: c } = await supabase.from("conversations").select("id, merged_into")
+              const { data: c } = await supabase.from("conversations").select("id, merged_into, from_email, primary_contact_email")
                 .eq("email_account_id", accountId).eq("subject", cleanSubject)
                 .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
               if (c) {
-                // Redirect to merge primary if the matched conv was merged.
-                conversationId = c.merged_into
+                const candidateConvId = c.merged_into
                   ? await resolveMergedInto(supabase, c.merged_into)
                   : c.id;
+
+                // The supplier for THIS message: sender for inbound, primary
+                // recipient for outbound.
+                const msgSupplierEmail = (
+                  isOutbound ? extractFirstEmail(toAddresses) : fromEmail
+                )?.toLowerCase() || "";
+                const msgSupplierDomain = msgSupplierEmail.split("@")[1] || "";
+
+                // Does the matched conversation already involve this supplier?
+                // Check the conversation's own from_email/primary_contact_email,
+                // and (authoritatively) whether any message in it is from/to
+                // this supplier email or domain.
+                let supplierConsistent = false;
+                if (msgSupplierEmail) {
+                  const convFromEmail = (c.from_email || "").toLowerCase();
+                  const convPrimary = (c.primary_contact_email || "").toLowerCase();
+                  if (
+                    convFromEmail === msgSupplierEmail ||
+                    convPrimary === msgSupplierEmail ||
+                    (msgSupplierDomain &&
+                      (convFromEmail.endsWith("@" + msgSupplierDomain) ||
+                        convPrimary.endsWith("@" + msgSupplierDomain)))
+                  ) {
+                    supplierConsistent = true;
+                  } else {
+                    // Authoritative check: any message in the candidate
+                    // conversation from/to this supplier email or domain.
+                    const { data: existingMsgs } = await supabase
+                      .from("messages")
+                      .select("from_email, to_addresses")
+                      .eq("conversation_id", candidateConvId)
+                      .limit(200);
+                    if (existingMsgs && existingMsgs.length > 0) {
+                      supplierConsistent = existingMsgs.some((m: any) => {
+                        const f = (m.from_email || "").toLowerCase();
+                        const t = (m.to_addresses || "").toLowerCase();
+                        if (f === msgSupplierEmail) return true;
+                        if (msgSupplierEmail && t.includes(msgSupplierEmail)) return true;
+                        if (msgSupplierDomain) {
+                          if (f.endsWith("@" + msgSupplierDomain)) return true;
+                          if (t.includes("@" + msgSupplierDomain)) return true;
+                        }
+                        return false;
+                      });
+                    } else {
+                      // No messages yet (shell) — allow the match.
+                      supplierConsistent = true;
+                    }
+                  }
+                }
+
+                if (supplierConsistent) {
+                  conversationId = candidateConvId;
+                } else {
+                  console.warn(
+                    "imap-sync: SKIPPED subject-match (different supplier) " +
+                    "subject=" + JSON.stringify(cleanSubject) +
+                    " candidate=" + candidateConvId +
+                    " msgSupplier=" + msgSupplierEmail +
+                    " — creating new conversation to avoid cross-supplier leak"
+                  );
+                }
               }
             }
 
