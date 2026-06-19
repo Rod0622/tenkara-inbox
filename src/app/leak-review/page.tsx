@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, AlertTriangle, ArrowLeft, ExternalLink, ChevronRight } from "lucide-react";
+import { useEmailAccounts } from "@/lib/hooks";
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface AccountLite { id: string; name: string; email: string; }
@@ -55,6 +56,14 @@ export default function LeakReviewPage() {
   const router = useRouter();
 
   const [accounts, setAccounts] = useState<AccountLite[]>([]);
+  const hookAccounts = useEmailAccounts(session?.user?.email);
+  useEffect(() => {
+    if (hookAccounts && hookAccounts.length > 0) {
+      setAccounts(
+        hookAccounts.map((a: any) => ({ id: a.id, name: a.name, email: a.email }))
+      );
+    }
+  }, [hookAccounts]);
   const [accountId, setAccountId] = useState<string>("");
   const [suspects, setSuspects] = useState<Suspect[]>([]);
   const [scanned, setScanned] = useState<number | null>(null);
@@ -69,20 +78,7 @@ export default function LeakReviewPage() {
     if (authStatus === "unauthenticated") router.push("/login");
   }, [authStatus, router]);
 
-  // Load accounts for the picker.
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/data?dataset=accounts");
-        if (res.ok) {
-          const data = await res.json();
-          setAccounts(data.accounts || []);
-        }
-      } catch {
-        /* non-fatal */
-      }
-    })();
-  }, []);
+  // Load accounts via the shared hook (same source the main app uses).
 
   const scan = useCallback(async (accId: string) => {
     if (!accId) return;
