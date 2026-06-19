@@ -25,6 +25,7 @@ import {
   Sun,
   Moon,
   Target,
+  AlertTriangle,
   Pin,
   Mic,
 } from "lucide-react";
@@ -985,6 +986,13 @@ export default function Sidebar({
               >
                 <BarChart3 size={16} />
                 <span>Dashboard</span>
+              </Link>
+              <Link
+                href="/leak-review"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
+              >
+                <AlertTriangle size={16} />
+                <span>Leak Review</span>
               </Link>
               <Link
                 href="/settings"
