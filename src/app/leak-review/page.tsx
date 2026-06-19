@@ -73,10 +73,10 @@ export default function LeakReviewPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/data?type=accounts");
+        const res = await fetch("/api/data?dataset=accounts");
         if (res.ok) {
           const data = await res.json();
-          setAccounts(data.accounts || data.email_accounts || []);
+          setAccounts(data.accounts || []);
         }
       } catch {
         /* non-fatal */
