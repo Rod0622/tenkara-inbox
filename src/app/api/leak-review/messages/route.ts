@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     const { data: msgs, error } = await supabase
       .from("messages")
       .select(
-        "id, from_email, from_name, to_addresses, is_outbound, sent_at, subject, snippet"
+        "id, from_email, from_name, to_addresses, is_outbound, sent_at, subject, snippet, body_text"
       )
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: true })

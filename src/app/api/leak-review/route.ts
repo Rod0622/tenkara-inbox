@@ -121,7 +121,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ suspects: [] });
     }
 
-    const convIds = convos.map((c: any) => c.id);
+    // Load dismissed conversation ids (reviewed & judged not-a-leak) to
+    // exclude them from the suspect list.
+    const { data: dismissedRows } = await supabase
+      .from("leak_review_dismissed")
+      .select("conversation_id");
+    const dismissed = new Set(
+      (dismissedRows || []).map((d: any) => d.conversation_id)
+    );
+
+    const convIds = convos
+      .map((c: any) => c.id)
+      .filter((id: string) => !dismissed.has(id));
 
     // 2. Messages for those conversations. Chunk the .in() to stay under
     //    PostgREST URL limits (~150 ids/chunk), dispatched in parallel.
