@@ -17,6 +17,81 @@ function cleanText(value?: string | null) {
     .trim();
 }
 
+// Decode the handful of HTML entities that commonly appear in extracted cell
+// text so numbers/units read correctly (e.g. &nbsp; &amp; &#39;).
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_m, n) => {
+      const code = parseInt(n, 10);
+      return Number.isFinite(code) ? String.fromCharCode(code) : _m;
+    });
+}
+
+// Extract any <table> elements from an HTML body and render them as readable,
+// pipe-delimited rows so the model can SEE tabular quotes (prices, MOQ, lead
+// times, etc.). Suppliers frequently send quotes as HTML tables whose content
+// is lost or garbled in the plain-text (body_text) part — that data never
+// reached the model before, so table-formatted quotes weren't captured.
+//
+// Pure string parsing (no DOM dependency). Best-effort: returns "" when there
+// are no usable tables.
+function extractHtmlTables(html?: string | null): string {
+  if (!html) return "";
+  const src = String(html);
+  const tables = src.match(/<table\b[\s\S]*?<\/table>/gi);
+  if (!tables || tables.length === 0) return "";
+
+  const out: string[] = [];
+  tables.forEach((tbl, ti) => {
+    const rows = tbl.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+    const lines: string[] = [];
+    for (const row of rows) {
+      // Cells can be <td> or <th>.
+      const cells = row.match(/<t[dh]\b[\s\S]*?<\/t[dh]>/gi) || [];
+      const values = cells.map((cell) => {
+        // Strip inner tags, collapse whitespace, decode entities.
+        const text = decodeEntities(
+          cell
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+        );
+        return text;
+      });
+      // Skip fully-empty rows.
+      if (values.some((v) => v.length > 0)) {
+        lines.push(values.join(" | "));
+      }
+    }
+    if (lines.length > 0) {
+      out.push(`Table ${ti + 1}:\n${lines.join("\n")}`);
+    }
+  });
+  return out.join("\n\n");
+}
+
+// Build the best textual representation of a message body for the model:
+// the plain-text body, plus any tables recovered from the HTML part (which
+// the plain text usually loses). Tables are appended clearly labelled so the
+// model can extract quote data that only appears in tabular form.
+function bodyForModel(msg: { body_text?: string | null; body_html?: string | null; snippet?: string | null }): string {
+  const base = cleanText(msg.body_text || msg.snippet || "");
+  const tables = extractHtmlTables(msg.body_html);
+  if (!tables) return base;
+  // If the plain text already contains the table numbers we'd be duplicating,
+  // appending the structured version is still useful (clearer rows/cols) and
+  // low-risk; the model dedupes naturally. Keep base first, tables after.
+  return base
+    ? `${base}\n\n[Tabular content extracted from email HTML]\n${tables}`
+    : `[Tabular content extracted from email HTML]\n${tables}`;
+}
+
 function truncate(value: string, max = 4000) {
   if (value.length <= max) return value;
   return value.slice(0, max) + "\n...[truncated]";
@@ -448,6 +523,7 @@ function buildPrompt(params: {
     from_email?: string | null;
     to_addresses?: string | null;
     body_text?: string | null;
+    body_html?: string | null;
     snippet?: string | null;
     sent_at?: string | null;
   }>;
@@ -457,13 +533,13 @@ function buildPrompt(params: {
   const messagesText = params.messages
     .slice(-12)
     .map((msg, idx) => {
-      const body = cleanText(msg.body_text || msg.snippet || "");
+      const body = bodyForModel(msg);
       return [
         `Message ${idx + 1}`,
         `From: ${msg.from_name || ""} <${msg.from_email || ""}>`,
         `To: ${msg.to_addresses || ""}`,
         `Sent: ${msg.sent_at || ""}`,
-        `Content:\n${truncate(body, 2500)}`,
+        `Content:\n${truncate(body, 4000)}`,
       ].join("\n");
     })
     .join("\n\n---\n\n");
@@ -574,6 +650,7 @@ Supplier information & quotes extraction rules (IMPORTANT):
 - For prices, put the numeric/text price in "price", the quantity it applies to in "price_qty", and the unit in "price_unit" (e.g. price "12.50", price_qty "1", price_unit "kg").
 - "case_pack_size" is a SINGLE combined field for case/pack size, case weight, and pack size — capture whatever the supplier states about packaging size/weight here, together (e.g. "25kg fiber drum" or "1kg aluminum foil bag, 25 units/case"). Do not split these out.
 - "lead_time": if the supplier indicates the material is in stock / ready stock / available now / ships immediately, reflect that in lead_time (e.g. "In stock"). If they give both an in-stock note and a shipping time, capture both (e.g. "In stock — ships in 3 days"). If only a time is given, use that.
+- IMPORTANT — TABULAR QUOTES: Suppliers often send pricing as a TABLE. Message content may include a section labelled "[Tabular content extracted from email HTML]" with pipe-delimited rows (e.g. "Material | Price | MOQ | Lead time"). Treat these tables as authoritative quote data and extract one quote object per material ROW. A table's header row names the columns; map each data row's cells to the matching quote fields (material_name, price, price_qty, price_unit, moq, lead_time, grade, pack size, etc.). Do not ignore tables — quotes frequently appear ONLY in table form.
 
 Thread subject: ${params.subject}
 Conversation from: ${params.fromName || ""} <${params.fromEmail || ""}>
@@ -661,7 +738,7 @@ export async function POST(req: NextRequest) {
 
     const { data: messages, error: messagesError } = await supabase
       .from("messages")
-      .select("from_name, from_email, to_addresses, body_text, snippet, sent_at")
+      .select("from_name, from_email, to_addresses, body_text, body_html, snippet, sent_at")
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: true });
 
