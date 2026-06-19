@@ -70,7 +70,7 @@ export default function InboxPage() {
   //   • "unassigned" (default) — folder name itself: open + unassigned + in this folder
   //   • "all" — All sub-view: any conversation in this folder
   //   • "closed" — Closed sub-view: closures from this folder (separate data source)
-  const [folderSubView, setFolderSubView] = useState<"unassigned" | "all" | "closed">("unassigned");
+  const [folderSubView, setFolderSubView] = useState<"unassigned" | "all" | "closed" | "pending_outreach">("unassigned");
   const [searchQuery, setSearchQuery] = useState("");
   // Debounced version of searchQuery — lags real input by ~300ms. Used for:
   //   1. The /api/search fetch (avoids one fetch per keystroke)
@@ -284,10 +284,6 @@ export default function InboxPage() {
   // Drafts row under an account in the sidebar. Shows ALL team members'
   // drafts on that account.
   const isAccountDraftsView = activeView === "account-drafts" && !!activeMailbox && !activeFolder;
-  // Pending Outreach: agent-created drafts where requires_sender_selection
-  // is TRUE. Sidebar entry between Drafts and Sent. Global scope (across all
-  // accounts), so account/folder filters don't apply.
-  const isPendingOutreachView = activeView === "pending-outreach" && !activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
   const displayConversations = useMemo(() => {
@@ -822,20 +818,6 @@ export default function InboxPage() {
               onOpenCompose={() => setActiveView("compose")}
             />
           </Panel>
-        ) : isPendingOutreachView ? (
-          // Pending Outreach view — agent-created drafts awaiting an
-          // operator's sender-account choice. Single full-width panel,
-          // no sidebar/list (global scope across all email accounts).
-          <Panel defaultSize={86} minSize={50} order={2} id="content-pending-outreach">
-            <PendingOutreachPanel
-              currentUser={currentUser}
-              emailAccounts={emailAccounts}
-              onOpenConversation={(conversationId) => {
-                setActiveView("inbox");
-                window.location.hash = `#conversation=${conversationId}`;
-              }}
-            />
-          </Panel>
         ) : isAccountDraftsView ? (
           // Per-account Drafts view — same panel, scoped to one email account
           // and showing drafts from ALL team members.
@@ -853,8 +835,16 @@ export default function InboxPage() {
           </Panel>
         ) : (
           <>
-            {/* ── Panel 2: ConversationList ── */}
+            {/* ── Panel 2: ConversationList (or per-folder Pending Outreach sub-view) ── */}
             <Panel defaultSize={22} minSize={15} maxSize={45} order={2} id="conversation-list">
+              {folderSubView === "pending_outreach" && activeFolder ? (
+                <PendingOutreachPanel
+                  currentUser={currentUser}
+                  emailAccounts={emailAccounts}
+                  onOpenConversation={openConversationFromTask}
+                  folderId={activeFolder}
+                />
+              ) : (
               <ConversationList
                 conversations={displayConversations}
                 activeConvo={activeConvo}
@@ -877,6 +867,7 @@ export default function InboxPage() {
                 supplierStatusMap={supplierStatusMap}
                 allSupplierStatuses={allSupplierStatuses}
               />
+              )}
             </Panel>
 
             <PanelResizeHandle className="resize-handle" />

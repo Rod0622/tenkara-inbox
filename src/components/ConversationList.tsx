@@ -775,7 +775,7 @@ export default function ConversationList({
   teamMembers, onBulkAction, searchSnippets, searchTaskResults = [], onOpenConversation,
   currentUserId,
   supplierStatusMap, allSupplierStatuses,
-}: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void; currentUserId?: string | null }) {
+}: ConversationListProps & { folderSubView?: "unassigned" | "all" | "closed" | "pending_outreach"; searchTaskResults?: any[]; onOpenConversation?: (id: string) => void; currentUserId?: string | null }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

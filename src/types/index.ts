@@ -4,7 +4,7 @@ export type TaskStatus = "todo" | "in_progress" | "completed" | "dismissed";
 //   • "unassigned" — clicking the folder name itself: status=open, assignee=null, folder=this
 //   • "all"        — All sub-view: any conversation tagged with this folder's label
 //   • "closed"     — Closed sub-view: conversations closed FROM this folder (via conversation_closures)
-export type FolderSubView = "unassigned" | "all" | "closed";
+export type FolderSubView = "unassigned" | "all" | "closed" | "pending_outreach";
 
 export interface TeamMember {
   id: string;

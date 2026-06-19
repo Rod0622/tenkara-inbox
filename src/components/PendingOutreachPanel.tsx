@@ -77,10 +77,18 @@ export default function PendingOutreachPanel({
   currentUser,
   emailAccounts,
   onOpenConversation,
+  folderId = null,
+  accountId = null,
 }: {
   currentUser: TeamMember | null;
   emailAccounts: EmailAccount[];
   onOpenConversation?: (conversationId: string) => void;
+  // Optional scoping. When folderId is set, the panel shows only agent drafts
+  // whose conversation is in that folder (the per-folder Pending Outreach
+  // sub-view). When accountId is set (and no folderId), scopes by account.
+  // When neither is set, shows the global list (legacy).
+  folderId?: string | null;
+  accountId?: string | null;
 }) {
   const [drafts, setDrafts] = useState<PendingDraft[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +110,12 @@ export default function PendingOutreachPanel({
 
   const fetchDrafts = async () => {
     try {
-      const res = await fetch("/api/drafts/pending-outreach");
+      const qs = folderId
+        ? `?folder_id=${encodeURIComponent(folderId)}`
+        : accountId
+        ? `?account_id=${encodeURIComponent(accountId)}`
+        : "";
+      const res = await fetch(`/api/drafts/pending-outreach${qs}`);
       if (res.ok) {
         const data = await res.json();
         setDrafts((data.drafts || []) as PendingDraft[]);
@@ -132,7 +145,7 @@ export default function PendingOutreachPanel({
       window.removeEventListener("focus", onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [folderId, accountId]);
 
   const showToast = (kind: ToastState["kind"], message: string) => {
     setToast({ kind, message });
