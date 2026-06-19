@@ -28,24 +28,23 @@ export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
   const countOnly = searchParams.get("count_only") === "true";
+  // Optional scoping (Stage 1): a per-folder Pending Outreach sub-view passes
+  // folder_id; a per-account view passes account_id. When neither is set the
+  // endpoint returns the global list (legacy behavior, used by the old panel
+  // until the UI migrates).
+  const folderId = searchParams.get("folder_id");
+  const accountId = searchParams.get("account_id");
 
+  // Membership: any UNSENT draft created by an agent. (Previously this was
+  // limited to requires_sender_selection=true, which only covered cold-
+  // outreach drafts missing a sender — it missed agent REPLY drafts that
+  // already have an account. Pending Outreach is the review queue for ALL
+  // agent drafts awaiting an operator, so we key on created_by_agent only.)
   try {
-    if (countOnly) {
-      const { count, error } = await supabase
-        .from("email_drafts")
-        .select("id", { count: "exact", head: true })
-        .eq("requires_sender_selection", true)
-        .not("created_by_agent", "is", null);
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-      return NextResponse.json({ count: count || 0 });
-    }
-
-    // Full list. The conversation join surfaces the supplier email + thread
-    // context so the panel can show a meaningful row even though the draft
-    // itself doesn't carry a separate "supplier" column.
+    // Always fetch the candidate set with the conversation join (which
+    // carries folder_id + email_account_id), then apply folder/account
+    // scoping in JS. PostgREST embedded-filter semantics are awkward for
+    // "the parent's column equals X", and the agent-draft set is small.
     const { data: drafts, error } = await supabase
       .from("email_drafts")
       .select(
@@ -70,11 +69,12 @@ export async function GET(req: NextRequest) {
           from_email,
           primary_contact_email,
           primary_contact_name,
-          thread_id
+          thread_id,
+          folder_id,
+          email_account_id
         )
         `
       )
-      .eq("requires_sender_selection", true)
       .not("created_by_agent", "is", null)
       .order("created_at", { ascending: false });
 
@@ -82,7 +82,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ drafts: drafts || [] });
+    // Apply scoping. A draft matches a folder/account scope via its
+    // conversation's folder_id / email_account_id.
+    let scoped = (drafts || []) as any[];
+    if (folderId) {
+      scoped = scoped.filter(
+        (d) => (d.conversation as any)?.folder_id === folderId
+      );
+    } else if (accountId) {
+      scoped = scoped.filter(
+        (d) => (d.conversation as any)?.email_account_id === accountId
+      );
+    }
+
+    if (countOnly) {
+      return NextResponse.json({ count: scoped.length });
+    }
+
+    return NextResponse.json({ drafts: scoped });
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || "Unexpected error" },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyEmailAssigned } from "@/lib/notifications";
+import { labelManualCreatedConversation } from "@/lib/folder-labels";
 
 // POST /api/conversations/create — Create a blank conversation (internal/team chat)
 export async function POST(req: NextRequest) {
@@ -69,6 +70,12 @@ export async function POST(req: NextRequest) {
     action: "conversation_created",
     details: { subject: subject.trim(), assignee_id },
   });
+
+  // Auto-label: apply the account label (always) and, when the conversation
+  // is unassigned, the "Inbox" label + place it in the account's Inbox
+  // folder so it surfaces in that account's inbox triage. Mirrors the
+  // sync path's inbound labeling. Best-effort — never blocks the create.
+  await labelManualCreatedConversation(convo.id, email_account_id, !assignee_id);
 
   // Notify the assigned user
   if (assignee_id && actor_id && assignee_id !== actor_id) {

@@ -116,6 +116,77 @@ export async function ensureGlobalLabel(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// ensureSuperAgentLabel
+//
+// Returns the id of the global "Super Agent" label, creating it if missing.
+// Applied to every conversation created via the external API (agent-created
+// conversations) so operators can spot them. Top-level label (no parent).
+// ────────────────────────────────────────────────────────────────────
+
+export async function ensureSuperAgentLabel(): Promise<string | null> {
+  // Distinct purple so it stands out from account/folder labels.
+  return ensureGlobalLabel("Super Agent", {
+    color: "#BC8CFF",
+    bg_color: "rgba(188, 140, 255, 0.14)",
+    parentLabelId: null,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// labelManualCreatedConversation
+//
+// Called after a conversation is created via the manual create route
+// (/api/conversations/create) or the external API. Applies:
+//   • the account label (always)
+//   • the "Inbox" label AND sets folder_id = account's Inbox folder
+//     (only when the conversation is unassigned — assigned convos go to
+//     the assignee's plate, not the shared inbox triage)
+//
+// Mirrors onNewConversationFromSync's inbound behavior, but for
+// human/agent-created conversations rather than synced mail.
+//
+// Best-effort — never throws.
+// ────────────────────────────────────────────────────────────────────
+
+export async function labelManualCreatedConversation(
+  conversationId: string,
+  accountId: string,
+  isUnassigned: boolean
+): Promise<void> {
+  try {
+    const supabase = createServerClient();
+    const { account_label_id, inbox_label_id } = await ensureAccountLabels(accountId);
+    const labelsToApply: Array<string | null> = [account_label_id];
+
+    if (isUnassigned) {
+      labelsToApply.push(inbox_label_id);
+
+      // Place in the account's Inbox folder so it appears in that account's
+      // inbox triage (and under Inbox → Pending Outreach for agent drafts).
+      const { data: inboxFolder } = await supabase
+        .from("folders")
+        .select("id")
+        .eq("email_account_id", accountId)
+        .ilike("name", "Inbox")
+        .eq("is_system", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (inboxFolder?.id) {
+        await supabase
+          .from("conversations")
+          .update({ folder_id: inboxFolder.id })
+          .eq("id", conversationId);
+      }
+    }
+
+    await applyLabelsToConversation(conversationId, labelsToApply);
+  } catch (e: any) {
+    console.error("[labelManualCreatedConversation] failed:", e?.message || e);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // ensureAccountLabels
 //
 // Called once after an email account is created (any provider).
