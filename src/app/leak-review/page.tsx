@@ -91,7 +91,10 @@ export default function LeakReviewPage() {
   const [sugLoading, setSugLoading] = useState(false);
   const [placement, setPlacement] = useState<string>("new"); // "new" | conversation_id
   const [busy, setBusy] = useState(false);
-  const [lastSplitId, setLastSplitId] = useState<string | null>(null);
+  const [recentSplits, setRecentSplits] = useState<
+    { split_id: string; moved: number; domain: string; sourceSubject: string }[]
+  >([]);
+  const [showUndo, setShowUndo] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,7 +106,7 @@ export default function LeakReviewPage() {
   const scan = useCallback(async (accId: string) => {
     if (!accId) return;
     setLoading(true); setError(null); setSelected(null); setMessages([]);
-    setSplitSupplier(null); setLastSplitId(null);
+    setSplitSupplier(null);
     try {
       const res = await fetch(`/api/leak-review?account_id=${encodeURIComponent(accId)}`);
       const data = await res.json();
@@ -173,8 +176,11 @@ export default function LeakReviewPage() {
       const data = await res.json();
       if (!res.ok) { showToast("Split failed: " + (data.error || "unknown")); }
       else {
-        setLastSplitId(data.split_id);
-        showToast(`Moved ${data.moved} message(s)${data.created_new ? " to a new conversation" : ""}. You can undo.`);
+        setRecentSplits((prev) => [
+          { split_id: data.split_id, moved: data.moved, domain: splitSupplier.domain, sourceSubject: selected.subject },
+          ...prev,
+        ]);
+        showToast(`Moved ${data.moved} message(s)${data.created_new ? " to a new conversation" : ""}. Undo available in "Recent splits".`);
         setSplitSupplier(null);
         await openSuspect(selected);   // refresh the panel
         await scan(accountId);         // refresh suspect list
@@ -183,17 +189,21 @@ export default function LeakReviewPage() {
     setBusy(false);
   }, [selected, splitSupplier, messagesToMove, placement, accountId, openSuspect, scan]);
 
-  const undoSplit = useCallback(async () => {
-    if (!lastSplitId) return;
+  const undoSplit = useCallback(async (splitId: string) => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/leak-review/split?split_id=${encodeURIComponent(lastSplitId)}`, { method: "DELETE" });
+      const res = await fetch(`/api/leak-review/split?split_id=${encodeURIComponent(splitId)}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) showToast("Undo failed: " + (data.error || "unknown"));
-      else { showToast(`Restored ${data.restored} message(s).`); setLastSplitId(null); await scan(accountId); setSelected(null); }
+      else {
+        showToast(`Restored ${data.restored} message(s).`);
+        setRecentSplits((prev) => prev.filter((r) => r.split_id !== splitId));
+        await scan(accountId);
+        setSelected(null);
+      }
     } catch (e: any) { showToast("Undo failed: " + e.message); }
     setBusy(false);
-  }, [lastSplitId, accountId, scan]);
+  }, [accountId, scan]);
 
   const dismissSuspect = useCallback(async () => {
     if (!selected) return;
@@ -213,27 +223,53 @@ export default function LeakReviewPage() {
 
   const domainOrder = selected ? selected.suppliers.map((s) => s.domain) : [];
 
+  // Open a conversation in a standalone popout window (reuses the app's
+  // fullscreen conversation view), so the operator can inspect full context
+  // without leaving the leak-review page.
+  const openThreadWindow = (conversationId: string) => {
+    const url = `/#conversation=${conversationId}&fullscreen=1`;
+    window.open(url, "_blank", "noopener,noreferrer,width=900,height=800");
+  };
+
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text-primary)]">
-      <div className="border-b border-[var(--border)] px-6 py-4 flex items-center gap-3">
+    <div className="h-screen flex flex-col bg-[var(--bg)] text-[var(--text-primary)]">
+      <div className="shrink-0 border-b border-[var(--border)] px-6 py-4 flex items-center gap-3">
         <Link href="/" className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"><ArrowLeft size={18} /></Link>
         <AlertTriangle size={18} className="text-[#D97706]" />
         <h1 className="text-[15px] font-semibold">Leak Review</h1>
         <span className="text-[12px] text-[var(--text-muted)]">Conversations that may contain more than one supplier</span>
-        {lastSplitId && (
-          <button onClick={undoSplit} disabled={busy}
+        {recentSplits.length > 0 && (
+          <button onClick={() => setShowUndo((v) => !v)}
             className="ml-auto text-[12px] flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-[var(--border)] hover:bg-[var(--surface)]">
-            <Undo2 size={13} /> Undo last split
+            <Undo2 size={13} /> Recent splits ({recentSplits.length})
           </button>
         )}
       </div>
 
-      {toast && (
-        <div className="mx-6 mt-3 text-[12px] px-3 py-2 rounded-md bg-[var(--surface)] border border-[var(--border)]">{toast}</div>
+      {/* Recent splits / undo tray */}
+      {showUndo && recentSplits.length > 0 && (
+        <div className="shrink-0 mx-6 mt-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+          <div className="text-[12px] font-semibold mb-2">Recent splits (this session) — undo to restore</div>
+          <div className="flex flex-col gap-1">
+            {recentSplits.map((rs) => (
+              <div key={rs.split_id} className="flex items-center justify-between text-[12px] gap-2">
+                <span className="truncate">Moved {rs.moved} msg(s) of <span className="font-medium">{rs.domain}</span> out of “{rs.sourceSubject}”</span>
+                <button onClick={() => undoSplit(rs.split_id)} disabled={busy}
+                  className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] hover:bg-[var(--bg)]">
+                  <Undo2 size={12} /> Undo
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
-      <div className="px-6 py-4">
-        <div className="flex items-center gap-3 mb-4">
+      {toast && (
+        <div className="shrink-0 mx-6 mt-3 text-[12px] px-3 py-2 rounded-md bg-[var(--surface)] border border-[var(--border)]">{toast}</div>
+      )}
+
+      <div className="flex-1 overflow-hidden px-6 py-4 flex flex-col">
+        <div className="shrink-0 flex items-center gap-3 mb-4">
           <label className="text-[13px] text-[var(--text-secondary)]">Account</label>
           <select value={accountId}
             onChange={(e) => { setAccountId(e.target.value); scan(e.target.value); }}
@@ -249,14 +285,14 @@ export default function LeakReviewPage() {
           )}
         </div>
 
-        {error && <div className="text-[13px] text-[#DC2626] mb-3">{error}</div>}
+        {error && <div className="shrink-0 text-[13px] text-[#DC2626] mb-3">{error}</div>}
 
         {loading ? (
           <div className="flex items-center gap-2 text-[13px] text-[var(--text-muted)] py-8"><Loader2 size={16} className="animate-spin" /> Scanning…</div>
         ) : (
-          <div className="flex gap-4">
+          <div className="flex-1 overflow-hidden flex gap-4">
             {/* Suspect list */}
-            <div className="w-[400px] shrink-0">
+            <div className="w-[400px] shrink-0 overflow-y-auto pr-1">
               {suspects.length === 0 && accountId && (
                 <div className="text-[13px] text-[var(--text-muted)] py-6">No suspected leaks found in this account. 🎉</div>
               )}
@@ -286,7 +322,7 @@ export default function LeakReviewPage() {
             </div>
 
             {/* Review panel */}
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 overflow-y-auto">
               {!selected ? (
                 <div className="text-[13px] text-[var(--text-muted)] py-6">Select a conversation to review its messages grouped by supplier.</div>
               ) : (
@@ -301,9 +337,10 @@ export default function LeakReviewPage() {
                         className="text-[12px] flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] hover:bg-[var(--surface)]">
                         <EyeOff size={12} /> Not a leak
                       </button>
-                      <a href={`/#conversation=${selected.conversation_id}`} className="text-[12px] flex items-center gap-1 text-[var(--accent)] hover:underline">
-                        Open in inbox <ExternalLink size={12} />
-                      </a>
+                      <button onClick={() => openThreadWindow(selected.conversation_id)}
+                        className="text-[12px] flex items-center gap-1 text-[var(--accent)] hover:underline">
+                        Open thread <ExternalLink size={12} />
+                      </button>
                     </div>
                   </div>
 
@@ -345,13 +382,19 @@ export default function LeakReviewPage() {
                             <span>Create a new conversation (filed into this account's Inbox)</span>
                           </label>
                           {suggestions.map((sg) => (
-                            <label key={sg.conversation_id} className="flex items-center gap-2 text-[12px] p-1.5 rounded hover:bg-[var(--bg)] cursor-pointer">
-                              <input type="radio" name="placement" checked={placement === sg.conversation_id} onChange={() => setPlacement(sg.conversation_id)} />
-                              <span className="truncate">
-                                Merge into: <span className="font-medium">{sg.subject || "(no subject)"}</span>{" "}
-                                <span className="text-[var(--text-muted)]">· {sg.msg_count} msgs · {sg.match_type === "exact" ? "exact email" : "same domain"}</span>
-                              </span>
-                            </label>
+                            <div key={sg.conversation_id} className="flex items-center gap-1.5">
+                              <label className="flex-1 flex items-center gap-2 text-[12px] p-1.5 rounded hover:bg-[var(--bg)] cursor-pointer">
+                                <input type="radio" name="placement" checked={placement === sg.conversation_id} onChange={() => setPlacement(sg.conversation_id)} />
+                                <span className="truncate">
+                                  Merge into: <span className="font-medium">{sg.subject || "(no subject)"}</span>{" "}
+                                  <span className="text-[var(--text-muted)]">· {sg.msg_count} msgs · {sg.match_type === "exact" ? "exact email" : "same domain"}</span>
+                                </span>
+                              </label>
+                              <button onClick={() => openThreadWindow(sg.conversation_id)} title="Inspect this thread in a new window"
+                                className="shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] p-1">
+                                <ExternalLink size={12} />
+                              </button>
+                            </div>
                           ))}
                           {suggestions.length === 0 && (
                             <div className="text-[11px] text-[var(--text-muted)] pl-1.5">No existing conversations found for this supplier — a new one will be created.</div>
