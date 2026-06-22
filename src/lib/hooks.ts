@@ -205,6 +205,7 @@ export function useConversations(accountId: string | null) {
         created_at,
         updated_at,
         supplier_contact_id,
+        supplier_contact:supplier_contacts(id, name, company),
         primary_contact_name,
         primary_contact_email,
         primary_contact_is_manual,
