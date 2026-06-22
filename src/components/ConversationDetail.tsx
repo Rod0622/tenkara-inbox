@@ -3382,12 +3382,22 @@ export default function ConversationDetail({
               //      we're actually corresponding with in this conversation.
               //   3. The linked supplier's company name (fallback only).
               //   4. The supplier's stored contact name (last resort).
+              // Display precedence for the conversation's contact label:
+              //   1. A manually-set / per-conversation primary contact name.
+              //   2. The latest INBOUND message's sender name — the person/party
+              //      we're actually corresponding with right now (live).
+              //   3. The conversation's stored from_name (fallback).
+              //   4. The linked supplier's company / contact name (last resort).
               const supplierCompany =
                 (convo as any).supplier_contact?.company ||
                 (convo as any).supplier_contact?.name ||
                 null;
+              const latestInboundName = Array.isArray(messages)
+                ? ([...messages].reverse().find((m: any) => !m.is_outbound)?.from_name || null)
+                : null;
               const displayName =
                 (convo as any).primary_contact_name ||
+                latestInboundName ||
                 convo.from_name ||
                 supplierCompany;
               const displayEmail = (convo as any).primary_contact_email || convo.from_email;
