@@ -77,8 +77,11 @@ export default function StatusDropdown({
   const isClosed = currentStatus === "closed";
   const isAssignedToCurrentUser =
     currentUser?.id != null && currentUser.id === currentAssigneeId;
-  // Only the assignee may close. Anyone may reopen a closed convo.
-  const canClose = isAssignedToCurrentUser && !isClosed;
+  const isAdmin = currentUser?.role === "admin";
+  // The assignee may close their own conversation; admins may close ANY
+  // conversation (even unassigned or assigned to someone else). Anyone may
+  // reopen a closed convo.
+  const canClose = (isAssignedToCurrentUser || isAdmin) && !isClosed;
   const canReopen = isClosed;
 
   const handleConfirmClose = async () => {

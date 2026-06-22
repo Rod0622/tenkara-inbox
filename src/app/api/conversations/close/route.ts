@@ -43,12 +43,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  // Safety check: only the current assignee can close.
+  // Permission check: the current assignee can close their own conversation,
+  // and ADMINS can close any conversation (even ones not assigned to them).
   if (convo.assignee_id !== actor_id) {
-    return NextResponse.json(
-      { error: "Only the assigned user can close this conversation" },
-      { status: 403 }
-    );
+    const { data: actor } = await supabase
+      .from("team_members")
+      .select("role")
+      .eq("id", actor_id)
+      .maybeSingle();
+    const isAdmin = actor?.role === "admin";
+    if (!isAdmin) {
+      return NextResponse.json(
+        { error: "Only the assigned user or an admin can close this conversation" },
+        { status: 403 }
+      );
+    }
   }
 
   // Safety check: target folder must belong to the same email account
