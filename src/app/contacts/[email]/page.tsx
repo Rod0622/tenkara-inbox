@@ -203,6 +203,15 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
 
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [companyDraft, setCompanyDraft] = useState("");
+  const [savingCompany, setSavingCompany] = useState(false);
+
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
   // Contact persons CRUD state. We mirror data.contact_persons into local state so
   // adds/edits/deletes can update instantly without refetching the entire page.
   const [persons, setPersons] = useState<any[]>([]);
@@ -270,6 +279,61 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
         setData((prev: any) => prev ? { ...prev, contact: { ...prev.contact, name: trimmed } } : prev);
       }
     } catch (e) { console.error(e); } finally { setSavingName(false); }
+  };
+
+  const saveCompany = async () => {
+    if (!data) return;
+    const trimmed = companyDraft.trim();
+    setSavingCompany(true);
+    try {
+      const res = await fetch("/api/contact-command-center", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplier_contact_id: data.supplier_contact_id || data.supplier_hours?.id || null,
+          email: decodedEmail,
+          company: trimmed,
+        }),
+      });
+      if (res.ok) {
+        setEditingCompany(false);
+        setData((prev: any) => prev ? { ...prev, contact: { ...prev.contact, company: trimmed || null } } : prev);
+      }
+    } catch (e) { console.error(e); } finally { setSavingCompany(false); }
+  };
+
+  const saveEmail = async () => {
+    if (!data) return;
+    const trimmed = emailDraft.trim().toLowerCase();
+    setEmailError(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError("Enter a valid email address.");
+      return;
+    }
+    if (trimmed === decodedEmail.toLowerCase()) { setEditingEmail(false); return; }
+    setSavingEmail(true);
+    try {
+      const res = await fetch("/api/contact-command-center", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplier_contact_id: data.supplier_contact_id || data.supplier_hours?.id || null,
+          email: decodedEmail,
+          new_email: trimmed,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // The email is the page's lookup key (URL), so navigate to the new
+        // address to keep the page consistent with the saved value.
+        const qs = account ? `?account=${encodeURIComponent(account)}` : "";
+        window.location.href = `/contacts/${encodeURIComponent(trimmed)}${qs}`;
+      } else {
+        setEmailError(j.error || "Could not update email.");
+      }
+    } catch (e: any) {
+      setEmailError(e?.message || "Could not update email.");
+    } finally { setSavingEmail(false); }
   };
 
   const openAddPerson = () => {
@@ -461,8 +525,64 @@ export default function ContactCommandCenterPage({ params }: { params: { email: 
                   </button>
                 </div>
               )}
-              {contact.company && contact.company !== contact.name && <div className="text-sm text-[var(--info)]">{contact.company}</div>}
-              <div className="text-sm text-[var(--text-secondary)]">{contact.email}</div>
+              {/* Company — inline editable */}
+              {!editingCompany ? (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-[var(--info)]">{contact.company || <span className="text-[var(--text-muted)] italic">No company</span>}</div>
+                  <button onClick={() => { setCompanyDraft(contact.company || ""); setEditingCompany(true); }} title="Edit company" className="p-0.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                    <Edit3 size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={companyDraft}
+                    onChange={(e) => setCompanyDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveCompany(); if (e.key === "Escape") setEditingCompany(false); }}
+                    autoFocus
+                    placeholder="Company name"
+                    className="text-sm bg-transparent border-b border-[var(--accent)] outline-none text-[var(--text-primary)] py-0.5 min-w-[220px]"
+                  />
+                  <button onClick={saveCompany} disabled={savingCompany} title="Save" className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)]/10 disabled:opacity-50">
+                    <Save size={12} /> {savingCompany ? "Saving…" : "Save"}
+                  </button>
+                  <button onClick={() => setEditingCompany(false)} title="Cancel" className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+              {/* Email — inline editable (it's the page key, so saving navigates) */}
+              {!editingEmail ? (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-[var(--text-secondary)]">{contact.email}</div>
+                  <button onClick={() => { setEmailDraft(contact.email || ""); setEmailError(null); setEditingEmail(true); }} title="Edit email" className="p-0.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                    <Edit3 size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="email"
+                      value={emailDraft}
+                      onChange={(e) => setEmailDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveEmail(); if (e.key === "Escape") setEditingEmail(false); }}
+                      autoFocus
+                      placeholder="supplier@example.com"
+                      className="text-sm bg-transparent border-b border-[var(--accent)] outline-none text-[var(--text-primary)] py-0.5 min-w-[260px]"
+                    />
+                    <button onClick={saveEmail} disabled={savingEmail || !emailDraft.trim()} title="Save" className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)]/10 disabled:opacity-50">
+                      <Save size={12} /> {savingEmail ? "Saving…" : "Save"}
+                    </button>
+                    <button onClick={() => setEditingEmail(false)} title="Cancel" className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {emailError && <div className="text-[11px] text-[#DC2626]">{emailError}</div>}
+                  <div className="text-[11px] text-[var(--text-muted)]">Changing the email updates the supplier's primary address and reloads this page.</div>
+                </div>
+              )}
             </div>
           </div>
         </div>

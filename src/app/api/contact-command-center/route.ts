@@ -609,7 +609,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const supabase = createServerClient();
     const body = await req.json();
-    const { supplier_contact_id, email, timezone, work_start, work_end, work_days, name, company } = body;
+    const { supplier_contact_id, email, timezone, work_start, work_end, work_days, name, company, new_email } = body;
 
     if (!supplier_contact_id && !email) {
       return NextResponse.json({ error: "supplier_contact_id or email required" }, { status: 400 });
@@ -629,6 +629,28 @@ export async function PATCH(req: NextRequest) {
     }
     if (company !== undefined) {
       update.company = typeof company === "string" ? (company.trim() || null) : null;
+    }
+    // Editable email (the supplier's primary address). `new_email` is the
+    // updated value; `email` stays the current lookup key. Validate format and
+    // guard against collisions with another supplier_contacts row.
+    if (new_email !== undefined) {
+      const normalized = typeof new_email === "string" ? new_email.trim().toLowerCase() : "";
+      if (!normalized || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+        return NextResponse.json({ error: "A valid email is required" }, { status: 400 });
+      }
+      // Block if another supplier already uses this email.
+      const { data: clash } = await supabase
+        .from("supplier_contacts")
+        .select("id")
+        .eq("email", normalized)
+        .maybeSingle();
+      if (clash && (!supplier_contact_id || clash.id !== supplier_contact_id)) {
+        return NextResponse.json(
+          { error: "Another supplier already uses that email address." },
+          { status: 409 }
+        );
+      }
+      update.email = normalized;
     }
 
     if (Object.keys(update).length === 0) {
