@@ -17,6 +17,60 @@ function cleanText(value?: string | null) {
     .trim();
 }
 
+// Strip quoted reply-history from an HTML body so we don't re-extract tables
+// (including signature and quote tables) that belong to earlier messages and
+// are repeated inline. Outlook/our composer wrap the quoted thread in a
+// reference-message container; cut from the first such marker onward.
+function stripQuotedHistory(html: string): string {
+  const markers = [
+    'id="mail-editor-reference-message-container"',
+    'class="ms-outlook-mobile-reference-message',
+    "gmail_quote",
+    'id="divRplyFwdMsg"',
+  ];
+  let cutAt = html.length;
+  for (const m of markers) {
+    const idx = html.indexOf(m);
+    if (idx !== -1 && idx < cutAt) cutAt = idx;
+  }
+  return html.slice(0, cutAt);
+}
+
+// Heuristic: does this single <table> look like a SIGNATURE / contact block
+// rather than a data/quote table? Signature tables here contain things like
+// "Sales Manager", a phone, an email, a company address — and never pricing
+// headers. We skip them so they don't crowd out the real quote table.
+function looksLikeSignatureTable(tableHtml: string): boolean {
+  const text = tableHtml.replace(/<[^>]+>/g, " ").toLowerCase();
+  const sigMarkers = [
+    "sales manager",
+    "best regards",
+    "kind regards",
+    "phone:",
+    "whatsapp",
+    "co., ltd",
+    "mobile:",
+    "tel:",
+  ];
+  const sigHits = sigMarkers.filter((m) => text.includes(m)).length;
+  // Quote/data tables have these column-ish keywords; if present, NOT a sig.
+  const quoteMarkers = [
+    "material name",
+    "price",
+    "moq",
+    "purity",
+    "cas",
+    "lead time",
+    "quantity",
+    "inci",
+    "grade",
+    "unit",
+  ];
+  const quoteHits = quoteMarkers.filter((m) => text.includes(m)).length;
+  if (quoteHits >= 1) return false; // has quote-ish columns → keep it
+  return sigHits >= 2; // looks like a contact/signature block → skip
+}
+
 // Decode the handful of HTML entities that commonly appear in extracted cell
 // text so numbers/units read correctly (e.g. &nbsp; &amp; &#39;).
 function decodeEntities(s: string): string {
@@ -33,63 +87,56 @@ function decodeEntities(s: string): string {
     });
 }
 
-// Extract any <table> elements from an HTML body and render them as readable,
+// Extract <table> elements from an HTML body and render them as readable,
 // pipe-delimited rows so the model can SEE tabular quotes (prices, MOQ, lead
 // times, etc.). Suppliers frequently send quotes as HTML tables whose content
 // is lost or garbled in the plain-text (body_text) part — that data never
 // reached the model before, so table-formatted quotes weren't captured.
 //
-// Pure string parsing (no DOM dependency). Best-effort: returns "" when there
-// are no usable tables.
+// Skips signature/contact tables and ignores quoted reply-history. Pure string
+// parsing (no DOM dependency). Best-effort: returns "" when no usable tables.
 function extractHtmlTables(html?: string | null): string {
   if (!html) return "";
-  const src = String(html);
+  const src = stripQuotedHistory(String(html));
   const tables = src.match(/<table\b[\s\S]*?<\/table>/gi);
   if (!tables || tables.length === 0) return "";
 
   const out: string[] = [];
-  tables.forEach((tbl, ti) => {
+  let kept = 0;
+  tables.forEach((tbl) => {
+    if (looksLikeSignatureTable(tbl)) return; // skip signature/contact blocks
     const rows = tbl.match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
     const lines: string[] = [];
     for (const row of rows) {
-      // Cells can be <td> or <th>.
       const cells = row.match(/<t[dh]\b[\s\S]*?<\/t[dh]>/gi) || [];
-      const values = cells.map((cell) => {
-        // Strip inner tags, collapse whitespace, decode entities.
-        const text = decodeEntities(
-          cell
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim()
-        );
-        return text;
-      });
-      // Skip fully-empty rows.
+      const values = cells.map((cell) =>
+        decodeEntities(cell.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      );
       if (values.some((v) => v.length > 0)) {
         lines.push(values.join(" | "));
       }
     }
     if (lines.length > 0) {
-      out.push(`Table ${ti + 1}:\n${lines.join("\n")}`);
+      kept += 1;
+      out.push(`Table ${kept}:\n${lines.join("\n")}`);
     }
   });
   return out.join("\n\n");
 }
 
 // Build the best textual representation of a message body for the model:
-// the plain-text body, plus any tables recovered from the HTML part (which
-// the plain text usually loses). Tables are appended clearly labelled so the
-// model can extract quote data that only appears in tabular form.
+// the plain-text body (truncated), plus any quote tables recovered from the
+// HTML part — kept INTACT (not subject to the prose truncation) so multi-row
+// pricing tables aren't cut off mid-table.
 function bodyForModel(msg: { body_text?: string | null; body_html?: string | null; snippet?: string | null }): string {
-  const base = cleanText(msg.body_text || msg.snippet || "");
+  const base = truncate(cleanText(msg.body_text || msg.snippet || ""), 2500);
   const tables = extractHtmlTables(msg.body_html);
   if (!tables) return base;
-  // If the plain text already contains the table numbers we'd be duplicating,
-  // appending the structured version is still useful (clearer rows/cols) and
-  // low-risk; the model dedupes naturally. Keep base first, tables after.
+  // Tables get their own generous budget so all rows survive.
+  const tablesCapped = truncate(tables, 6000);
   return base
-    ? `${base}\n\n[Tabular content extracted from email HTML]\n${tables}`
-    : `[Tabular content extracted from email HTML]\n${tables}`;
+    ? `${base}\n\n[Tabular content extracted from email HTML]\n${tablesCapped}`
+    : `[Tabular content extracted from email HTML]\n${tablesCapped}`;
 }
 
 function truncate(value: string, max = 4000) {
@@ -539,7 +586,7 @@ function buildPrompt(params: {
         `From: ${msg.from_name || ""} <${msg.from_email || ""}>`,
         `To: ${msg.to_addresses || ""}`,
         `Sent: ${msg.sent_at || ""}`,
-        `Content:\n${truncate(body, 4000)}`,
+        `Content:\n${body}`,
       ].join("\n");
     })
     .join("\n\n---\n\n");
