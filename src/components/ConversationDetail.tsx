@@ -3377,19 +3377,19 @@ export default function ConversationDetail({
                 Shows manual override if set, otherwise the original sender. */}
             {(() => {
               // Display precedence for the conversation's contact label:
-              //   1. A manually-set primary contact name (explicit override).
-              //   2. The linked supplier's company name (kept current — when the
-              //      company is renamed in the command center it reflects here,
-              //      instead of a stale original sender name).
-              //   3. The original sender's from_name (fallback).
+              //   1. A manually-set / per-conversation primary contact name.
+              //   2. The live sender on this thread (from_name) — the person
+              //      we're actually corresponding with in this conversation.
+              //   3. The linked supplier's company name (fallback only).
+              //   4. The supplier's stored contact name (last resort).
               const supplierCompany =
                 (convo as any).supplier_contact?.company ||
                 (convo as any).supplier_contact?.name ||
                 null;
               const displayName =
                 (convo as any).primary_contact_name ||
-                supplierCompany ||
-                convo.from_name;
+                convo.from_name ||
+                supplierCompany;
               const displayEmail = (convo as any).primary_contact_email || convo.from_email;
               const isManual = (convo as any).primary_contact_is_manual === true;
               return (
