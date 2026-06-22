@@ -555,17 +555,19 @@ export async function onNewConversationFromSync(
   try {
     const supabase = createServerClient();
     const { account_label_id, inbox_label_id } = await ensureAccountLabels(accountId);
-    const labelsToApply: Array<string | null> = [account_label_id];
+    // Both inbound mail AND outbound-first outreach now live in the account's
+    // Inbox (product decision: first outreach goes to Inbox, not Sent). So both
+    // get the Inbox label + Inbox folder. The only difference left is unread:
+    // inbound is unread-worthy, outbound is not (handled at message insert).
+    const labelsToApply: Array<string | null> = [account_label_id, inbox_label_id];
 
-    if (!isOutbound) {
-      labelsToApply.push(inbox_label_id);
-
-      // Set folder_id to the account's Inbox folder so future moves work correctly.
+    {
+      // Set folder_id to the account's Inbox folder.
       const { data: inboxFolder } = await supabase
         .from("folders")
         .select("id")
         .eq("email_account_id", accountId)
-        .ilike("name", "Inbox")
+        .ilike("name", "inbox")
         .eq("is_system", true)
         .limit(1)
         .maybeSingle();
@@ -574,29 +576,6 @@ export async function onNewConversationFromSync(
         await supabase
           .from("conversations")
           .update({ folder_id: inboxFolder.id })
-          .eq("id", conversationId);
-      }
-    } else {
-      // Outbound: set folder_id to the account's Sent folder. This mirrors
-      // /api/send/route.ts which sets folder_id = sent_folder_id when a
-      // compose creates a brand-new conversation. Without this, outbound-
-      // first conversations created by the sync (e.g., historical email
-      // backfilled from a newly-added group inbox) end up with folder_id
-      // = null and don't render in NutriPro Group → Sent (or any folder
-      // view), even though the account label is applied.
-      const { data: sentFolder } = await supabase
-        .from("folders")
-        .select("id")
-        .eq("email_account_id", accountId)
-        .ilike("name", "sent")
-        .eq("is_system", true)
-        .limit(1)
-        .maybeSingle();
-
-      if (sentFolder?.id) {
-        await supabase
-          .from("conversations")
-          .update({ folder_id: sentFolder.id })
           .eq("id", conversationId);
       }
     }

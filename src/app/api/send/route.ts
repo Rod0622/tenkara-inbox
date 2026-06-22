@@ -9,6 +9,7 @@ import { notifyWatchers } from "@/lib/notifications";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { dispatchDraftWebhook } from "@/lib/api-token-webhook";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
+import { onNewConversationFromSync } from "@/lib/folder-labels";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
 
@@ -367,15 +368,18 @@ export async function POST(req: NextRequest) {
       messageId = info.messageId;
     }
 
-    // If compose (no existing conversation), create one in Sent folder
+    // If compose (no existing conversation), create one in the INBOX folder.
+    // Product decision: a first outreach we send lives in the account's Inbox
+    // (under the account used), NOT in Sent. The Sent folder stays empty for
+    // normal flow.
     if (!isReply) {
-      // Look up the Sent system folder for this account
-      const { data: sentFolder } = await supabase
+      // Look up the Inbox system folder for this account
+      const { data: inboxFolder } = await supabase
         .from("folders")
         .select("id")
         .eq("email_account_id", accountId)
         .eq("is_system", true)
-        .ilike("name", "sent")
+        .ilike("name", "inbox")
         .maybeSingle();
 
       // For outbound-originated conversations, from_email should be the
@@ -401,12 +405,23 @@ export async function POST(req: NextRequest) {
           is_unread: false,
           status: "open",
           last_message_at: new Date().toISOString(),
-          folder_id: sentFolder?.id || null,
+          folder_id: inboxFolder?.id || null,
         })
         .select("id")
         .single();
 
       conversationId = newConvo?.id || null;
+
+      // Apply the account + Inbox labels (and confirm Inbox folder) so a
+      // composed first-outreach is consistent with sync-created conversations:
+      // it lives in the account's Inbox with the right labels. Best-effort.
+      if (conversationId) {
+        try {
+          await onNewConversationFromSync(conversationId, accountId, true);
+        } catch (e: any) {
+          console.error("[send] label/folder apply failed:", e?.message || e);
+        }
+      }
     }
 
     // Store sent message locally
