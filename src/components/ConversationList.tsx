@@ -1951,7 +1951,7 @@ export default function ConversationList({
                     {/* Header row */}
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span className={`text-[13px] truncate flex-1 ${c.is_unread ? "font-bold text-[var(--text-primary)]" : "font-medium text-[var(--text-secondary)]"}`}>
-                        {c.from_name}
+                        {(c as any).primary_contact_name || (c as any).supplier_contact?.company || (c as any).supplier_contact?.name || c.from_name}
                       </span>
                       {c.is_starred && <span className="text-[var(--highlight)] text-[12px]">★</span>}
                       {/* Personal pin — only show toggle for the assignee */}

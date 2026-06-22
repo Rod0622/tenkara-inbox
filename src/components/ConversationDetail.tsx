@@ -3376,7 +3376,20 @@ export default function ConversationDetail({
             {/* Primary contact display — clickable dropdown.
                 Shows manual override if set, otherwise the original sender. */}
             {(() => {
-              const displayName = (convo as any).primary_contact_name || convo.from_name;
+              // Display precedence for the conversation's contact label:
+              //   1. A manually-set primary contact name (explicit override).
+              //   2. The linked supplier's company name (kept current — when the
+              //      company is renamed in the command center it reflects here,
+              //      instead of a stale original sender name).
+              //   3. The original sender's from_name (fallback).
+              const supplierCompany =
+                (convo as any).supplier_contact?.company ||
+                (convo as any).supplier_contact?.name ||
+                null;
+              const displayName =
+                (convo as any).primary_contact_name ||
+                supplierCompany ||
+                convo.from_name;
               const displayEmail = (convo as any).primary_contact_email || convo.from_email;
               const isManual = (convo as any).primary_contact_is_manual === true;
               return (
