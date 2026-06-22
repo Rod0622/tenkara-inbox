@@ -19,13 +19,28 @@ import { createServerClient } from "@/lib/supabase";
 export async function GET(_req: NextRequest) {
   const supabase = createServerClient();
 
-  // 1. Fetch all supplier_contacts (basic fields + scoring)
-  const { data: suppliers, error: sErr } = await supabase
-    .from("supplier_contacts")
-    .select(
-      "id, name, email, company, responsiveness_score, responsiveness_tier, qualifying_exchanges, last_exchange_at"
-    );
-  if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+  // 1. Fetch all supplier_contacts (basic fields + scoring).
+  //    Supabase caps a single select at 1000 rows by default, but there are
+  //    more suppliers than that — page through to get them all.
+  const suppliers: any[] = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data: sBatch, error: sErr } = await supabase
+        .from("supplier_contacts")
+        .select(
+          "id, name, email, company, responsiveness_score, responsiveness_tier, qualifying_exchanges, last_exchange_at"
+        )
+        .range(offset, offset + PAGE - 1);
+      if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+      if (!sBatch || sBatch.length === 0) break;
+      suppliers.push(...sBatch);
+      if (sBatch.length < PAGE) break;
+      offset += PAGE;
+      if (offset > 100000) break; // safety cap
+    }
+  }
 
   // 2. Fetch all email accounts (small set — 3 today) for chip metadata
   const { data: accounts, error: aErr } = await supabase
@@ -77,13 +92,23 @@ export async function GET(_req: NextRequest) {
     }
   }
 
-  // Signal A: conversations with supplier_contact_id backlink
-  const { data: byIdData, error: byIdErr } = await supabase
-    .from("conversations")
-    .select("supplier_contact_id, email_account_id, last_message_at")
-    .in("supplier_contact_id", supplierIds);
-  if (byIdErr) {
-    return NextResponse.json({ error: byIdErr.message }, { status: 500 });
+  // Signal A: conversations with supplier_contact_id backlink.
+  // supplierIds can be large (1900+); a single .in() with that many values
+  // exceeds PostgREST's URL/statement limits and 500s. Batch in chunks.
+  const byIdData: any[] = [];
+  {
+    const CHUNK = 200;
+    for (let i = 0; i < supplierIds.length; i += CHUNK) {
+      const batch = supplierIds.slice(i, i + CHUNK);
+      const { data: bd, error: byIdErr } = await supabase
+        .from("conversations")
+        .select("supplier_contact_id, email_account_id, last_message_at")
+        .in("supplier_contact_id", batch);
+      if (byIdErr) {
+        return NextResponse.json({ error: byIdErr.message }, { status: 500 });
+      }
+      if (bd) byIdData.push(...bd);
+    }
   }
   const byIdRes = { data: byIdData };
 
