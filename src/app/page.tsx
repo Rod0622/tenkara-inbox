@@ -254,6 +254,10 @@ export default function InboxPage() {
               created_at,
               updated_at,
               supplier_contact_id,
+              supplier_contact:supplier_contacts(id, name, company),
+              primary_contact_name,
+              primary_contact_email,
+              primary_contact_is_manual,
               assignee:team_members!conversations_assignee_id_fkey(*),
               labels:conversation_labels(label_id, label:labels(*))
             `)
@@ -509,7 +513,7 @@ export default function InboxPage() {
           const sb = createBrowserClient();
           const { data } = await sb
             .from("conversations")
-            .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id")
+            .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id, supplier_contact:supplier_contacts(id, name, company), primary_contact_name, primary_contact_email, primary_contact_is_manual")
             .eq("id", conversation)
             .maybeSingle();
           if (data) match = data as any;
@@ -649,7 +653,7 @@ export default function InboxPage() {
       const sb = createBrowserClient();
       const { data } = await sb
         .from("conversations")
-        .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id")
+        .select("id, thread_id, email_account_id, folder_id, subject, from_name, from_email, preview, is_unread, is_starred, assignee_id, status, last_message_at, created_at, supplier_contact_id, supplier_contact:supplier_contacts(id, name, company), primary_contact_name, primary_contact_email, primary_contact_is_manual")
         .eq("id", conversationId)
         .maybeSingle();
 
