@@ -47,32 +47,35 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     console.log("MS OAuth sync " + accountId + ": token refreshed, fetching emails");
     console.log("MS OAuth sync " + accountId + ": last_sync_at=" + (account.last_sync_at || "null") + ", Graph URL prefix: " + (account.last_sync_at ? "incremental" : "initial skip=" + (account.last_sync_uid || "0")));
 
-    // Fetch emails using delegated token (/me/ endpoint)
-    const BATCH_SIZE = 10;
+    // Fetch emails using delegated token (/me/ endpoint).
+    // Pagination uses Microsoft's recommended @odata.nextLink cursor rather
+    // than self-managed $skip offsets. Outlook Mail's $skip is unreliable for
+    // deep paging (it can stop short / repeat on large mailboxes), which is why
+    // earlier inbox walks stalled before reaching the oldest mail. We persist
+    // the nextLink URL in last_sync_uid between cron runs and resume from it,
+    // walking the WHOLE mailbox across ALL folders (/me/messages) to completion.
+    const BATCH_SIZE = 50;
     let url: string;
     const fields = "id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
+    // Is last_sync_uid a saved nextLink (a full URL) vs. a legacy numeric offset?
+    const savedCursor = (account.last_sync_uid || "").trim();
+    const savedNextLink = savedCursor.startsWith("https://") ? savedCursor : "";
 
     if (account.last_sync_at) {
-      // Incremental sync — fetch only new inbox messages
+      // Incremental sync — new messages across ALL folders since last_sync_at.
+      // `/me/messages` spans Inbox, Sent, Archive, custom folders. Sent mail is
+      // classified outbound downstream via the from==account.email check.
       const syncDate = new Date(account.last_sync_at).toISOString().replace(/\.\d{3}Z$/, "Z");
-      url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=" + fields + "&$filter=receivedDateTime ge " + syncDate;
+      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=" + fields + "&$filter=receivedDateTime ge " + syncDate;
+    } else if (savedNextLink) {
+      // Initial backfill in progress — resume exactly where we left off by
+      // following the saved nextLink (do NOT rebuild the query or extract the
+      // skiptoken; Microsoft requires using the nextLink URL verbatim).
+      url = savedNextLink;
     } else {
-      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
-
-      // Safety: if initial sync has been paginating too long (skip > 500),
-      // force-complete it and switch to incremental sync going forward
-      if (skipOffset > 500) {
-        console.log("MS OAuth sync " + accountId + ": initial sync stuck at skip=" + skipOffset + ", forcing transition to incremental sync");
-        await supabase.from("email_accounts").update({
-          last_sync_at: new Date().toISOString(),
-          sync_error: null,
-        }).eq("id", accountId);
-        result.success = true;
-        return result;
-      }
-
-      // Initial sync — use skip offset for pagination
-      url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=" + BATCH_SIZE + "&$skip=" + skipOffset + "&$orderby=receivedDateTime desc&$select=" + fields;
+      // Initial backfill, first page — walk ALL folders, newest-first. The
+      // server returns @odata.nextLink we then follow to completion.
+      url = "https://graph.microsoft.com/v1.0/me/messages?$top=" + BATCH_SIZE + "&$orderby=receivedDateTime desc&$select=" + fields;
     }
 
     const res = await fetch(url, {
@@ -90,17 +93,26 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
 
     const data = await res.json();
     const messages = data.value || [];
+    // Microsoft's continuation cursor. Present => more pages remain; absent =>
+    // we've reached the end of the mailbox (backfill complete).
+    const nextLink: string = data["@odata.nextLink"] || "";
 
-    console.log("MS OAuth sync " + accountId + ": fetched " + messages.length + " messages");
+    console.log("MS OAuth sync " + accountId + ": fetched " + messages.length + " messages" + (nextLink ? " (more pages)" : " (last page)"));
 
     if (messages.length === 0) {
       if (account.last_sync_at) {
-        // Incremental sync found no new messages — that's fine, update timestamp
+        // Incremental sync found no new messages — update timestamp.
         await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+      } else if (nextLink) {
+        // Empty page but more pages remain — save the cursor and continue next run.
+        await supabase.from("email_accounts").update({ last_sync_uid: nextLink, sync_error: null }).eq("id", accountId);
       } else {
-        // Initial sync with skip offset found no more messages — mark complete
-        await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
-        console.log("MS OAuth sync " + accountId + ": initial sync complete (no more messages at offset " + (account.last_sync_uid || "0") + ")");
+        // Initial backfill reached the end — mark complete (switch to incremental).
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(),
+          sync_error: null,
+        }).eq("id", accountId);
+        console.log("MS OAuth sync " + accountId + ": initial backfill complete (no more pages)");
       }
       result.success = true;
       return result;
@@ -310,25 +322,25 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         sync_error: null,
       }).eq("id", accountId);
     } else {
-      // Initial sync — save skip offset for next batch, or mark complete if no more
-      const skipOffset = parseInt(account.last_sync_uid || "0") || 0;
-      const newOffset = skipOffset + messages.length;
-
-      if (messages.length < BATCH_SIZE) {
-        // No more messages — initial sync complete
+      // Initial backfill — follow the @odata.nextLink cursor.
+      if (nextLink) {
+        // More pages remain — persist the nextLink and resume next cron run.
+        // Do NOT set last_sync_at yet (still backfilling).
         await supabase.from("email_accounts").update({
-          last_sync_at: new Date().toISOString(),
-          last_sync_uid: String(newOffset),
-          sync_error: null,
-        }).eq("id", accountId);
-      } else {
-        // More messages to fetch — save offset, don't set last_sync_at yet
-        await supabase.from("email_accounts").update({
-          last_sync_uid: String(newOffset),
+          last_sync_uid: nextLink,
           sync_error: null,
         }).eq("id", accountId);
         result.success = true;
         return result;
+      } else {
+        // No nextLink — reached the end of the mailbox. Backfill complete:
+        // switch to incremental mode. Clear the cursor.
+        await supabase.from("email_accounts").update({
+          last_sync_at: new Date().toISOString(),
+          last_sync_uid: null,
+          sync_error: null,
+        }).eq("id", accountId);
+        console.log("MS OAuth sync " + accountId + ": initial backfill complete (all pages walked)");
       }
     }
 
