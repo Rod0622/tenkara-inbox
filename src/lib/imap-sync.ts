@@ -6,7 +6,7 @@ import { refreshGoogleToken, buildXOAuth2Token } from "@/lib/google-oauth";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/attachments-storage";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
-import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { mergeConversation } from "@/lib/merge-conversations";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
@@ -453,6 +453,11 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 console.warn(`[gmail-sync] raw fallback failed for ${msgId}: ${rawErr?.message}`);
               }
             }
+
+            // Sanitize/cap the HTML body before any insert/update below. Strips
+            // base64 inline images and caps length so the stored row stays small
+            // (the messages table had ballooned to ~8 GB of TOAST from raw HTML).
+            bodyHtml = sanitizeBodyHtml(bodyHtml);
 
             // Body text fallback chain (in priority order):
             //   1. text/plain part from MIME walker (best — pure plaintext)

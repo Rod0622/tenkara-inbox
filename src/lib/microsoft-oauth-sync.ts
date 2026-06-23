@@ -1,6 +1,6 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
-import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 
 // Sync a microsoft_oauth account using delegated Graph API token
@@ -253,6 +253,8 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           bodyText = email.bodyPreview || "";
           bodyHtml = null;
         }
+        // Sanitize/cap stored HTML (strip base64 inline images) before insert.
+        bodyHtml = sanitizeBodyHtml(bodyHtml);
         const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
 

@@ -105,7 +105,10 @@ export async function fetchEmails(
                   : "";
 
                 const bodyText = parsed.text || "";
-                const bodyHtml = parsed.html || "";
+                // Sanitize/cap stored HTML (strip base64 inline images) — see
+                // sanitizeBodyHtml below. The outbound send path (mailOptions.html)
+                // is intentionally NOT sanitized, so recipients still get images.
+                const bodyHtml = sanitizeBodyHtml(parsed.html || "") || "";
 
                 emails.push({
                   uid,
@@ -234,11 +237,18 @@ export function computeThreadKey(
 export function cleanSubject(raw: string): string {
   if (!raw) return "";
   let s = String(raw);
+  // English reply/forward prefixes, e.g. "Re:", "Fwd:", "RE[2]:".
   const prefixRe = /^(Re|Fwd|Fw|RE|FW|FWD)(\[\d+\])?:\s*/i;
-  // Loop in case of multiple stacked prefixes ("Re: Fwd: Re: ...").
-  // Bounded at 20 iterations to defend against pathological input.
-  for (let i = 0; i < 20; i++) {
-    const next = s.replace(prefixRe, "");
+  // CJK reply/forward prefixes commonly seen from Chinese/Japanese/Korean
+  // suppliers, e.g. "回复：" (reply), "答复：", "回覆：", "转发：" / "轉發："
+  // (forward), "RE：" with a full-width colon. Without stripping these, each
+  // reply produced a different cleaned subject and fragmented the thread.
+  // Matches both full-width (：) and half-width (:) colons.
+  const cjkPrefixRe = /^(回复|回複|回覆|答复|答覆|转发|轉發|轉发|轉寄|轉傳|回信)\s*[:：]\s*/;
+  // Loop in case of multiple stacked prefixes ("Re: Fwd: Re: ...",
+  // "回复：回复：..."). Bounded at 40 iterations for deeply-stacked input.
+  for (let i = 0; i < 40; i++) {
+    const next = s.replace(prefixRe, "").replace(cjkPrefixRe, "");
     if (next === s) break;
     s = next;
   }
@@ -267,4 +277,42 @@ export async function getAllMailboxes(): Promise<MailboxCredentials[]> {
     .eq("sync_enabled", true);
 
   return (data || []) as MailboxCredentials[];
+}
+// ── Sanitize/cap email HTML before storage ───────────────────────────
+// Why: the `messages.body_html` column was stored uncapped, and emails with
+// base64-embedded inline images (data:image/...;base64,<huge>) ballooned the
+// table to ~8 GB of TOAST across ~37k rows. That bloated every Realtime
+// broadcast of a message row and pinned memory on the small instance.
+//
+// This strips base64 data-URIs (the main bloat source) down to a tiny
+// placeholder and applies a hard length cap as a backstop. Inline images are
+// still delivered to recipients on the OUTBOUND path (we don't sanitize what
+// we send); this only affects what we STORE for synced/displayed mail, where a
+// multi-MB base64 blob adds no readable value over a placeholder.
+//
+// Conservative by design: it only touches data: URIs and an overall size cap,
+// leaving normal HTML (formatting, linked <img src="https://...">, text)
+// untouched so the stored message still renders meaningfully.
+const MAX_BODY_HTML_CHARS = 200000; // ~200 KB cap; normal emails are far smaller
+
+export function sanitizeBodyHtml(html: string | null | undefined): string | null {
+  if (html == null) return null;
+  let out = String(html);
+
+  // 1) Replace base64 data-URIs (images, fonts, etc.) with a 1x1 placeholder.
+  //    Matches: data:<mime>;base64,<payload up to the closing quote/paren/space>
+  //    This is where the multi-MB bloat lives.
+  out = out.replace(
+    /data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=\s]+/g,
+    "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" // transparent 1x1
+  );
+
+  // 2) Backstop: hard length cap. After base64 removal almost everything fits
+  //    well under the cap; this only catches pathological non-base64 bloat.
+  if (out.length > MAX_BODY_HTML_CHARS) {
+    out = out.slice(0, MAX_BODY_HTML_CHARS) +
+      "\n<!-- [Tenkara: body truncated for storage] -->";
+  }
+
+  return out;
 }

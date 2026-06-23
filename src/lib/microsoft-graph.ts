@@ -1,7 +1,7 @@
 import { createServerClient } from "@/lib/supabase";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
-import { cleanSubject as cleanSubjectFn } from "@/lib/email";
+import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 
@@ -448,6 +448,8 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             rawBodyText = email.bodyPreview || "";
             emailBodyHtml = null;
           }
+          // Sanitize/cap stored HTML (strip base64 inline images) before insert.
+          emailBodyHtml = sanitizeBodyHtml(emailBodyHtml);
           const bodyText = decodeEmailTextPreserveNewlines(rawBodyText);
           const toAddr = (email.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
           const ccAddr = (email.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean).join(", ");
@@ -544,10 +546,11 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               .eq("id", conversationId)
               .maybeSingle();
             const folder: any = (convoRow as any)?.folder;
+            const hasNoFolder = !((convoRow as any)?.folder_id);
             const isInSentSystemFolder =
               folder && folder.is_system === true &&
               String(folder.name || "").toLowerCase() === "sent";
-            if (isInSentSystemFolder) {
+            if (isInSentSystemFolder || hasNoFolder) {
               const { data: inboxFolder } = await supabase
                 .from("folders")
                 .select("id")
@@ -557,9 +560,8 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
                 .maybeSingle();
               if (inboxFolder?.id) {
                 convoUpdate.folder_id = inboxFolder.id;
-              } else {
-                convoUpdate.folder_id = null;
               }
+              // If no Inbox folder found, leave folder_id as-is (don't force null).
             }
           }
           if (email.hasAttachments) convoUpdate.has_attachments = true;
