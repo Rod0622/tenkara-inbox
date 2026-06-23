@@ -288,26 +288,42 @@ export function useConversations(accountId: string | null) {
   useEffect(() => {
     fetchConversations();
 
+    // Debounced refetch: a sync (or any burst) can fire many Realtime events in
+    // a short window. Coalesce them into ONE trailing refetch (~1.5s) instead of
+    // re-running the 500-row list query per event — this was a major egress and
+    // CPU driver. A single change still refreshes within ~1.5s, imperceptible
+    // for a conversation list.
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedRefetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { fetchConversations(); }, 1500);
+    };
+
     const channel = supabase
       .channel("conversations-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "conversations" },
-        () => fetchConversations()
+        () => debouncedRefetch()
       )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "inbox", table: "messages" },
-        () => fetchConversations()
-      )
+      // NOTE: the unfiltered `messages` subscription was removed here. The list
+      // only shows message-derived fields (last_message_at, preview,
+      // has_attachments), and the sync already updates those ON the conversations
+      // row — so a `conversations` change already triggers the refetch. The old
+      // `messages` subscription fired a full 500-row refetch for EVERY message
+      // inserted anywhere (hundreds during a backfill) and broadcast full message
+      // rows to every client — the main egress/CPU storm. Live message bodies for
+      // the OPEN conversation come from the detail channel below, which is
+      // correctly scoped by conversation_id.
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "conversation_labels" },
-        () => fetchConversations()
+        () => debouncedRefetch()
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [fetchConversations]);
