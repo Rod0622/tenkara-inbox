@@ -54,7 +54,12 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
     // earlier inbox walks stalled before reaching the oldest mail. We persist
     // the nextLink URL in last_sync_uid between cron runs and resume from it,
     // walking the WHOLE mailbox across ALL folders (/me/messages) to completion.
-    const BATCH_SIZE = 50;
+    // Page size. 250 (vs the old 50) speeds up backfill ~5x — each cron run
+    // pages 250 messages following nextLink. Graph allows up to 1000 for
+    // /messages, but a large $select payload makes 250 a safe practical size
+    // that stays within the per-run time budget. Already-synced messages are
+    // dedup-skipped cheaply, so early recent-mail pages process fast.
+    const BATCH_SIZE = 250;
     let url: string;
     const fields = "id,subject,from,toRecipients,ccRecipients,body,bodyPreview,receivedDateTime,sentDateTime,isRead,hasAttachments,conversationId,internetMessageId";
     // Is last_sync_uid a saved nextLink (a full URL) vs. a legacy numeric offset?
