@@ -209,10 +209,13 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 ? new Date(account.last_sync_at).getTime()
                 : nowMs - 365 * 24 * 60 * 60 * 1000) / 1000
             );
-        // `in:anywhere -in:trash` — include Spam (routed to Tenkara's Spam
-        // folder) but never Trash, so Gmail-misclassified supplier mail isn't
-        // silently lost.
-        const query = `after:${afterEpoch} in:anywhere -in:trash`;
+        // Gmail API quirk: the `in:anywhere` operator in the `q` parameter does
+        // NOT behave like the web UI — combined with `after:` it can return only
+        // a tiny subset of mail (we saw 6 of 113). The API-correct way to reach
+        // all mail (including Spam) is the `includeSpamTrash=true` URL parameter
+        // with a date-only `q`. We exclude Trash post-fetch (and route Spam to
+        // Tenkara's Spam folder downstream as before).
+        const query = `after:${afterEpoch}`;
 
         // Unconditional diagnostic so we can confirm which mode ran in logs.
         console.log(
@@ -230,7 +233,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         do {
           const url =
             `https://gmail.googleapis.com/gmail/v1/users/me/messages` +
-            `?q=${encodeURIComponent(query)}&maxResults=100` +
+            `?q=${encodeURIComponent(query)}&maxResults=100&includeSpamTrash=true` +
             (pageToken ? `&pageToken=${pageToken}` : "");
           const listRes = await fetch(url, { headers: { Authorization: `Bearer ${gmailToken}` } });
           if (!listRes.ok) {
@@ -478,6 +481,9 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             //   SOCIAL     → CAPTURED (rare in B2B but harmless)
             //   FORUMS     → CAPTURED (rare in B2B but harmless)
             const labels: string[] = msgData.labelIds || [];
+            // We pass includeSpamTrash=true to the list endpoint (so all mail,
+            // including Spam, is reachable). Trash must be excluded here.
+            if (labels.some((l: string) => l === "TRASH")) continue;
             const isSpam = labels.some((l: string) => l === "SPAM" || l.toLowerCase() === "spam");
             const isPromotions = labels.some((l: string) => l.toLowerCase().includes("promotions") || l === "CATEGORY_PROMOTIONS");
             // SPAM wins — capture spam-flagged messages even if also Promotional.
