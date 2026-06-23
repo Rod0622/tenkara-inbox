@@ -222,6 +222,45 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           if (messageIds.length >= COLLECT_CAP) break;
         } while (pageToken);
 
+        // ── Explicit SENT-folder pass ─────────────────────────────
+        // The main walk above (q=after:/includeSpamTrash) under-returns Sent
+        // mail — observed capturing only a handful of an account's Sent items.
+        // Gmail's authoritative way to enumerate the Sent folder is
+        // labelIds=SENT, which is unaffected by that quirk. We collect Sent IDs
+        // explicitly and merge them into messageIds; the existing per-message
+        // loop then processes them identically (and classifies is_outbound via
+        // from==account.email). Dedup below prevents double-processing. On
+        // incremental runs we constrain by the same `after:` window so we don't
+        // re-list the whole Sent folder every 5 minutes.
+        {
+          let sentCount = 0;
+          let sentPageToken: string | undefined;
+          do {
+            const sentUrl =
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages` +
+              `?maxResults=100&labelIds=SENT` +
+              (query ? `&q=${encodeURIComponent(query)}` : ``) +
+              (sentPageToken ? `&pageToken=${sentPageToken}` : ``);
+            const sentRes = await fetch(sentUrl, { headers: { Authorization: `Bearer ${gmailToken}` } });
+            if (!sentRes.ok) {
+              // Non-fatal: log and continue with what the main walk found.
+              const e = await sentRes.json().catch(() => ({}));
+              console.warn(`IMAP sync ${accountId}: SENT-pass list error: ${e.error?.message || sentRes.statusText}`);
+              break;
+            }
+            const sentData = await sentRes.json();
+            const sentIds: string[] = (sentData.messages || []).map((m: any) => m.id);
+            for (const id of sentIds) {
+              if (!messageIds.includes(id)) { messageIds.push(id); sentCount++; }
+            }
+            sentPageToken = sentData.nextPageToken;
+            if (messageIds.length >= COLLECT_CAP) break;
+          } while (sentPageToken);
+          if (sentCount > 0) {
+            console.log(`IMAP sync ${accountId}: SENT-pass added ${sentCount} Sent message id(s)`);
+          }
+        }
+
         console.log(`IMAP sync ${accountId}: Gmail API found ${messageIds.length} messages`);
 
         if (messageIds.length === 0) {
