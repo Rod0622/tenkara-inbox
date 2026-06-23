@@ -23,6 +23,7 @@ interface EmailAccount {
   imap_password: string;
   imap_tls: boolean;
   last_sync_uid: string | null;
+  backfill_through?: string | null;
   oauth_refresh_token?: string | null;
   _xoauth2Token?: string; // Populated at runtime for OAuth accounts
 }
@@ -174,28 +175,46 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         // pulled because the next sync would advance last_sync_at past
         // them. For accounts that need >1 year of history, use
         // `POST /api/admin/backfill-account` separately.
-        const isFirstSync = !account.last_sync_at;
-        const sinceDate = account.last_sync_at
-          ? new Date(account.last_sync_at)
-          : (() => { const d = new Date(); d.setDate(d.getDate() - 365); return d; })();
-        const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
-        // `in:anywhere -in:trash` — by default Gmail's API excludes Spam and
-        // Trash. That meant legitimate emails Gmail mis-classified as spam
-        // (e.g., supplier auto-responders with token-style From addresses)
-        // never reached Tenkara. We now include everything except Trash, and
-        // route SPAM-labeled messages to Tenkara's Spam folder so users can
-        // review them rather than lose them silently.
+        // ── Window + mode selection ──────────────────────────────
+        // Two modes, mirroring the IMAP path's forward-walking design:
+        //
+        // BACKFILL mode — when backfill_through hasn't caught up to ~now.
+        //   We walk OLDEST-FIRST through the entire mailbox: query everything
+        //   after backfill_through (NULL/absent => from the beginning of time),
+        //   collect the window, take the oldest BACKFILL_BATCH, import them,
+        //   then advance backfill_through to the NEWEST message in that batch.
+        //   Each 5-minute cron run walks forward, so history fills in over
+        //   successive runs until backfill_through reaches the present. Nothing
+        //   gets stranded — the cursor only advances past messages actually
+        //   imported.
+        //
+        // INCREMENTAL mode — once backfill_through is within ~1 hour of now,
+        //   backfill is complete. Fetch new mail after last_sync_at, newest
+        //   first, one page — the normal steady-state behavior.
+        const BACKFILL_BATCH = 300;
+        const nowMs = Date.now();
+        const backfillThroughMs = account.backfill_through
+          ? new Date(account.backfill_through).getTime()
+          : 0; // 0 => walk from the very beginning of the mailbox (all-time)
+        const isBackfilling = backfillThroughMs < nowMs - 60 * 60 * 1000;
+
+        const afterEpoch = isBackfilling
+          ? Math.floor(backfillThroughMs / 1000) // backfill: from the cursor (0 = all-time)
+          : Math.floor(
+              (account.last_sync_at
+                ? new Date(account.last_sync_at).getTime()
+                : nowMs - 365 * 24 * 60 * 60 * 1000) / 1000
+            );
+        // `in:anywhere -in:trash` — include Spam (routed to Tenkara's Spam
+        // folder) but never Trash, so Gmail-misclassified supplier mail isn't
+        // silently lost.
         const query = `after:${afterEpoch} in:anywhere -in:trash`;
 
-        // ── Pagination ──────────────────────────────────────────
-        // Incremental syncs (last_sync_at set): one page only. Catching
-        // up is normally well within 100 messages; the next cron pass
-        // grabs anything more.
-        // First sync: paginate fully up to 2000 messages, so a freshly-
-        // added inbox actually gets its year of history imported in one
-        // pass instead of being silently truncated by the maxResults=100
-        // ceiling. Beyond 2000, use the admin backfill endpoint.
-        const FIRST_SYNC_CAP = 2000;
+        // ── Pagination / ID collection ───────────────────────────
+        // BACKFILL: page through the window (Gmail returns newest-first),
+        //   then take the OLDEST BACKFILL_BATCH from the tail.
+        // INCREMENTAL: one page of the most recent mail is enough.
+        const FIRST_SYNC_CAP = 5000; // safety ceiling on IDs collected per run
         let messageIds: string[] = [];
         let pageToken: string | undefined;
         do {
@@ -212,24 +231,33 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           const pageIds: string[] = (listData.messages || []).map((m: any) => m.id);
           messageIds.push(...pageIds);
           pageToken = listData.nextPageToken;
-          // Only paginate on first sync. Stop once we hit cap or the
-          // last page (no nextPageToken). Incremental sync always exits
-          // after the first iteration regardless.
-          if (!isFirstSync) break;
+          if (!isBackfilling) break; // incremental: first page only
           if (messageIds.length >= FIRST_SYNC_CAP) break;
         } while (pageToken);
 
-        if (isFirstSync && messageIds.length >= FIRST_SYNC_CAP) {
+        // Gmail returns newest-first across pages, so the OLDEST collected IDs
+        // are at the TAIL of the array. In backfill mode take the oldest batch
+        // from the tail so the cursor walks forward chronologically.
+        if (isBackfilling && messageIds.length > BACKFILL_BATCH) {
+          messageIds = messageIds.slice(-BACKFILL_BATCH);
+        }
+
+        if (isBackfilling && messageIds.length >= FIRST_SYNC_CAP) {
           console.log(
-            `IMAP sync ${accountId}: first-sync cap hit (${FIRST_SYNC_CAP}); ` +
-            `older messages need /api/admin/backfill-account`
+            `IMAP sync ${accountId}: backfill window large (>=${FIRST_SYNC_CAP}); ` +
+            `walking oldest-first ${BACKFILL_BATCH}/run`
           );
         }
         console.log(`IMAP sync ${accountId}: Gmail API found ${messageIds.length} messages`);
 
         if (messageIds.length === 0) {
           result.success = true;
-          await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+          // No messages in this window. In backfill mode that means we've
+          // walked past the end of history → mark backfill complete (cursor to
+          // now). In incremental mode, just touch last_sync_at.
+          const upd: any = { sync_error: null, last_sync_at: new Date().toISOString() };
+          if (isBackfilling) upd.backfill_through = new Date().toISOString();
+          await supabase.from("email_accounts").update(upd).eq("id", accountId);
           return result;
         }
 
@@ -256,7 +284,32 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         if (newMessageIds.length === 0) {
           console.log(`IMAP sync ${accountId}: all ${messageIds.length} messages already synced`);
           result.success = true;
-          await supabase.from("email_accounts").update({ last_sync_at: new Date().toISOString(), sync_error: null }).eq("id", accountId);
+          const upd: any = { sync_error: null, last_sync_at: new Date().toISOString() };
+          if (isBackfilling) {
+            // CRITICAL: this oldest batch is already in our DB. We must advance
+            // backfill_through PAST it, or the walk loops forever re-checking
+            // the same already-synced batch. Advance to the newest sent_at among
+            // these messages (look them up in our own messages table).
+            const provIds = messageIds.map((id) => `gmail:${id}`);
+            let newestSent: string | null = null;
+            for (let i = 0; i < provIds.length; i += 200) {
+              const slice = provIds.slice(i, i + 200);
+              const { data: rows } = await supabase
+                .from("messages")
+                .select("sent_at")
+                .in("provider_message_id", slice)
+                .order("sent_at", { ascending: false })
+                .limit(1);
+              const s = rows?.[0]?.sent_at;
+              if (s && (!newestSent || s > newestSent)) newestSent = s;
+            }
+            // Advance cursor; nudge +1s so the next `after:` doesn't re-include
+            // the boundary message. Fall back to now if we somehow found none.
+            upd.backfill_through = newestSent
+              ? new Date(new Date(newestSent).getTime() + 1000).toISOString()
+              : new Date().toISOString();
+          }
+          await supabase.from("email_accounts").update(upd).eq("id", accountId);
           return result;
         }
         console.log(`IMAP sync ${accountId}: ${newMessageIds.length} new messages to fetch (${existingIds.size} already synced, skipped)`);
@@ -269,6 +322,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         const ACCOUNT_BUDGET_MS = 25000; // Each account gets max 25s of work
         const accountStart = Date.now();
         let earliestProcessedAt: string | null = null;
+        let latestProcessedAt: string | null = null; // newest msg processed — backfill cursor
         let processedCount = 0;
         const CHECKPOINT_EVERY = 5; // Save last_sync_at every N messages
 
@@ -995,23 +1049,29 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 console.error("[primary-contact auto-update]", e?.message);
               }
 
-              // If the conversation is currently sitting in the system Sent
-              // folder (because /api/send put it there), move it to the
-              // account's INBOX folder. We can't just set folder_id=null —
-              // ConversationList's unassigned-view filter requires a strict
-              // `folder_id === activeFolder` match, and rows with NULL get
-              // rejected even though page.tsx's filter would accept them.
-              // Custom folder placements are NOT touched.
+              // When an inbound message arrives, make sure the conversation is
+              // visible in a folder. Two cases get pulled into the account's
+              // INBOX:
+              //   1. It's sitting in the system Sent folder (because /api/send
+              //      or an outbound-first sync put it there).
+              //   2. It has NO folder at all (folder_id = null). This is a dead
+              //      state: an outbound-first conversation whose Sent-folder
+              //      assignment didn't land ends up null, and without this it
+              //      would never be rescued — the inbound reply (e.g. a supplier
+              //      quote) stays invisible in every folder view. Pulling it to
+              //      Inbox on the first inbound reply fixes that.
+              // Custom folder placements (non-system folders) are NOT touched.
               const { data: convoRow } = await supabase
                 .from("conversations")
                 .select("folder_id, folder:folders(is_system, name)")
                 .eq("id", conversationId)
                 .maybeSingle();
               const folder: any = (convoRow as any)?.folder;
+              const hasNoFolder = !((convoRow as any)?.folder_id);
               const isInSentSystemFolder =
                 folder && folder.is_system === true &&
                 String(folder.name || "").toLowerCase() === "sent";
-              if (isInSentSystemFolder) {
+              if (isInSentSystemFolder || hasNoFolder) {
                 // Look up this account's Inbox folder id.
                 const { data: inboxFolder } = await supabase
                   .from("folders")
@@ -1022,34 +1082,36 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   .maybeSingle();
                 if (inboxFolder?.id) {
                   convoUpdate.folder_id = inboxFolder.id;
-                } else {
-                  // No Inbox folder for this account (shouldn't happen,
-                  // but fail safe: clear folder_id rather than leaving
-                  // it stuck in Sent).
-                  convoUpdate.folder_id = null;
                 }
+                // If no Inbox folder is found, leave folder_id as-is rather
+                // than forcing it to null (don't make a null-folder worse).
               }
             }
             await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
 
             result.newMessages++;
             processedCount++;
-            // Track the OLDEST timestamp we've successfully processed.
-            // (Gmail returns newest-first, so we keep the smallest sentAt we've seen.)
-            // Setting last_sync_at to this guarantees we've fully processed everything
-            // from this timestamp forward — the next run won't miss anything.
+            // Track both the oldest and newest timestamps processed this run.
             if (!earliestProcessedAt || sentAt < earliestProcessedAt) {
               earliestProcessedAt = sentAt;
             }
+            if (!latestProcessedAt || sentAt > latestProcessedAt) {
+              latestProcessedAt = sentAt;
+            }
 
-            // Checkpoint: every N messages, save progress to last_sync_at.
-            // This way if Vercel times out mid-loop, the next run picks up from where we left off
-            // instead of re-fetching the same messages.
-            if (processedCount % CHECKPOINT_EVERY === 0 && earliestProcessedAt) {
-              await supabase.from("email_accounts").update({
-                last_sync_at: earliestProcessedAt,
-                sync_error: null,
-              }).eq("id", accountId);
+            // Checkpoint every N messages so a Vercel timeout mid-loop doesn't
+            // lose progress. In BACKFILL mode we advance backfill_through to the
+            // NEWEST message processed (the forward-walking cursor); we also
+            // keep last_sync_at current so incremental sync stays consistent.
+            // In INCREMENTAL mode we only move last_sync_at (newest), so the
+            // next run fetches strictly newer mail.
+            if (processedCount % CHECKPOINT_EVERY === 0) {
+              const upd: any = { sync_error: null };
+              if (isBackfilling && latestProcessedAt) {
+                upd.backfill_through = latestProcessedAt;
+              }
+              if (latestProcessedAt) upd.last_sync_at = latestProcessedAt;
+              await supabase.from("email_accounts").update(upd).eq("id", accountId);
             }
 
             // Note: computeResponseTime moved out of the hot path. It adds 3-4 queries
@@ -1061,15 +1123,25 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         }
 
         result.success = true;
-        // Use the OLDEST timestamp of any successfully processed message.
-        // This guarantees we've fully processed everything from this timestamp forward —
-        // the next run's Gmail query starts here and won't miss anything.
-        // If we processed nothing (e.g. no new messages), advance to "now" so we don't re-query.
-        const finalSyncAt = earliestProcessedAt || new Date().toISOString();
-        await supabase.from("email_accounts").update({
-          last_sync_at: finalSyncAt,
+        // Finalization:
+        //  • BACKFILL mode: advance backfill_through to the NEWEST message we
+        //    imported this run, so the next cron run continues forward from
+        //    there. If we processed nothing in the window (gap with no mail),
+        //    nudge the cursor forward to "now" so we don't loop on an empty
+        //    range — backfill is effectively complete.
+        //  • INCREMENTAL mode: move last_sync_at to the newest processed (or
+        //    "now" if nothing new) so the next run fetches strictly newer mail.
+        const finalUpd: any = {
           sync_error: result.errors.length > 0 ? result.errors[0] : null,
-        }).eq("id", accountId);
+        };
+        if (isBackfilling) {
+          finalUpd.backfill_through = latestProcessedAt || new Date().toISOString();
+          // Keep last_sync_at at least as current as the newest we imported.
+          finalUpd.last_sync_at = latestProcessedAt || account.last_sync_at || new Date().toISOString();
+        } else {
+          finalUpd.last_sync_at = latestProcessedAt || new Date().toISOString();
+        }
+        await supabase.from("email_accounts").update(finalUpd).eq("id", accountId);
         return result;
 
       } catch (apiErr: any) {
