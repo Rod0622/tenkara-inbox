@@ -193,13 +193,17 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         //   first, one page — the normal steady-state behavior.
         const BACKFILL_BATCH = 300;
         const nowMs = Date.now();
+        // All-time floor: Gmail's `after:` can behave oddly with epoch 0
+        // (1970). Use a safe, comfortably-old floor (2000-01-01) that predates
+        // any real mailbox content but is a valid date for Gmail search.
+        const ALLTIME_FLOOR_MS = new Date("2000-01-01T00:00:00Z").getTime();
         const backfillThroughMs = account.backfill_through
           ? new Date(account.backfill_through).getTime()
-          : 0; // 0 => walk from the very beginning of the mailbox (all-time)
+          : ALLTIME_FLOOR_MS; // walk from the beginning of the mailbox (all-time)
         const isBackfilling = backfillThroughMs < nowMs - 60 * 60 * 1000;
 
         const afterEpoch = isBackfilling
-          ? Math.floor(backfillThroughMs / 1000) // backfill: from the cursor (0 = all-time)
+          ? Math.floor(backfillThroughMs / 1000) // backfill: from the cursor
           : Math.floor(
               (account.last_sync_at
                 ? new Date(account.last_sync_at).getTime()
@@ -209,6 +213,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         // folder) but never Trash, so Gmail-misclassified supplier mail isn't
         // silently lost.
         const query = `after:${afterEpoch} in:anywhere -in:trash`;
+
+        // Unconditional diagnostic so we can confirm which mode ran in logs.
+        console.log(
+          `IMAP sync ${accountId}: mode=${isBackfilling ? "BACKFILL" : "incremental"} ` +
+          `after:${afterEpoch} backfill_through=${account.backfill_through || "NULL"}`
+        );
 
         // ── Pagination / ID collection ───────────────────────────
         // BACKFILL: page through the window (Gmail returns newest-first),
