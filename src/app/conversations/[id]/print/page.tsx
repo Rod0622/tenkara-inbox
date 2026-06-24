@@ -273,7 +273,11 @@ export default function PrintConversationPage() {
   return (
     <>
       <style>{`
-        @page { margin: 0.5in; }
+        /* margin:0 removes the browser's auto print header/footer (date, page
+           title "Tenkara Inbox", URL, page number). Content keeps its own
+           breathing room via .print-root padding below, so nothing runs
+           edge-to-edge. This is what keeps shared/printed PDFs unbranded. */
+        @page { margin: 0; }
         html, body { background: #fff; margin: 0; padding: 0; }
         .print-root {
           max-width: 7.5in;
