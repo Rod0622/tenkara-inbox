@@ -246,7 +246,16 @@ export default function MessageAttachments({ messageId }: { messageId: string })
     setFolderPath((prev) => [...prev, { id: folder.id, name: folder.name }]);
     setLoadingFolders(true);
     try {
-      const res = await fetch(`/api/drive?action=folders&drive_id=${selectedDrive?.id}&folder_id=${folder.id}`);
+      // Pass drive_id ONLY when it's a real picked Shared Drive. In direct/
+      // configured mode selectedDrive.id is the "configured" placeholder, which
+      // is NOT a valid driveId — sending it makes the API query Google with a
+      // bogus drive and return no folders (the bug). Omitting it lets the API
+      // resolve the real drive from folder_id, exactly as ThreadAttachmentBar does.
+      const driveParam =
+        selectedDrive?.id && selectedDrive.id !== "configured"
+          ? `&drive_id=${selectedDrive.id}`
+          : "";
+      const res = await fetch(`/api/drive?action=folders&folder_id=${folder.id}${driveParam}`);
       const data = await res.json();
       setFolders(data.folders || []);
     } catch (e) { console.error(e); }
@@ -256,7 +265,26 @@ export default function MessageAttachments({ messageId }: { messageId: string })
   const navigateToPathIndex = async (index: number) => {
     if (index < 0) {
       setFolderPath([]);
-      await selectDrive(selectedDrive);
+      // Back to root. In direct/configured mode, selectDrive would query with
+      // the bogus "configured" id and return nothing — instead reload the
+      // configured root folder. In picker mode, selectDrive with the real
+      // drive is correct.
+      if (selectedDrive?.id && selectedDrive.id !== "configured") {
+        await selectDrive(selectedDrive);
+      } else {
+        setLoadingFolders(true);
+        try {
+          const configRes = await fetch("/api/drive?action=config");
+          const config = await configRes.json();
+          if (config.mode === "direct" && config.folderId) {
+            setFolderPath([{ id: config.folderId, name: "Training Files" }]);
+            const res = await fetch(`/api/drive?action=folders&folder_id=${config.folderId}`);
+            const data = await res.json();
+            setFolders(data.folders || []);
+          }
+        } catch (e) { console.error(e); }
+        setLoadingFolders(false);
+      }
       return;
     }
     const newPath = folderPath.slice(0, index + 1);
@@ -264,7 +292,11 @@ export default function MessageAttachments({ messageId }: { messageId: string })
     setLoadingFolders(true);
     try {
       const fId = newPath[newPath.length - 1].id;
-      const res = await fetch(`/api/drive?action=folders&drive_id=${selectedDrive?.id}&folder_id=${fId}`);
+      const driveParam =
+        selectedDrive?.id && selectedDrive.id !== "configured"
+          ? `&drive_id=${selectedDrive.id}`
+          : "";
+      const res = await fetch(`/api/drive?action=folders&folder_id=${fId}${driveParam}`);
       const data = await res.json();
       setFolders(data.folders || []);
     } catch (e) { console.error(e); }
