@@ -949,33 +949,15 @@ export default function ConversationList({
   const [closedNextCursor, setClosedNextCursor] = useState<string | null>(null);
   const [closedHasMore, setClosedHasMore] = useState(false);
 
-  // Fetch closed conversations whenever Closed sub-view is active.
+  // Closed sub-view now filters the local conversations array by
+  // status="closed" (see filteredConversations). The old closures-table fetch
+  // (/api/conversations/closed-from) is no longer used — keeping these state
+  // vars as inert no-ops to avoid touching every reference, and skipping the
+  // network fetch entirely (also reduces egress).
   useEffect(() => {
-    if (folderSubView !== "closed" || !activeFolder) {
-      setClosedConvos([]);
-      setClosedNextCursor(null);
-      setClosedHasMore(false);
-      return;
-    }
-    let cancelled = false;
-    setClosedLoading(true);
-    fetch(`/api/conversations/closed-from?folder_id=${activeFolder}&limit=50`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        setClosedConvos(d.conversations || []);
-        setClosedNextCursor(d.next_cursor || null);
-        setClosedHasMore(!!d.has_more);
-      })
-      .catch((e) => {
-        if (!cancelled) console.error("[ConversationList] closed-from fetch failed:", e);
-      })
-      .then(() => {
-        if (!cancelled) setClosedLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setClosedConvos([]);
+    setClosedNextCursor(null);
+    setClosedHasMore(false);
   }, [folderSubView, activeFolder]);
 
   const loadMoreClosed = async () => {
@@ -1096,10 +1078,21 @@ export default function ConversationList({
   const filteredConversations = useMemo(() => {
     let result = conversations;
 
-    // Phase 3: Closed sub-view uses closedConvos as source (closures table),
-    // not the regular conversations array.
+    // Closed sub-view (NEW model): real status="closed" conversations that
+    // belong to this folder (by folder_id OR the folder's label — same
+    // durable-membership logic as the All view). No longer uses the
+    // conversation_closures footprints (that caused redundant entries).
     if (folderSubView === "closed" && activeFolder) {
-      result = closedConvos;
+      const activeF = (folders || []).find((f: any) => f.id === activeFolder);
+      const fName = String(activeF?.name || "").trim().toLowerCase();
+      result = result.filter(
+        (c: any) =>
+          c.status === "closed" &&
+          (c.folder_id === activeFolder ||
+            (c.labels || []).some(
+              (cl: any) => String(cl?.label?.name || "").toLowerCase() === fName
+            ))
+      );
     } else if (activeFolder) {
       // Sub-view filtering for "unassigned" and "all" modes (scoped to a folder).
       if (folderSubView === "unassigned") {
@@ -1157,6 +1150,10 @@ export default function ConversationList({
         } else if (fName === "trash") {
           result = result.filter((c: any) => c.status === "trash" || c.folder_id === activeFolder);
         } else {
+          // All sub-view = literally everything in this folder: any assignee,
+          // any status (open OR closed). Closed conversations intentionally
+          // appear in BOTH All and the Closed sub-view. Match by folder_id OR
+          // the folder's label (durable membership after assignment).
           result = result.filter(
             (c: any) =>
               c.folder_id === activeFolder ||

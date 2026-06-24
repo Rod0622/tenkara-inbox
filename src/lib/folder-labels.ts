@@ -642,38 +642,22 @@ export async function onIncomingMessageReopenCheck(
 
     if (!convo || convo.status !== "closed") return; // nothing to reopen
 
-    // Build the update. Always flip to open.
-    const update: any = { status: "open" };
-
-    // If currently unassigned, check the last closure for auto-reassignment
-    if (!convo.assignee_id) {
-      const { data: lastClosure } = await supabase
-        .from("conversation_closures")
-        .select("closed_by_user_id, closed_at")
-        .eq("conversation_id", conversationId)
-        .order("closed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lastClosure?.closed_at && lastClosure.closed_by_user_id) {
-        const closedAt = new Date(lastClosure.closed_at);
-        const now = new Date();
-        if (isWithinBusinessDays(closedAt, now, 3)) {
-          update.assignee_id = lastClosure.closed_by_user_id;
-        }
-      }
-    }
-
-    await supabase.from("conversations").update(update).eq("id", conversationId);
+    // NEW model: a supplier reply reopens the conversation. We simply flip it
+    // back to "open" and KEEP the existing assignee (no footprint-based
+    // auto-reassignment). Reopened + assigned → returns to that assignee's
+    // personal inbox (personal inbox = assigned AND open). Reopened +
+    // unassigned → returns to its folder's normal (Inbox) view via its label.
+    await supabase
+      .from("conversations")
+      .update({ status: "open" })
+      .eq("id", conversationId);
 
     // Activity log
     await supabase.from("activity_log").insert({
       conversation_id: conversationId,
       actor_id: null,
       action: "reopened_by_supplier_reply",
-      details: {
-        auto_assigned_to: update.assignee_id || null,
-      },
+      details: { auto_assigned_to: null },
     });
   } catch (e: any) {
     console.error("[onIncomingMessageReopenCheck] failed:", e?.message || e);

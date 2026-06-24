@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Circle, X, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, RotateCcw } from "lucide-react";
 import type { Folder, TeamMember } from "@/types";
 
 // ────────────────────────────────────────────────────────────────────
@@ -37,34 +37,8 @@ export default function StatusDropdown({
   onReopened?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [showCloseModal, setShowCloseModal] = useState(false);
-  const [targetFolderId, setTargetFolderId] = useState<string>("");
-  const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  // Restrict folders to this conversation's email account, hide system folders
-  // we shouldn't close TO (Inbox / Trash / Spam are not stage destinations;
-  // Sent / Drafts aren't either). What's left: any custom folders + Completed.
-  const accountFolders = (folders || []).filter(
-    (f: any) => f.email_account_id === emailAccountId
-  );
-  const closableFolders = accountFolders.filter((f: any) => {
-    const name = String(f.name || "").toLowerCase();
-    if (!f.is_system) return true; // custom folders always closable
-    if (name === "completed") return true; // the dedicated end-state
-    return false; // Inbox / Trash / Spam / Sent / Drafts — not close targets
-  });
-
-  // Default the target to the account's "Completed" folder
-  useEffect(() => {
-    if (!showCloseModal) return;
-    const completed = closableFolders.find(
-      (f: any) => String(f.name || "").toLowerCase() === "completed"
-    );
-    if (completed?.id) setTargetFolderId(completed.id);
-    else if (closableFolders[0]?.id) setTargetFolderId(closableFolders[0].id);
-  }, [showCloseModal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -84,8 +58,11 @@ export default function StatusDropdown({
   const canClose = (isAssignedToCurrentUser || isAdmin) && !isClosed;
   const canReopen = isClosed;
 
-  const handleConfirmClose = async () => {
-    if (!targetFolderId || !currentUser?.id) return;
+  // One-click close. No folder picker, no note — closing sets status=closed,
+  // keeps the assignee and folder label, and the conversation moves to its
+  // folder's "Closed" sub-view. A supplier reply reopens it.
+  const handleClose = async () => {
+    if (!currentUser?.id) return;
     setSubmitting(true);
     try {
       const res = await fetch("/api/conversations/close", {
@@ -93,9 +70,7 @@ export default function StatusDropdown({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: conversationId,
-          target_folder_id: targetFolderId,
           actor_id: currentUser.id,
-          note: note.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -103,8 +78,6 @@ export default function StatusDropdown({
         alert("Close failed: " + (err.error || "Unknown error"));
         return;
       }
-      setShowCloseModal(false);
-      setNote("");
       setOpen(false);
       if (onClosed) onClosed();
     } finally {
@@ -175,17 +148,15 @@ export default function StatusDropdown({
               {!isClosed && <Check size={14} className="text-[var(--accent)]" />}
             </div>
 
-            {/* Close option */}
+            {/* Close option — one click, no modal */}
             {canClose && (
               <button
-                onClick={() => {
-                  setOpen(false);
-                  setShowCloseModal(true);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] text-left"
+                onClick={handleClose}
+                disabled={submitting}
+                className="flex items-center gap-2 w-full px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] text-left disabled:opacity-50"
               >
                 <Circle size={12} fill="#7D8590" stroke="#7D8590" />
-                <span className="flex-1">Close…</span>
+                <span className="flex-1">{submitting ? "Closing…" : "Close"}</span>
               </button>
             )}
 
@@ -218,88 +189,6 @@ export default function StatusDropdown({
         )}
       </div>
 
-      {/* Close modal — folder picker + optional note */}
-      {showCloseModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => !submitting && setShowCloseModal(false)}
-        >
-          <div
-            className="w-full max-w-md bg-[var(--surface-2)] border border-[var(--border)] rounded-2xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
-              <div>
-                <div className="text-sm font-bold text-[var(--text-primary)]">Close conversation</div>
-                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                  Move to a folder. The conversation will be unassigned and marked closed.
-                </div>
-              </div>
-              <button
-                onClick={() => !submitting && setShowCloseModal(false)}
-                className="w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] flex items-center justify-center"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">
-                  Move to folder
-                </label>
-                <select
-                  value={targetFolderId}
-                  onChange={(e) => setTargetFolderId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] [color-scheme:dark]"
-                >
-                  {closableFolders.length === 0 && (
-                    <option value="">No folders available</option>
-                  )}
-                  {closableFolders.map((f: any) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                      {String(f.name || "").toLowerCase() === "completed"
-                        ? " (default)"
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">
-                  Note (optional)
-                </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Why are you closing this? (visible in conversation notes)"
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)]"
-                />
-              </div>
-            </div>
-
-            <div className="px-4 pb-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowCloseModal(false)}
-                disabled={submitting}
-                className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-secondary)] text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmClose}
-                disabled={submitting || !targetFolderId}
-                className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-sm font-bold hover:bg-[var(--accent-strong)] disabled:opacity-40"
-              >
-                {submitting ? "Closing…" : "Close conversation"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

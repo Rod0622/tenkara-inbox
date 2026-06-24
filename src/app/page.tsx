@@ -416,12 +416,15 @@ export default function InboxPage() {
             c.status !== "spam"
         );
       } else if (activeView === "inbox") {
-        // Personal inbox: show ALL conversations assigned to me
+        // Personal inbox: conversations assigned to me that are still OPEN.
+        // Closed ones drop out (they live in their folder's Closed sub-view).
         filtered = conversations.filter(
-          (c) => c.assignee_id === currentUser.id
+          (c) => c.assignee_id === currentUser.id && c.status !== "closed"
         );
       } else {
-        filtered = conversations.filter((c) => c.assignee_id === currentUser.id);
+        filtered = conversations.filter(
+          (c) => c.assignee_id === currentUser.id && c.status !== "closed"
+        );
       }
     }
 
