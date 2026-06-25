@@ -258,6 +258,7 @@ export default function TeamChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchComments = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
       const res = await fetch(`/api/comments?conversation_id=${conversationId}`);
       if (!res.ok) return;

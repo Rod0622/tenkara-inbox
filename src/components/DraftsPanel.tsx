@@ -55,6 +55,7 @@ export default function DraftsPanel({
     setLoading(true);
     fetchDrafts();
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       if (!deletingRef.current) fetchDrafts();
     }, 60000);
     const onFocus = () => {

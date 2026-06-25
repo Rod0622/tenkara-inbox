@@ -23,6 +23,7 @@ export default function SidebarTeamList({
   const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const fetchMembers = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
       const res = await fetch("/api/team/ooo");
       if (!res.ok) return;

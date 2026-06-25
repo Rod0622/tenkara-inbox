@@ -184,6 +184,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchNotifs = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/notifications?user_id=" + currentUser.id);
         const data = await res.json();
@@ -208,6 +209,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchOwnOOO = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(`/api/team/ooo?user_id=${currentUser.id}`);
         if (!res.ok) return;
@@ -224,6 +226,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchWatching = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(`/api/conversations/watchers?user_id=${currentUser.id}`);
         if (!res.ok) return;

@@ -134,6 +134,7 @@ export default function PendingOutreachPanel({
     setLoading(true);
     fetchDrafts();
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       if (!inflightRef.current) fetchDrafts();
     }, 60000);
     const onFocus = () => {

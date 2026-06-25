@@ -211,6 +211,7 @@ export default function InboxPage() {
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchWatching = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(`/api/conversations/watchers?user_id=${currentUser.id}`);
         if (!res.ok) return;

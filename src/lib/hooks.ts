@@ -840,6 +840,7 @@ export function useSupplierAccountStatuses() {
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
       const res = await fetch("/api/supplier-status-overview");
       if (!res.ok) {
