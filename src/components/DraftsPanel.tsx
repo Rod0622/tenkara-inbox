@@ -56,7 +56,7 @@ export default function DraftsPanel({
     fetchDrafts();
     const interval = setInterval(() => {
       if (!deletingRef.current) fetchDrafts();
-    }, 15000);
+    }, 60000);
     const onFocus = () => {
       if (!deletingRef.current) fetchDrafts();
     };

@@ -200,7 +200,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 15000);
+    const interval = setInterval(fetchNotifs, 60000);
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -232,7 +232,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchWatching();
-    const id = setInterval(fetchWatching, 30000);
+    const id = setInterval(fetchWatching, 60000);
     return () => clearInterval(id);
   }, [currentUser?.id]);
 

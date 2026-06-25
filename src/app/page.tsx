@@ -270,7 +270,7 @@ export default function InboxPage() {
       } catch (_e) {}
     };
     fetchWatching();
-    const id = setInterval(fetchWatching, 30000);
+    const id = setInterval(fetchWatching, 60000);
     return () => clearInterval(id);
   }, [currentUser?.id, conversations]);
 

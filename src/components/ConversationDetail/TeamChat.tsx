@@ -271,7 +271,7 @@ export default function TeamChat({
   useEffect(() => {
     if (!conversationId) return;
     fetchComments();
-    const id = setInterval(fetchComments, 5000);
+    const id = setInterval(fetchComments, 20000);
     return () => clearInterval(id);
   }, [conversationId]);
 

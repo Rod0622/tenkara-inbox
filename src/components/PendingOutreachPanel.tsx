@@ -135,7 +135,7 @@ export default function PendingOutreachPanel({
     fetchDrafts();
     const interval = setInterval(() => {
       if (!inflightRef.current) fetchDrafts();
-    }, 15000);
+    }, 60000);
     const onFocus = () => {
       if (!inflightRef.current) fetchDrafts();
     };
