@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 
 // GET /api/team/ooo
@@ -75,24 +77,33 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/team/ooo — create new OOO period
-// Body: { user_id, start_date?, end_date?, is_active_indefinite?, note?, created_by? }
-// Permission: user can set their own; admins can set anyone's
+// Body: { user_id, start_date?, end_date?, is_active_indefinite?, note? }
+// Permission: a user can set their OWN OOO; admins can set anyone's. The actor
+// is derived from the authenticated session — NOT from a body-supplied
+// created_by (which previously could be omitted/spoofed to bypass the check).
 export async function POST(req: NextRequest) {
+  const session: any = await getServerSession(authOptions);
+  const actorId = session?.user?.id;
+  if (!actorId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = createServerClient();
   const body = await req.json();
 
-  const { user_id, start_date, end_date, is_active_indefinite, note, created_by } = body;
+  const { user_id, start_date, end_date, is_active_indefinite, note } = body;
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id is required" }, { status: 400 });
   }
 
-  // Permission check: created_by must be the same user OR an admin
-  if (created_by && created_by !== user_id) {
+  // Permission check against the SESSION user: setting OOO for someone else
+  // requires admin.
+  if (user_id !== actorId) {
     const { data: actor } = await supabase
       .from("team_members")
       .select("role")
-      .eq("id", created_by)
+      .eq("id", actorId)
       .maybeSingle();
     if (!actor || actor.role !== "admin") {
       return NextResponse.json({ error: "Only the user themselves or an admin can set OOO" }, { status: 403 });
@@ -117,7 +128,7 @@ export async function POST(req: NextRequest) {
       end_date: cleanedEnd,
       is_active_indefinite: indefinite,
       note: note || null,
-      created_by: created_by || user_id,
+      created_by: actorId,
     })
     .select()
     .single();

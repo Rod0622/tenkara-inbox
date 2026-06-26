@@ -1,31 +1,41 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { createServerClient } from "@/lib/supabase";
 
 // ─── Conversation Pins (per-user) ───────────────────────────────────────────
 //
 // Each user can pin conversations for quick personal access. Pinning is
-// strictly personal — no other team member sees your pins. Stored in
-// inbox.conversation_pins with composite PK (user_id, conversation_id).
+// strictly personal — no other team member sees your pins.
+//
+// SECURITY: the user is taken from the authenticated NextAuth session, never
+// from a client-supplied user_id (which previously allowed reading/modifying
+// another user's pins — IDOR). The app uses NextAuth + service-role DB access
+// (bypasses RLS), so authorization is enforced here.
 //
 // Endpoints:
-//   GET    ?user_id=X                       → list user's pinned conversation IDs
-//   GET    ?user_id=X&conversation_id=Y     → check if (Y) is pinned by (X)
-//   POST   body { user_id, conversation_id } → pin
-//   DELETE body { user_id, conversation_id } → unpin
+//   GET    ?conversation_id=Y   → check if (Y) is pinned by the current user
+//   GET                         → list current user's pinned conversation IDs
+//   POST   body { conversation_id } → pin
+//   DELETE body { conversation_id } → unpin
+
+async function sessionUserId(): Promise<string | null> {
+  const session: any = await getServerSession(authOptions);
+  return session?.user?.id || null;
+}
 
 export async function GET(req: NextRequest) {
-  const supabase = createServerClient();
-  const userId = req.nextUrl.searchParams.get("user_id");
-  const conversationId = req.nextUrl.searchParams.get("conversation_id");
-
+  const userId = await sessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "user_id required" }, { status: 400 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const supabase = createServerClient();
+  const conversationId = req.nextUrl.searchParams.get("conversation_id");
+
   if (conversationId) {
-    // Single-pin check
     const { data, error } = await supabase
       .from("conversation_pins")
       .select("conversation_id")
@@ -36,7 +46,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ pinned: !!data });
   }
 
-  // List of all the user's pinned conversation IDs, newest-pinned first
   const { data, error } = await supabase
     .from("conversation_pins")
     .select("conversation_id, created_at")
@@ -50,41 +59,47 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClient();
-  const body = await req.json();
-  const { user_id, conversation_id } = body || {};
-
-  if (!user_id || !conversation_id) {
-    return NextResponse.json({ error: "user_id and conversation_id required" }, { status: 400 });
+  const userId = await sessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Upsert so re-pinning the same convo is idempotent (no error on duplicate PK)
+  const supabase = createServerClient();
+  const body = await req.json();
+  const { conversation_id } = body || {};
+
+  if (!conversation_id) {
+    return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
+  }
+
   const { error } = await supabase
     .from("conversation_pins")
-    .upsert({ user_id, conversation_id }, { onConflict: "user_id,conversation_id" });
+    .upsert({ user_id: userId, conversation_id }, { onConflict: "user_id,conversation_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // ─── Footprint: pin_added ─────────────────────────────────────────
-  // Per-user pin, so actor and the pinned-by user are the same.
   await supabase.from("activity_log").insert({
     conversation_id,
-    actor_id: user_id,
+    actor_id: userId,
     action: "pin_added",
-    details: { user_id },
+    details: { user_id: userId },
   });
 
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: NextRequest) {
+  const userId = await sessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = createServerClient();
   const body = await req.json().catch(() => ({}));
-  const userId = body.user_id || req.nextUrl.searchParams.get("user_id");
   const conversationId = body.conversation_id || req.nextUrl.searchParams.get("conversation_id");
 
-  if (!userId || !conversationId) {
-    return NextResponse.json({ error: "user_id and conversation_id required" }, { status: 400 });
+  if (!conversationId) {
+    return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
   }
 
   const { error } = await supabase
@@ -95,7 +110,6 @@ export async function DELETE(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // ─── Footprint: pin_removed ───────────────────────────────────────
   await supabase.from("activity_log").insert({
     conversation_id: conversationId,
     actor_id: userId,
