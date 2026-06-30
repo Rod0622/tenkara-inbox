@@ -85,19 +85,25 @@ export async function GET(req: NextRequest) {
   };
   let ownRows: AttachmentRow[] | null = null;
   let ownErr: { message: string } | null = null;
+  let _debugUrl = "";
+  let _debugStatus = 0;
+  let _debugRawBody = "";
   try {
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
       `?message_id=eq.${encodeURIComponent(messageId)}` +
       `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
+    _debugUrl = url;
     const rawRes = await fetch(url, {
       headers: {
         apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
-        // Tell PostgREST which schema this request targets. Service role
-        // keys have access to all schemas — Accept-Profile picks "inbox".
         "Accept-Profile": "inbox",
       },
     });
+    _debugStatus = rawRes.status;
+    if (req.nextUrl.searchParams.get("debug") === "1") {
+      _debugRawBody = await rawRes.clone().text();
+    }
     if (!rawRes.ok) {
       ownErr = { message: `PostgREST status ${rawRes.status}: ${await rawRes.text()}` };
     } else {
@@ -108,18 +114,19 @@ export async function GET(req: NextRequest) {
   }
 
   // TEMP DIAGNOSTIC: ?debug=1 surfaces exactly what the raw PostgREST fetch
-  // returned (status, error, row count) instead of silently falling through
-  // to the Graph fallback. Remove once the empty-list bug is fixed.
+  // returned (status, url, body) instead of silently falling through to the
+  // Graph fallback. Remove once the empty-list bug is fixed.
   if (req.nextUrl.searchParams.get("debug") === "1") {
     return NextResponse.json({
       debug: true,
       messageId,
-      supabaseUrlSet: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      serviceKeySet: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      builtUrl: _debugUrl.replace(process.env.NEXT_PUBLIC_SUPABASE_URL || "", "<SUPABASE_URL>"),
+      rawStatus: _debugStatus,
+      rawBody: _debugRawBody.slice(0, 1000),
+      serviceKeyPrefix: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").slice(0, 8),
+      serviceKeyLen: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").length,
       ownErr,
-      ownRowsType: Array.isArray(ownRows) ? "array" : typeof ownRows,
       ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
-      ownRowsSample: Array.isArray(ownRows) ? ownRows.slice(0, 3) : ownRows,
     });
   }
 
