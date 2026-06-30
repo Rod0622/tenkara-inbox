@@ -126,7 +126,40 @@ export async function GET(req: NextRequest) {
 
     // ── Single download ──
     if (attachmentId) {
-      const row = ownRows!.find((r: any) => r.id === attachmentId);
+      // Fetch the requested attachment DIRECTLY by its id, rather than calling
+      // .find() against the message's attachment list. The list fetch above can
+      // intermittently return a PARTIAL set of rows (the same row-count
+      // inconsistency documented for this endpoint), and when the requested
+      // attachment wasn't in that partial set, .find() returned undefined and
+      // the route 404'd ("Attachment not found") even though the file exists.
+      // Querying by primary key returns exactly the one row we need, with no
+      // dependency on the list being complete.
+      let row: AttachmentRow | null = null;
+      try {
+        const rowUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
+          `?id=eq.${encodeURIComponent(attachmentId)}` +
+          `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path` +
+          `&limit=1`;
+        const rowRes = await fetch(rowUrl, {
+          headers: {
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
+            "Accept-Profile": "inbox",
+          },
+        });
+        if (rowRes.ok) {
+          const rows = await rowRes.json();
+          if (Array.isArray(rows) && rows.length > 0) row = rows[0];
+        }
+      } catch {
+        row = null;
+      }
+
+      // Fallback: if the direct fetch somehow missed, try the list we already have.
+      if (!row) {
+        row = (ownRows || []).find((r: any) => r.id === attachmentId) || null;
+      }
+
       if (!row) {
         return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
       }
