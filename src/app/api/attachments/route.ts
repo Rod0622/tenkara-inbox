@@ -58,22 +58,23 @@ export async function GET(req: NextRequest) {
 
   // 1. Try our own Storage-backed attachments first.
   //
-  // IMPORTANT — DO NOT USE THE SUPABASE JS SDK FOR THIS QUERY.
+  // READ STRATEGY — via RPC, not a direct table read.
   //
-  // Through experimentation we confirmed that calling:
-  //   supabase.schema("inbox").from("attachments").select(...).eq("message_id", X)
-  // on a serverClient that's already pinned to schema "inbox" via
-  // db.schema returns only ONE row even when the DB has multiple. We
-  // proved this by running:
-  //   1. The same query in Supabase SQL Editor → 4 rows
-  //   2. The same query via supabase JS SDK in this route → 1 row
-  //   3. A raw fetch to PostgREST with identical headers → 4 rows
-  // So the bug is in the SDK layer, not the DB and not PostgREST.
+  // History: we originally read attachments with the supabase-js SDK, but it
+  // returned only ONE row for multi-row messages, so we switched to a raw
+  // PostgREST fetch (`/rest/v1/attachments?message_id=eq.X`). That worked for a
+  // long time — but rows inserted by the attachment re-detection backfill turned
+  // out to be INVISIBLE to PostgREST's table-read endpoint (a 200 with an empty
+  // body), even though the exact same rows are returned by SQL, by triggers, and
+  // by an RPC function. RLS is open (USING true), the schema/columns are correct,
+  // and the code is identical to known-good versions — so this is a PostgREST
+  // table-read layer issue, not application code.
   //
-  // The workaround: call PostgREST directly via fetch using the service
-  // role key and Accept-Profile header. This bypasses the SDK entirely
-  // and returns all rows correctly. Behavior is identical to what the
-  // SDK was supposed to do.
+  // The fix: read through a SECURITY DEFINER SQL function
+  // (`inbox.get_message_attachments`) called via supabase.rpc(). RPC executes
+  // real SQL, which sees every row reliably, sidestepping the broken table-read
+  // path. We keep the raw PostgREST fetch as a fallback in case the RPC function
+  // is ever missing.
   type AttachmentRow = {
     id: string;
     filename: string;
@@ -88,6 +89,23 @@ export async function GET(req: NextRequest) {
   let _debugUrl = "";
   let _debugStatus = 0;
   let _debugRawBody = "";
+
+  // Primary path: RPC (reliable — runs real SQL).
+  try {
+    const { data: rpcRows, error: rpcErr } = await supabase
+      .schema("inbox")
+      .rpc("get_message_attachments", { p_message_id: messageId });
+    if (rpcErr) {
+      ownErr = { message: `rpc error: ${rpcErr.message}` };
+    } else if (Array.isArray(rpcRows)) {
+      ownRows = rpcRows as AttachmentRow[];
+    }
+  } catch (e: any) {
+    ownErr = { message: e?.message || "rpc fetch failed" };
+  }
+
+  // Fallback path: raw PostgREST fetch (only if RPC returned nothing usable).
+  if (!Array.isArray(ownRows) || ownRows.length === 0) {
   try {
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
       `?message_id=eq.${encodeURIComponent(messageId)}` +
@@ -112,6 +130,7 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     ownErr = { message: e?.message || "fetch failed" };
   }
+  } // end fallback raw-fetch block
 
   // TEMP DIAGNOSTIC: ?debug=1 surfaces exactly what the raw PostgREST fetch
   // returned (status, url, body) instead of silently falling through to the
