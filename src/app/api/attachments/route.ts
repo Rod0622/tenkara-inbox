@@ -107,6 +107,22 @@ export async function GET(req: NextRequest) {
     ownErr = { message: e?.message || "fetch failed" };
   }
 
+  // TEMP DIAGNOSTIC: ?debug=1 surfaces exactly what the raw PostgREST fetch
+  // returned (status, error, row count) instead of silently falling through
+  // to the Graph fallback. Remove once the empty-list bug is fixed.
+  if (req.nextUrl.searchParams.get("debug") === "1") {
+    return NextResponse.json({
+      debug: true,
+      messageId,
+      supabaseUrlSet: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      serviceKeySet: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      ownErr,
+      ownRowsType: Array.isArray(ownRows) ? "array" : typeof ownRows,
+      ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
+      ownRowsSample: Array.isArray(ownRows) ? ownRows.slice(0, 3) : ownRows,
+    });
+  }
+
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
 
   if (hasOwnRows) {
