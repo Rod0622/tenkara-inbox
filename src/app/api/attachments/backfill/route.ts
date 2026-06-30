@@ -124,6 +124,14 @@ export async function POST(req: NextRequest) {
 
   const conversationId: string | null = body?.conversation_id || null;
   const accountIdParam: string | null = body?.account_id || null;
+  // redetect mode: also re-examine messages currently flagged
+  // has_attachments=false. Used to recover messages that were synced by an
+  // older code path that failed to DETECT their attachments (so they were
+  // stored as false with no attachment rows, and their cid: inline images
+  // can't resolve). When false, we keep the original behavior of only
+  // processing has_attachments=true (the capture-gap). redetect should be
+  // scoped to a conversation or account — never run unscoped across the DB.
+  const redetect: boolean = body?.redetect === true;
   const offsetParam: number = Math.max(0, parseInt(String(body?.offset || "0"), 10) || 0);
   const requestedLimit: number = Math.min(
     Math.max(parseInt(String(body?.limit || ""), 10) || 200, 1),
@@ -156,12 +164,28 @@ export async function POST(req: NextRequest) {
   //    msg.has_attachments=false to "retire" done messages (that broke
   //    the UI gate). Without offset pagination, the loop would re-scan
   //    the same N already-done messages forever and never progress.
+  // Safety: redetect re-fetches EVERY candidate from Gmail/Graph (heavy), so
+  // it must be scoped to a single conversation or account. Refuse an unscoped
+  // redetect to prevent an accidental full-DB re-fetch.
+  if (redetect && !conversationId && !accountIdParam) {
+    return NextResponse.json(
+      { error: "redetect requires conversation_id or account_id scope" },
+      { status: 400 }
+    );
+  }
+
   let query = supabase
     .from("messages")
     .select("id, provider_message_id, conversation_id, conversations!inner(email_account_id)")
-    .eq("has_attachments", true)
     .order("sent_at", { ascending: true })
     .range(offsetParam, offsetParam + requestedLimit - 1);
+
+  // Default (capture-gap) mode only looks at messages already flagged as
+  // having attachments. redetect mode drops that filter so it also re-examines
+  // false-flagged messages (the detection-gap).
+  if (!redetect) {
+    query = query.eq("has_attachments", true);
+  }
 
   if (conversationId) {
     query = query.eq("conversation_id", conversationId);
@@ -742,17 +766,26 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // False-positive cleanup for Gmail/Microsoft. Only flip the flag when:
-    //   1. The scan ran without throwing
-    //   2. The walk uploaded nothing
-    //   3. The walk pushed no errors
+    // Flag reconciliation for Gmail/Microsoft. Only act when the scan ran
+    // without throwing.
     if (scannedSuccessfully) {
       const attachmentsAfter = stats.attachmentsUploaded + stats.attachmentsSkipped;
       const errorsAfter = stats.errors.length;
+      const foundAttachments = attachmentsAfter > attachmentsBefore;
       if (attachmentsAfter === attachmentsBefore && errorsAfter === errorsBefore) {
+        // Scanned cleanly, found nothing → the has_attachments flag was a
+        // false positive (or, in redetect mode, correctly stays false).
         await supabase
           .from("messages")
           .update({ has_attachments: false })
+          .eq("id", msg.id);
+      } else if (redetect && foundAttachments) {
+        // redetect found attachments on a message that was flagged false —
+        // flip it to true so the UI treats it correctly and its cid: inline
+        // images can resolve against the now-stored attachment rows.
+        await supabase
+          .from("messages")
+          .update({ has_attachments: true })
           .eq("id", msg.id);
       }
     }
