@@ -156,6 +156,8 @@ export async function GET(req: NextRequest) {
       ownErr,
       rpcError: _debugRpcErr,
       rpcCount: _debugRpcCount,
+      firstRowContentIdRaw: ownRows && ownRows[0] ? JSON.stringify((ownRows[0] as any).content_id) : null,
+      firstRowContentIdType: ownRows && ownRows[0] ? (Array.isArray((ownRows[0] as any).content_id) ? "array" : typeof (ownRows[0] as any).content_id) : null,
       ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
     });
   }
