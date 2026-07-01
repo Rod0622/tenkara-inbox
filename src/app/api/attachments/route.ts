@@ -93,17 +93,24 @@ export async function GET(req: NextRequest) {
   let _debugRawBody = "";
 
   // Primary path: RPC (reliable — runs real SQL).
+  let _debugRpcErr: string | null = null;
+  let _debugRpcCount: number | null = null;
   try {
     const { data: rpcRows, error: rpcErr } = await supabase
       .schema("inbox")
       .rpc("get_message_attachments", { p_message_id: messageId });
     if (rpcErr) {
       ownErr = { message: `rpc error: ${rpcErr.message}` };
+      _debugRpcErr = rpcErr.message;
     } else if (Array.isArray(rpcRows)) {
       ownRows = rpcRows as AttachmentRow[];
+      _debugRpcCount = rpcRows.length;
+    } else {
+      _debugRpcErr = `rpc returned non-array: ${typeof rpcRows}`;
     }
   } catch (e: any) {
     ownErr = { message: e?.message || "rpc fetch failed" };
+    _debugRpcErr = `threw: ${e?.message}`;
   }
 
   // Fallback path: raw PostgREST fetch (only if RPC returned nothing usable).
@@ -147,6 +154,8 @@ export async function GET(req: NextRequest) {
       serviceKeyPrefix: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").slice(0, 8),
       serviceKeyLen: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").length,
       ownErr,
+      rpcError: _debugRpcErr,
+      rpcCount: _debugRpcCount,
       ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
     });
   }
