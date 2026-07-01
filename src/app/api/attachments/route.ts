@@ -168,6 +168,7 @@ export async function GET(req: NextRequest) {
       rpcCount: _debugRpcCount,
       firstRowContentIdRaw: ownRows && ownRows[0] ? JSON.stringify((ownRows[0] as any).content_id) : null,
       firstRowContentIdType: ownRows && ownRows[0] ? (Array.isArray((ownRows[0] as any).content_id) ? "array" : typeof (ownRows[0] as any).content_id) : null,
+      firstRowContentIdJoined: ownRows && ownRows[0] ? JSON.stringify((ownRows[0] as any).content_id_joined) : null,
       ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
     });
   }
@@ -207,7 +208,12 @@ export async function GET(req: NextRequest) {
       };
       return NextResponse.json({
         attachments: ownRows!.map((r: any) => {
-          const cids = toCidArray(r.content_id);
+          // The RPC returns content_id_joined (newline-delimited string) to
+          // avoid supabase-js flattening a nested array. Split it back. Fall
+          // back to content_id for any legacy/raw-fetch shape.
+          const cids = typeof r.content_id_joined === "string"
+            ? r.content_id_joined.split("\n").map((s: string) => s.trim()).filter(Boolean)
+            : toCidArray(r.content_id);
           return {
             id: r.id,
             name: r.filename,
