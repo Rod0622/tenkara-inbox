@@ -97,17 +97,26 @@ export async function GET(req: NextRequest) {
   let _debugRpcErr: string | null = null;
   let _debugRpcCount: number | null = null;
   try {
-    const { data: rpcRows, error: rpcErr } = await supabase
+    const { data: rpcData, error: rpcErr } = await supabase
       .schema("inbox")
       .rpc("get_message_attachments", { p_message_id: messageId });
     if (rpcErr) {
       ownErr = { message: `rpc error: ${rpcErr.message}` };
       _debugRpcErr = rpcErr.message;
-    } else if (Array.isArray(rpcRows)) {
-      ownRows = rpcRows as AttachmentRow[];
-      _debugRpcCount = rpcRows.length;
     } else {
-      _debugRpcErr = `rpc returned non-array: ${typeof rpcRows}`;
+      // The RPC returns a SINGLE jsonb value: a JSON array of attachment
+      // objects. supabase-js may hand it back as a parsed array (usual) or,
+      // in some versions, as a JSON string — handle both.
+      let parsed: any = rpcData;
+      if (typeof parsed === "string") {
+        try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+      }
+      if (Array.isArray(parsed)) {
+        ownRows = parsed as AttachmentRow[];
+        _debugRpcCount = parsed.length;
+      } else {
+        _debugRpcErr = `rpc returned non-array: ${typeof rpcData}`;
+      }
     }
   } catch (e: any) {
     ownErr = { message: e?.message || "rpc fetch failed" };
