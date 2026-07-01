@@ -270,7 +270,12 @@ export async function POST(req: NextRequest) {
 
   const alreadyHave = new Set<string>((existingRows || []).map((r: any) => r.message_id));
   stats.alreadyBackfilled = alreadyHave.size;
-  const toProcess = filtered.filter((m: any) => !alreadyHave.has(m.id));
+  // In redetect mode we re-examine every candidate regardless of whether it
+  // already has SOME attachment rows — the whole point is to recover messages
+  // that were partially/incorrectly captured (e.g. flag is false, or only a
+  // subset of inline images stored). The per-attachment upsert is idempotent
+  // (dedup index), so re-processing an already-complete message is harmless.
+  const toProcess = redetect ? filtered : filtered.filter((m: any) => !alreadyHave.has(m.id));
 
   // NOTE: an earlier version of this code bulk-cleared `has_attachments=false`
   // on every message in `alreadyHave` to keep them out of future backfill
