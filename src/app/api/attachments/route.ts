@@ -58,89 +58,46 @@ export async function GET(req: NextRequest) {
 
   // 1. Try our own Storage-backed attachments first.
   //
-  // READ STRATEGY — via RPC, not a direct table read.
+  // IMPORTANT — DO NOT USE THE SUPABASE JS SDK FOR THIS QUERY.
   //
-  // History: we originally read attachments with the supabase-js SDK, but it
-  // returned only ONE row for multi-row messages, so we switched to a raw
-  // PostgREST fetch (`/rest/v1/attachments?message_id=eq.X`). That worked for a
-  // long time — but rows inserted by the attachment re-detection backfill turned
-  // out to be INVISIBLE to PostgREST's table-read endpoint (a 200 with an empty
-  // body), even though the exact same rows are returned by SQL, by triggers, and
-  // by an RPC function. RLS is open (USING true), the schema/columns are correct,
-  // and the code is identical to known-good versions — so this is a PostgREST
-  // table-read layer issue, not application code.
+  // Through experimentation we confirmed that calling:
+  //   supabase.schema("inbox").from("attachments").select(...).eq("message_id", X)
+  // on a serverClient that's already pinned to schema "inbox" via
+  // db.schema returns only ONE row even when the DB has multiple. We
+  // proved this by running:
+  //   1. The same query in Supabase SQL Editor → 4 rows
+  //   2. The same query via supabase JS SDK in this route → 1 row
+  //   3. A raw fetch to PostgREST with identical headers → 4 rows
+  // So the bug is in the SDK layer, not the DB and not PostgREST.
   //
-  // The fix: read through a SECURITY DEFINER SQL function
-  // (`inbox.get_message_attachments`) called via supabase.rpc(). RPC executes
-  // real SQL, which sees every row reliably, sidestepping the broken table-read
-  // path. We keep the raw PostgREST fetch as a fallback in case the RPC function
-  // is ever missing.
+  // The workaround: call PostgREST directly via fetch using the service
+  // role key and Accept-Profile header. This bypasses the SDK entirely
+  // and returns all rows correctly. Behavior is identical to what the
+  // SDK was supposed to do.
   type AttachmentRow = {
     id: string;
     filename: string;
     mime_type: string | null;
     size_bytes: number | null;
     is_inline: boolean;
-    // content_id may arrive as a JS array (jsonb RPC), a scalar string
-    // (legacy / supabase-js flattening), or a Postgres array literal string
-    // (raw fetch). toCidArray normalizes all forms.
-    content_id: string | string[] | null;
+    content_id: string | null;
     storage_path: string;
   };
   let ownRows: AttachmentRow[] | null = null;
   let ownErr: { message: string } | null = null;
-  let _debugUrl = "";
-  let _debugStatus = 0;
-  let _debugRawBody = "";
-
-  // Primary path: RPC (reliable — runs real SQL).
-  let _debugRpcErr: string | null = null;
-  let _debugRpcCount: number | null = null;
-  try {
-    const { data: rpcData, error: rpcErr } = await supabase
-      .schema("inbox")
-      .rpc("get_message_attachments", { p_message_id: messageId });
-    if (rpcErr) {
-      ownErr = { message: `rpc error: ${rpcErr.message}` };
-      _debugRpcErr = rpcErr.message;
-    } else {
-      // The RPC returns a SINGLE jsonb value: a JSON array of attachment
-      // objects. supabase-js may hand it back as a parsed array (usual) or,
-      // in some versions, as a JSON string — handle both.
-      let parsed: any = rpcData;
-      if (typeof parsed === "string") {
-        try { parsed = JSON.parse(parsed); } catch { parsed = null; }
-      }
-      if (Array.isArray(parsed)) {
-        ownRows = parsed as AttachmentRow[];
-        _debugRpcCount = parsed.length;
-      } else {
-        _debugRpcErr = `rpc returned non-array: ${typeof rpcData}`;
-      }
-    }
-  } catch (e: any) {
-    ownErr = { message: e?.message || "rpc fetch failed" };
-    _debugRpcErr = `threw: ${e?.message}`;
-  }
-
-  // Fallback path: raw PostgREST fetch (only if RPC returned nothing usable).
-  if (!Array.isArray(ownRows) || ownRows.length === 0) {
   try {
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
       `?message_id=eq.${encodeURIComponent(messageId)}` +
       `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
-    _debugUrl = url;
     const rawRes = await fetch(url, {
       headers: {
         apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
+        // Tell PostgREST which schema this request targets. Service role
+        // keys have access to all schemas — Accept-Profile picks "inbox".
         "Accept-Profile": "inbox",
       },
     });
-    _debugStatus = rawRes.status;
-    if (req.nextUrl.searchParams.get("debug") === "1") {
-      _debugRawBody = await rawRes.clone().text();
-    }
     if (!rawRes.ok) {
       ownErr = { message: `PostgREST status ${rawRes.status}: ${await rawRes.text()}` };
     } else {
@@ -149,120 +106,52 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     ownErr = { message: e?.message || "fetch failed" };
   }
-  } // end fallback raw-fetch block
-
-  // TEMP DIAGNOSTIC: ?debug=1 surfaces exactly what the raw PostgREST fetch
-  // returned (status, url, body) instead of silently falling through to the
-  // Graph fallback. Remove once the empty-list bug is fixed.
-  if (req.nextUrl.searchParams.get("debug") === "1") {
-    return NextResponse.json({
-      debug: true,
-      messageId,
-      builtUrl: _debugUrl.replace(process.env.NEXT_PUBLIC_SUPABASE_URL || "", "<SUPABASE_URL>"),
-      rawStatus: _debugStatus,
-      rawBody: _debugRawBody.slice(0, 1000),
-      serviceKeyPrefix: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").slice(0, 8),
-      serviceKeyLen: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").length,
-      ownErr,
-      rpcError: _debugRpcErr,
-      rpcCount: _debugRpcCount,
-      firstRowContentIdRaw: ownRows && ownRows[0] ? JSON.stringify((ownRows[0] as any).content_id) : null,
-      firstRowContentIdType: ownRows && ownRows[0] ? (Array.isArray((ownRows[0] as any).content_id) ? "array" : typeof (ownRows[0] as any).content_id) : null,
-      firstRowContentIdJoined: ownRows && ownRows[0] ? JSON.stringify((ownRows[0] as any).content_id_joined) : null,
-      ownRowsCount: Array.isArray(ownRows) ? ownRows.length : null,
-    });
-  }
 
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
 
   if (hasOwnRows) {
     // ── List metadata only ──
     if (!attachmentId && !downloadAll) {
-      // content_id can arrive in several shapes depending on the read path:
-      //   • a real JS array (RPC now returns jsonb → parsed array): ["i0_","i1_"]
-      //   • a scalar string (legacy rows / supabase-js flattening): "i0_"
-      //   • a Postgres array literal string (raw fetch): "{i0_,i1_}"
-      // Normalize all of them to a string[] so every cid resolves.
-      const toCidArray = (v: any): string[] => {
-        if (v == null) return [];
-        if (Array.isArray(v)) return v.filter(Boolean).map(String);
-        if (typeof v === "string") {
-          const s = v.trim();
-          // Postgres array literal: {a,b,c}
-          if (s.startsWith("{") && s.endsWith("}")) {
-            return s.slice(1, -1)
-              .split(",")
-              .map((x) => x.replace(/^"|"$/g, "").trim())
-              .filter(Boolean);
-          }
-          // JSON array string: ["a","b"]
-          if (s.startsWith("[") && s.endsWith("]")) {
-            try {
-              const arr = JSON.parse(s);
-              if (Array.isArray(arr)) return arr.filter(Boolean).map(String);
-            } catch { /* fall through */ }
-          }
-          return s ? [s] : [];
-        }
-        return [String(v)];
-      };
       return NextResponse.json({
-        attachments: ownRows!.map((r: any) => {
-          // The RPC returns content_id_joined (newline-delimited string) to
-          // avoid supabase-js flattening a nested array. Split it back. Fall
-          // back to content_id for any legacy/raw-fetch shape.
-          const cids = typeof r.content_id_joined === "string"
-            ? r.content_id_joined.split("\n").map((s: string) => s.trim()).filter(Boolean)
-            : toCidArray(r.content_id);
-          return {
-            id: r.id,
-            name: r.filename,
-            contentType: r.mime_type || "application/octet-stream",
-            size: r.size_bytes || 0,
-            isInline: !!r.is_inline,
-            contentId: cids[0] || null,
-            contentIds: cids,
-          };
-        }),
+        attachments: ownRows!.map((r: any) => ({
+          id: r.id,
+          name: r.filename,
+          contentType: r.mime_type || "application/octet-stream",
+          size: r.size_bytes || 0,
+          isInline: !!r.is_inline,
+          contentId: r.content_id || null,
+        })),
       });
     }
 
     // ── Single download ──
     if (attachmentId) {
-      // Fetch the requested attachment DIRECTLY by its id, rather than calling
-      // .find() against the message's attachment list. The list fetch above can
-      // intermittently return a PARTIAL set of rows (the same row-count
-      // inconsistency documented for this endpoint), and when the requested
-      // attachment wasn't in that partial set, .find() returned undefined and
-      // the route 404'd ("Attachment not found") even though the file exists.
-      // Querying by primary key returns exactly the one row we need, with no
-      // dependency on the list being complete.
-      let row: AttachmentRow | null = null;
+      // Query the attachment directly by its primary key rather than
+      // filtering the message's list — robust even if the list fetch was
+      // partial. Falls back to the already-fetched list if the direct read
+      // returns nothing.
+      let row: any = null;
       try {
-        const rowUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
+        const byIdUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/attachments` +
           `?id=eq.${encodeURIComponent(attachmentId)}` +
-          `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path` +
-          `&limit=1`;
-        const rowRes = await fetch(rowUrl, {
+          `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
+        const byIdRes = await fetch(byIdUrl, {
           headers: {
             apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
             Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
             "Accept-Profile": "inbox",
           },
         });
-        if (rowRes.ok) {
-          const rows = await rowRes.json();
-          if (Array.isArray(rows) && rows.length > 0) row = rows[0];
+        if (byIdRes.ok) {
+          const arr = await byIdRes.json();
+          if (Array.isArray(arr) && arr.length > 0) row = arr[0];
         }
       } catch {
-        row = null;
+        /* fall through to list lookup */
       }
-
-      // Fallback: if the direct fetch somehow missed, try the list we already have.
       if (!row) {
-        row = (ownRows || []).find((r: any) => r.id === attachmentId) || null;
+        row = ownRows!.find((r: any) => r.id === attachmentId) || null;
       }
-
       if (!row) {
         return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
       }
@@ -512,4 +401,4 @@ async function handleGraphAttachments(
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
-}// cache-bust 2026-07-01T23:01:34.1374707+08:00
+}

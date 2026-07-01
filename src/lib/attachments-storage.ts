@@ -120,48 +120,44 @@ export async function uploadAttachmentToStorage(
     return { ok: false, error: `storage upload threw: ${e?.message || "unknown"}` };
   }
 
-  // Insert (or, for a duplicate image already stored on this message, append
-  // this cid to the existing row) via the upsert_attachment RPC.
-  //
-  // Why an RPC: one physical image can be referenced by MULTIPLE cids in a
-  // single message (e.g. a signature quoted several times down a reply chain,
-  // cids i0_/i1_/i2_). The table dedups identical images per message
-  // (UNIQUE(message_id, checksum) / UNIQUE(message_id, filename, size_bytes)),
-  // so a plain insert would drop the 2nd/3rd cid and those inline images
-  // couldn't resolve. The RPC atomically inserts a new row OR appends the cid
-  // to the existing row's content_id[] array, so every cid resolves.
+  // Insert metadata row. Dedup is enforced by partial unique indexes that
+  // INCLUDE content_id, so the same image referenced by different cids in one
+  // message each gets its own lightweight row (all sharing one storage_path):
+  //   • UNIQUE (message_id, checksum, content_id)      WHERE checksum IS NOT NULL
+  //   • UNIQUE (message_id, filename, size_bytes, content_id) WHERE checksum IS NULL
+  // A genuine re-sync of the same image+cid still hits the constraint (23505)
+  // and is treated as a successful skip.
   try {
-    const { data, error: rpcErr } = await supabase
+    const { data, error: insertErr } = await supabase
       .schema("inbox")
-      .rpc("upsert_attachment", {
-        p_message_id: messageId,
-        p_filename: attachment.filename || safeFilename,
-        p_mime_type: attachment.contentType || null,
-        p_size_bytes: attachment.size || attachment.content.length,
-        p_is_inline: !!attachment.isInline,
-        p_content_id: attachment.contentId || null,
-        p_storage_path: storagePath,
-        p_checksum: checksum,
-      });
+      .from("attachments")
+      .insert({
+        message_id: messageId,
+        filename: attachment.filename || safeFilename,
+        mime_type: attachment.contentType || null,
+        size_bytes: attachment.size || attachment.content.length,
+        is_inline: !!attachment.isInline,
+        content_id: attachment.contentId || null,
+        storage_path: storagePath,
+        checksum,
+      })
+      .select("id")
+      .single();
 
-    if (rpcErr) {
-      return { ok: false, error: `db upsert: ${rpcErr.message}` };
+    if (insertErr) {
+      // Postgres unique-violation code is "23505". Treat as a successful skip
+      // rather than an error — re-sync should be a no-op.
+      const code = (insertErr as any).code || "";
+      const msg = String(insertErr.message || "").toLowerCase();
+      if (code === "23505" || msg.includes("duplicate") || msg.includes("unique")) {
+        return { ok: true, storagePath, skipped: "duplicate" };
+      }
+      return { ok: false, error: `db insert: ${insertErr.message}` };
     }
 
-    // RPC returns rows of { out_id, action }. action ∈ inserted|appended|unchanged.
-    const row = Array.isArray(data) ? data[0] : data;
-    const action = row?.action as string | undefined;
-    const rowId = row?.out_id as string | undefined;
-
-    // 'unchanged' = the image AND this cid were already stored → a true no-op
-    // duplicate (preserve the previous "skipped: duplicate" semantics so
-    // backfill stats stay meaningful). 'inserted'/'appended' are real work.
-    if (action === "unchanged") {
-      return { ok: true, storagePath, attachmentId: rowId, skipped: "duplicate" };
-    }
-    return { ok: true, storagePath, attachmentId: rowId };
+    return { ok: true, storagePath, attachmentId: data.id };
   } catch (e: any) {
-    return { ok: false, error: `db upsert threw: ${e?.message || "unknown"}` };
+    return { ok: false, error: `db insert threw: ${e?.message || "unknown"}` };
   }
 }
 
