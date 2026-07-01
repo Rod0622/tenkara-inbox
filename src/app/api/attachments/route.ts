@@ -512,4 +512,4 @@ async function handleGraphAttachments(
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
-}
+}// cache-bust 2026-07-01T23:01:34.1374707+08:00
