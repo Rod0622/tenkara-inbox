@@ -81,8 +81,9 @@ export async function GET(req: NextRequest) {
     mime_type: string | null;
     size_bytes: number | null;
     is_inline: boolean;
-    // content_id may be a legacy scalar (text) or the new array (text[]),
-    // depending on whether the schema migration has run. Reads handle both.
+    // content_id may arrive as a JS array (jsonb RPC), a scalar string
+    // (legacy / supabase-js flattening), or a Postgres array literal string
+    // (raw fetch). toCidArray normalizes all forms.
     content_id: string | string[] | null;
     storage_path: string;
   };
@@ -167,14 +168,33 @@ export async function GET(req: NextRequest) {
   if (hasOwnRows) {
     // ── List metadata only ──
     if (!attachmentId && !downloadAll) {
-      // content_id may be stored as a scalar (legacy) or an array (new model).
-      // Normalize to an array here and expose BOTH `contentIds` (array, new)
-      // and `contentId` (scalar first element, back-compat) so any client
-      // version resolves inline images correctly.
+      // content_id can arrive in several shapes depending on the read path:
+      //   • a real JS array (RPC now returns jsonb → parsed array): ["i0_","i1_"]
+      //   • a scalar string (legacy rows / supabase-js flattening): "i0_"
+      //   • a Postgres array literal string (raw fetch): "{i0_,i1_}"
+      // Normalize all of them to a string[] so every cid resolves.
       const toCidArray = (v: any): string[] => {
+        if (v == null) return [];
         if (Array.isArray(v)) return v.filter(Boolean).map(String);
-        if (v) return [String(v)];
-        return [];
+        if (typeof v === "string") {
+          const s = v.trim();
+          // Postgres array literal: {a,b,c}
+          if (s.startsWith("{") && s.endsWith("}")) {
+            return s.slice(1, -1)
+              .split(",")
+              .map((x) => x.replace(/^"|"$/g, "").trim())
+              .filter(Boolean);
+          }
+          // JSON array string: ["a","b"]
+          if (s.startsWith("[") && s.endsWith("]")) {
+            try {
+              const arr = JSON.parse(s);
+              if (Array.isArray(arr)) return arr.filter(Boolean).map(String);
+            } catch { /* fall through */ }
+          }
+          return s ? [s] : [];
+        }
+        return [String(v)];
       };
       return NextResponse.json({
         attachments: ownRows!.map((r: any) => {
