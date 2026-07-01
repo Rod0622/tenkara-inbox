@@ -81,7 +81,9 @@ export async function GET(req: NextRequest) {
     mime_type: string | null;
     size_bytes: number | null;
     is_inline: boolean;
-    content_id: string | null;
+    // content_id may be a legacy scalar (text) or the new array (text[]),
+    // depending on whether the schema migration has run. Reads handle both.
+    content_id: string | string[] | null;
     storage_path: string;
   };
   let ownRows: AttachmentRow[] | null = null;
@@ -154,15 +156,28 @@ export async function GET(req: NextRequest) {
   if (hasOwnRows) {
     // ── List metadata only ──
     if (!attachmentId && !downloadAll) {
+      // content_id may be stored as a scalar (legacy) or an array (new model).
+      // Normalize to an array here and expose BOTH `contentIds` (array, new)
+      // and `contentId` (scalar first element, back-compat) so any client
+      // version resolves inline images correctly.
+      const toCidArray = (v: any): string[] => {
+        if (Array.isArray(v)) return v.filter(Boolean).map(String);
+        if (v) return [String(v)];
+        return [];
+      };
       return NextResponse.json({
-        attachments: ownRows!.map((r: any) => ({
-          id: r.id,
-          name: r.filename,
-          contentType: r.mime_type || "application/octet-stream",
-          size: r.size_bytes || 0,
-          isInline: !!r.is_inline,
-          contentId: r.content_id || null,
-        })),
+        attachments: ownRows!.map((r: any) => {
+          const cids = toCidArray(r.content_id);
+          return {
+            id: r.id,
+            name: r.filename,
+            contentType: r.mime_type || "application/octet-stream",
+            size: r.size_bytes || 0,
+            isInline: !!r.is_inline,
+            contentId: cids[0] || null,
+            contentIds: cids,
+          };
+        }),
       });
     }
 

@@ -67,7 +67,17 @@ export default function MessageBody({
             const data = await res.json();
             const atts: any[] = data.attachments || [];
             for (const a of atts) {
-              if (a.contentId) cidMap.set(norm(a.contentId), a.id);
+              // Backward/forward compatible: an attachment may expose its cid
+              // references as a single `contentId` (legacy scalar) and/or a
+              // `contentIds` array (new model, where one stored image can be
+              // referenced by multiple cids in the body). Map every cid we see
+              // to this attachment's id.
+              const cids: string[] = [];
+              if (Array.isArray(a.contentIds)) {
+                for (const c of a.contentIds) if (c) cids.push(String(c));
+              }
+              if (a.contentId) cids.push(String(a.contentId));
+              for (const c of cids) cidMap.set(norm(c), a.id);
             }
             // If we got at least one usable mapping, accept it.
             if (cidMap.size > 0) return cidMap;
