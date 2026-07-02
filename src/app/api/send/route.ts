@@ -170,13 +170,24 @@ export async function POST(req: NextRequest) {
     // Send via Graph API or SMTP depending on provider
     let messageId: string | undefined;
 
-    // Append signature if enabled and not already in body
+    // Append signature if enabled and not already in body.
+    //
+    // The RichTextEditor inserts the signature wrapped in a stable marker
+    // (`data-signature-block="true"`). If that marker is already present, the
+    // signature is in the body — do NOT append again (that caused a duplicate
+    // signature on send). We also keep a plain-text fallback check for bodies
+    // composed outside the editor.
     let finalBody = emailBody;
     if (account.signature_enabled && account.signature) {
-      const sigText = (account.signature || "").replace(/<[^>]*>/g, "").trim();
-      if (sigText && !emailBody.includes(sigText.slice(0, 30))) {
+      const hasSignatureBlock = /data-signature-block\s*=\s*["']true["']/i.test(emailBody);
+      const sigText = (account.signature || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+      const bodyText = emailBody.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+      const sigProbe = sigText.slice(0, 40);
+      const alreadyHasSignature =
+        hasSignatureBlock || (sigProbe.length > 0 && bodyText.includes(sigProbe));
+      if (!alreadyHasSignature) {
         // Signature not in body yet — append it without border line
-        finalBody = emailBody + '<br><div style="padding-top: 8px; margin-top: 8px;">' + account.signature + '</div>';
+        finalBody = emailBody + '<br><div data-signature-block="true" style="padding-top: 8px; margin-top: 8px;">' + account.signature + '</div>';
       }
     }
 
