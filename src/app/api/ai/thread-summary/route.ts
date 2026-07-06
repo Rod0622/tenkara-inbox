@@ -380,6 +380,18 @@ async function autoPromoteToSupplierProfile(
 
     if (!supplierContactId) return; // not a supplier thread — nothing to promote
 
+    // If the conversation wasn't linked to this supplier yet (we resolved it via
+    // from_email or the message-participant fallback), persist the link back to
+    // the conversation. This makes the Summary tab's quote fetch work (it reads
+    // convo.supplier_contact_id) and properly links the thread for everything
+    // else that relies on it.
+    if (!conversation.supplier_contact_id && supplierContactId) {
+      await supabase
+        .from("conversations")
+        .update({ supplier_contact_id: supplierContactId })
+        .eq("id", conversation.id);
+    }
+
     // ── Profile: fill-only-if-empty ──
     const extracted = mapExtractedProfile(coerceSupplierInformation(parsed.supplier_information));
     const { data: existingProfile } = await supabase
