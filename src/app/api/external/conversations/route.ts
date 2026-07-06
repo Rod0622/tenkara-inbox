@@ -120,10 +120,16 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 5. Validate email_account_id if provided ──
+  // When an account is provided we also capture its sender identity (name +
+  // email) so the conversation/draft land with a populated "from" — otherwise
+  // the app shows a blank sender even though requires_sender_selection is
+  // false, forcing the operator to re-pick a sender that was already chosen.
+  let accountFromName: string | null = null;
+  let accountFromEmail: string | null = null;
   if (emailAccountId) {
     const { data: acc } = await supabase
       .from("email_accounts")
-      .select("id")
+      .select("id, name, email")
       .eq("id", emailAccountId)
       .maybeSingle();
     if (!acc) {
@@ -132,6 +138,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    accountFromName = (acc as any).name ?? null;
+    accountFromEmail = (acc as any).email ?? null;
   }
 
   // ── 6. Idempotency lookup ──
@@ -236,8 +244,8 @@ export async function POST(req: NextRequest) {
       email_account_id: emailAccountId,
       thread_id: threadId,
       subject,
-      from_name: null,
-      from_email: null,
+      from_name: accountFromName,
+      from_email: accountFromEmail,
       preview: computedBodyText.slice(0, 200),
       is_unread: false,
       status: "open",
