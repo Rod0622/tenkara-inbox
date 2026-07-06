@@ -36,6 +36,22 @@ function stripQuotedHistory(html: string): string {
   return html.slice(0, cutAt);
 }
 
+// Heuristic: does this message likely CONTAIN a price/quote? Used to guarantee
+// pricing-bearing messages always reach the model, even in long threads where a
+// simple "last N messages" window would drop early quotes. Deliberately broad —
+// catches informal prose prices ("10.50/kg", ".79/lb", "$1.86", "priced at",
+// "position on", "MOQ", "lead time") since suppliers rarely use a clean format.
+function looksLikeQuote(msg: { body_text?: string | null; body_html?: string | null; snippet?: string | null }): boolean {
+  const text = `${msg.body_text || ""} ${msg.snippet || ""}`.toLowerCase();
+  if (!text.trim()) return false;
+  // Currency amounts / prose prices: $1.86, 1.86/lb, .79/lb, 10.50/kg, 12 per kg
+  const priceNumberPattern = /\$\s*\d|\d{1,4}(?:[.,]\d{1,2})?\s*(?:\/|per\s+)\s*(?:kg|lb|lbs|g|gram|mt|ton|oz|unit|pc|each|bag|drum|case)|\.\d{1,2}\s*\/\s*(?:kg|lb|g|oz)/i;
+  if (priceNumberPattern.test(text)) return true;
+  // Quote-intent keywords
+  const kw = ["price", "pricing", "quote", "quoted", "moq", "lead time", "per kg", "per lb", "position on", "usd", "fob", "cif", "ex works", "subject to confirmation"];
+  return kw.some((k) => text.includes(k));
+}
+
 // Heuristic: does this single <table> look like a SIGNATURE / contact block
 // rather than a data/quote table? Signature tables here contain things like
 // "Sales Manager", a phone, an email, a company address — and never pricing
@@ -577,9 +593,38 @@ function buildPrompt(params: {
   notes: Array<{ text?: string | null }>;
   tasks: Array<{ text?: string | null; status?: string | null; is_done?: boolean }>;
 }) {
-  const messagesText = params.messages
-    .slice(-12)
-    .map((msg, idx) => {
+  // Message selection (Option B): guarantee pricing-bearing messages reach the
+  // model even in long threads. A naive "last 12" window drops early quotes
+  // (e.g. a supplier's opening price). Strategy:
+  //   • Always keep the most recent RECENT_WINDOW messages (conversation flow).
+  //   • ALSO keep any earlier message that looks like it contains a quote/price.
+  //   • Preserve chronological order; cap the total to avoid token blowup.
+  const RECENT_WINDOW = 20;
+  const MAX_MESSAGES = 30;
+  const allMsgs = params.messages;
+  const recentStart = Math.max(0, allMsgs.length - RECENT_WINDOW);
+  const selectedIdx = new Set<number>();
+  // recent window
+  for (let i = recentStart; i < allMsgs.length; i++) selectedIdx.add(i);
+  // earlier pricing-bearing messages
+  for (let i = 0; i < recentStart; i++) {
+    if (looksLikeQuote(allMsgs[i])) selectedIdx.add(i);
+  }
+  // Assemble in chronological order, capped. If over cap, drop OLDEST
+  // non-pricing messages first (keep all pricing ones + newest).
+  let orderedIdx = Array.from(selectedIdx).sort((a, b) => a - b);
+  if (orderedIdx.length > MAX_MESSAGES) {
+    const pricing = orderedIdx.filter((i) => looksLikeQuote(allMsgs[i]));
+    const nonPricing = orderedIdx.filter((i) => !looksLikeQuote(allMsgs[i]));
+    // keep all pricing + the newest non-pricing up to the remaining budget
+    const budget = Math.max(0, MAX_MESSAGES - pricing.length);
+    const keptNonPricing = nonPricing.slice(-budget);
+    orderedIdx = Array.from(new Set([...pricing, ...keptNonPricing])).sort((a, b) => a - b);
+  }
+
+  const messagesText = orderedIdx
+    .map((origIdx, idx) => {
+      const msg = allMsgs[origIdx];
       const body = bodyForModel(msg);
       return [
         `Message ${idx + 1}`,
@@ -697,6 +742,7 @@ Supplier information & quotes extraction rules (IMPORTANT):
 - For prices, put the numeric/text price in "price", the quantity it applies to in "price_qty", and the unit in "price_unit" (e.g. price "12.50", price_qty "1", price_unit "kg").
 - "case_pack_size" is a SINGLE combined field for case/pack size, case weight, and pack size — capture whatever the supplier states about packaging size/weight here, together (e.g. "25kg fiber drum" or "1kg aluminum foil bag, 25 units/case"). Do not split these out.
 - "lead_time": if the supplier indicates the material is in stock / ready stock / available now / ships immediately, reflect that in lead_time (e.g. "In stock"). If they give both an in-stock note and a shipping time, capture both (e.g. "In stock — ships in 3 days"). If only a time is given, use that.
+- IMPORTANT — PROSE / INFORMAL QUOTES: Suppliers frequently state prices informally in sentences, not tables. Treat ALL of these as quotes and extract them: "priced at 10.50/kg", "$1.86/lb", ".79/lb, 55lb bags", "position on Taurine at 3.50/lb", "we can offer X for Y". Prices written without a currency symbol (e.g. "1.86/lb", ".79/lb", "10.50/kg") ARE prices — extract them. A material named in one message with its price in a nearby message in the same thread still counts as one quote — associate them. Do NOT require a table or a "$" sign for something to be a quote. If a supplier states any price for any material, that is a quote object.
 - IMPORTANT — TABULAR QUOTES: Suppliers often send pricing as a TABLE. Message content may include a section labelled "[Tabular content extracted from email HTML]" with pipe-delimited rows (e.g. "Material | Price | MOQ | Lead time"). Treat these tables as authoritative quote data and extract one quote object per material ROW. A table's header row names the columns; map each data row's cells to the matching quote fields (material_name, price, price_qty, price_unit, moq, lead_time, grade, pack size, etc.). Do not ignore tables — quotes frequently appear ONLY in table form.
 
 Thread subject: ${params.subject}
