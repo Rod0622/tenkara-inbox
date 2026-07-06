@@ -990,6 +990,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: saveError.message }, { status: 500 });
     }
 
+    // TEMP DIAGNOSTIC: ?debug=1 surfaces what the model actually returned so we
+    // can see whether quotes were extracted (and lost in promotion) or never
+    // extracted at all. Remove once quote extraction is confirmed working.
+    if (req.nextUrl.searchParams.get("debug") === "1") {
+      return NextResponse.json({
+        debug: true,
+        conversationId,
+        wasTruncated,
+        parsedQuotesCount: Array.isArray(parsed?.quotes) ? parsed.quotes.length : "not-an-array",
+        parsedQuotesSample: Array.isArray(parsed?.quotes) ? parsed.quotes.slice(0, 5) : null,
+        rawModelTextSnippet: rawText.slice(0, 1500),
+        overview: parsed?.overview?.slice?.(0, 200) ?? null,
+      });
+    }
+
     // Auto-promote the extracted supplier info + quotes into the persistent,
     // editable supplier_profiles / supplier_quotes tables. Awaited (so it
     // completes before the serverless function returns) but best-effort —
