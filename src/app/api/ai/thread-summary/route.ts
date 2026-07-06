@@ -335,19 +335,49 @@ async function autoPromoteToSupplierProfile(
   supabase: any,
   conversation: any,
   parsed: any,
-  actorId: string | null
+  actorId: string | null,
+  messages?: Array<{ from_email?: string | null; to_addresses?: string | null }>
 ): Promise<void> {
   try {
     // Resolve the supplier this thread belongs to.
     let supplierContactId: string | null = conversation.supplier_contact_id || null;
-    if (!supplierContactId && conversation.from_email) {
+
+    // Path 1: conversation.from_email — but only if it's a real email address
+    // (some threads store "internal" or a display name here, which is useless).
+    const convFrom = String(conversation.from_email || "").trim().toLowerCase();
+    const isRealEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+    if (!supplierContactId && isRealEmail(convFrom)) {
       const { data: sc } = await supabase
         .from("supplier_contacts")
         .select("id")
-        .eq("email", String(conversation.from_email).trim().toLowerCase())
+        .eq("email", convFrom)
         .maybeSingle();
       supplierContactId = sc?.id || null;
     }
+
+    // Path 2 (fallback): scan the thread's message participants for an address
+    // that matches a known supplier_contact. Handles threads where from_email is
+    // "internal"/blank or the conversation was never linked — the supplier is
+    // still identifiable from who actually sent/received the messages.
+    if (!supplierContactId && messages && messages.length > 0) {
+      const candidateEmails = new Set<string>();
+      for (const m of messages) {
+        const from = String(m.from_email || "").trim().toLowerCase();
+        if (isRealEmail(from)) candidateEmails.add(from);
+        // to_addresses is a delimited string; pull any email-looking tokens.
+        const tos = String(m.to_addresses || "").toLowerCase().match(/[^@\s<>,;"]+@[^@\s<>,;"]+\.[^@\s<>,;"]+/g);
+        if (tos) tos.forEach((t) => candidateEmails.add(t));
+      }
+      if (candidateEmails.size > 0) {
+        const { data: matches } = await supabase
+          .from("supplier_contacts")
+          .select("id, email")
+          .in("email", Array.from(candidateEmails));
+        // Prefer the first matching supplier contact found.
+        supplierContactId = (matches && matches[0]?.id) || null;
+      }
+    }
+
     if (!supplierContactId) return; // not a supplier thread — nothing to promote
 
     // ── Profile: fill-only-if-empty ──
@@ -990,26 +1020,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: saveError.message }, { status: 500 });
     }
 
-    // TEMP DIAGNOSTIC: ?debug=1 surfaces what the model actually returned so we
-    // can see whether quotes were extracted (and lost in promotion) or never
-    // extracted at all. Remove once quote extraction is confirmed working.
-    if (req.nextUrl.searchParams.get("debug") === "1") {
-      return NextResponse.json({
-        debug: true,
-        conversationId,
-        wasTruncated,
-        parsedQuotesCount: Array.isArray(parsed?.quotes) ? parsed.quotes.length : "not-an-array",
-        parsedQuotesSample: Array.isArray(parsed?.quotes) ? parsed.quotes.slice(0, 5) : null,
-        rawModelTextSnippet: rawText.slice(0, 1500),
-        overview: parsed?.overview?.slice?.(0, 200) ?? null,
-      });
-    }
-
     // Auto-promote the extracted supplier info + quotes into the persistent,
     // editable supplier_profiles / supplier_quotes tables. Awaited (so it
     // completes before the serverless function returns) but best-effort —
     // it never throws back into the response.
-    await autoPromoteToSupplierProfile(supabase, conversation, parsed, session.teamMember.id || null);
+    await autoPromoteToSupplierProfile(supabase, conversation, parsed, session.teamMember.id || null, messages || []);
 
     return NextResponse.json({ summary: saved, cached: false, truncated: wasTruncated });
   } catch (error: any) {
