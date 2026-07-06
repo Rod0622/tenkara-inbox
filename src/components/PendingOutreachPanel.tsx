@@ -65,6 +65,7 @@ interface PendingDraft {
     primary_contact_email: string | null;
     primary_contact_name: string | null;
     thread_id: string | null;
+    email_account_id: string | null;
   } | null;
 }
 
@@ -134,9 +135,8 @@ export default function PendingOutreachPanel({
     setLoading(true);
     fetchDrafts();
     const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
       if (!inflightRef.current) fetchDrafts();
-    }, 60000);
+    }, 15000);
     const onFocus = () => {
       if (!inflightRef.current) fetchDrafts();
     };
@@ -154,7 +154,10 @@ export default function PendingOutreachPanel({
   };
 
   const handleSend = async (draft: PendingDraft) => {
-    const accountId = pickedAccount[draft.id];
+    // Use the operator's manual pick if they changed it; otherwise fall back
+    // to the account the agent already set on the conversation.
+    const accountId =
+      pickedAccount[draft.id] || draft.conversation?.email_account_id || "";
     if (!accountId) {
       showToast("error", "Pick a sending account first.");
       return;
@@ -291,7 +294,14 @@ export default function PendingOutreachPanel({
               const isSending = sendingId === draft.id;
               const isDiscarding = discardingId === draft.id;
               const isBusy = isSending || isDiscarding;
-              const accountId = pickedAccount[draft.id] || "";
+              // Prefer the account the agent already set on the conversation
+              // (so drafts created with email_account_id are ready to send with
+              // no operator pick). Fall back to the operator's manual pick only
+              // when the draft has no account yet.
+              const accountId =
+                pickedAccount[draft.id] ||
+                draft.conversation?.email_account_id ||
+                "";
               const pickedAccountRow = emailAccounts.find(
                 (a) => a.id === accountId
               );
