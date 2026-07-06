@@ -302,6 +302,12 @@ export default function PendingOutreachPanel({
                 pickedAccount[draft.id] ||
                 draft.conversation?.email_account_id ||
                 "";
+              // When the agent already set the account on the conversation,
+              // there's nothing for the operator to choose — show the sender as
+              // read-only text. Only fall back to a picker for legacy/edge
+              // drafts that genuinely have no account yet (avoids the operator
+              // mis-picking a mailbox that was already determined).
+              const hasPresetAccount = !!draft.conversation?.email_account_id;
               const pickedAccountRow = emailAccounts.find(
                 (a) => a.id === accountId
               );
@@ -366,17 +372,33 @@ export default function PendingOutreachPanel({
                     ) || "(empty body)"}
                   </div>
 
-                  {/* Row 4: actions — account picker + send + discard + open */}
+                  {/* Row 4: actions — sender (read-only if preset) + send + discard + open */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Account picker */}
-                    <AccountPicker
-                      accounts={emailAccounts}
-                      value={accountId}
-                      onChange={(id) =>
-                        setPickedAccount((prev) => ({ ...prev, [draft.id]: id }))
-                      }
-                      disabled={isBusy}
-                    />
+                    {/* Sender: read-only when the agent already set the account;
+                        picker only as a fallback for drafts with no account. */}
+                    {hasPresetAccount ? (
+                      <span
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[12px] text-[var(--text-secondary)]"
+                        title={`Sends from ${pickedAccountRow?.email || "this account"}`}
+                      >
+                        <Send size={12} className="opacity-60" />
+                        <span>
+                          From:{" "}
+                          <span className="font-semibold text-[var(--text-primary)]">
+                            {pickedAccountRow?.name || pickedAccountRow?.email || "account"}
+                          </span>
+                        </span>
+                      </span>
+                    ) : (
+                      <AccountPicker
+                        accounts={emailAccounts}
+                        value={accountId}
+                        onChange={(id) =>
+                          setPickedAccount((prev) => ({ ...prev, [draft.id]: id }))
+                        }
+                        disabled={isBusy}
+                      />
+                    )}
 
                     {/* Send button */}
                     <button
