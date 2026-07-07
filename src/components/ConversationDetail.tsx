@@ -5154,7 +5154,7 @@ export default function ConversationDetail({
 
                     <div className="flex-1 min-w-0">
                       <div
-                        className={`text-sm font-medium ${
+                        className={`text-sm font-medium whitespace-pre-wrap ${
                           task.status === "dismissed"
                             ? "text-[var(--warning)] italic opacity-70"
                             : task.status === "completed" || task.is_done

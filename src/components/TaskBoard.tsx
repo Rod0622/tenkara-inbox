@@ -749,7 +749,7 @@ function TaskCard({
         </button>
 
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-medium ${task.status === "dismissed" ? "text-[var(--warning)] italic opacity-70" : task.status === "completed" ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>
+          <div className={`text-sm font-medium whitespace-pre-wrap ${task.status === "dismissed" ? "text-[var(--warning)] italic opacity-70" : task.status === "completed" ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>
             {task.status === "dismissed" && <Ban size={12} className="inline mr-1 -mt-0.5" />}
             {task.text}
           </div>
