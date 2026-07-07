@@ -1720,6 +1720,7 @@ export default function ConversationDetail({
 
   const tabs = [
     { id: "messages", label: "Messages", count: messages.length },
+    { id: "calls", label: "Calls", count: (calls || []).length },
     { id: "notes", label: "Notes", count: notes.length },
     { id: "tasks", label: "Tasks", count: tasks.length },
     { id: "activity", label: "Activity", count: activities.length },
@@ -4098,7 +4099,7 @@ export default function ConversationDetail({
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => { setActiveTab(tab.id); if (tab.id === "tasks" || tab.id === "notes") refetchDetail(); }}
+            onClick={() => { setActiveTab(tab.id); if (tab.id === "tasks" || tab.id === "notes") refetchDetail(); if (tab.id === "calls") refetchCalls(); }}
             className={`px-4 py-2.5 text-xs font-semibold transition-all flex items-center gap-1.5 ${
               activeTab === tab.id
                 ? "text-[var(--accent)] border-b-2 border-[var(--accent)]"
@@ -4229,6 +4230,8 @@ export default function ConversationDetail({
               // first message (idx === 0 within messages), which now appears
               // visually at the bottom — the drop cap marks "where the
               // conversation started," not "what you see first."
+              // Calls now live in their own "Calls" tab, so the Messages
+              // timeline shows email messages only (keeps this tab uncrowded).
               type Item =
                 | { kind: "message"; m: any; idx: number; t: number }
                 | { kind: "call"; c: CallEntry; t: number };
@@ -4239,12 +4242,7 @@ export default function ConversationDetail({
                 idx,
                 t: new Date(m.sent_at || m.created_at || 0).getTime() || 0,
               }));
-              const callItems: Item[] = (calls || []).map((c) => ({
-                kind: "call" as const,
-                c,
-                t: new Date(c.started_at || c.created_at || 0).getTime() || 0,
-              }));
-              const timelineItems: Item[] = [...msgItems, ...callItems].sort((a, b) => b.t - a.t);
+              const timelineItems: Item[] = [...msgItems].sort((a, b) => b.t - a.t);
 
               return timelineItems.map((item) => {
                 // ── Call entry ──
@@ -4449,6 +4447,35 @@ export default function ConversationDetail({
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "calls" && (
+          <div className="h-full overflow-y-auto pr-2 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Call Log</div>
+            </div>
+            {(calls || []).length === 0 ? (
+              <div className="text-[13px] text-[var(--text-muted)] py-8 text-center">
+                No calls logged yet for this conversation.
+              </div>
+            ) : (
+              [...(calls || [])]
+                .sort(
+                  (a, b) =>
+                    (new Date(b.started_at || b.created_at || 0).getTime() || 0) -
+                    (new Date(a.started_at || a.created_at || 0).getTime() || 0)
+                )
+                .map((c) => (
+                  <CallTimelineEntry
+                    key={`call-${c.id}`}
+                    call={c}
+                    onDraft={handleDraftFromCall}
+                    onToggleFollowUp={handleToggleCallFollowUp}
+                    hasFollowUp={activeFollowUps.has(c.id)}
+                  />
+                ))
+            )}
+          </div>
         )}
 
         {activeTab === "notes" && (
