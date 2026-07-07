@@ -4,6 +4,34 @@ import { notifyMention, notifyWatchers } from "@/lib/notifications";
 import { runRulesForEvent } from "@/lib/rule-engine";
 import { removeCommentAttachment } from "@/lib/comment-attachments-storage";
 
+// Given a surviving conversation, collect the IDs of ALL conversations whose
+// team chat should appear on it: itself, plus every conversation actively
+// merged into it, following chains (A→B→C) transitively. Cycle-safe via a
+// visited set (the merge graph can contain loops, e.g. two conversations merged
+// into each other). Read-only — nothing is moved.
+async function collectMergedConversationIds(supabase: any, rootId: string): Promise<string[]> {
+  const visited = new Set<string>([rootId]);
+  let frontier = [rootId];
+  // Bounded to avoid pathological loops; merge chains are short in practice.
+  for (let depth = 0; depth < 20 && frontier.length > 0; depth++) {
+    const { data: merges } = await supabase
+      .from("conversation_merges")
+      .select("merged_conversation_id")
+      .in("primary_conversation_id", frontier)
+      .eq("is_active", true);
+    const next: string[] = [];
+    for (const m of (merges || []) as any[]) {
+      const id = m.merged_conversation_id;
+      if (id && !visited.has(id)) {
+        visited.add(id);
+        next.push(id);
+      }
+    }
+    frontier = next;
+  }
+  return Array.from(visited);
+}
+
 // GET /api/comments?conversation_id=xxx
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
@@ -13,13 +41,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "conversation_id is required" }, { status: 400 });
   }
 
+  // Include team chat from conversations that were merged INTO this one, so
+  // history isn't lost after a merge (comments aren't physically moved for past
+  // merges — we surface them here on the surviving conversation).
+  const conversationIds = await collectMergedConversationIds(supabase, conversationId);
+
   const { data: comments, error } = await supabase
     .from("comments")
     .select(`
       *,
       author:team_members!author_id (id, name, initials, color)
     `)
-    .eq("conversation_id", conversationId)
+    .in("conversation_id", conversationIds)
     .order("created_at", { ascending: true });
 
   if (error) {
