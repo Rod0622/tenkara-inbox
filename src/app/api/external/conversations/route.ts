@@ -4,6 +4,7 @@ import { authenticateBearer, hasScope } from "@/lib/api-token-auth";
 import { checkAndRecordRateLimit, rateLimitedResponse } from "@/lib/api-token-rate-limit";
 import { dispatchConversationCreatedWebhook } from "@/lib/api-token-webhook";
 import { ensureSuperAgentLabel, labelManualCreatedConversation } from "@/lib/folder-labels";
+import { createNotifications } from "@/lib/notifications";
 
 // ── POST /api/external/conversations ─────────────────────────────────────
 //
@@ -361,6 +362,42 @@ export async function POST(req: NextRequest) {
     }
   } catch (e: any) {
     console.error("[external/conversations] auto-label failed:", e?.message);
+  }
+
+  // ── 8c. Notify users with access to this account ──
+  // When an agent draft lands in an account's Pending Outreach, notify every
+  // team member who has access to that email account (any account_access row).
+  // Best-effort — never block or fail the agent response.
+  if (emailAccountId) {
+    try {
+      const { data: accessRows } = await supabase
+        .from("account_access")
+        .select("team_member_id")
+        .eq("email_account_id", emailAccountId);
+      const memberIds = Array.from(
+        new Set(
+          (accessRows || [])
+            .map((r: any) => r.team_member_id)
+            .filter((id: string) => !!id)
+        )
+      );
+      if (memberIds.length > 0) {
+        const accountLabel = accountFromName || accountFromEmail || "an account";
+        const supplierLabel = toName || toEmail || "a supplier";
+        await createNotifications(
+          memberIds.map((uid) => ({
+            user_id: uid,
+            type: "pending_outreach_draft",
+            title: "New outreach draft",
+            body: `${token.name} created a draft to ${supplierLabel} in ${accountLabel} — Pending Outreach.`,
+            conversation_id: conv.id,
+            actor_id: null,
+          }))
+        );
+      }
+    } catch (e: any) {
+      console.error("[external/conversations] pending-outreach notify failed:", e?.message);
+    }
   }
 
   // ── 9. Activity log (fire-and-forget) ──
