@@ -184,7 +184,6 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchNotifs = async () => {
-    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/notifications?user_id=" + currentUser.id);
         const data = await res.json();
@@ -201,7 +200,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 60000);
+    const interval = setInterval(fetchNotifs, 15000);
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -209,7 +208,6 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchOwnOOO = async () => {
-    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(`/api/team/ooo?user_id=${currentUser.id}`);
         if (!res.ok) return;
@@ -226,7 +224,6 @@ export default function Sidebar({
   useEffect(() => {
     if (!currentUser?.id) return;
     const fetchWatching = async () => {
-    if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(`/api/conversations/watchers?user_id=${currentUser.id}`);
         if (!res.ok) return;
@@ -235,7 +232,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchWatching();
-    const id = setInterval(fetchWatching, 60000);
+    const id = setInterval(fetchWatching, 30000);
     return () => clearInterval(id);
   }, [currentUser?.id]);
 
@@ -271,6 +268,10 @@ export default function Sidebar({
     } else if (notif.type === "mention" && notif.conversation_id) {
       // Go to conversation AND auto-open team chat (where the mention was made)
       window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true&open_team_chat=1";
+    } else if (notif.type === "pending_outreach_draft" && notif.conversation_id) {
+      // Super Agent draft — open the conversation (Pending Outreach lives under
+      // its account view; opening the conversation surfaces the draft).
+      window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true";
     } else if (notif.conversation_id) {
       // Go to conversation with highlight
       window.location.hash = "conversation=" + notif.conversation_id + "&highlight=true";
@@ -567,14 +568,26 @@ export default function Sidebar({
                     className={"w-full text-left px-3 py-2.5 border-b border-[var(--border)]/50 hover:bg-[var(--surface)] transition-colors " + (notif.is_read ? "opacity-60" : "")}
                   >
                     <div className="flex items-start gap-2">
-                      {notif.actor && (
+                      {notif.actor ? (
                         <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-[var(--bg)] flex-shrink-0 mt-0.5"
                           style={{ background: notif.actor.color || "var(--accent)" }}>
                           {notif.actor.initials || "?"}
                         </div>
-                      )}
+                      ) : notif.type === "pending_outreach_draft" ? (
+                        // Super Agent notification — purple badge matching the
+                        // "Super Agent" label color (#BC8CFF) so it's instantly
+                        // recognizable as agent-generated.
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold flex-shrink-0 mt-0.5"
+                          style={{ background: "rgba(188, 140, 255, 0.14)", color: "#BC8CFF" }}
+                          title="Super Agent">
+                          SA
+                        </div>
+                      ) : null}
                       <div className="flex-1 min-w-0">
-                        <div className="text-[11px] font-semibold text-[var(--text-primary)]">{notif.title}</div>
+                        <div className="text-[11px] font-semibold"
+                          style={{ color: notif.type === "pending_outreach_draft" ? "#BC8CFF" : "var(--text-primary)" }}>
+                          {notif.title}
+                        </div>
                         {notif.body && <div className="text-[10px] text-[var(--text-secondary)] truncate">{notif.body}</div>}
                         {notif.conversation?.subject && <div className="text-[10px] text-[var(--text-muted)] truncate">{notif.conversation.subject}</div>}
                         <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{new Date(notif.created_at).toLocaleString()}</div>
