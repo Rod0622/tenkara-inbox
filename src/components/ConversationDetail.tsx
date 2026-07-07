@@ -742,6 +742,12 @@ export default function ConversationDetail({
   const [editTaskDueTime, setEditTaskDueTime] = useState("");
   const [activeTab, setActiveTab] = useState("messages");
   const [sending, setSending] = useState(false);
+  // Messenger-style send indicator for the reply box: transient confirmation of
+  // the send outcome. "sending" while in flight, "sent" flashes briefly on
+  // success, "failed" persists (with retry) until the user sends again. Not
+  // persisted to the DB — it's an in-the-moment confirmation, like Messenger's
+  // checkmark. null = idle (nothing shown).
+  const [replySendStatus, setReplySendStatus] = useState<null | "sending" | "sent" | "failed">(null);
   const [newTaskText, setNewTaskText] = useState("");
   const [newTaskAssigneeIds, setNewTaskAssigneeIds] = useState<string[]>([]);
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
@@ -2269,6 +2275,7 @@ export default function ConversationDetail({
     if (warning && !confirm(warning + "\n\nSend anyway?")) return;
 
     setSending(true);
+    setReplySendStatus("sending");
     try {
       // Batch 11: pass cc/bcc through. The hook → /api/send already supports them.
       // Inline reply: pass the user-edited To and Subject too — both are
@@ -2282,6 +2289,7 @@ export default function ConversationDetail({
         replyTo.trim() || undefined,
         replySubject.trim() || undefined,
       );
+      // Success — clear the box and flash the ✓ Sent indicator briefly.
       setReplyText("");
       setReplyAttachments([]);
       setReplyCc("");
@@ -2297,6 +2305,15 @@ export default function ConversationDetail({
         setLoadedDraftMeta(null);
       }
       await refetchDetail();
+      setReplySendStatus("sent");
+      // Auto-clear the ✓ after a moment (Messenger-style transient confirmation).
+      setTimeout(() => setReplySendStatus((s) => (s === "sent" ? null : s)), 3000);
+    } catch (err: any) {
+      // FAILURE — do NOT clear the reply box or delete the draft; the user's
+      // message is preserved so they can retry. Show a persistent ✗ indicator.
+      console.error("[send] reply failed:", err?.message || err);
+      setReplySendStatus("failed");
+      showToast("Message not sent — check your connection and try again.");
     } finally {
       setSending(false);
     }
@@ -6461,6 +6478,24 @@ export default function ConversationDetail({
                     <Send size={12} />
                     {sending ? "Sending..." : "Send"}
                   </button>
+                  {/* Messenger-style send indicator */}
+                  {replySendStatus === "sent" && (
+                    <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--accent-strong)] animate-in fade-in">
+                      <CheckCircle size={13} /> Sent
+                    </span>
+                  )}
+                  {replySendStatus === "failed" && (
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--danger)]">
+                      Not sent
+                      <button
+                        onClick={handleSendReplyInternal}
+                        disabled={sending}
+                        className="underline hover:no-underline disabled:opacity-40"
+                      >
+                        Retry
+                      </button>
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -775,6 +775,9 @@ export function useActions() {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error("Send reply failed:", err);
+      // Throw so the caller (compose UI) can surface a failed-send indicator
+      // and preserve the user's draft instead of silently clearing it.
+      throw new Error(err?.error || "Failed to send reply");
     }
   };
 
