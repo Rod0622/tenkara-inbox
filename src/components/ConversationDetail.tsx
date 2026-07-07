@@ -4182,7 +4182,7 @@ export default function ConversationDetail({
                 const safeIndex = totalMatches > 0 ? ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches : 0;
 
                 return (
-                  <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--surface)]">
+                  <div className="sticky top-0 z-20 flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--surface)] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-[var(--surface)]/95">
                     <Search size={14} className="text-[var(--text-muted)] flex-shrink-0" />
                     <input
                       value={threadSearch}
