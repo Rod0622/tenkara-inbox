@@ -364,21 +364,30 @@ export async function POST(req: NextRequest) {
     console.error("[external/conversations] auto-label failed:", e?.message);
   }
 
-  // ── 8c. Notify users with access to this account ──
+  // ── 8c. Notify users with access to this account + all admins ──
   // When an agent draft lands in an account's Pending Outreach, notify every
-  // team member who has access to that email account (any account_access row).
+  // team member who has access to that email account (any account_access row),
+  // PLUS every admin (for org-wide oversight of agent activity). Deduplicated so
+  // an admin who also has explicit access gets a single notification.
   // Best-effort — never block or fail the agent response.
   if (emailAccountId) {
     try {
-      const { data: accessRows } = await supabase
-        .from("account_access")
-        .select("team_member_id")
-        .eq("email_account_id", emailAccountId);
+      const [accessRes, adminsRes] = await Promise.all([
+        supabase
+          .from("account_access")
+          .select("team_member_id")
+          .eq("email_account_id", emailAccountId),
+        supabase
+          .from("team_members")
+          .select("id")
+          .eq("role", "admin"),
+      ]);
       const memberIds = Array.from(
         new Set(
-          (accessRows || [])
-            .map((r: any) => r.team_member_id)
-            .filter((id: string) => !!id)
+          [
+            ...((accessRes.data || []).map((r: any) => r.team_member_id)),
+            ...((adminsRes.data || []).map((r: any) => r.id)),
+          ].filter((id: string) => !!id)
         )
       );
       if (memberIds.length > 0) {
