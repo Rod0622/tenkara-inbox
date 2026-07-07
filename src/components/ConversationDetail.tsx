@@ -2306,6 +2306,7 @@ export default function ConversationDetail({
       }
       await refetchDetail();
       setReplySendStatus("sent");
+      showToast("✓ Message sent");
       // Auto-clear the ✓ after a moment (Messenger-style transient confirmation).
       setTimeout(() => setReplySendStatus((s) => (s === "sent" ? null : s)), 3000);
     } catch (err: any) {
@@ -2420,6 +2421,7 @@ export default function ConversationDetail({
         setLoadedDraftMeta(null);
       }
       setReplyText("");
+      showToast("✓ Message sent");
     } catch (error: any) {
       console.error("Reply (modal) failed:", error);
       alert(error?.message || "Failed to send reply");
@@ -2834,6 +2836,7 @@ export default function ConversationDetail({
         setInlineComposeCc(""); setInlineComposeBcc("");
         setShowInlineComposeCc(false); setShowInlineComposeBcc(false);
         refetchDetail();
+        showToast("✓ Message sent");
       } else {
         const err = await res.json();
         alert("Send failed: " + (err.error || "Unknown error"));
