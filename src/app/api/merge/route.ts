@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   const convoById = new Map<string, any>();
   for (const c of convos) convoById.set(c.id, c);
 
-  const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, activities: 0, labels: 0, drafts: 0, response_times: 0, watchers: 0, pins: 0, follow_up_tracking: 0, quo_call_logs: 0, call_follow_ups: 0 } };
+  const results = { merges: 0, moved: { messages: 0, tasks: 0, notes: 0, comments: 0, activities: 0, labels: 0, drafts: 0, response_times: 0, watchers: 0, pins: 0, follow_up_tracking: 0, quo_call_logs: 0, call_follow_ups: 0 } };
 
   try {
     for (const mergeId of newMergeIds) {
@@ -81,10 +81,11 @@ export async function POST(req: NextRequest) {
       const mid = mergeRecord.id;
 
       // Fetch all record IDs in parallel
-      const [msgsR, tasksR, notesR, activR, labelsR, draftsR, rtsR, watchersR, pinsR, fupTrackR, callLogsR, callFollowUpsR] = await Promise.all([
+      const [msgsR, tasksR, notesR, commentsR, activR, labelsR, draftsR, rtsR, watchersR, pinsR, fupTrackR, callLogsR, callFollowUpsR] = await Promise.all([
         supabase.from("messages").select("id").eq("conversation_id", mergeId),
         supabase.from("tasks").select("id").eq("conversation_id", mergeId),
         supabase.from("notes").select("id").eq("conversation_id", mergeId),
+        supabase.from("comments").select("id").eq("conversation_id", mergeId),
         supabase.from("activity_log").select("id").eq("conversation_id", mergeId),
         supabase.from("conversation_labels").select("id, label_id").eq("conversation_id", mergeId),
         supabase.from("email_drafts").select("id").eq("conversation_id", mergeId),
@@ -99,6 +100,7 @@ export async function POST(req: NextRequest) {
       const msgs = msgsR.data || [];
       const tasks = tasksR.data || [];
       const notes = notesR.data || [];
+      const comments = commentsR.data || [];
       const activ = activR.data || [];
       const labels = labelsR.data || [];
       const drafts = draftsR.data || [];
@@ -119,6 +121,7 @@ export async function POST(req: NextRequest) {
       mkTrack("messages", msgs);
       mkTrack("tasks", tasks);
       mkTrack("notes", notes);
+      mkTrack("comments", comments);
       mkTrack("activity_log", activ);
       mkTrack("conversation_labels", labels);
       mkTrack("email_drafts", drafts);
@@ -144,6 +147,7 @@ export async function POST(req: NextRequest) {
       if (msgs.length > 0) moveOps.push(supabase.from("messages").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (tasks.length > 0) moveOps.push(supabase.from("tasks").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (notes.length > 0) moveOps.push(supabase.from("notes").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
+      if (comments.length > 0) moveOps.push(supabase.from("comments").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (activ.length > 0) moveOps.push(supabase.from("activity_log").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (drafts.length > 0) moveOps.push(supabase.from("email_drafts").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
       if (rts.length > 0) moveOps.push(supabase.from("response_times").update({ conversation_id: primary_id }).eq("conversation_id", mergeId).select().then(r => r));
@@ -232,6 +236,7 @@ export async function POST(req: NextRequest) {
       results.moved.messages += msgs.length;
       results.moved.tasks += tasks.length;
       results.moved.notes += notes.length;
+      results.moved.comments += comments.length;
       results.moved.activities += activ.length;
       results.moved.labels += labels.length;
       results.moved.drafts += drafts.length;
