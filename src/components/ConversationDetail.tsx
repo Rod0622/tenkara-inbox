@@ -4329,10 +4329,12 @@ export default function ConversationDetail({
                 })()}
 
                 <div className="text-[14px] leading-[1.7] text-[var(--text-secondary)]">
-                  {msg.body_html && !searchQ ? (
+                  {msg.body_html ? (
                     <MessageBody
                       messageId={msg.id}
                       bodyHtml={msg.body_html}
+                      searchQuery={searchQ || undefined}
+                      matchStartIndex={msgStartIdx}
                       className="prose prose-sm prose-invert max-w-none [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--border)] [&_td]:p-2 [&_th]:border [&_th]:border-[var(--border)] [&_th]:p-2 [&_th]:bg-[var(--surface-2)] [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded [&_img]:my-2 [&_a]:text-[var(--info)] [&_a]:underline [&_a]:break-all [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--text-secondary)] [&_pre]:bg-[var(--surface-2)] [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_hr]:border-[var(--border)] [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5 [&_ul_ul]:list-[circle] [&_ul_ul_ul]:list-[square]"
                     />
                   ) : (
