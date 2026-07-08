@@ -381,7 +381,7 @@ export default function ConversationDetail({
         if (attempts++ < 15) setTimeout(tryScroll, 100);
         return;
       }
-      setDomMatchCount(marks.length);
+      setDomMatchCount((prev) => (prev === marks.length ? prev : marks.length));
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
       // Reset all
       marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
@@ -401,7 +401,7 @@ export default function ConversationDetail({
     };
     const timer = setTimeout(tryScroll, 60);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [currentMatchIndex, threadSearch, threadSearchActive]);
+  }, [currentMatchIndex, threadSearch, threadSearchActive, domMatchCount]);
 
   // Reset search when conversation changes
   useEffect(() => {

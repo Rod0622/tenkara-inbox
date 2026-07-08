@@ -89,15 +89,32 @@ export default function MessageBody({
   }, [messageId, bodyHtml]);
 
   // Search highlighting: walk text nodes and wrap matches in <mark>. Runs after
-  // the HTML is in the DOM (and re-runs when the query or resolved HTML changes).
+  // the HTML is in the DOM. Idempotent: it first removes any marks it added on a
+  // previous run (merging their text back), then re-highlights. It does NOT wipe
+  // innerHTML on cleanup — doing so on every re-render made the highlight flash
+  // and vanish. React re-applies resolvedHtml via dangerouslySetInnerHTML when
+  // that string actually changes, which naturally clears stale marks.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const q = (searchQuery || "").trim();
-    if (!q) return; // nothing to highlight; DOM already reflects resolvedHtml
+    // Remove any marks from a previous highlight pass, restoring plain text,
+    // so repeated runs don't nest or duplicate.
+    const stripExistingMarks = () => {
+      const prior = container.querySelectorAll("mark[data-match-idx]");
+      prior.forEach((mk) => {
+        const parent = mk.parentNode;
+        if (!parent) return;
+        parent.replaceChild(document.createTextNode(mk.textContent || ""), mk);
+        parent.normalize(); // coalesce adjacent text nodes
+      });
+    };
 
-    // Collect text nodes, skipping ones inside <script>/<style> and existing marks.
+    stripExistingMarks();
+
+    const q = (searchQuery || "").trim();
+    if (!q) return; // nothing to highlight
+
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
@@ -122,7 +139,6 @@ export default function MessageBody({
       const lower = text.toLowerCase();
       if (!lower.includes(lowerQ)) continue;
 
-      // Build a replacement fragment: text split around each match, matches wrapped in <mark>.
       const frag = document.createDocumentFragment();
       let pos = 0;
       let found = lower.indexOf(lowerQ, pos);
@@ -144,15 +160,8 @@ export default function MessageBody({
       }
       textNode.parentNode?.replaceChild(frag, textNode);
     }
-
-    // Cleanup: on query/html change, React re-renders from resolvedHtml via
-    // dangerouslySetInnerHTML, which replaces our injected marks wholesale. But
-    // to be safe when only the query changes, force a re-set of the innerHTML.
-    return () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = resolvedHtml;
-      }
-    };
+    // No destructive cleanup — the next run strips its own marks, and a real
+    // content change re-renders from resolvedHtml.
   }, [searchQuery, resolvedHtml, matchStartIndex]);
 
   return (
