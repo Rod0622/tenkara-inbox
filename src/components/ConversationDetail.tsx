@@ -362,41 +362,64 @@ export default function ConversationDetail({
   const addTaskInternalLockRef = useRef(false);
   const [savingNewTask, setSavingNewTask] = useState(false);
 
-  // Scroll to current match
+  // Scroll to current match.
+  //
+  // The match <mark> elements are created by MessageBody's DOM highlighter,
+  // which runs asynchronously AFTER the message HTML renders — and re-runs when
+  // inline images resolve (changing the body HTML). A fixed delay races that,
+  // and a one-shot scroll gets wiped when the highlighter regenerates the marks.
+  //
+  // So instead of polling once, we watch the message container with a
+  // MutationObserver: any time marks are added/removed/replaced, we re-apply the
+  // active-match emphasis and re-scroll. This survives late highlighting and
+  // image-load re-renders, and keeps the counter in sync with the real marks.
   useEffect(() => {
     if (!threadSearchActive || !threadSearch) return;
-    // The match <mark> elements are created by MessageBody's DOM highlighter,
-    // which runs asynchronously after the message HTML renders (and can re-run
-    // after inline-image resolution). A single fixed delay races that work and
-    // often finds zero marks, so we poll briefly until they appear, then scroll.
-    let cancelled = false;
-    let attempts = 0;
-    const tryScroll = () => {
-      if (cancelled) return;
-      const container = messagesScrollRef.current;
-      if (!container) return;
+    const container = messagesScrollRef.current;
+    if (!container) return;
+
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyHighlightAndScroll = () => {
       const marks = container.querySelectorAll("mark[data-match-idx]");
-      if (marks.length === 0) {
-        // Not highlighted yet — retry for up to ~1.5s (15 × 100ms).
-        if (attempts++ < 15) setTimeout(tryScroll, 100);
-        return;
-      }
+      if (marks.length === 0) return;
+      // Keep the counter in sync with the marks actually rendered.
       setDomMatchCount((prev) => (prev === marks.length ? prev : marks.length));
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
-      // Reset all to the base highlight, emphasise the active one.
+      // Base highlight on all, stronger highlight on the active match.
       marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
       const target = marks[idx] as HTMLElement;
       if (target) {
         target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
-        // Let the browser compute the correct scroll position regardless of how
-        // deeply the mark is nested (tables, prose wrappers, flex, etc.). Manual
-        // offsetTop accumulation is unreliable across arbitrary HTML layouts.
         target.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     };
-    const timer = setTimeout(tryScroll, 60);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [currentMatchIndex, threadSearch, threadSearchActive, domMatchCount]);
+
+    // Debounced runner — a burst of DOM mutations (e.g. several messages
+    // highlighting at once) collapses into a single scroll.
+    const schedule = () => {
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(applyHighlightAndScroll, 60);
+    };
+
+    // Run once now (marks may already be present), then watch for changes.
+    schedule();
+
+    const observer = new MutationObserver((mutations) => {
+      // Only react when marks (or their container subtree) actually change, to
+      // avoid needless work on unrelated DOM updates.
+      const touchesMarks = mutations.some((m) =>
+        m.type === "childList" && (m.addedNodes.length > 0 || m.removedNodes.length > 0)
+      );
+      if (touchesMarks) schedule();
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      if (scrollTimer) clearTimeout(scrollTimer);
+    };
+  }, [currentMatchIndex, threadSearch, threadSearchActive]);
 
   // Reset search when conversation changes
   useEffect(() => {
@@ -1342,24 +1365,10 @@ export default function ConversationDetail({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showReplyEditor, convo?.id, messages.length, accountEmail]);
 
-  // Re-scroll when messages load
-  useEffect(() => {
-    if (!threadSearchActive || !threadSearch || messages.length === 0) return;
-    const timer = setTimeout(() => {
-      const container = messagesScrollRef.current;
-      if (!container) return;
-      const marks = container.querySelectorAll("mark[data-match-idx]");
-      if (marks.length === 0) return;
-      const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
-      marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
-      const target = marks[idx] as HTMLElement;
-      if (target) {
-        target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [messages.length, threadSearchActive]);
+  // (The former "re-scroll when messages load" effect was removed — the
+  // MutationObserver in the "Scroll to current match" effect above already
+  // catches marks appearing when messages/highlights render, so a second
+  // timer-based scroll here was redundant and could compete with it.)
 
   const {
     threads: relatedThreads,
