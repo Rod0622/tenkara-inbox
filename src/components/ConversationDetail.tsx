@@ -360,11 +360,22 @@ export default function ConversationDetail({
   // Scroll to current match
   useEffect(() => {
     if (!threadSearchActive || !threadSearch) return;
-    const timer = setTimeout(() => {
+    // The match <mark> elements are created by MessageBody's DOM highlighter,
+    // which runs asynchronously after the message HTML renders (and can re-run
+    // after inline-image resolution). A single fixed delay races that work and
+    // often finds zero marks, so we poll briefly until they appear, then scroll.
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
       const container = messagesScrollRef.current;
       if (!container) return;
       const marks = container.querySelectorAll("mark[data-match-idx]");
-      if (marks.length === 0) return;
+      if (marks.length === 0) {
+        // Not highlighted yet — retry for up to ~1.5s (15 × 100ms).
+        if (attempts++ < 15) setTimeout(tryScroll, 100);
+        return;
+      }
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
       // Reset all
       marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
@@ -373,7 +384,6 @@ export default function ConversationDetail({
       if (target) {
         target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
         // Find the closest scrollable parent and scroll
-        const targetTop = target.offsetTop;
         let parent = target.offsetParent as HTMLElement | null;
         let accumulatedTop = target.offsetTop;
         while (parent && parent !== container) {
@@ -382,8 +392,9 @@ export default function ConversationDetail({
         }
         container.scrollTop = accumulatedTop - container.clientHeight / 2;
       }
-    }, 200);
-    return () => clearTimeout(timer);
+    };
+    const timer = setTimeout(tryScroll, 60);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [currentMatchIndex, threadSearch, threadSearchActive]);
 
   // Reset search when conversation changes
