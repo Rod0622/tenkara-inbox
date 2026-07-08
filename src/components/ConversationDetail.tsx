@@ -383,20 +383,15 @@ export default function ConversationDetail({
       }
       setDomMatchCount((prev) => (prev === marks.length ? prev : marks.length));
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
-      // Reset all
+      // Reset all to the base highlight, emphasise the active one.
       marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
-      // Highlight and scroll to current
       const target = marks[idx] as HTMLElement;
       if (target) {
         target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
-        // Find the closest scrollable parent and scroll
-        let parent = target.offsetParent as HTMLElement | null;
-        let accumulatedTop = target.offsetTop;
-        while (parent && parent !== container) {
-          accumulatedTop += parent.offsetTop;
-          parent = parent.offsetParent as HTMLElement | null;
-        }
-        container.scrollTop = accumulatedTop - container.clientHeight / 2;
+        // Let the browser compute the correct scroll position regardless of how
+        // deeply the mark is nested (tables, prose wrappers, flex, etc.). Manual
+        // offsetTop accumulation is unreliable across arbitrary HTML layouts.
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     };
     const timer = setTimeout(tryScroll, 60);
@@ -1360,13 +1355,7 @@ export default function ConversationDetail({
       const target = marks[idx] as HTMLElement;
       if (target) {
         target.style.background = "color-mix(in srgb, var(--highlight) 80%, transparent)";
-        let accumulatedTop = target.offsetTop;
-        let parent = target.offsetParent as HTMLElement | null;
-        while (parent && parent !== container) {
-          accumulatedTop += parent.offsetTop;
-          parent = parent.offsetParent as HTMLElement | null;
-        }
-        container.scrollTop = accumulatedTop - container.clientHeight / 2;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }, 500);
     return () => clearTimeout(timer);
