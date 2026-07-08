@@ -342,6 +342,11 @@ export default function ConversationDetail({
   const [threadSearch, setThreadSearch] = useState("");
   const [threadSearchActive, setThreadSearchActive] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  // Actual number of highlighted <mark> elements currently in the DOM. This is
+  // the source of truth for navigation and the "N/M" counter — the plain-text
+  // match count can diverge from what the HTML highlighter actually marks, which
+  // made the arrows land on the wrong match. Updated by the scroll effect.
+  const [domMatchCount, setDomMatchCount] = useState(0);
   const matchRefs = useRef<(HTMLElement | null)[]>([]);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   // Synchronous locks to prevent double-submit task creation. React state
@@ -376,6 +381,7 @@ export default function ConversationDetail({
         if (attempts++ < 15) setTimeout(tryScroll, 100);
         return;
       }
+      setDomMatchCount(marks.length);
       const idx = ((currentMatchIndex % marks.length) + marks.length) % marks.length;
       // Reset all
       marks.forEach((m) => (m as HTMLElement).style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)");
@@ -4194,10 +4200,13 @@ export default function ConversationDetail({
             {threadSearchActive ? (
               (() => {
                 const sq = threadSearch.trim().toLowerCase();
-                const totalMatches = sq ? messages.reduce((count: number, msg: any) => {
+                const plainMatches = sq ? messages.reduce((count: number, msg: any) => {
                   const bt = msg.body_text || (msg.body_html ? msg.body_html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ") : "") || msg.snippet || "";
                   return count + (bt.toLowerCase().split(sq).length - 1);
                 }, 0) : 0;
+                // Prefer the real count of highlighted marks in the DOM; fall back
+                // to the plain-text estimate until the highlighter has run.
+                const totalMatches = domMatchCount > 0 ? domMatchCount : plainMatches;
                 const safeIndex = totalMatches > 0 ? ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches : 0;
 
                 return (
@@ -4205,7 +4214,7 @@ export default function ConversationDetail({
                     <Search size={14} className="text-[var(--text-muted)] flex-shrink-0" />
                     <input
                       value={threadSearch}
-                      onChange={(e) => { setThreadSearch(e.target.value); setCurrentMatchIndex(0); matchRefs.current = []; }}
+                      onChange={(e) => { setThreadSearch(e.target.value); setCurrentMatchIndex(0); setDomMatchCount(0); matchRefs.current = []; }}
                       placeholder="Search in this thread..."
                       autoFocus
                       className="flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
