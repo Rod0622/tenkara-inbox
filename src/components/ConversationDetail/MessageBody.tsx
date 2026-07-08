@@ -88,80 +88,126 @@ export default function MessageBody({
     };
   }, [messageId, bodyHtml]);
 
-  // Search highlighting: walk text nodes and wrap matches in <mark>. Runs after
-  // the HTML is in the DOM. Idempotent: it first removes any marks it added on a
-  // previous run (merging their text back), then re-highlights. It does NOT wipe
-  // innerHTML on cleanup — doing so on every re-render made the highlight flash
-  // and vanish. React re-applies resolvedHtml via dangerouslySetInnerHTML when
-  // that string actually changes, which naturally clears stale marks.
+  // Search highlighting: walk text nodes and wrap matches in <mark>.
+  //
+  // The tricky part: this component renders via dangerouslySetInnerHTML, and
+  // `resolvedHtml` changes when inline images resolve (~1s after mount). Each
+  // time React re-applies innerHTML it OVERWRITES our injected marks with the
+  // raw HTML — so a one-time highlight pass gets silently wiped, and the
+  // highlights "disappear after a second". Relying on the effect re-running is
+  // fragile because of commit/effect ordering.
+  //
+  // Robust fix: after highlighting, we also attach a MutationObserver to the
+  // container. If anything replaces the content (image resolve, any re-render),
+  // the observer re-runs the highlight pass. The observer is disconnected while
+  // we mutate (to avoid reacting to our own marks) and reconnected after.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Remove any marks from a previous highlight pass, restoring plain text,
-    // so repeated runs don't nest or duplicate.
+    const q = (searchQuery || "").trim();
+
+    let observer: MutationObserver | null = null;
+    let rehighlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Remove any marks from a previous pass, restoring plain text.
     const stripExistingMarks = () => {
       const prior = container.querySelectorAll("mark[data-match-idx]");
       prior.forEach((mk) => {
         const parent = mk.parentNode;
         if (!parent) return;
         parent.replaceChild(document.createTextNode(mk.textContent || ""), mk);
-        parent.normalize(); // coalesce adjacent text nodes
+        parent.normalize();
       });
     };
 
-    stripExistingMarks();
+    const highlight = () => {
+      stripExistingMarks();
+      if (!q) return;
 
-    const q = (searchQuery || "").trim();
-    if (!q) return; // nothing to highlight
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          const tag = parent.tagName;
+          if (tag === "SCRIPT" || tag === "STYLE" || tag === "MARK") {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
 
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        const tag = parent.tagName;
-        if (tag === "SCRIPT" || tag === "STYLE" || tag === "MARK") {
-          return NodeFilter.FILTER_REJECT;
+      const lowerQ = q.toLowerCase();
+      const textNodes: Text[] = [];
+      let n: Node | null;
+      while ((n = walker.nextNode())) textNodes.push(n as Text);
+
+      let matchIdx = matchStartIndex;
+      for (const textNode of textNodes) {
+        const text = textNode.nodeValue || "";
+        const lower = text.toLowerCase();
+        if (!lower.includes(lowerQ)) continue;
+
+        const frag = document.createDocumentFragment();
+        let pos = 0;
+        let found = lower.indexOf(lowerQ, pos);
+        while (found !== -1) {
+          if (found > pos) {
+            frag.appendChild(document.createTextNode(text.slice(pos, found)));
+          }
+          const mark = document.createElement("mark");
+          mark.setAttribute("data-match-idx", String(matchIdx++));
+          mark.style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)";
+          mark.style.borderRadius = "2px";
+          mark.textContent = text.slice(found, found + q.length);
+          frag.appendChild(mark);
+          pos = found + q.length;
+          found = lower.indexOf(lowerQ, pos);
         }
-        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-
-    const lowerQ = q.toLowerCase();
-    const textNodes: Text[] = [];
-    let n: Node | null;
-    while ((n = walker.nextNode())) textNodes.push(n as Text);
-
-    let matchIdx = matchStartIndex;
-    for (const textNode of textNodes) {
-      const text = textNode.nodeValue || "";
-      const lower = text.toLowerCase();
-      if (!lower.includes(lowerQ)) continue;
-
-      const frag = document.createDocumentFragment();
-      let pos = 0;
-      let found = lower.indexOf(lowerQ, pos);
-      while (found !== -1) {
-        if (found > pos) {
-          frag.appendChild(document.createTextNode(text.slice(pos, found)));
+        if (pos < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(pos)));
         }
-        const mark = document.createElement("mark");
-        mark.setAttribute("data-match-idx", String(matchIdx++));
-        mark.style.background = "color-mix(in srgb, var(--highlight) 40%, transparent)";
-        mark.style.borderRadius = "2px";
-        mark.textContent = text.slice(found, found + q.length);
-        frag.appendChild(mark);
-        pos = found + q.length;
-        found = lower.indexOf(lowerQ, pos);
+        textNode.parentNode?.replaceChild(frag, textNode);
       }
-      if (pos < text.length) {
-        frag.appendChild(document.createTextNode(text.slice(pos)));
+    };
+
+    // Run highlight without the observer reacting to our own DOM writes.
+    const runHighlight = () => {
+      if (observer) observer.disconnect();
+      highlight();
+      // Reconnect on the next tick so our synchronous mutations settle first.
+      if (observer) {
+        requestAnimationFrame(() => {
+          if (observer) observer.observe(container, { childList: true, subtree: true });
+        });
       }
-      textNode.parentNode?.replaceChild(frag, textNode);
+    };
+
+    // Initial pass.
+    runHighlight();
+
+    // Only bother observing when there's an active query worth re-applying.
+    if (q) {
+      observer = new MutationObserver((mutations) => {
+        // React overwriting innerHTML shows up as childList add/remove. When
+        // that happens our marks are gone, so re-highlight (debounced).
+        const contentReplaced = mutations.some(
+          (m) => m.type === "childList" && (m.addedNodes.length > 0 || m.removedNodes.length > 0)
+        );
+        if (!contentReplaced) return;
+        // If marks are already present, nothing to do (avoids churn).
+        if (container.querySelector("mark[data-match-idx]")) return;
+        if (rehighlightTimer) clearTimeout(rehighlightTimer);
+        rehighlightTimer = setTimeout(runHighlight, 30);
+      });
+      observer.observe(container, { childList: true, subtree: true });
     }
-    // No destructive cleanup — the next run strips its own marks, and a real
-    // content change re-renders from resolvedHtml.
+
+    return () => {
+      if (observer) observer.disconnect();
+      if (rehighlightTimer) clearTimeout(rehighlightTimer);
+    };
   }, [searchQuery, resolvedHtml, matchStartIndex]);
 
   return (
