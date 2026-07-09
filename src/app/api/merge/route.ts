@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { backfillConversation } from "@/app/api/response-times/route";
 
 function getSupabase() {
   return createClient(
@@ -300,7 +301,22 @@ export async function POST(req: NextRequest) {
       await supabase.from("conversations").update({ last_message_at: latestMsg.sent_at }).eq("id", primary_id);
     }
 
-    return NextResponse.json({ success: true, ...results });
+    // Recompute response_times for the merged primary. Moving rows above
+    // preserves PRE-merge trigger→response pairings; the merged message
+    // sequence can create different (and cross-thread) pairs. Backfill is
+    // delete-and-reinsert for this one conversation, so it replaces the
+    // moved rows with correct ones. Best-effort: a failure here must not
+    // fail the merge itself — the hourly response-times cron self-heals
+    // any conversation whose last_message_at falls in its lookback, and a
+    // manual backfill_conversation can fix stragglers.
+    let responseTimesRecomputed = 0;
+    try {
+      responseTimesRecomputed = await backfillConversation(supabase, primary_id);
+    } catch (e: any) {
+      console.error("[merge] response_times recompute failed:", e?.message);
+    }
+
+    return NextResponse.json({ success: true, response_times_recomputed: responseTimesRecomputed, ...results });
   } catch (error: any) {
     console.error("[merge] Failed:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -435,7 +451,19 @@ export async function DELETE(req: NextRequest) {
     const counts: Record<string, number> = {};
     for (const [table, records] of Object.entries(byTable)) counts[table] = records.length;
 
-    return NextResponse.json({ success: true, restored: counts });
+    // Recompute response_times on BOTH sides. The unmerge changed the
+    // message sequence of the primary (messages moved out) AND restored the
+    // duplicate as its own conversation — pairings computed on the merged
+    // sequence are wrong for both. Best-effort, same rationale as merge.
+    let responseTimesRecomputed = 0;
+    try {
+      responseTimesRecomputed += await backfillConversation(supabase, merge.primary_conversation_id);
+      responseTimesRecomputed += await backfillConversation(supabase, merge.merged_conversation_id);
+    } catch (e: any) {
+      console.error("[unmerge] response_times recompute failed:", e?.message);
+    }
+
+    return NextResponse.json({ success: true, response_times_recomputed: responseTimesRecomputed, restored: counts });
   } catch (error: any) {
     console.error("[unmerge] Failed:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });

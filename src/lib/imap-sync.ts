@@ -1382,10 +1382,12 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         result.newMessages++;
         result.lastUid = Math.max(result.lastUid || 0, email.uid);
 
-        // Compute response time for this new message
-        try {
-          await computeResponseTime(supabase, conversationId);
-        } catch (_rtErr) { /* best-effort */ }
+        // Note: response times are computed by the hourly
+        // /api/cron/response-times cron (backfillConversation), which
+        // covers this conversation via last_message_at. The old inline
+        // computeResponseTime call was removed — it duplicated the cron's
+        // work with a stale private implementation and added 3-4 queries
+        // per message to the sync hot path.
       } catch (emailErr: any) {
         result.errors.push(`Email ${email.uid}: ${emailErr.message}`);
       }
@@ -1810,75 +1812,4 @@ function normalizeSubject(subject: string): string {
 
 function isOutbound(fromEmail: string, accountEmail: string): boolean {
   return fromEmail.toLowerCase() === accountEmail.toLowerCase();
-}
-
-// ── Compute response time for latest message in a conversation ──
-async function computeResponseTime(supabase: any, conversationId: string) {
-  try {
-    // Fetch conversation metadata
-    const { data: convo } = await supabase
-      .from("conversations")
-      .select("id, email_account_id, assignee_id")
-      .eq("id", conversationId)
-      .single();
-    if (!convo) return;
-
-    // Fetch last few messages to find the response pair
-    const { data: messages } = await supabase
-      .from("messages")
-      .select("id, from_email, is_outbound, sent_at, sent_by_user_id")
-      .eq("conversation_id", conversationId)
-      .order("sent_at", { ascending: true });
-
-    if (!messages || messages.length < 2) return;
-
-    const newMsg = messages[messages.length - 1];
-    // Look backwards for the most recent message in the opposite direction
-    let triggerMsg = null;
-    for (let i = messages.length - 2; i >= 0; i--) {
-      if (messages[i].is_outbound !== newMsg.is_outbound) {
-        triggerMsg = messages[i];
-        break;
-      }
-    }
-    if (!triggerMsg) return;
-
-    const diffMinutes = (new Date(newMsg.sent_at).getTime() - new Date(triggerMsg.sent_at).getTime()) / (1000 * 60);
-    if (diffMinutes <= 0 || diffMinutes > 30 * 24 * 60) return;
-
-    // Check if this pair already exists
-    const { data: existing } = await supabase
-      .from("response_times")
-      .select("id")
-      .eq("trigger_message_id", triggerMsg.id)
-      .eq("response_message_id", newMsg.id)
-      .maybeSingle();
-    if (existing) return;
-
-    const supplierEmail = triggerMsg.is_outbound
-      ? newMsg.from_email?.toLowerCase()
-      : triggerMsg.from_email?.toLowerCase();
-    const supplierDomain = supplierEmail ? supplierEmail.split("@")[1] || null : null;
-    const direction = triggerMsg.is_outbound ? "supplier_reply" : "team_reply";
-    const teamMemberId = direction === "team_reply"
-      ? (newMsg.sent_by_user_id || convo.assignee_id || null)
-      : null;
-
-    await supabase.from("response_times").insert({
-      conversation_id: conversationId,
-      email_account_id: convo.email_account_id,
-      direction,
-      trigger_message_id: triggerMsg.id,
-      trigger_sent_at: triggerMsg.sent_at,
-      response_message_id: newMsg.id,
-      response_sent_at: newMsg.sent_at,
-      response_minutes: Math.round(diffMinutes * 10) / 10,
-      response_business_minutes: null,
-      supplier_email: supplierEmail || null,
-      supplier_domain: supplierDomain || null,
-      team_member_id: teamMemberId,
-    });
-  } catch (err: any) {
-    // Non-critical — silently ignore
-  }
 }
