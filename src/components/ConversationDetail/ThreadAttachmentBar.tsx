@@ -134,7 +134,20 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
 
   const totalCount = allAttachments.reduce((sum, g) => sum + g.attachments.length, 0);
 
-  const isPreCapture = loaded && !hadAnyRows && messagesWithAttachments.length > 0;
+  // "Pre-capture" = has_attachments flags set but zero attachment rows.
+  // Only claim that for OLD messages: a message synced in the last hour is
+  // almost certainly mid-race (sync sets the flag, then uploads the files
+  // moments later — and the just-sent case reconciles before uploading).
+  // Showing "synced before attachment storage was enabled — run backfill"
+  // on a 3-minute-old email is wrong and alarming; within the window we
+  // render nothing and the next open picks up the rows.
+  const RECENT_MS = 60 * 60 * 1000;
+  const newestAttachmentMsgAt = messagesWithAttachments.reduce((max: number, m: any) => {
+    const t = m.sent_at ? new Date(m.sent_at).getTime() : 0;
+    return Number.isFinite(t) && t > max ? t : max;
+  }, 0);
+  const withinSyncWindow = newestAttachmentMsgAt > Date.now() - RECENT_MS;
+  const isPreCapture = loaded && !hadAnyRows && messagesWithAttachments.length > 0 && !withinSyncWindow;
   const isOnlyInline = loaded && hadAnyRows && totalCount === 0;
 
   const downloadAtt = async (messageId: string, attId: string, name: string) => {
@@ -421,6 +434,13 @@ export default function ThreadAttachmentBar({ messages }: { messages: any[] }) {
 
   // ── Render ────────────────────────────────────────────
   if (isOnlyInline) {
+    return null;
+  }
+
+  // Suppressed pre-capture case: no rows yet but the message is recent
+  // enough that the sync is likely still uploading. Render nothing rather
+  // than an empty "0 attachments" bar; the next open shows the real state.
+  if (loaded && !hadAnyRows && withinSyncWindow) {
     return null;
   }
 
