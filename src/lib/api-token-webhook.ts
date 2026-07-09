@@ -27,6 +27,8 @@
 // computed as HMAC-SHA256(webhook_secret, exact JSON body bytes).
 import { createHmac } from "crypto";
 import { createServerClient } from "@/lib/supabase";
+import { fetchAttachmentsForMessages, toExternalAttachment } from "@/lib/external-attachments";
+import type { ExternalAttachment } from "@/lib/external-attachments";
 
 export type WebhookEvent =
   | "draft.sent"
@@ -248,6 +250,27 @@ export async function dispatchMessageReceivedWebhook(args: {
 
   if (agentNames.size === 0) return;
 
+  // Attachments for this message — BEST-EFFORT. This runs during email
+  // sync; a failed lookup must never block or throw (a stalled sync is far
+  // worse than a missing attachments list, which the agent can recover via
+  // GET /api/external/conversations/{id}). fetchAttachmentsForMessages
+  // already swallows all errors internally; the try/catch is belt-and-
+  // braces. Default: [].
+  //
+  // NOTE — sync ordering: the sync paths dispatch this webhook AFTER
+  // uploading the message's attachments (imap-sync.ts, both Gmail and
+  // IMAP paths), so the rows are in place by the time this lookup runs.
+  // If a future sync path dispatches early, the payload degrades to
+  // attachments: [] rather than failing.
+  let attachments: ExternalAttachment[] = [];
+  try {
+    const byMessage = await fetchAttachmentsForMessages([messageId]);
+    attachments = (byMessage.get(messageId) || []).map(toExternalAttachment);
+  } catch (e: any) {
+    console.error(`[webhook] attachments lookup failed for ${messageId}:`, e?.message || e);
+    attachments = [];
+  }
+
   // Fire to each agent in parallel. Each call is independently best-effort.
   await Promise.all(
     Array.from(agentNames).map(async (agentName) => {
@@ -264,6 +287,7 @@ export async function dispatchMessageReceivedWebhook(args: {
         subject,
         body_text: bodyText,
         body_html: bodyHtml,
+        attachments,
         received_at: receivedAt,
         timestamp: new Date().toISOString(),
       };

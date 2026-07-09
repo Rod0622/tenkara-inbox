@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { authenticateBearer, hasScope } from "@/lib/api-token-auth";
 import { checkAndRecordRateLimit, rateLimitedResponse } from "@/lib/api-token-rate-limit";
+import { fetchAttachmentsForMessages, toExternalAttachment } from "@/lib/external-attachments";
 
 // ── GET /api/external/conversations/[id] ───────────────────────────────
 //
@@ -18,10 +19,16 @@ import { checkAndRecordRateLimit, rateLimitedResponse } from "@/lib/api-token-ra
 //                     email_account_id, account_name, status },
 //     messages: [
 //       { id, is_outbound, from_email, from_name, to_addresses, cc_addresses,
-//         subject, body_text, body_html, sent_at },
+//         subject, body_text, body_html, sent_at,
+//         attachments: [{ id, filename, content_type, size_bytes, is_inline,
+//                         download_url }] },
 //       ...
 //     ]
 //   }
+//
+// The attachments array is best-effort: if the lookup fails the messages
+// still return, each with attachments: []. Bytes are fetched via the
+// download_url (GET /api/external/attachments/{id}).
 //
 // Caps messages at 200 to bound the response size. If a thread is longer
 // than that (rare), the agent gets the most-recent 200.
@@ -69,6 +76,17 @@ export async function GET(
 
   const messages = (msgsDesc || []).slice().reverse();
 
+  // Attachments per message — additive, best-effort (failures → []).
+  // Raw PostgREST under the hood; see src/lib/external-attachments.ts for
+  // why the SDK is not used on the attachments table.
+  const attachmentsByMessage = await fetchAttachmentsForMessages(
+    messages.map((m: any) => m.id)
+  );
+  const messagesWithAttachments = messages.map((m: any) => ({
+    ...m,
+    attachments: (attachmentsByMessage.get(m.id) || []).map(toExternalAttachment),
+  }));
+
   return NextResponse.json({
     conversation: {
       id: convo.id,
@@ -80,6 +98,6 @@ export async function GET(
       account_name: (convo as any).account?.name || null,
       status: convo.status,
     },
-    messages,
+    messages: messagesWithAttachments,
   });
 }

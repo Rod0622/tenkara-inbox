@@ -852,28 +852,6 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
               result.errors.push(`Gmail message ${msgId}: ${gmailInsertErr?.message || "insert failed"}`);
               continue;
             }
-            // Phase 3 — agent reply loop. For NEW inbound messages (i.e. not
-            // a reconciliation of a previously-stored local outbound), fire
-            // message.received so any agent involved in the conversation can
-            // compose a reply. The webhook side filters to convs that have
-            // current/sent agent drafts, so this is a cheap no-op for the
-            // vast majority of inbound traffic. Fire-and-forget.
-            // (conversationId is typed `string | null` here from the find-or-
-            // create flow; by this point a message insert has already
-            // succeeded with it, so it cannot be null in practice — narrow
-            // explicitly to keep TypeScript happy.)
-            if (!reconciledMessageId && !isOutbound && conversationId) {
-              dispatchMessageReceivedWebhook({
-                conversationId,
-                messageId: insertedGmailMsg.id,
-                fromEmail,
-                fromName,
-                subject,
-                bodyText: bodyText.slice(0, 5000),
-                bodyHtml,
-                receivedAt: sentAt,
-              }).catch((e) => console.error("[gmail-sync] agent webhook failed:", e?.message));
-            }
 
             // Reopen rule: if this inbound message landed on an existing
             // CLOSED conversation, reopen it (and auto-assign to the last
@@ -895,127 +873,164 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             // We also handle parts WITHOUT a filename when they have a content
             // disposition or Content-ID — Yahoo and a few clients send images
             // that way ("Attached Image" with no filename header).
-            if (hasAttachments) {
-              const collectParts = (payload: any, out: any[] = []) => {
-                if (!payload) return out;
-                const body = payload.body || {};
-                const hasBytes = !!body.attachmentId || !!body.data;
-                const mime = String(payload.mimeType || "");
-                // Skip text/html and text/plain body parts — those are the
-                // message body, not attachments. Everything else with bytes
-                // is a candidate.
-                //
-                // message/rfc822 = a nested email (Gmail "Forward as
-                // attachment", inline forwards, etc). These often have NO
-                // filename header — Gmail's web UI invents one on download.
-                // We allow them through and synthesize a filename below.
-                const isBodyText = mime === "text/plain" || mime === "text/html";
-                const isNestedEmail = mime === "message/rfc822";
-                if (!isBodyText && hasBytes && (payload.filename || isNestedEmail || mime.startsWith("image/") || mime.startsWith("application/"))) {
-                  out.push(payload);
-                }
-                if (Array.isArray(payload.parts)) {
-                  for (const p of payload.parts) collectParts(p, out);
-                }
-                return out;
-              };
-              const parts = collectParts(msgData.payload || {});
-              for (let i = 0; i < parts.length; i++) {
-                const p = parts[i];
-                try {
-                  let buf: Buffer | null = null;
+            //
+            // The whole block is wrapped in try/catch so an unexpected throw
+            // (e.g. in part collection) can NEVER skip the webhook dispatch
+            // below — an email with no webhook at all is worse than one with
+            // an empty attachments array. Per-part failures were already
+            // caught individually; this catch covers everything else.
+            try {
+              if (hasAttachments) {
+                const collectParts = (payload: any, out: any[] = []) => {
+                  if (!payload) return out;
+                  const body = payload.body || {};
+                  const hasBytes = !!body.attachmentId || !!body.data;
+                  const mime = String(payload.mimeType || "");
+                  // Skip text/html and text/plain body parts — those are the
+                  // message body, not attachments. Everything else with bytes
+                  // is a candidate.
+                  //
+                  // message/rfc822 = a nested email (Gmail "Forward as
+                  // attachment", inline forwards, etc). These often have NO
+                  // filename header — Gmail's web UI invents one on download.
+                  // We allow them through and synthesize a filename below.
+                  const isBodyText = mime === "text/plain" || mime === "text/html";
+                  const isNestedEmail = mime === "message/rfc822";
+                  if (!isBodyText && hasBytes && (payload.filename || isNestedEmail || mime.startsWith("image/") || mime.startsWith("application/"))) {
+                    out.push(payload);
+                  }
+                  if (Array.isArray(payload.parts)) {
+                    for (const p of payload.parts) collectParts(p, out);
+                  }
+                  return out;
+                };
+                const parts = collectParts(msgData.payload || {});
+                for (let i = 0; i < parts.length; i++) {
+                  const p = parts[i];
+                  try {
+                    let buf: Buffer | null = null;
 
-                  if (p.body?.attachmentId) {
-                    // Larger attachments: separate fetch
-                    const attRes = await fetch(
-                      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${p.body.attachmentId}`,
-                      { headers: { Authorization: `Bearer ${gmailToken}` } }
-                    );
-                    if (!attRes.ok) {
-                      result.errors.push(`Gmail attach fetch ${p.filename || "(unnamed)"} on ${msgId}: ${attRes.statusText}`);
+                    if (p.body?.attachmentId) {
+                      // Larger attachments: separate fetch
+                      const attRes = await fetch(
+                        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${p.body.attachmentId}`,
+                        { headers: { Authorization: `Bearer ${gmailToken}` } }
+                      );
+                      if (!attRes.ok) {
+                        result.errors.push(`Gmail attach fetch ${p.filename || "(unnamed)"} on ${msgId}: ${attRes.statusText}`);
+                        continue;
+                      }
+                      const attJson = await attRes.json();
+                      buf = Buffer.from(attJson.data || "", "base64url");
+                    } else if (p.body?.data) {
+                      // Small inline attachments: decode directly from the body
+                      buf = Buffer.from(p.body.data, "base64url");
+                    }
+
+                    if (!buf || buf.length === 0) {
+                      result.errors.push(`Gmail attach ${p.filename || "(unnamed)"} on ${msgId}: empty body`);
                       continue;
                     }
-                    const attJson = await attRes.json();
-                    buf = Buffer.from(attJson.data || "", "base64url");
-                  } else if (p.body?.data) {
-                    // Small inline attachments: decode directly from the body
-                    buf = Buffer.from(p.body.data, "base64url");
-                  }
 
-                  if (!buf || buf.length === 0) {
-                    result.errors.push(`Gmail attach ${p.filename || "(unnamed)"} on ${msgId}: empty body`);
-                    continue;
-                  }
+                    // Pull Content-ID and disposition out of the part headers so
+                    // we know whether this is an inline image or a normal file.
+                    const headersList: { name: string; value: string }[] = p.headers || [];
+                    const findHeader = (n: string) =>
+                      headersList.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value || "";
+                    const disposition = findHeader("Content-Disposition").toLowerCase();
+                    const contentIdRaw = findHeader("Content-ID");
+                    const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
 
-                  // Pull Content-ID and disposition out of the part headers so
-                  // we know whether this is an inline image or a normal file.
-                  const headersList: { name: string; value: string }[] = p.headers || [];
-                  const findHeader = (n: string) =>
-                    headersList.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value || "";
-                  const disposition = findHeader("Content-Disposition").toLowerCase();
-                  const contentIdRaw = findHeader("Content-ID");
-                  const contentId = contentIdRaw ? contentIdRaw.replace(/^<|>$/g, "") : null;
-
-                  // Derive a filename when the part doesn't carry one.
-                  // Yahoo sometimes sends inline images with no filename header.
-                  // Gmail "Forward as attachment" sends message/rfc822 parts
-                  // with no filename — invent one from the nested Subject header
-                  // when possible, fall back to "forwarded-message.eml".
-                  const fallbackName = (() => {
-                    const mt = String(p.mimeType || "").toLowerCase();
-                    if (mt === "message/rfc822") {
-                      // Walk the nested part's headers for a Subject. Gmail
-                      // exposes them in p.parts[0].headers for the inner
-                      // RFC822 part — check both top-level and nested headers.
-                      const findSubject = (node: any): string | null => {
-                        const hdrs: any[] = node?.headers || [];
-                        const subj = hdrs.find((h) => h.name?.toLowerCase() === "subject")?.value;
-                        if (subj) return subj;
-                        if (Array.isArray(node?.parts)) {
-                          for (const child of node.parts) {
-                            const found = findSubject(child);
-                            if (found) return found;
+                    // Derive a filename when the part doesn't carry one.
+                    // Yahoo sometimes sends inline images with no filename header.
+                    // Gmail "Forward as attachment" sends message/rfc822 parts
+                    // with no filename — invent one from the nested Subject header
+                    // when possible, fall back to "forwarded-message.eml".
+                    const fallbackName = (() => {
+                      const mt = String(p.mimeType || "").toLowerCase();
+                      if (mt === "message/rfc822") {
+                        // Walk the nested part's headers for a Subject. Gmail
+                        // exposes them in p.parts[0].headers for the inner
+                        // RFC822 part — check both top-level and nested headers.
+                        const findSubject = (node: any): string | null => {
+                          const hdrs: any[] = node?.headers || [];
+                          const subj = hdrs.find((h) => h.name?.toLowerCase() === "subject")?.value;
+                          if (subj) return subj;
+                          if (Array.isArray(node?.parts)) {
+                            for (const child of node.parts) {
+                              const found = findSubject(child);
+                              if (found) return found;
+                            }
                           }
-                        }
-                        return null;
-                      };
-                      const subj = findSubject(p);
-                      // Sanitize for filesystem: remove / \ : * ? " < > | and trim
-                      const safe = (subj || "forwarded-message")
-                        .replace(/[\/\\:*?"<>|\r\n]+/g, "")
-                        .trim()
-                        .slice(0, 100);
-                      return `${safe || "forwarded-message"}.eml`;
-                    }
-                    const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
-                    return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
-                  })();
+                          return null;
+                        };
+                        const subj = findSubject(p);
+                        // Sanitize for filesystem: remove / \ : * ? " < > | and trim
+                        const safe = (subj || "forwarded-message")
+                          .replace(/[\/\\:*?"<>|\r\n]+/g, "")
+                          .trim()
+                          .slice(0, 100);
+                        return `${safe || "forwarded-message"}.eml`;
+                      }
+                      const ext = mt.startsWith("image/") ? mt.split("/")[1] : "bin";
+                      return contentId ? `${contentId}.${ext}` : `attachment-${i + 1}.${ext}`;
+                    })();
 
-                  const up = await uploadAttachmentToStorage(supabase, {
-                    accountId,
-                    messageId: insertedGmailMsg.id,
-                    attachment: {
-                      filename: p.filename || fallbackName,
-                      contentType: p.mimeType || "application/octet-stream",
-                      size: typeof p.body?.size === "number" ? p.body.size : buf.length,
-                      // Disposition is authoritative for "inline." A
-                      // Content-ID alone doesn't mean inline — Outlook and
-                      // Graph routinely set Content-ID on regular file
-                      // attachments. See longer comment in the IMAP path.
-                      isInline: disposition.startsWith("inline"),
-                      contentId,
-                      checksum: null,
-                      content: buf,
-                    },
-                    indexInMessage: i,
-                  });
-                  if (!up.ok && !up.skipped) {
-                    result.errors.push(`Gmail attach upload ${p.filename || fallbackName} on ${msgId}: ${up.error}`);
+                    const up = await uploadAttachmentToStorage(supabase, {
+                      accountId,
+                      messageId: insertedGmailMsg.id,
+                      attachment: {
+                        filename: p.filename || fallbackName,
+                        contentType: p.mimeType || "application/octet-stream",
+                        size: typeof p.body?.size === "number" ? p.body.size : buf.length,
+                        // Disposition is authoritative for "inline." A
+                        // Content-ID alone doesn't mean inline — Outlook and
+                        // Graph routinely set Content-ID on regular file
+                        // attachments. See longer comment in the IMAP path.
+                        isInline: disposition.startsWith("inline"),
+                        contentId,
+                        checksum: null,
+                        content: buf,
+                      },
+                      indexInMessage: i,
+                    });
+                    if (!up.ok && !up.skipped) {
+                      result.errors.push(`Gmail attach upload ${p.filename || fallbackName} on ${msgId}: ${up.error}`);
+                    }
+                  } catch (attErr: any) {
+                    result.errors.push(`Gmail attach exception on ${msgId}: ${attErr?.message || "unknown"}`);
                   }
-                } catch (attErr: any) {
-                  result.errors.push(`Gmail attach exception on ${msgId}: ${attErr?.message || "unknown"}`);
                 }
               }
+            } catch (attBlockErr: any) {
+              result.errors.push(`Gmail attachments block on ${msgId}: ${attBlockErr?.message || "unknown"}`);
+            }
+
+            // Phase 3 — agent reply loop. For NEW inbound messages (i.e. not
+            // a reconciliation of a previously-stored local outbound), fire
+            // message.received so any agent involved in the conversation can
+            // compose a reply. The webhook side filters to convs that have
+            // current/sent agent drafts, so this is a cheap no-op for the
+            // vast majority of inbound traffic. Fire-and-forget.
+            //
+            // Deliberately placed AFTER the attachment upload block (and outside
+            // any try/catch an upload error could short-circuit) so the webhook
+            // payload's attachments array is populated.
+            // (conversationId is typed `string | null` here from the find-or-
+            // create flow; by this point a message insert has already
+            // succeeded with it, so it cannot be null in practice — narrow
+            // explicitly to keep TypeScript happy.)
+            if (!reconciledMessageId && !isOutbound && conversationId) {
+              dispatchMessageReceivedWebhook({
+                conversationId,
+                messageId: insertedGmailMsg.id,
+                fromEmail,
+                fromName,
+                subject,
+                bodyText: bodyText.slice(0, 5000),
+                bodyHtml,
+                receivedAt: sentAt,
+              }).catch((e) => console.error("[gmail-sync] agent webhook failed:", e?.message));
             }
 
             // Build the conversation update. For INBOUND messages we ALSO
@@ -1275,21 +1290,6 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
           result.errors.push(`Message ${email.uid}: ${msgError?.message || "insert failed"}`);
           continue;
         }
-        // Phase 3 — agent reply loop. Fire message.received for new inbound
-        // IMAP messages. The webhook side filters to convs with agent
-        // involvement, so this is a no-op for non-agent convs.
-        if (!isOutbound(email.fromEmail, account.email)) {
-          dispatchMessageReceivedWebhook({
-            conversationId,
-            messageId: insertedMsg.id,
-            fromEmail: email.fromEmail,
-            fromName: email.fromName,
-            subject: email.subject,
-            bodyText: email.bodyText,
-            bodyHtml: email.bodyHtml,
-            receivedAt: email.sentAt.toISOString(),
-          }).catch((e) => console.error("[imap-sync] agent webhook failed:", e?.message));
-        }
 
         // Reopen rule: inbound message on an existing CLOSED conversation
         // reopens it (auto-assign to last closer if unassigned & closed within
@@ -1303,19 +1303,49 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
         // the rest of the sync. Inline attachments are stored too so that
         // signature images / cid: references can resolve later, but they're
         // flagged in the table for the UI to filter out by default.
-        if (email.attachments && email.attachments.length > 0) {
-          for (let i = 0; i < email.attachments.length; i++) {
-            const att = email.attachments[i];
-            const up = await uploadAttachmentToStorage(supabase, {
-              accountId,
-              messageId: insertedMsg.id,
-              attachment: att as AttachmentUploadInput,
-              indexInMessage: i,
-            });
-            if (!up.ok && !up.skipped) {
-              result.errors.push(`Attachment ${att.filename} on msg ${email.uid}: ${up.error || "unknown"}`);
+        //
+        // The whole block is additionally wrapped in try/catch so that an
+        // unexpected throw can NEVER skip the webhook dispatch below —
+        // an email with no webhook at all is worse than one with an empty
+        // attachments array.
+        try {
+          if (email.attachments && email.attachments.length > 0) {
+            for (let i = 0; i < email.attachments.length; i++) {
+              const att = email.attachments[i];
+              const up = await uploadAttachmentToStorage(supabase, {
+                accountId,
+                messageId: insertedMsg.id,
+                attachment: att as AttachmentUploadInput,
+                indexInMessage: i,
+              });
+              if (!up.ok && !up.skipped) {
+                result.errors.push(`Attachment ${att.filename} on msg ${email.uid}: ${up.error || "unknown"}`);
+              }
             }
           }
+        } catch (attBlockErr: any) {
+          result.errors.push(`Attachments block on msg ${email.uid}: ${attBlockErr?.message || "unknown"}`);
+        }
+
+        // Phase 3 — agent reply loop. Fire message.received for new inbound
+        // IMAP messages. The webhook side filters to convs with agent
+        // involvement, so this is a no-op for non-agent convs.
+        //
+        // Deliberately placed AFTER the attachment upload block (and outside
+        // any try/catch an upload error could short-circuit) so the webhook
+        // payload's attachments array is populated. Fire-and-forget — never
+        // blocks sync.
+        if (!isOutbound(email.fromEmail, account.email)) {
+          dispatchMessageReceivedWebhook({
+            conversationId,
+            messageId: insertedMsg.id,
+            fromEmail: email.fromEmail,
+            fromName: email.fromName,
+            subject: email.subject,
+            bodyText: email.bodyText,
+            bodyHtml: email.bodyHtml,
+            receivedAt: email.sentAt.toISOString(),
+          }).catch((e) => console.error("[imap-sync] agent webhook failed:", e?.message));
         }
 
         // Update conversation with latest message info
