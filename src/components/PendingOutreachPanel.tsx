@@ -100,14 +100,18 @@ export default function PendingOutreachPanel({
   );
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [discardingId, setDiscardingId] = useState<string | null>(null);
+  // Multi-select for bulk discard. Holds draft ids; pruned on every refetch
+  // so ids that were sent/discarded elsewhere don't linger selected.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDiscarding, setBulkDiscarding] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // Pause polling while a mutation is in flight so optimistic UI doesn't
   // get clobbered by a refetch that hasn't seen the change yet.
   const inflightRef = useRef<boolean>(false);
   useEffect(() => {
-    inflightRef.current = !!sendingId || !!discardingId;
-  }, [sendingId, discardingId]);
+    inflightRef.current = !!sendingId || !!discardingId || bulkDiscarding;
+  }, [sendingId, discardingId, bulkDiscarding]);
 
   const fetchDrafts = async () => {
     try {
@@ -119,7 +123,16 @@ export default function PendingOutreachPanel({
       const res = await fetch(`/api/drafts/pending-outreach${qs}`);
       if (res.ok) {
         const data = await res.json();
-        setDrafts((data.drafts || []) as PendingDraft[]);
+        const next = (data.drafts || []) as PendingDraft[];
+        setDrafts(next);
+        // Drop selections for drafts that no longer exist (sent/discarded
+        // elsewhere, or scoped out by folder/account changes).
+        setSelectedIds((prev) => {
+          if (prev.size === 0) return prev;
+          const live = new Set(next.map((d) => d.id));
+          const pruned = new Set(Array.from(prev).filter((x) => live.has(x)));
+          return pruned.size === prev.size ? prev : pruned;
+        });
         setError(null);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -227,6 +240,55 @@ export default function PendingOutreachPanel({
     }
   };
 
+  // Bulk discard — one DELETE with comma-separated ids. Each agent draft
+  // still gets its own draft.discarded webhook + audit-log entry server-
+  // side (same lifecycle as single discard, just batched).
+  const toggleSelected = (draftId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(draftId)) next.delete(draftId);
+      else next.add(draftId);
+      return next;
+    });
+  };
+
+  const allSelected = drafts.length > 0 && selectedIds.size === drafts.length;
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(drafts.map((d) => d.id)));
+  };
+
+  const handleBulkDiscard = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Discard ${ids.length} draft${ids.length !== 1 ? "s" : ""}?\n\nEach agent draft will be deleted and a draft.discarded webhook will fire so the agent knows. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBulkDiscarding(true);
+    try {
+      const res = await fetch(
+        `/api/drafts?ids=${encodeURIComponent(ids.join(","))}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Bulk discard failed (${res.status})`);
+      }
+      const data = await res.json().catch(() => ({}));
+      const n = typeof data.deleted === "number" ? data.deleted : ids.length;
+      showToast("ok", `${n} draft${n !== 1 ? "s" : ""} discarded.`);
+      setSelectedIds(new Set());
+      await fetchDrafts();
+    } catch (e: any) {
+      showToast("error", e?.message || "Bulk discard failed");
+    } finally {
+      setBulkDiscarding(false);
+    }
+  };
+
   if (loading && drafts.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -241,7 +303,7 @@ export default function PendingOutreachPanel({
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <Bell size={22} className="text-[var(--warning)]" />
-          <div>
+          <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-[var(--text-primary)]">
               Pending Outreach
             </h1>
@@ -250,6 +312,36 @@ export default function PendingOutreachPanel({
               sender selection
             </p>
           </div>
+          {/* Bulk selection controls — only when there's something to select */}
+          {drafts.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  disabled={bulkDiscarding}
+                  className="accent-[var(--accent)] cursor-pointer"
+                />
+                Select all
+              </label>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={handleBulkDiscard}
+                  disabled={bulkDiscarding}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium bg-[var(--danger)]/10 border border-[var(--danger)]/30 text-[var(--danger)] hover:bg-[var(--danger)]/20 disabled:opacity-50 transition-colors"
+                  title="Discard all selected drafts (fires draft.discarded webhooks)"
+                >
+                  {bulkDiscarding ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
+                  Delete selected ({selectedIds.size})
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Error banner */}
@@ -321,10 +413,22 @@ export default function PendingOutreachPanel({
               return (
                 <div
                   key={draft.id}
-                  className="group p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border)]/80 transition-all"
+                  className={`group p-4 rounded-xl bg-[var(--surface)] border transition-all ${
+                    selectedIds.has(draft.id)
+                      ? "border-[var(--accent)]/60"
+                      : "border-[var(--border)] hover:border-[var(--border)]/80"
+                  }`}
                 >
-                  {/* Row 1: subject + agent chip + age */}
+                  {/* Row 1: checkbox + subject + agent chip + age */}
                   <div className="flex items-start gap-2 mb-2 flex-wrap">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(draft.id)}
+                      onChange={() => toggleSelected(draft.id)}
+                      disabled={isBusy || bulkDiscarding}
+                      className="mt-0.5 accent-[var(--accent)] cursor-pointer shrink-0"
+                      title="Select for bulk delete"
+                    />
                     <div className="text-sm font-medium text-[var(--text-primary)] flex-1 min-w-0 truncate">
                       {draft.subject ||
                         draft.conversation?.subject ||

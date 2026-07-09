@@ -256,7 +256,16 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
   const id = req.nextUrl.searchParams.get("id");
+  // Bulk discard: ?ids=<uuid>,<uuid>,... — used by Pending Outreach's
+  // multi-select delete. Same lifecycle as single discard (per-draft
+  // draft.discarded webhook + audit log below), just batched. Capped at
+  // 200 ids per call to bound URL length and webhook fan-out.
+  const idsParam = req.nextUrl.searchParams.get("ids");
   const conversationId = req.nextUrl.searchParams.get("conversation_id");
+
+  const ids = idsParam
+    ? idsParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200)
+    : [];
 
   // "discarded_by_send" param distinguishes the operator hitting Send
   // (which deletes the draft as part of the send flow) from a manual
@@ -283,6 +292,12 @@ export async function DELETE(req: NextRequest) {
       .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
       .eq("id", id);
     draftsToDelete = (data || []) as DraftRow[];
+  } else if (ids.length > 0) {
+    const { data } = await supabase
+      .from("email_drafts")
+      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .in("id", ids);
+    draftsToDelete = (data || []) as DraftRow[];
   } else if (conversationId) {
     const { data } = await supabase
       .from("email_drafts")
@@ -290,12 +305,15 @@ export async function DELETE(req: NextRequest) {
       .eq("conversation_id", conversationId);
     draftsToDelete = (data || []) as DraftRow[];
   } else {
-    return NextResponse.json({ error: "id or conversation_id required" }, { status: 400 });
+    return NextResponse.json({ error: "id, ids, or conversation_id required" }, { status: 400 });
   }
 
   // Do the actual delete.
   if (id) {
     const { error } = await supabase.from("email_drafts").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  } else if (ids.length > 0) {
+    const { error } = await supabase.from("email_drafts").delete().in("id", ids);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (conversationId) {
     const { error } = await supabase.from("email_drafts").delete().eq("conversation_id", conversationId);
@@ -328,5 +346,5 @@ export async function DELETE(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, deleted: draftsToDelete.length });
 }
