@@ -85,7 +85,9 @@ export async function fetchAttachmentRowByIdOrThrow(
     `?id=eq.${encodeURIComponent(attachmentId)}` +
     `&select=${SELECT_COLUMNS}` +
     `&limit=1`;
-  const res = await fetch(url, { headers: postgrestHeaders() });
+  // no-store: Next's data cache can otherwise pin an empty response
+  // fetched before the attachment rows existed (see /api/attachments).
+  const res = await fetch(url, { cache: "no-store", headers: postgrestHeaders() });
   if (!res.ok) {
     throw new Error(`PostgREST status ${res.status}: ${await res.text().catch(() => "")}`);
   }
@@ -119,7 +121,9 @@ export async function fetchAttachmentsForMessages(
         `?message_id=in.(${idList})` +
         `&select=${SELECT_COLUMNS}` +
         `&order=filename.asc`;
-      const res = await fetch(url, { headers: postgrestHeaders() });
+      // no-store: Next's data cache can otherwise pin an empty response
+  // fetched before the attachment rows existed (see /api/attachments).
+  const res = await fetch(url, { cache: "no-store", headers: postgrestHeaders() });
       if (!res.ok) {
         console.error(
           `[external-attachments] chunk fetch failed: PostgREST status ${res.status}`

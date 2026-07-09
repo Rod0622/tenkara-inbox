@@ -90,6 +90,13 @@ export async function GET(req: NextRequest) {
       `?message_id=eq.${encodeURIComponent(messageId)}` +
       `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
     const rawRes = await fetch(url, {
+      // no-store is load-bearing: without it, Next's data cache can pin an
+      // EMPTY response fetched during the window between a message being
+      // synced and its attachments finishing upload — after which the route
+      // serves "no attachments" forever for that message even though the
+      // rows exist. Symptom: banner says "not yet captured" while SQL shows
+      // the rows.
+      cache: "no-store",
       headers: {
         apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
@@ -105,6 +112,13 @@ export async function GET(req: NextRequest) {
     }
   } catch (e: any) {
     ownErr = { message: e?.message || "fetch failed" };
+  }
+
+  // Surface PostgREST failures in the function logs — previously ownErr was
+  // swallowed and the route fell through to the "pre-capture" note, which
+  // made real errors indistinguishable from legitimately-empty messages.
+  if (ownErr) {
+    console.error(`[attachments] PostgREST list failed for message ${messageId}:`, ownErr.message);
   }
 
   const hasOwnRows = !ownErr && Array.isArray(ownRows) && ownRows.length > 0;
@@ -136,6 +150,7 @@ export async function GET(req: NextRequest) {
           `?id=eq.${encodeURIComponent(attachmentId)}` +
           `&select=id,filename,mime_type,size_bytes,is_inline,content_id,storage_path`;
         const byIdRes = await fetch(byIdUrl, {
+          cache: "no-store",
           headers: {
             apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
             Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ""}`,
@@ -273,9 +288,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Account not found for message" }, { status: 404 });
   }
 
+  // Explicit columns only — never select("*") on email_accounts (it pulls
+  // OAuth tokens into memory; this pattern caused the Sierra token
+  // exposure). This route only needs the address + provider for routing.
   const { data: account } = await supabase
     .from("email_accounts")
-    .select("*")
+    .select("id, email, provider")
     .eq("id", accountId)
     .single();
 
