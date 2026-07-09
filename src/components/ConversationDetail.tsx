@@ -172,6 +172,25 @@ function plainPreview(input: any, maxLen = 80): string {
 // Handles both raw addresses ("alice@x.com, bob@y.com") and the
 // "Name <email>" format ("Alice <alice@x.com>, Bob <bob@y.com>").
 // Returns lowercase, deduplicated, trimmed strings. Empty input -> [].
+// Repair address strings stored in a broken shape. Early agent drafts were
+// written with to_addresses as a JS ARRAY into a text column, which
+// serialized to JSON — ["\"'Name'\" <a@b.com>"] — and rendered raw in the
+// To field. Unwraps that shape and strips quote/escape noise; clean
+// strings pass through unchanged.
+function normalizeAddressList(raw: string | null | undefined): string {
+  if (!raw) return "";
+  let s = String(raw).trim();
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) s = arr.map((x) => String(x)).join(", ");
+    } catch {
+      /* not JSON — fall through and clean as-is */
+    }
+  }
+  return s.replace(/\\+/g, "").replace(/["']/g, "").trim();
+}
+
 function extractEmails(raw: string | null | undefined): string[] {
   if (!raw) return [];
   const parts = String(raw).split(",");
@@ -579,10 +598,10 @@ export default function ConversationDetail({
             // Preload edited To/Subject from the draft if they were customized
             // last time AND the recipient passes the validation above.
             // Empty values fall back to the auto-init effect below.
-            if (myDraft.to_addresses && recipientDomainMatches) setReplyTo(myDraft.to_addresses);
+            if (myDraft.to_addresses && recipientDomainMatches) setReplyTo(normalizeAddressList(myDraft.to_addresses));
             if (myDraft.subject) setReplySubject(myDraft.subject);
-            if (myDraft.cc_addresses && recipientDomainMatches) { setReplyCc(myDraft.cc_addresses); setShowReplyCc(true); }
-            if (myDraft.bcc_addresses && recipientDomainMatches) { setReplyBcc(myDraft.bcc_addresses); setShowReplyBcc(true); }
+            if (myDraft.cc_addresses && recipientDomainMatches) { setReplyCc(normalizeAddressList(myDraft.cc_addresses)); setShowReplyCc(true); }
+            if (myDraft.bcc_addresses && recipientDomainMatches) { setReplyBcc(normalizeAddressList(myDraft.bcc_addresses)); setShowReplyBcc(true); }
             setLoadedDraftId(myDraft.id);
             // Track agent metadata so the inline editor can show a badge and
             // force the operator to pick a sender before Send.
@@ -1351,8 +1370,18 @@ export default function ConversationDetail({
   useEffect(() => {
     if (!convo || !showReplyEditor) return;
     if (!replyTo) {
-      const { primaryTo } = computeReplyAllRecipients(messages, accountEmail, convo.from_email);
-      if (primaryTo) setReplyTo(primaryTo);
+      // Prefer primary_contact_email (explicitly the counterparty — set by
+      // the agent API and the contact picker) over from_email, because
+      // historical agent conversations stored our OWN account address in
+      // from_email. Belt-and-braces: if the computed To still equals the
+      // account's own email, leave it blank — an empty To the operator
+      // fills in is better than auto-addressing ourselves.
+      const counterparty =
+        (convo as any).primary_contact_email || convo.from_email;
+      const { primaryTo } = computeReplyAllRecipients(messages, accountEmail, counterparty);
+      if (primaryTo && primaryTo.toLowerCase() !== (accountEmail || "").toLowerCase()) {
+        setReplyTo(primaryTo);
+      }
     }
     if (!replySubject) {
       const base = (convo.subject || "").trim();

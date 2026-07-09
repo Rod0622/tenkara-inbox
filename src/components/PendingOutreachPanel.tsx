@@ -190,9 +190,9 @@ export default function PendingOutreachPanel({
         body: JSON.stringify({
           conversation_id: draft.conversation_id,
           account_id: accountId,
-          to: draft.to_addresses || draft.conversation?.primary_contact_email || "",
-          cc: draft.cc_addresses || "",
-          bcc: draft.bcc_addresses || "",
+          to: normalizeAddressList(draft.to_addresses) || draft.conversation?.primary_contact_email || "",
+          cc: normalizeAddressList(draft.cc_addresses),
+          bcc: normalizeAddressList(draft.bcc_addresses),
           subject: draft.subject || draft.conversation?.subject || "",
           body: draft.body_html || draft.body_text || "",
           actor_id: currentUser?.id || null,
@@ -404,7 +404,7 @@ export default function PendingOutreachPanel({
                 (a) => a.id === accountId
               );
               const supplierEmail =
-                draft.to_addresses ||
+                normalizeAddressList(draft.to_addresses) ||
                 draft.conversation?.primary_contact_email ||
                 draft.conversation?.from_email ||
                 "—";
@@ -653,6 +653,25 @@ function AccountPicker({
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────
+
+// Repair address strings stored in a broken shape. Early agent drafts were
+// written with to_addresses as a JS ARRAY into a text column, which
+// serialized to JSON — ["\"'Name'\" <a@b.com>"] — and rendered raw in the
+// UI. This unwraps that shape (and strips stray quote/escape noise) so
+// existing rows display and send correctly; new rows are stored clean.
+function normalizeAddressList(raw: string | null | undefined): string {
+  if (!raw) return "";
+  let s = String(raw).trim();
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) s = arr.map((x) => String(x)).join(", ");
+    } catch {
+      /* not JSON — fall through and clean as-is */
+    }
+  }
+  return s.replace(/\\+/g, "").replace(/["']/g, "").trim();
+}
 
 function stripHtml(s: string): string {
   return s

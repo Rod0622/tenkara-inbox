@@ -177,6 +177,20 @@ export async function POST(req: NextRequest) {
   const computedBodyText =
     bodyText ?? (bodyHtml as string).replace(/<[^>]*>/g, "").slice(0, 5000);
 
+  // Recipient formatting. Sanitize the agent-supplied display name — strip
+  // quotes/backslashes/control chars (agents have sent names like
+  // 'Gigi Dolloff' with literal quotes, which then got double-escaped
+  // downstream). The result is a PLAIN STRING ("Name <email>" or bare
+  // email) — to_addresses columns are text, and every consumer (send
+  // route, panel, reply editor) expects a comma-separated string, not an
+  // array. Storing an array here serialized to JSON garbage in the UI.
+  const sanitizedToName = toName
+    ? toName.replace(/["'\\\r\n\t]/g, "").trim() || null
+    : null;
+  const toAddressFormatted = sanitizedToName
+    ? `${sanitizedToName} <${toEmail}>`
+    : toEmail;
+
   const threadId = `external:${token.name}:${externalId}`;
   const requiresSenderSelection = !emailAccountId;
   const nowIso = new Date().toISOString();
@@ -245,8 +259,14 @@ export async function POST(req: NextRequest) {
       email_account_id: emailAccountId,
       thread_id: threadId,
       subject,
-      from_name: accountFromName,
-      from_email: accountFromEmail,
+      // Codebase convention (see /api/send compose path): from_name /
+      // from_email on a conversation identify the COUNTERPARTY, not our
+      // account. Setting these to our own account (the previous behavior)
+      // broke every downstream consumer that treats from_email as "the
+      // other party" — most visibly the reply editor's To fallback, which
+      // auto-filled our own address on agent conversations.
+      from_name: sanitizedToName || toEmail,
+      from_email: toEmail,
       preview: computedBodyText.slice(0, 200),
       is_unread: false,
       status: "open",
@@ -268,10 +288,7 @@ export async function POST(req: NextRequest) {
   // ── 8. Create the draft ──
   // Carries the external_id + external_token_id so the unique partial
   // index enforces single-create per (token, external_id), even under
-  // concurrent retries.
-  const toAddressFormatted = toName
-    ? `"${toName.replace(/"/g, '\\"')}" <${toEmail}>`
-    : toEmail;
+  // concurrent retries. to_addresses uses the plain string computed above.
 
   const { data: draft, error: draftErr } = await supabase
     .from("email_drafts")
@@ -279,7 +296,7 @@ export async function POST(req: NextRequest) {
       conversation_id: conv.id,
       email_account_id: emailAccountId,
       author_id: null,
-      to_addresses: [toAddressFormatted],
+      to_addresses: toAddressFormatted,
       subject,
       body_html: bodyHtml,
       body_text: computedBodyText,
