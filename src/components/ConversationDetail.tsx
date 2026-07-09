@@ -561,7 +561,7 @@ export default function ConversationDetail({
             // user replies to ericyang@x.com — same company, different
             // contact) are preserved.
             const draftEmails = myDraft.to_addresses
-              ? extractEmails(String(myDraft.to_addresses))
+              ? extractEmails(normalizeAddressList(myDraft.to_addresses))
               : [];
             const primary = draftEmails[0] || "";
             const primaryDomain = primary.split("@")[1] || "";
