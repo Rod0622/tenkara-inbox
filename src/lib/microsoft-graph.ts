@@ -4,6 +4,7 @@ import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-e
 import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
+import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 
 // ── Microsoft Graph Client Credentials ──────────────
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
@@ -251,8 +252,15 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
   const internalCtx: InternalContext = await loadInternalContext(supabase);
 
   try {
+    // Explicit columns only — NEVER `select("*")` on email_accounts (it
+    // drags OAuth/refresh tokens into memory and logs; this exact pattern
+    // caused the Sierra token exposure). Graph credentials are fetched
+    // separately by getGraphTokenForAccount with its own targeted select.
     const { data: account, error: accErr } = await supabase
-      .from("email_accounts").select("*").eq("id", accountId).single();
+      .from("email_accounts")
+      .select("id, email, provider, last_sync_at, last_sync_uid")
+      .eq("id", accountId)
+      .single();
 
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
@@ -493,6 +501,7 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
             }
           }
 
+          let newMsMessageId: string | null = null;
           if (!reconciledMsMessageId) {
             const { data: insMs, error: me } = await supabase.from("messages").insert({
               conversation_id: conversationId, provider_message_id: `ms:${msgId}`,
@@ -507,24 +516,126 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               sent_at: msSentAt,
             }).select("id").single();
             if (me || !insMs) { result.errors.push(me?.message || "ms insert failed"); continue; }
-            // Phase 3 — agent reply loop. Fire message.received for new
-            // inbound MS Graph messages. Webhook side filters to convs with
-            // agent involvement, so no-op for non-agent convs.
-            // (conversationId is `string | null` at this scope; by here a
-            // successful insert means it isn't null in practice — narrow
-            // explicitly for TypeScript.)
-            if (!isOutbound && conversationId) {
-              dispatchMessageReceivedWebhook({
-                conversationId,
-                messageId: insMs.id,
-                fromEmail: email.from?.emailAddress?.address || "",
-                fromName: email.from?.emailAddress?.name || null,
-                subject: email.subject || null,
-                bodyText: bodyText.slice(0, 5000),
-                bodyHtml: emailBodyHtml,
-                receivedAt: msSentAt,
-              }).catch((e) => console.error("[ms-graph-sync] agent webhook failed:", e?.message));
+            newMsMessageId = insMs.id;
+          }
+          // The DB message this Graph email landed on (new insert OR the
+          // reconciled local outbound row) — attachments link to this.
+          const msDbMessageId = reconciledMsMessageId || newMsMessageId;
+
+          // ── Attachment capture (Option A: incremental syncs only) ──
+          // Fetch attachment bytes from Graph and store them via
+          // uploadAttachmentToStorage so the attachments table / Storage /
+          // external API behave identically to Gmail and IMAP accounts.
+          //
+          // Skipped during initial bulk sync (same precedent as the rules
+          // engine above: isInitialSync skips runRulesFn) — historical
+          // backfill is a separate deferred roadmap item; the UI's live
+          // Graph fallback still covers old messages.
+          //
+          // Uses email.id (the Graph message id) directly — no
+          // internetMessageId resolution needed at sync time. fileAttachment
+          // entries carry base64 contentBytes in the list response; if a
+          // large one omits it, we fetch that attachment individually.
+          // itemAttachment / referenceAttachment have no contentBytes — skipped.
+          //
+          // The whole block is wrapped in try/catch so an unexpected throw
+          // can NEVER skip the webhook dispatch below — an email with no
+          // webhook at all is worse than one with an empty attachments array.
+          try {
+            if (!isInitialSync && email.hasAttachments && msDbMessageId) {
+              const listRes = await fetch(
+                `${GRAPH_BASE}/users/${account.email}/messages/${email.id}/attachments`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (!listRes.ok) {
+                const gerr = await listRes.json().catch(() => ({}));
+                result.errors.push(`Graph attach list on ${msgId}: ${gerr.error?.message || listRes.statusText}`);
+              } else {
+                const listData = await listRes.json();
+                const atts: any[] = listData.value || [];
+                for (let ai = 0; ai < atts.length; ai++) {
+                  const att = atts[ai];
+                  try {
+                    const odataType = String(att["@odata.type"] || "");
+                    if (odataType && !odataType.includes("fileAttachment")) {
+                      // Nested emails / reference links — no contentBytes.
+                      console.log(`[graph-sync] skipping non-file attachment (${odataType}) on ${msgId}`);
+                      continue;
+                    }
+                    let contentBytes: string | null = att.contentBytes || null;
+                    if (!contentBytes && att.id) {
+                      // Large attachment — list omitted the bytes; fetch it.
+                      const oneRes = await fetch(
+                        `${GRAPH_BASE}/users/${account.email}/messages/${email.id}/attachments/${att.id}`,
+                        { headers: { Authorization: `Bearer ${token}` } }
+                      );
+                      if (oneRes.ok) {
+                        const oneData = await oneRes.json();
+                        contentBytes = oneData.contentBytes || null;
+                      }
+                    }
+                    if (!contentBytes) {
+                      result.errors.push(`Graph attach ${att.name || "(unnamed)"} on ${msgId}: no contentBytes`);
+                      continue;
+                    }
+                    const buf = Buffer.from(contentBytes, "base64");
+                    if (buf.length === 0) {
+                      result.errors.push(`Graph attach ${att.name || "(unnamed)"} on ${msgId}: empty body`);
+                      continue;
+                    }
+                    const up = await uploadAttachmentToStorage(supabase, {
+                      accountId,
+                      messageId: msDbMessageId,
+                      attachment: {
+                        filename: att.name || `attachment-${ai + 1}.bin`,
+                        contentType: att.contentType || "application/octet-stream",
+                        size: typeof att.size === "number" ? att.size : buf.length,
+                        // Graph's isInline is authoritative here (unlike raw
+                        // MIME, where only the disposition header is —
+                        // Outlook sets Content-ID on regular files too).
+                        isInline: !!att.isInline,
+                        contentId: att.contentId || null,
+                        checksum: null,
+                        content: buf,
+                      },
+                      indexInMessage: ai,
+                    });
+                    if (!up.ok && !up.skipped) {
+                      result.errors.push(`Graph attach upload ${att.name || "(unnamed)"} on ${msgId}: ${up.error}`);
+                    }
+                  } catch (attErr: any) {
+                    result.errors.push(`Graph attach exception on ${msgId}: ${attErr?.message || "unknown"}`);
+                  }
+                }
+              }
             }
+          } catch (attBlockErr: any) {
+            result.errors.push(`Graph attachments block on ${msgId}: ${attBlockErr?.message || "unknown"}`);
+          }
+
+          // Phase 3 — agent reply loop. Fire message.received for new
+          // inbound MS Graph messages. Webhook side filters to convs with
+          // agent involvement, so no-op for non-agent convs.
+          //
+          // Deliberately placed AFTER the attachment capture block (and
+          // outside any try/catch a capture error could short-circuit) so
+          // the webhook payload's attachments array is populated.
+          // Fire-and-forget — never blocks sync.
+          // (conversationId is `string | null` at this scope; by here a
+          // successful insert means it isn't null in practice — narrow
+          // explicitly for TypeScript.)
+          if (newMsMessageId && !isOutbound && conversationId) {
+            const webhookMessageId = newMsMessageId;
+            dispatchMessageReceivedWebhook({
+              conversationId,
+              messageId: webhookMessageId,
+              fromEmail: email.from?.emailAddress?.address || "",
+              fromName: email.from?.emailAddress?.name || null,
+              subject: email.subject || null,
+              bodyText: bodyText.slice(0, 5000),
+              bodyHtml: emailBodyHtml,
+              receivedAt: msSentAt,
+            }).catch((e) => console.error("[ms-graph-sync] agent webhook failed:", e?.message));
           }
 
           const convoUpdate: any = {
