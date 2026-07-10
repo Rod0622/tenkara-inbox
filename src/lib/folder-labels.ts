@@ -508,6 +508,85 @@ export async function swapFolderLabel(
     }
   }
 
+  // ─── Migrated / never-foldered thread cleanup ─────────────────────
+  // oldFolderId is NULL for threads that predate the folder system
+  // (Missive migrations: all of Rove/NutriPro/Vita history). Their
+  // pipeline stage lives purely in labels, so the standard strip above
+  // has nothing to key on — the FIRST Move-to on such a thread would
+  // leave stale stage labels behind (e.g. "1 - Inquiries" + its children
+  // surviving a move into "2 - Quotes"). Same idea as the transitional
+  // Inbox strip below, generalized: when moving INTO a top-level folder,
+  // strip any attached labels that name-match the destination's SIBLING
+  // top-level custom folders, plus those labels' attached children.
+  //
+  // Deliberately narrow: only fires when oldFolderId is NULL (native
+  // threads keep the exact behavior above), only top-level destinations,
+  // only non-system siblings (never touches Sent/Trash/Spam/Archive
+  // semantics), and only labels actually attached to this conversation.
+  // Existing labels are matched by name — nothing is created.
+  if (!oldFolderId && newFolderId) {
+    try {
+      const { data: dest } = await supabase
+        .from("folders")
+        .select("id, name, email_account_id, parent_folder_id")
+        .eq("id", newFolderId)
+        .maybeSingle();
+
+      if (dest && !dest.parent_folder_id) {
+        const { data: siblings } = await supabase
+          .from("folders")
+          .select("id, name, is_system")
+          .eq("email_account_id", dest.email_account_id)
+          .is("parent_folder_id", null)
+          .neq("id", newFolderId);
+
+        const siblingNames = (siblings || [])
+          .filter((f: any) => !f.is_system)
+          .map((f: any) => String(f.name || "").trim())
+          .filter(Boolean);
+
+        if (siblingNames.length > 0) {
+          const { data: stageLabels } = await supabase
+            .from("labels")
+            .select("id, name")
+            .in("name", siblingNames)
+            .is("parent_label_id", null);
+
+          const stageIds = (stageLabels || [])
+            .map((l: any) => l.id)
+            .filter((id: string) => id !== newLabelId);
+
+          if (stageIds.length > 0) {
+            const { data: kids } = await supabase
+              .from("labels")
+              .select("id")
+              .in("parent_label_id", stageIds);
+
+            const candidateIds = [
+              ...stageIds,
+              ...((kids || []).map((l: any) => l.id)),
+            ].filter((id: string) => id !== newLabelId);
+
+            const { data: attached } = await supabase
+              .from("conversation_labels")
+              .select("label_id")
+              .eq("conversation_id", conversationId)
+              .in("label_id", candidateIds);
+
+            for (const row of (attached || [])) {
+              if (!labelsToStrip.includes(row.label_id)) {
+                labelsToStrip.push(row.label_id);
+              }
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      // Best-effort — a cleanup failure must never block the move itself.
+      console.error("[swapFolderLabel] unfoldered-thread stage cleanup failed:", e?.message);
+    }
+  }
+
   // If destination is NOT the Inbox folder, also strip the global Inbox label
   // (handles transitional data where folder_id was NULL but Inbox label was applied).
   if (newFolderName?.toLowerCase() !== "inbox") {
