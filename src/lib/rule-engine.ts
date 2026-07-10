@@ -1061,18 +1061,50 @@ export async function runRulesForMessage(
   const supabase = createServerClient();
   const result = { matched: 0, actions: [] as string[] };
 
-  // Notify watchers about new inbound messages (best-effort, fire-and-forget).
-  // This is centralized here rather than in the sync libraries (imap, ms-graph, ms-oauth-sync)
-  // because all three call runRulesForMessage with triggerType="incoming" after inserting the message.
+  // Notify about new inbound messages (best-effort, fire-and-forget).
+  // Centralized here rather than in the sync libraries (imap, ms-graph,
+  // ms-oauth-sync) because all three call runRulesForMessage with
+  // triggerType="incoming" after inserting the message.
+  //
+  // Two audiences:
+  //   1. The conversation's ASSIGNEE always gets "New reply from …" —
+  //      being assigned means being responsible for the thread, so the
+  //      supplier's answer must not silently sit behind an unread badge.
+  //      (This also completes the agent flow: agent assigns via
+  //      assignee_email → only that member is notified of the draft AND
+  //      of every reply.)
+  //   2. WATCHERS with the new-message flag, as before — with the assignee
+  //      excluded so someone who is both assigned and watching gets one
+  //      notification, not two.
   if (triggerType === "incoming") {
     try {
-      const { notifyWatchers } = await import("@/lib/notifications");
+      const { notifyWatchers, createNotifications } = await import("@/lib/notifications");
       const senderName = msg.from_name || msg.from_email || "Someone";
+
+      const { data: convRow } = await supabase
+        .from("conversations")
+        .select("assignee_id, subject")
+        .eq("id", conversationId)
+        .maybeSingle();
+      const assigneeId: string | null = convRow?.assignee_id || null;
+
       await notifyWatchers(conversationId, "new_message", {
         title: `New message from ${senderName}`,
         body: msg.subject || undefined,
         actorId: null, // inbound message — actor is the external sender
+        excludeUserIds: assigneeId ? [assigneeId] : [],
       });
+
+      if (assigneeId) {
+        await createNotifications([{
+          user_id: assigneeId,
+          type: "reply_received",
+          title: `New reply from ${senderName}`,
+          body: msg.subject || convRow?.subject || undefined,
+          conversation_id: conversationId,
+          actor_id: null,
+        }]);
+      }
     } catch (_e) { /* best-effort */ }
   }
 

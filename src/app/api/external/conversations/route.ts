@@ -82,6 +82,16 @@ export async function POST(req: NextRequest) {
     body?.supplier_contact && typeof body.supplier_contact === "object"
       ? body.supplier_contact
       : null;
+  // Optional pre-assignment: the agent can assign the conversation to a
+  // specific team member by their team_members.email. When it matches an
+  // active member, ONLY that member is notified of the new draft (the
+  // account-wide + admins broadcast is skipped) and they'll also be
+  // notified when the supplier replies. Unmatched/omitted → conversation
+  // is created unassigned and the broadcast behaves as before.
+  const assigneeEmail: string | null =
+    typeof body?.assignee_email === "string" && body.assignee_email.trim()
+      ? body.assignee_email.trim().toLowerCase()
+      : null;
 
   if (typeof externalId !== "string" || !externalId.trim()) {
     return NextResponse.json(
@@ -253,12 +263,34 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Resolve the optional assignee. ilike with no wildcards = case-
+  // insensitive equality. Unmatched or inactive → warn (returned in the
+  // response so the agent can self-correct) and fall back to unassigned.
+  let assignedMember: { id: string; name: string } | null = null;
+  let assigneeWarning: string | null = null;
+  if (assigneeEmail) {
+    const { data: member } = await supabase
+      .from("team_members")
+      .select("id, name, email, is_active")
+      .ilike("email", assigneeEmail)
+      .maybeSingle();
+    if (member && member.is_active !== false) {
+      assignedMember = { id: member.id, name: member.name };
+    } else {
+      assigneeWarning = `assignee_email "${assigneeEmail}" did not match an active team member — conversation created unassigned and the account team was notified instead`;
+    }
+  }
+
   const { data: conv, error: convErr } = await supabase
     .from("conversations")
     .insert({
       email_account_id: emailAccountId,
       thread_id: threadId,
       subject,
+      // Agent pre-assignment (see assignee_email above). Mirrors the assign
+      // API's convention: assigned conversations live in the assignee's
+      // personal inbox (no account Inbox folder — handled below).
+      assignee_id: assignedMember?.id || null,
       // Codebase convention (see /api/send compose path): from_name /
       // from_email on a conversation identify the COUNTERPARTY, not our
       // account. Setting these to our own account (the previous behavior)
@@ -373,21 +405,48 @@ export async function POST(req: NextRequest) {
         );
     }
     if (emailAccountId) {
-      // Agent-created conversations are unassigned → pass true so the Inbox
-      // label + Inbox folder_id are applied.
-      await labelManualCreatedConversation(conv.id, emailAccountId, true);
+      // Unassigned agent conversations get the Inbox label + Inbox folder
+      // so they surface under [account] → Inbox → Pending Outreach.
+      // Pre-assigned ones follow the assign API's convention instead:
+      // folder stays null (assignee's personal inbox); they still appear
+      // in Pending Outreach, which is driven by the draft, not the folder.
+      await labelManualCreatedConversation(conv.id, emailAccountId, !assignedMember);
     }
   } catch (e: any) {
     console.error("[external/conversations] auto-label failed:", e?.message);
   }
 
-  // ── 8c. Notify users with access to this account + all admins ──
-  // When an agent draft lands in an account's Pending Outreach, notify every
-  // team member who has access to that email account (any account_access row),
-  // PLUS every admin (for org-wide oversight of agent activity). Deduplicated so
-  // an admin who also has explicit access gets a single notification.
-  // Best-effort — never block or fail the agent response.
-  if (emailAccountId) {
+  // ── 8c. Notify ──
+  // Pre-assigned: ONLY the assignee is notified (plus an "assigned"
+  // activity-log entry mirroring the assign API). Unassigned: broadcast to
+  // every team member with access to the account PLUS all admins (deduped),
+  // exactly as before. Best-effort — never block or fail the agent response.
+  if (emailAccountId && assignedMember) {
+    try {
+      const accountLabel = accountFromName || accountFromEmail || "an account";
+      const supplierLabel = toName || toEmail || "a supplier";
+      await createNotifications([
+        {
+          user_id: assignedMember.id,
+          type: "pending_outreach_draft",
+          title: "Outreach draft assigned to you",
+          body: `${token.name} assigned you a draft to ${supplierLabel} in ${accountLabel} — Pending Outreach.`,
+          conversation_id: conv.id,
+          actor_id: null,
+        },
+      ]);
+      // Same shape the assign API writes; actor falls back to the assignee
+      // (the agent has no team_members row), with the agent named in details.
+      await supabase.from("activity_log").insert({
+        conversation_id: conv.id,
+        actor_id: assignedMember.id,
+        action: "assigned",
+        details: { assignee_id: assignedMember.id, assigned_by_agent: token.name },
+      });
+    } catch (e: any) {
+      console.error("[external/conversations] assignee notify failed:", e?.message);
+    }
+  } else if (emailAccountId) {
     try {
       const [accessRes, adminsRes] = await Promise.all([
         supabase
@@ -482,6 +541,8 @@ export async function POST(req: NextRequest) {
       conversation_id: conv.id,
       draft_id: draft.id,
       requires_sender_selection: requiresSenderSelection,
+      assignee_id: assignedMember?.id || null,
+      ...(assigneeWarning ? { warnings: [assigneeWarning] } : {}),
       created_at: draft.created_at,
       idempotent: false,
     },
