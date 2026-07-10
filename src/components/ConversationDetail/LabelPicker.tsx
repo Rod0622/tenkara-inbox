@@ -11,7 +11,7 @@ export default function LabelPicker({
 }: {
   conversationId: string;
   currentLabels: { label_id: string; label?: any }[];
-  onToggle: () => void;
+  onToggle: (delta?: { labelId: string; added: boolean; label?: any }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -67,7 +67,14 @@ export default function LabelPicker({
         body: JSON.stringify({ conversationId, labelId }),
       });
       if (!res.ok) throw new Error(`label ${add ? "add" : "remove"} failed (${res.status})`);
-      onToggle();
+      // Pass the delta up so the page can patch its activeConvo snapshot
+      // immediately (chips update even when the thread isn't in the main
+      // list, e.g. opened from search or bookmarks).
+      onToggle({
+        labelId,
+        added: add,
+        label: (allLabels as any[]).find((l: any) => l.id === labelId) || null,
+      });
     } catch (error) {
       // Roll back the optimistic change so the checkbox reflects reality.
       console.error("Label toggle failed:", error);

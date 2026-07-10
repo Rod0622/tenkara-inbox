@@ -895,7 +895,25 @@ export default function InboxPage() {
                 onSendReply={actions.sendReply}
                 onMoveToFolder={handleMoveToFolder}
                 globalSearchQuery={debouncedSearchQuery.trim().length >= 2 ? debouncedSearchQuery : ""}
-                onLabelsChange={refetch}
+                onLabelsChange={(delta) => {
+                  // Patch the open conversation's chips immediately. The
+                  // labels-sync effect above only covers threads present in
+                  // the main list — threads opened from search/bookmarks
+                  // aren't, so without this their chips never update.
+                  if (delta) {
+                    setActiveConvo((prev) => {
+                      if (!prev) return prev;
+                      const labels = ((prev as any).labels || []) as { label_id: string; label?: any }[];
+                      const next = delta.added
+                        ? (labels.some((cl) => cl.label_id === delta.labelId)
+                            ? labels
+                            : [...labels, { label_id: delta.labelId, label: delta.label || undefined }])
+                        : labels.filter((cl) => cl.label_id !== delta.labelId);
+                      return { ...prev, labels: next } as any;
+                    });
+                  }
+                  refetch();
+                }}
               />
             </Panel>
           </>

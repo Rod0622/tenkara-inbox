@@ -3759,7 +3759,7 @@ export default function ConversationDetail({
             <LabelPicker
               conversationId={convo.id}
               currentLabels={convo.labels || []}
-              onToggle={() => { onLabelsChange?.(); }}
+              onToggle={(delta) => { onLabelsChange?.(delta); }}
             />
 
             {onMoveToFolder && (

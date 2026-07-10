@@ -286,6 +286,12 @@ export interface ConversationListProps {
   allSupplierStatuses?: { id: string; name: string; color: string; background_color: string }[];
 }
 
+export interface LabelToggleDelta {
+  labelId: string;
+  added: boolean;
+  label?: any; // full label row when available (for immediate chip render)
+}
+
 export interface ConversationDetailProps {
   conversation: Conversation | null;
   currentUser: TeamMember | null;
@@ -302,5 +308,11 @@ export interface ConversationDetailProps {
   // Called after a label is added/removed on the open conversation so the
   // parent can refresh the conversation list (and thus the open conversation's
   // labels). Without this the label picker reads a stale labels array.
-  onLabelsChange?: () => void;
+  // Called after a label is added/removed in the detail view. The optional
+  // delta lets the page patch its activeConvo snapshot directly — required
+  // because activeConvo may have been opened from search/bookmarks and thus
+  // not exist in the main `conversations` list that refetch() refreshes
+  // (the label-sync effect keyed on that list silently skips such threads,
+  // which left stale label chips on screen).
+  onLabelsChange?: (delta?: LabelToggleDelta) => void;
 }
