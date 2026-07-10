@@ -2,6 +2,8 @@ import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
+import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 
 // Sync a microsoft_oauth account using delegated Graph API token
 export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
@@ -27,8 +29,15 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
   const internalCtx: InternalContext = await loadInternalContext(supabase);
 
   try {
+    // Explicit columns only — NEVER `select("*")` on email_accounts (it
+    // drags OAuth refresh tokens into memory/logs; this pattern caused the
+    // Sierra token exposure). refreshMicrosoftToken does its own targeted
+    // credential lookup.
     const { data: account, error: accErr } = await supabase
-      .from("email_accounts").select("*").eq("id", accountId).single();
+      .from("email_accounts")
+      .select("id, email, provider, last_sync_at, last_sync_uid")
+      .eq("id", accountId)
+      .single();
 
     if (accErr || !account) { result.errors.push("Account not found"); return result; }
 
@@ -258,7 +267,7 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
 
-        const { error: me } = await supabase.from("messages").insert({
+        const { data: insMs, error: me } = await supabase.from("messages").insert({
           conversation_id: conversationId,
           provider_message_id: providerId,
           from_name: email.from?.emailAddress?.name || "Unknown",
@@ -272,14 +281,121 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
           is_outbound: isOutbound,
           has_attachments: email.hasAttachments || false,
           sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
-        });
+        }).select("id").single();
 
-        if (me) {
-          console.error("MS OAuth sync: message insert failed:", me.message);
+        if (me || !insMs) {
+          console.error("MS OAuth sync: message insert failed:", me?.message || "no row");
           continue;
         }
 
         result.newMessages++;
+
+        // ── Attachment capture (incremental syncs only) ──
+        // Same treatment as the other three sync paths: fetch attachment
+        // bytes from Graph (delegated /me/ endpoint here) and store via
+        // uploadAttachmentToStorage so the attachments table / Storage /
+        // external API behave identically for microsoft_oauth accounts.
+        //
+        // Gated on account.last_sync_at (this path's "incremental" flag) —
+        // during the initial nextLink backfill we skip capture, matching
+        // the rules engine below which effectively no-ops on history.
+        // fileAttachment entries carry base64 contentBytes in the list
+        // response; large ones omitted from the list are fetched
+        // individually. itemAttachment / referenceAttachment are skipped.
+        //
+        // The whole block is wrapped in try/catch so an unexpected throw
+        // can NEVER skip the webhook dispatch below — an email with no
+        // webhook at all is worse than one with an empty attachments array.
+        try {
+          if (account.last_sync_at && email.hasAttachments) {
+            const listRes = await fetch(
+              `https://graph.microsoft.com/v1.0/me/messages/${email.id}/attachments`,
+              { headers: { Authorization: "Bearer " + token } }
+            );
+            if (!listRes.ok) {
+              const gerr = await listRes.json().catch(() => ({}));
+              result.errors.push(`Graph attach list on ${msgId}: ${gerr.error?.message || listRes.statusText}`);
+            } else {
+              const listData = await listRes.json();
+              const atts: any[] = listData.value || [];
+              for (let ai = 0; ai < atts.length; ai++) {
+                const att = atts[ai];
+                try {
+                  const odataType = String(att["@odata.type"] || "");
+                  if (odataType && !odataType.includes("fileAttachment")) {
+                    console.log(`MS OAuth sync: skipping non-file attachment (${odataType}) on ${msgId}`);
+                    continue;
+                  }
+                  let contentBytes: string | null = att.contentBytes || null;
+                  if (!contentBytes && att.id) {
+                    const oneRes = await fetch(
+                      `https://graph.microsoft.com/v1.0/me/messages/${email.id}/attachments/${att.id}`,
+                      { headers: { Authorization: "Bearer " + token } }
+                    );
+                    if (oneRes.ok) {
+                      const oneData = await oneRes.json();
+                      contentBytes = oneData.contentBytes || null;
+                    }
+                  }
+                  if (!contentBytes) {
+                    result.errors.push(`Graph attach ${att.name || "(unnamed)"} on ${msgId}: no contentBytes`);
+                    continue;
+                  }
+                  const buf = Buffer.from(contentBytes, "base64");
+                  if (buf.length === 0) {
+                    result.errors.push(`Graph attach ${att.name || "(unnamed)"} on ${msgId}: empty body`);
+                    continue;
+                  }
+                  const up = await uploadAttachmentToStorage(supabase, {
+                    accountId,
+                    messageId: insMs.id,
+                    attachment: {
+                      filename: att.name || `attachment-${ai + 1}.bin`,
+                      contentType: att.contentType || "application/octet-stream",
+                      size: typeof att.size === "number" ? att.size : buf.length,
+                      isInline: !!att.isInline,
+                      contentId: att.contentId || null,
+                      checksum: null,
+                      content: buf,
+                    },
+                    indexInMessage: ai,
+                  });
+                  if (!up.ok && !up.skipped) {
+                    result.errors.push(`Graph attach upload ${att.name || "(unnamed)"} on ${msgId}: ${up.error}`);
+                  }
+                } catch (attErr: any) {
+                  result.errors.push(`Graph attach exception on ${msgId}: ${attErr?.message || "unknown"}`);
+                }
+              }
+            }
+          }
+        } catch (attBlockErr: any) {
+          result.errors.push(`Graph attachments block on ${msgId}: ${attBlockErr?.message || "unknown"}`);
+        }
+
+        // Phase 3 — agent reply loop. Fire message.received for new inbound
+        // messages so any agent involved in the conversation can compose a
+        // reply. The webhook side filters to convs with agent involvement,
+        // so this is a cheap no-op for non-agent traffic.
+        //
+        // Deliberately placed AFTER the attachment capture block (and
+        // outside any try/catch a capture error could short-circuit) so
+        // the webhook payload's attachments array is populated.
+        // Gated on account.last_sync_at like capture above: the initial
+        // historical backfill must not fire thousands of message.received
+        // events for old mail. Fire-and-forget — never blocks sync.
+        if (account.last_sync_at && !isOutbound && conversationId) {
+          dispatchMessageReceivedWebhook({
+            conversationId,
+            messageId: insMs.id,
+            fromEmail: email.from?.emailAddress?.address || "",
+            fromName: email.from?.emailAddress?.name || null,
+            subject: email.subject || null,
+            bodyText: bodyText.slice(0, 5000),
+            bodyHtml,
+            receivedAt: email.receivedDateTime || email.sentDateTime || new Date().toISOString(),
+          }).catch((e) => console.error("[ms-oauth-sync] agent webhook failed:", e?.message));
+        }
 
         // Update conversation preview
         await supabase.from("conversations").update({
