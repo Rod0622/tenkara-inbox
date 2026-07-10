@@ -145,3 +145,42 @@ body {
   left: -3px;
   right: -3px;
 }
+
+/* ── Email "paper" card (dark mode) ─────────────────────────────────────
+   Email HTML is authored for light backgrounds — senders hard-code dark
+   text colors (#333 etc.) and assume white behind them, so rendering it
+   on our dark surface produces black-on-black (e.g. invoice emails).
+   Rewriting sender colors is brittle; instead, do what mail clients do:
+   in dark mode, render HTML email bodies on a light card with fixed
+   light-scheme colors. Light mode is untouched (no rule matches).
+   Applied via the .email-html-body class on MessageBody. These rules
+   out-specify the Tailwind arbitrary-variant utilities on the same
+   element ([data-theme] + class + element beats class + element). */
+[data-theme="dark"] .email-html-body {
+  background: #ffffff;
+  color: #1f2937;
+  padding: 12px 16px;
+  border-radius: 10px;
+  color-scheme: light; /* form controls / scrollbars inside stay light */
+}
+[data-theme="dark"] .email-html-body a {
+  color: #2563eb;
+}
+[data-theme="dark"] .email-html-body blockquote {
+  border-left-color: #e5e7eb;
+  color: #4b5563;
+}
+[data-theme="dark"] .email-html-body td,
+[data-theme="dark"] .email-html-body th {
+  border-color: #e5e7eb;
+}
+[data-theme="dark"] .email-html-body th {
+  background: #f9fafb;
+}
+[data-theme="dark"] .email-html-body pre {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+[data-theme="dark"] .email-html-body hr {
+  border-color: #e5e7eb;
+}
