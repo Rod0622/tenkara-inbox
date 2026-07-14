@@ -365,7 +365,17 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             const fromMatch = (headers.from || "").match(/^(.+?)\s*<(.+?)>$/);
             const fromName = fromMatch ? fromMatch[1].trim() : (headers.from || "Unknown");
             const fromEmail = fromMatch ? fromMatch[2].trim().toLowerCase() : (headers.from || "").toLowerCase();
-            const isOutbound = fromEmail === account.email.toLowerCase();
+            // SENT-label-aware outbound classification. Gmail accounts can
+            // send through send-as ALIASES on other domains (e.g.
+            // operations@tenkara.ai on the operations@trytenkara.com
+            // account). An exact from==account.email check classifies those
+            // sent copies as INBOUND mail from a stranger — which forked
+            // duplicate conversations and could fire message.received
+            // webhooks / assignee notifications for our own outgoing mail.
+            // Gmail's SENT label is authoritative regardless of From alias.
+            const isOutbound =
+              (msgData.labelIds || []).includes("SENT") ||
+              fromEmail === account.email.toLowerCase();
 
             const toAddresses = headers.to || "";
             const ccAddresses = headers.cc || "";
@@ -510,6 +520,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             // fragmented one thread into several conversations whenever the
             // subject drifted; threadId-first prevents that. Subject is only a
             // fallback for messages that arrive without a usable threadId.
+            let matchedByThreadId = false;
             const gmailThreadId = msgData.threadId
               ? `gmail:${msgData.threadId}`
               : null;
@@ -521,6 +532,7 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 conversationId = t.merged_into
                   ? await resolveMergedInto(supabase, t.merged_into)
                   : t.id;
+                matchedByThreadId = true;
               }
             }
 
@@ -826,6 +838,31 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   })
                   .eq("id", local.id);
                 reconciledMessageId = local.id;
+              }
+            }
+
+            // ── Thread-anchor upgrade ─────────────────────────────────
+            // Conversations created by /api/send (compose/reply) are anchored
+            // to an RFC822 Message-ID; legacy ones to uid:. Match #1 (gmail
+            // threadId — the reliable, rename-immune key) can never hit
+            // those, so they depend forever on the subject fallback — and a
+            // conversation RENAME breaks that, orphaning the thread and
+            // forking duplicates (the "Libre mo ko starbucks" incident).
+            // Whenever a gmail message lands in a conversation that was NOT
+            // matched by threadId, upgrade its anchor to the gmail thread —
+            // guarded so an existing gmail: anchor is never overwritten
+            // (a subject-matched conversation on a DIFFERENT gmail thread
+            // keeps its own anchor). One-time per conversation; the
+            // .not() filter makes repeats a no-op.
+            if (conversationId && gmailThreadId && !matchedByThreadId) {
+              try {
+                await supabase
+                  .from("conversations")
+                  .update({ thread_id: gmailThreadId })
+                  .eq("id", conversationId)
+                  .not("thread_id", "like", "gmail:%");
+              } catch (anchorErr: any) {
+                console.error(`[gmail-sync] thread-anchor upgrade failed for ${conversationId}:`, anchorErr?.message);
               }
             }
 
