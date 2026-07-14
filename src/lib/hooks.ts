@@ -337,6 +337,59 @@ export function useConversationDetail(conversationId: string | null) {
   const [messages, setMessages] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
 
+  // Slice fetchers — each realtime event refreshes ONLY its own slice.
+  // Previously a single fetchDetail() re-downloaded EVERYTHING (including
+  // every message body in the thread) on ANY change — so a teammate merely
+  // viewing the conversation (which writes an activity_log row) made every
+  // open client re-download the full thread. That was the steady-state
+  // egress floor. Messages are the heavy slice; notes/tasks/activity are
+  // tiny and now refresh independently.
+  const fetchNotes = useCallback(async () => {
+    if (!conversationId) { setNotes([]); return; }
+    const { data, error } = await supabase
+      .from("notes")
+      .select("*, author:team_members(*)")
+      .eq("conversation_id", conversationId)
+      .order("created_at");
+    if (error) { console.error("Notes fetch error:", error); setNotes([]); }
+    else setNotes(data || []);
+  }, [conversationId]);
+
+  const fetchTasks = useCallback(async () => {
+    if (!conversationId) { setTasks([]); return; }
+    try {
+      const tasks = await fetchConversationTasks(conversationId);
+      setTasks(tasks || []);
+    } catch (e) {
+      console.error("Tasks fetch crashed:", e);
+      setTasks([]);
+    }
+  }, [conversationId]);
+
+  const fetchMessages = useCallback(async () => {
+    if (!conversationId) { setMessages([]); return; }
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("sent_at");
+    if (error) { console.error("Messages fetch error:", error); setMessages([]); }
+    else setMessages(data || []);
+  }, [conversationId]);
+
+  const fetchActivities = useCallback(async () => {
+    if (!conversationId) { setActivities([]); return; }
+    const { data, error } = await supabase
+      .from("activity_log")
+      .select("*, actor:team_members(id, name, initials, color)")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) { console.error("Activity fetch error:", error); setActivities([]); }
+    else setActivities(data || []);
+  }, [conversationId]);
+
+  // Full load (conversation open / manual refresh) — all four slices.
   const fetchDetail = useCallback(async () => {
     if (!conversationId) {
       setNotes([]);
@@ -345,75 +398,13 @@ export function useConversationDetail(conversationId: string | null) {
       setActivities([]);
       return;
     }
-
-    const results = await Promise.allSettled([
-      supabase
-        .from("notes")
-        .select("*, author:team_members(*)")
-        .eq("conversation_id", conversationId)
-        .order("created_at"),
-
-      fetchConversationTasks(conversationId),
-
-      supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("sent_at"),
-
-      supabase
-        .from("activity_log")
-        .select("*, actor:team_members(id, name, initials, color)")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: false })
-        .limit(100),
+    await Promise.allSettled([
+      fetchNotes(),
+      fetchTasks(),
+      fetchMessages(),
+      fetchActivities(),
     ]);
-
-    const [notesResult, tasksResult, messagesResult, activitiesResult] = results;
-
-    if (notesResult.status === "fulfilled") {
-      if (notesResult.value.error) {
-        console.error("Notes fetch error:", notesResult.value.error);
-        setNotes([]);
-      } else {
-        setNotes(notesResult.value.data || []);
-      }
-    } else {
-      console.error("Notes fetch crashed:", notesResult.reason);
-      setNotes([]);
-    }
-
-    if (tasksResult.status === "fulfilled") {
-      setTasks(tasksResult.value || []);
-    } else {
-      console.error("Tasks fetch crashed:", tasksResult.reason);
-      setTasks([]);
-    }
-
-    if (messagesResult.status === "fulfilled") {
-      if (messagesResult.value.error) {
-        console.error("Messages fetch error:", messagesResult.value.error);
-        setMessages([]);
-      } else {
-        setMessages(messagesResult.value.data || []);
-      }
-    } else {
-      console.error("Messages fetch crashed:", messagesResult.reason);
-      setMessages([]);
-    }
-
-    if (activitiesResult.status === "fulfilled") {
-      if (activitiesResult.value.error) {
-        console.error("Activity fetch error:", activitiesResult.value.error);
-        setActivities([]);
-      } else {
-        setActivities(activitiesResult.value.data || []);
-      }
-    } else {
-      console.error("Activity fetch crashed:", activitiesResult.reason);
-      setActivities([]);
-    }
-  }, [conversationId]);
+  }, [conversationId, fetchNotes, fetchTasks, fetchMessages, fetchActivities]);
 
   useEffect(() => {
     fetchDetail().catch((error) => console.error("Conversation detail fetch error:", error));
@@ -421,37 +412,39 @@ export function useConversationDetail(conversationId: string | null) {
 
     const channel = supabase
       .channel(`detail-${conversationId}`)
+      // Each event refreshes only its slice — a "Viewed" activity row no
+      // longer re-downloads every message body for every open client.
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "notes", filter: `conversation_id=eq.${conversationId}` },
-        () => fetchDetail()
+        () => fetchNotes()
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "tasks", filter: `conversation_id=eq.${conversationId}` },
-        () => fetchDetail()
+        () => fetchTasks()
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "task_assignees" },
-        () => fetchDetail()
+        () => fetchTasks()
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "messages", filter: `conversation_id=eq.${conversationId}` },
-        () => fetchDetail()
+        () => fetchMessages()
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "activity_log", filter: `conversation_id=eq.${conversationId}` },
-        () => fetchDetail()
+        () => fetchActivities()
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId, fetchDetail]);
+  }, [conversationId, fetchDetail, fetchNotes, fetchTasks, fetchMessages, fetchActivities]);
 
   return { notes, tasks, messages, activities, refetch: fetchDetail };
 }

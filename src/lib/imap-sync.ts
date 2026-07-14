@@ -763,8 +763,14 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                       .from("messages")
                       .update({
                         provider_message_id: `gmail:${msgId}`,
-                        body_html: bodyHtml || undefined,
-                        body_text: bodyText.slice(0, 5000) || undefined,
+                        // Deliberately NOT rewriting body_html/body_text here. The local
+                        // row was written by /api/send with the complete final body —
+                        // identical content to the synced copy. Rewriting a TOASTed value
+                        // creates a full dead copy of the body on every reconcile (2x
+                        // write amplification), which — with autovacuum never triggering
+                        // on this table — grew messages TOAST to ~8.8 GB of ~95% dead
+                        // space and thrashed the 2 GB instance. Provider id + attachment
+                        // flag only.
                         has_attachments: hasAttachments,
                       })
                       .eq("id", sameAccountMatch.id);
@@ -794,8 +800,14 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   .from("messages")
                   .update({
                     provider_message_id: `gmail:${msgId}`,
-                    body_html: bodyHtml || undefined,
-                    body_text: bodyText.slice(0, 5000) || undefined,
+                    // Deliberately NOT rewriting body_html/body_text here. The local
+                    // row was written by /api/send with the complete final body —
+                    // identical content to the synced copy. Rewriting a TOASTed value
+                    // creates a full dead copy of the body on every reconcile (2x
+                    // write amplification), which — with autovacuum never triggering
+                    // on this table — grew messages TOAST to ~8.8 GB of ~95% dead
+                    // space and thrashed the 2 GB instance. Provider id + attachment
+                    // flag only.
                     has_attachments: hasAttachments,
                   })
                   .eq("id", existingLocal.id);
@@ -832,8 +844,14 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                   .from("messages")
                   .update({
                     provider_message_id: `gmail:${msgId}`,
-                    body_html: bodyHtml || undefined,
-                    body_text: bodyText.slice(0, 5000) || undefined,
+                    // Deliberately NOT rewriting body_html/body_text here. The local
+                    // row was written by /api/send with the complete final body —
+                    // identical content to the synced copy. Rewriting a TOASTed value
+                    // creates a full dead copy of the body on every reconcile (2x
+                    // write amplification), which — with autovacuum never triggering
+                    // on this table — grew messages TOAST to ~8.8 GB of ~95% dead
+                    // space and thrashed the 2 GB instance. Provider id + attachment
+                    // flag only.
                     has_attachments: hasAttachments,
                   })
                   .eq("id", local.id);
