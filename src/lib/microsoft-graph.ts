@@ -165,9 +165,25 @@ export async function sendGraphEmail(
   body: string,
   cc?: string,
   attachments?: { name: string; type: string; data: string }[],
-  inlineAttachments?: { cid: string; content: Buffer; contentType: string; filename: string }[]
+  inlineAttachments?: { cid: string; content: Buffer; contentType: string; filename: string }[],
+  replyToInternetMessageId?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const token = await getGraphTokenForEmail(fromEmail);
+
+  // Threaded reply first (see sendGraphReplyViaToken): /sendMail cannot set
+  // In-Reply-To, so when the caller knows which message is being replied
+  // to, go through createReply. Any failure falls through to the regular
+  // sendMail below — sent-but-unthreaded beats not sent.
+  if (replyToInternetMessageId) {
+    const replyRes = await sendGraphReplyViaToken(
+      token,
+      `users/${fromEmail}`,
+      replyToInternetMessageId,
+      { subject, bodyHtml: body.replace(/\n/g, "<br>"), to, cc, attachments, inlineAttachments }
+    );
+    if (replyRes.success) return { success: true };
+    console.error("[sendGraphEmail] threaded reply failed, falling back to sendMail:", replyRes.error);
+  }
 
   const toRecipients = to.split(",").map((addr) => ({
     emailAddress: { address: addr.trim() },
@@ -736,4 +752,120 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
   }
 
   return result;
+}
+// ── Send a threaded reply via Graph createReply ─────────────────────────
+//
+// Graph's /sendMail cannot set In-Reply-To / References (custom
+// internetMessageHeaders must start with "x-"), so a "reply" sent through
+// it is a brand-new thread for every recipient. The only way to send a
+// properly-threaded reply through Graph is the draft flow:
+//   resolve internetMessageId → graph id → createReply → PATCH the draft
+//   (subject/body/recipients) → add attachments → send.
+//
+// userSegment is "me" (delegated / microsoft_oauth tokens) or
+// "users/<email>" (client-credential tokens). Returns { success:false }
+// on any failure so callers can FALL BACK to the untheaded sendMail path —
+// a sent-but-unthreaded email beats a failed send.
+export async function sendGraphReplyViaToken(
+  token: string,
+  userSegment: string,
+  replyToInternetMessageId: string,
+  opts: {
+    subject: string;
+    bodyHtml: string;
+    to: string;
+    cc?: string;
+    bcc?: string;
+    attachments?: { name: string; type: string; data: string }[];
+    inlineAttachments?: { cid: string; content: Buffer; contentType: string; filename: string }[];
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const seg = userSegment.replace(/\/+$/, "");
+    // 1. Resolve the Graph message id from the RFC822 internetMessageId
+    //    (that's what sync stores in provider_message_id as "ms:<id>").
+    const filterId = replyToInternetMessageId.replace(/'/g, "''");
+    const findRes = await fetch(
+      `${GRAPH_BASE}/${seg}/messages?$filter=internetMessageId eq '${encodeURIComponent(filterId)}'&$select=id`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!findRes.ok) return { success: false, error: `resolve failed (${findRes.status})` };
+    const found = await findRes.json();
+    const graphId: string | undefined = found?.value?.[0]?.id;
+    if (!graphId) return { success: false, error: "reply target not found in mailbox" };
+
+    // 2. Create the reply draft (inherits ConversationId + References).
+    const createRes = await fetch(`${GRAPH_BASE}/${seg}/messages/${graphId}/createReply`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!createRes.ok) return { success: false, error: `createReply failed (${createRes.status})` };
+    const draft = await createRes.json();
+    const draftId: string | undefined = draft?.id;
+    if (!draftId) return { success: false, error: "createReply returned no draft id" };
+
+    // 3. Overwrite the draft with our content and recipients. Our body
+    //    already contains the app-composed quoted history, so we replace
+    //    Graph's auto-quoted body entirely.
+    const mkRecipients = (s?: string) =>
+      (s || "")
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean)
+        .map((address) => ({ emailAddress: { address } }));
+    const patchBody: any = {
+      subject: opts.subject,
+      body: { contentType: "HTML", content: opts.bodyHtml },
+      toRecipients: mkRecipients(opts.to),
+    };
+    const ccR = mkRecipients(opts.cc);
+    const bccR = mkRecipients(opts.bcc);
+    if (ccR.length > 0) patchBody.ccRecipients = ccR;
+    if (bccR.length > 0) patchBody.bccRecipients = bccR;
+
+    const patchRes = await fetch(`${GRAPH_BASE}/${seg}/messages/${draftId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(patchBody),
+    });
+    if (!patchRes.ok) return { success: false, error: `draft patch failed (${patchRes.status})` };
+
+    // 4. Attachments (regular + inline CID) one POST each.
+    const allAtts = [
+      ...((opts.attachments || []).map((a) => ({
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: a.name,
+        contentType: a.type || "application/octet-stream",
+        contentBytes: a.data,
+      }))),
+      ...((opts.inlineAttachments || []).map((c) => ({
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: c.filename,
+        contentType: c.contentType,
+        contentBytes: c.content.toString("base64"),
+        isInline: true,
+        contentId: c.cid,
+      }))),
+    ];
+    for (const att of allAtts) {
+      const attRes = await fetch(`${GRAPH_BASE}/${seg}/messages/${draftId}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(att),
+      });
+      if (!attRes.ok) return { success: false, error: `attachment upload failed (${attRes.status})` };
+    }
+
+    // 5. Send.
+    const sendRes = await fetch(`${GRAPH_BASE}/${seg}/messages/${draftId}/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!sendRes.ok) return { success: false, error: `send failed (${sendRes.status})` };
+
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || "unknown" };
+  }
 }

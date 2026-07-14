@@ -156,10 +156,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Get account SMTP settings
+    // Get account SMTP settings. Explicit columns only — never select("*")
+    // on email_accounts (Sierra token exposure rule). This route is the
+    // sanctioned consumer of send credentials, but it still names them.
     const { data: account, error: accErr } = await supabase
       .from("email_accounts")
-      .select("*")
+      .select("id, email, name, provider, oauth_refresh_token, microsoft_client_id, signature, signature_enabled, smtp_host, smtp_port, smtp_user, smtp_password, imap_user, imap_password")
       .eq("id", accountId)
       .single();
 
@@ -252,10 +254,75 @@ export async function POST(req: NextRequest) {
 
     console.log(`[send] HTML size: ${finalBody.length} chars, ${cidAttachments.length} inline images extracted`);
 
+    // ── Reply threading context ────────────────────────────────────────
+    // Derive the RFC822 Message-ID of the message being replied to so the
+    // outgoing email carries In-Reply-To / References (SMTP path) or goes
+    // through Graph's createReply flow (Microsoft paths). Without these,
+    // every "reply" we send is a brand-new thread for the recipient —
+    // Outlook splits on every reply, and Gmail splits whenever the subject
+    // drifts (e.g. internally renamed conversations). Best-effort: any
+    // failure here sends the email unthreaded rather than not at all.
+    let replyRfc822Id: string | null = null;   // usable directly
+    let replyGmailApiId: string | null = null; // needs one metadata call (SMTP branch)
+    if (isReply && conversationId) {
+      try {
+        const { data: lastPidMsg } = await supabase
+          .from("messages")
+          .select("provider_message_id, subject")
+          .eq("conversation_id", conversationId)
+          .not("provider_message_id", "is", null)
+          .order("sent_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const pid = String(lastPidMsg?.provider_message_id || "");
+        if (pid.startsWith("gmail:")) replyGmailApiId = pid.slice(6);
+        else if (pid.startsWith("ms:")) replyRfc822Id = pid.slice(3);
+        else if (/^<.+@.+>$/.test(pid)) replyRfc822Id = pid;
+        // else: legacy "<accountId>:<uid>" IMAP shape — no Message-ID
+        // derivable from the DB; send unthreaded.
+
+        // Server-side subject fallback fix: when the client didn't pass a
+        // subject, base it on the LATEST MESSAGE's subject, not the
+        // conversation title — titles get renamed internally (e.g.
+        // "Supplier | Email: Daisy | Call: Jai") and leaking them into the
+        // outgoing subject splits the thread on the supplier's side.
+        if (!body.subject && lastPidMsg?.subject) {
+          const base = String(lastPidMsg.subject).trim();
+          if (base) subject = /^re:\s*/i.test(base) ? base : `Re: ${base}`;
+        }
+      } catch (e: any) {
+        console.error("[send] threading context lookup failed:", e?.message);
+      }
+    }
+
     if (account.provider === "microsoft_oauth" && account.oauth_refresh_token) {
       // Send via Graph API with delegated token
       const { refreshMicrosoftToken } = await import("@/lib/microsoft-oauth");
       const token = await refreshMicrosoftToken(account.id);
+
+      // Threaded reply first: Graph /sendMail cannot set In-Reply-To, so
+      // replies go through the createReply draft flow when we know the
+      // RFC822 id of the message being replied to. Falls back to the
+      // regular sendMail below on any failure (sent-but-unthreaded beats
+      // not sent).
+      let graphReplySent = false;
+      if (replyRfc822Id) {
+        const { sendGraphReplyViaToken } = await import("@/lib/microsoft-graph");
+        const replyRes = await sendGraphReplyViaToken(token, "me", replyRfc822Id, {
+          subject,
+          bodyHtml: finalBody,
+          to,
+          cc: cc || undefined,
+          bcc: bcc || undefined,
+          attachments: body.attachments || undefined,
+          inlineAttachments: cidAttachments.length > 0 ? cidAttachments : undefined,
+        });
+        if (replyRes.success) {
+          graphReplySent = true;
+        } else {
+          console.error("[send] graph threaded reply failed, falling back to sendMail:", replyRes.error);
+        }
+      }
 
       const toRecipients = to.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } }));
       const ccRecipients = cc ? cc.split(",").map((addr: string) => ({ emailAddress: { address: addr.trim() } })) : [];
@@ -291,15 +358,17 @@ export async function POST(req: NextRequest) {
         ];
       }
 
-      const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-        body: JSON.stringify(graphBody),
-      });
+      if (!graphReplySent) {
+        const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify(graphBody),
+        });
 
-      if (!sendRes.ok) {
-        const err = await sendRes.json().catch(() => ({}));
-        return NextResponse.json({ error: "Graph send failed: " + (err.error?.message || sendRes.statusText) }, { status: 500 });
+        if (!sendRes.ok) {
+          const err = await sendRes.json().catch(() => ({}));
+          return NextResponse.json({ error: "Graph send failed: " + (err.error?.message || sendRes.statusText) }, { status: 500 });
+        }
       }
 
       messageId = "graph-oauth:" + Date.now();
@@ -312,7 +381,8 @@ export async function POST(req: NextRequest) {
         finalBody,
         cc || undefined,
         body.attachments || undefined,
-        cidAttachments.length > 0 ? cidAttachments : undefined
+        cidAttachments.length > 0 ? cidAttachments : undefined,
+        replyRfc822Id || undefined
       );
 
       if (!graphResult.success) {
@@ -329,12 +399,41 @@ export async function POST(req: NextRequest) {
         user: account.smtp_user || account.imap_user || account.email,
       };
 
+      // Threading headers for the outgoing reply. ms:/rfc822-shaped ids are
+      // usable directly; gmail: ids need one metadata call to fetch the
+      // RFC822 Message-ID (+ existing References chain). Best-effort.
+      let smtpInReplyTo: string | undefined = replyRfc822Id || undefined;
+      let smtpReferences: string | undefined = replyRfc822Id || undefined;
+
       if (account.provider === "google_oauth" && account.oauth_refresh_token) {
         // Use XOAUTH2 for Google OAuth accounts
         const { refreshGoogleToken, buildXOAuth2Token } = await import("@/lib/google-oauth");
         const accessToken = await refreshGoogleToken(account.id);
         smtpAuth.type = "OAuth2";
         smtpAuth.accessToken = accessToken;
+
+        if (!smtpInReplyTo && replyGmailApiId) {
+          try {
+            const gm = await fetch(
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${replyGmailApiId}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            if (gm.ok) {
+              const meta = await gm.json();
+              const hs: any[] = meta?.payload?.headers || [];
+              const mid = hs.find((h) => String(h.name || "").toLowerCase() === "message-id")?.value;
+              const refs = hs.find((h) => String(h.name || "").toLowerCase() === "references")?.value;
+              if (mid) {
+                smtpInReplyTo = mid;
+                smtpReferences = refs ? `${refs} ${mid}` : mid;
+              }
+            } else {
+              console.error(`[send] gmail Message-ID metadata fetch failed (${gm.status}) — sending unthreaded`);
+            }
+          } catch (e: any) {
+            console.error("[send] gmail Message-ID metadata fetch error:", e?.message);
+          }
+        }
       } else {
         smtpAuth.pass = account.smtp_password || account.imap_password;
       }
@@ -358,6 +457,8 @@ export async function POST(req: NextRequest) {
         cc: cc || undefined,
         bcc: bcc || undefined,
         subject,
+        inReplyTo: smtpInReplyTo,
+        references: smtpReferences,
         text: plainContent,
         html: htmlContent,
         attachments: [

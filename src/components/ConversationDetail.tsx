@@ -1384,7 +1384,16 @@ export default function ConversationDetail({
       }
     }
     if (!replySubject) {
-      const base = (convo.subject || "").trim();
+      // Base the outgoing subject on the LATEST MESSAGE, not the
+      // conversation title. Titles get renamed internally (the
+      // "Supplier | Email: X | Call: Y" convention) and leaking a renamed
+      // title into the email subject splits the thread on the supplier's
+      // side — Gmail threads by References + subject similarity.
+      const lastMsgSubject =
+        messages.length > 0
+          ? String(messages[messages.length - 1]?.subject || "").trim()
+          : "";
+      const base = (lastMsgSubject || convo.subject || "").trim();
       const prefixed = base.match(/^re:\s*/i) ? base : `Re: ${base}`;
       setReplySubject(prefixed);
     }
