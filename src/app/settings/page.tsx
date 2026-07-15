@@ -605,7 +605,9 @@ function AccountsTab({ onConnect }: { onConnect: () => void }) {
   const fetchAccounts = () => {
     getSupabase()
       .from("email_accounts")
-      .select("*")
+      // Explicit non-secret columns only (credential columns are revoked
+      // from the browser at the database level; select("*") would error).
+      .select("id, email, name, provider, icon, color, is_active, signature, signature_enabled, last_sync_at, created_at, imap_host, imap_port, imap_user, smtp_host, smtp_port, smtp_user")
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         setAccounts(data || []);

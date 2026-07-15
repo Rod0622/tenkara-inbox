@@ -74,9 +74,14 @@ export function useEmailAccounts(currentUserEmail?: string | null) {
   useEffect(() => {
     const load = async () => {
       // Fetch all active accounts
+      // Explicit columns only — NEVER select("*") on email_accounts from the
+      // BROWSER: it ships every mailbox's OAuth refresh tokens and SMTP/IMAP
+      // passwords to the client (and, with the anon key public, to anyone).
+      // Credential columns are also revoked at the database level, so a
+      // select("*") here would fail outright.
       const { data: allAccounts, error } = await supabase
         .from("email_accounts")
-        .select("*")
+        .select("id, email, name, provider, icon, color, is_active, signature, signature_enabled, last_sync_at, created_at")
         .eq("is_active", true)
         .order("created_at");
 
@@ -429,9 +434,15 @@ export function useConversationDetail(conversationId: string | null) {
         { event: "*", schema: "inbox", table: "task_assignees" },
         () => fetchTasks()
       )
+      // messages is deliberately NOT subscribed: it was removed from the
+      // realtime publication (full rows — including body_html — streamed to
+      // every subscriber, a cross-brand exposure and the largest egress
+      // source). The sync updates the conversation row (preview,
+      // last_message_at) on every new message, so the thread refreshes off
+      // that row's UPDATE instead — tiny payloads, same liveness.
       .on(
         "postgres_changes",
-        { event: "*", schema: "inbox", table: "messages", filter: `conversation_id=eq.${conversationId}` },
+        { event: "UPDATE", schema: "inbox", table: "conversations", filter: `id=eq.${conversationId}` },
         () => fetchMessages()
       )
       .on(
