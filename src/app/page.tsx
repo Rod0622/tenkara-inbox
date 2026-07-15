@@ -259,7 +259,7 @@ export default function InboxPage() {
               primary_contact_name,
               primary_contact_email,
               primary_contact_is_manual,
-              assignee:team_members!conversations_assignee_id_fkey(*),
+              assignee:team_members!conversations_assignee_id_fkey(id, name, email, initials, color, avatar_url, role),
               labels:conversation_labels(label_id, label:labels(*))
             `)
             .in("id", missing)

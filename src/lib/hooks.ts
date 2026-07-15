@@ -217,7 +217,7 @@ export function useConversations(accountId: string | null) {
         primary_contact_name,
         primary_contact_email,
         primary_contact_is_manual,
-        assignee:team_members!conversations_assignee_id_fkey(*),
+        assignee:team_members!conversations_assignee_id_fkey(id, name, email, initials, color, avatar_url, role),
         labels:conversation_labels(
           label_id,
           label:labels(*)
@@ -356,7 +356,7 @@ export function useConversationDetail(conversationId: string | null) {
     if (!conversationId) { setNotes([]); return; }
     const { data, error } = await supabase
       .from("notes")
-      .select("*, author:team_members(*)")
+      .select("*, author:team_members(id, name, email, initials, color, avatar_url, role)")
       .eq("conversation_id", conversationId)
       .order("created_at");
     if (error) { console.error("Notes fetch error:", error); setNotes([]); }

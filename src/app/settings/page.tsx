@@ -3544,7 +3544,7 @@ function UserGroupsTab() {
 
   const fetchGroups = async () => {
     const [groupsRes, membersRes] = await Promise.all([
-      getSupabase().from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(*))").order("created_at"),
+      getSupabase().from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(id, name, email, initials, color, avatar_url, role))").order("created_at"),
       getSupabase().from("team_members").select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id").eq("is_active", true).order("name"),
     ]);
     setGroups(groupsRes.data || []);
