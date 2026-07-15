@@ -12,6 +12,7 @@ import {
   CheckCircle, AlertCircle, RefreshCw, Settings as SettingsIcon,
   Globe, Loader2, Eye, EyeOff, X, Zap, GripVertical, ChevronDown,
   FileSignature, Check, ClipboardList, ClipboardCheck, Download, ChevronLeft, Sparkles, Paperclip, FileText, Plug, Database,
+  Activity, ExternalLink,
   Key, Copy, AlertTriangle
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
@@ -49,6 +50,31 @@ const PROVIDERS = [
 ];
 
 // ── Settings tabs ────────────────────────────────────
+const SYNC_AUDITOR_URL = "https://sync-auditor.vercel.app/";
+
+function SyncAuditorTab() {
+  return (
+    <div className="p-8 max-w-2xl">
+      <div className="flex items-center gap-2.5 mb-1">
+        <Activity size={20} className="text-[var(--text-secondary)]" />
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Sync Auditor</h2>
+      </div>
+      <p className="text-sm text-[var(--text-secondary)] mb-6">
+        Diagnostic tool for reviewing mailbox sync health across accounts. Opens in a new tab.
+      </p>
+      <a
+        href={SYNC_AUDITOR_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
+      >
+        <ExternalLink size={16} />
+        Open Sync Auditor
+      </a>
+    </div>
+  );
+}
+
 const TABS = [
   { id: "accounts", label: "Accounts", icon: Mail },
   { id: "team", label: "Team Members", icon: Users },
@@ -61,6 +87,7 @@ const TABS = [
   { id: "templates", label: "Email Templates", icon: FileSignature },
   { id: "kara", label: "Kara (AI Assistant)", icon: Sparkles },
   { id: "data_tools", label: "Data Tools", icon: Database },
+  { id: "sync_auditor", label: "Sync Auditor", icon: Activity },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "api_tokens", label: "API Tokens", icon: Key },
   { id: "supplier_statuses", label: "Supplier Statuses", icon: Tag },
@@ -130,6 +157,7 @@ export default function SettingsPage() {
         {activeTab === "templates" && <EmailTemplatesTab />}
         {activeTab === "kara" && <KaraTab />}
         {activeTab === "data_tools" && <PhoneBackfillTab />}
+        {activeTab === "sync_auditor" && <SyncAuditorTab />}
         {activeTab === "integrations" && <IntegrationsTab />}
         {activeTab === "api_tokens" && <ApiTokensTab />}
         {activeTab === "supplier_statuses" && <SupplierStatusesTab />}
