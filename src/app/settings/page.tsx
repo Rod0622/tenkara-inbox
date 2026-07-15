@@ -1289,7 +1289,7 @@ function TeamTab() {
 
   const fetchMembers = async () => {
     const [membersRes, accountsRes, accessRes] = await Promise.all([
-      getSupabase().from("team_members").select("*").order("created_at"),
+      getSupabase().from("team_members").select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id").order("created_at"),
       getSupabase().from("email_accounts").select("id, name, email, icon, color").eq("is_active", true).order("created_at"),
       getSupabase().from("account_access").select("*"),
     ]);
@@ -2362,7 +2362,7 @@ function RulesTab() {
     Promise.all([
       fetch("/api/rules").then((r) => r.json()),
       getSupabase().from("labels").select("*").order("sort_order"),
-      getSupabase().from("team_members").select("*").eq("is_active", true),
+      getSupabase().from("team_members").select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id").eq("is_active", true),
       getSupabase().from("folders").select("*").order("sort_order"),
       getSupabase().from("email_accounts").select("id, name, email").eq("is_active", true),
       getSupabase().from("user_groups").select("id, name").order("created_at"),
@@ -3545,7 +3545,7 @@ function UserGroupsTab() {
   const fetchGroups = async () => {
     const [groupsRes, membersRes] = await Promise.all([
       getSupabase().from("user_groups").select("*, user_group_members(team_member_id, team_member:team_members(*))").order("created_at"),
-      getSupabase().from("team_members").select("*").eq("is_active", true).order("name"),
+      getSupabase().from("team_members").select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id").eq("is_active", true).order("name"),
     ]);
     setGroups(groupsRes.data || []);
     setTeamMembers(membersRes.data || []);

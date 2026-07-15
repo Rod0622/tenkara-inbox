@@ -171,7 +171,7 @@ export default function MyPerformancePage() {
     const sb = createBrowserClient();
 
     // Find current user
-    const { data: me } = await sb.from("team_members").select("*").eq("email", session!.user!.email!).single();
+    const { data: me } = await sb.from("team_members").select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id").eq("email", session!.user!.email!).single();
     if (!me) { setLoading(false); return; }
     setUser(me);
 

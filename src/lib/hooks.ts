@@ -51,7 +51,10 @@ export function useTeamMembers() {
   useEffect(() => {
     supabase
       .from("team_members")
-      .select("*")
+      // Explicit non-secret columns only — NEVER select("*") on team_members
+      // from the browser: it exposes password_hash and reset/invite tokens.
+      // Those columns are also revoked at the DB level, so "*" would error.
+      .select("id, email, name, initials, color, avatar_url, role, department, is_active, has_call_skillset, accepted_at, created_at, updated_at, preferred_quo_phone_number_id")
       .order("created_at")
       .then(({ data, error }) => {
         if (error) {
