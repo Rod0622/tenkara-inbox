@@ -3398,16 +3398,14 @@ export default function ConversationDetail({
 
   return (
     <div className="w-full h-full flex flex-col bg-[var(--bg)] overflow-hidden">
-      {/* Header reflows by WRAPPING, not by a pixel-breakpoint flip. The
-          previous `flex-col 2xl:flex-row` + `order-first 2xl:order-none`
-          pairing hard-switched the whole arrangement at 1536 CSS-px — which
-          browser zoom and monitor resolution both cross, causing the header
-          to visibly jump/reposition at certain zoom levels. Now it's always
-          a row that wraps: the title/contact column (flex-1 min-w-0) shrinks
-          and truncates, and the action cluster drops to the next line only
-          when there genuinely isn't room — smoothly, at any zoom or width. */}
-      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row flex-wrap items-start gap-3">
-        <div className="flex-1 min-w-0 basis-[280px]">
+      {/* Header is a single, non-wrapping row: the title/contact column
+          (flex-1 min-w-0) absorbs all width changes by truncating, and the
+          action cluster (shrink-0) holds its position top-right at every
+          zoom / resolution. No flex-wrap and no pixel-breakpoint flip — so
+          the action cluster never jumps to a second line the way it did at
+          ~80% zoom, and nothing repositions as the viewport width changes. */}
+      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row items-start gap-3">
+        <div className="flex-1 min-w-0">
           <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
             {editingSubject ? (
               <input
@@ -3778,7 +3776,7 @@ export default function ConversationDetail({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap justify-end shrink-0 ml-auto">
+        <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
           <AssignDropdown
             currentAssignee={assignee}
             currentUser={currentUser}
