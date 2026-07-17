@@ -3408,18 +3408,6 @@ export default function ConversationDetail({
           when there genuinely isn't room — smoothly, at any zoom or width. */}
       <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row flex-wrap items-start gap-3">
         <div className="flex-1 min-w-0 basis-[280px]">
-          {/* Phase 4f: editorial eyebrow — real metadata, not filler */}
-          <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-1 truncate">
-            THREAD
-            <span className="mx-1.5">·</span>
-            <span className="tabular-nums">{messages.length}</span> {messages.length === 1 ? "MESSAGE" : "MESSAGES"}
-            <span className="mx-1.5">·</span>
-            {assignee ? (
-              <>ASSIGNED TO <span className="text-[var(--text-secondary)]">{assignee.name.toUpperCase()}</span></>
-            ) : (
-              "UNASSIGNED"
-            )}
-          </div>
           <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
             {editingSubject ? (
               <input
