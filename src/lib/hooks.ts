@@ -882,7 +882,10 @@ export function useSupplierAccountStatuses() {
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(fetchAll, 120000);
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchAll();
+    }, 120000);
     return () => clearInterval(id);
   }, [fetchAll]);
 

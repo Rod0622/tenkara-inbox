@@ -148,6 +148,9 @@ export default function PendingOutreachPanel({
     setLoading(true);
     fetchDrafts();
     const interval = setInterval(() => {
+      // Skip polling while the tab is hidden — background tabs were a large
+      // share of egress. Active tab is unaffected; refocus refetches below.
+      if (typeof document !== "undefined" && document.hidden) return;
       if (!inflightRef.current) fetchDrafts();
     }, 15000);
     const onFocus = () => {

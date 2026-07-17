@@ -37,7 +37,7 @@ export default function SidebarTeamList({
   useEffect(() => {
     fetchMembers();
     // Refresh team OOO status every 60s
-    const id = setInterval(fetchMembers, 60000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchMembers(); }, 60000);
     return () => clearInterval(id);
   }, []);
 

@@ -272,7 +272,7 @@ export default function TeamChat({
   useEffect(() => {
     if (!conversationId) return;
     fetchComments();
-    const id = setInterval(fetchComments, 20000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchComments(); }, 20000);
     return () => clearInterval(id);
   }, [conversationId]);
 

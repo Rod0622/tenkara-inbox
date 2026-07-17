@@ -271,7 +271,7 @@ export default function InboxPage() {
       } catch (_e) {}
     };
     fetchWatching();
-    const id = setInterval(fetchWatching, 60000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchWatching(); }, 60000);
     return () => clearInterval(id);
   }, [currentUser?.id, conversations]);
 

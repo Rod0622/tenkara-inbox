@@ -200,7 +200,9 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 15000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchNotifs();
+    }, 15000);
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -216,7 +218,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchOwnOOO();
-    const id = setInterval(fetchOwnOOO, 60000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchOwnOOO(); }, 60000);
     return () => clearInterval(id);
   }, [currentUser?.id]);
 
@@ -232,7 +234,7 @@ export default function Sidebar({
       } catch (_e) {}
     };
     fetchWatching();
-    const id = setInterval(fetchWatching, 30000);
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchWatching(); }, 30000);
     return () => clearInterval(id);
   }, [currentUser?.id]);
 
