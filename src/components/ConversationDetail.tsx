@@ -3411,8 +3411,14 @@ export default function ConversationDetail({
           wrapper (order-last, w-full) drops below — so badges get the entire
           header width instead of being crushed beside the action cluster,
           which is what hid them at 75% zoom. */}
-      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row flex-wrap items-start gap-x-3 gap-y-2">
-        <div className="flex-1 min-w-0 order-1">
+      {/* Header as an explicit vertical stack — each band on its own line at
+          every zoom (no flex-wrap, so nothing shares a line when the viewport
+          widens on zoom-out): (1) action cluster, right-aligned; (2) subject,
+          full width, truncates; (3) metadata band, full width, badges wrap.
+          This is what keeps the subject from jumping up beside the action
+          buttons at <100% zoom. */}
+      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-col gap-2">
+        <div className="min-w-0 order-1">
           <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight">
             {editingSubject ? (
               <input
@@ -3789,7 +3795,7 @@ export default function ConversationDetail({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
+        <div className="flex items-center gap-2 justify-end order-none w-full">
           <AssignDropdown
             currentAssignee={assignee}
             currentUser={currentUser}
