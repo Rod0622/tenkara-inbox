@@ -3404,9 +3404,16 @@ export default function ConversationDetail({
           zoom / resolution. No flex-wrap and no pixel-breakpoint flip — so
           the action cluster never jumps to a second line the way it did at
           ~80% zoom, and nothing repositions as the viewport width changes. */}
-      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight mb-1.5">
+      {/* Header: subject + action cluster on line 1; the metadata band
+          (contact, participant badges, account/Labels/Move) wraps to its
+          own FULL-WIDTH line 2. Achieved with flex-wrap + order: the left
+          column holds only the subject on line 1, and a full-width metadata
+          wrapper (order-last, w-full) drops below — so badges get the entire
+          header width instead of being crushed beside the action cluster,
+          which is what hid them at 75% zoom. */}
+      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row flex-wrap items-start gap-x-3 gap-y-2">
+        <div className="flex-1 min-w-0 order-1">
+          <div className="text-xl font-normal font-serif text-[var(--text-primary)] truncate tracking-tight">
             {editingSubject ? (
               <input
                 type="text"
@@ -3439,7 +3446,13 @@ export default function ConversationDetail({
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scroll-row text-xs">
+        </div>
+
+        {/* Full-width metadata band — order-last + w-full forces it onto its
+            own line below the subject/action row, with the entire header
+            width to lay out badges horizontally. */}
+        <div className="order-last w-full flex flex-col gap-1.5">
+          <div className="flex items-center gap-2 flex-wrap text-xs">
             {/* Primary contact display — clickable dropdown.
                 Shows manual override if set, otherwise the original sender. */}
             {(() => {
@@ -3630,7 +3643,7 @@ export default function ConversationDetail({
             const shown = participants.slice(0, MAX_SHOW);
             const extra = participants.length - MAX_SHOW;
             return (
-              <div className="flex items-center gap-1.5 mt-1 flex-nowrap overflow-x-auto scroll-row">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <Users size={11} className="text-[var(--text-muted)] shrink-0" />
                 {shown.map((p, i) => {
                   const wasCopied = copiedEmail === p.email;
@@ -3741,7 +3754,7 @@ export default function ConversationDetail({
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 mt-1.5 flex-nowrap overflow-x-auto scroll-row">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {sortLabelsForBadges(convo.labels || []).map(
               (cl) =>
                 cl.label && (
