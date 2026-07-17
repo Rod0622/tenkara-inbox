@@ -184,3 +184,29 @@ body {
 [data-theme="dark"] .email-html-body hr {
   border-color: #e5e7eb;
 }
+
+
+/* Horizontal metadata rows (conversation header): stay on one line and
+   scroll sideways when the pane is narrow / zoomed in, instead of wrapping
+   to multiple lines. Children keep their intrinsic size. Thin scrollbar,
+   subtle until hover. */
+.scroll-row > * {
+  flex-shrink: 0;
+}
+.scroll-row {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-row:hover {
+  scrollbar-color: var(--border) transparent;
+}
+.scroll-row::-webkit-scrollbar {
+  height: 6px;
+}
+.scroll-row::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+.scroll-row:hover::-webkit-scrollbar-thumb {
+  background: var(--border);
+}

@@ -3439,7 +3439,7 @@ export default function ConversationDetail({
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 flex-wrap text-xs">
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scroll-row text-xs">
             {/* Primary contact display — clickable dropdown.
                 Shows manual override if set, otherwise the original sender. */}
             {(() => {
@@ -3630,7 +3630,7 @@ export default function ConversationDetail({
             const shown = participants.slice(0, MAX_SHOW);
             const extra = participants.length - MAX_SHOW;
             return (
-              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <div className="flex items-center gap-1.5 mt-1 flex-nowrap overflow-x-auto scroll-row">
                 <Users size={11} className="text-[var(--text-muted)] shrink-0" />
                 {shown.map((p, i) => {
                   const wasCopied = copiedEmail === p.email;
@@ -3741,7 +3741,7 @@ export default function ConversationDetail({
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-1.5 flex-nowrap overflow-x-auto scroll-row">
             {sortLabelsForBadges(convo.labels || []).map(
               (cl) =>
                 cl.label && (
