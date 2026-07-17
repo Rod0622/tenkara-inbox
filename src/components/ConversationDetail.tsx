@@ -3398,8 +3398,16 @@ export default function ConversationDetail({
 
   return (
     <div className="w-full h-full flex flex-col bg-[var(--bg)] overflow-hidden">
-      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-col 2xl:flex-row 2xl:items-start gap-3">
-        <div className="flex-1 min-w-0">
+      {/* Header reflows by WRAPPING, not by a pixel-breakpoint flip. The
+          previous `flex-col 2xl:flex-row` + `order-first 2xl:order-none`
+          pairing hard-switched the whole arrangement at 1536 CSS-px — which
+          browser zoom and monitor resolution both cross, causing the header
+          to visibly jump/reposition at certain zoom levels. Now it's always
+          a row that wraps: the title/contact column (flex-1 min-w-0) shrinks
+          and truncates, and the action cluster drops to the next line only
+          when there genuinely isn't room — smoothly, at any zoom or width. */}
+      <div className="px-5 py-3 border-b border-[var(--border)] flex flex-row flex-wrap items-start gap-3">
+        <div className="flex-1 min-w-0 basis-[280px]">
           {/* Phase 4f: editorial eyebrow — real metadata, not filler */}
           <div className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-muted)] mb-1 truncate">
             THREAD
@@ -3782,7 +3790,7 @@ export default function ConversationDetail({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap justify-end order-first 2xl:order-none 2xl:shrink-0 2xl:flex-nowrap">
+        <div className="flex items-center gap-2 flex-wrap justify-end shrink-0 ml-auto">
           <AssignDropdown
             currentAssignee={assignee}
             currentUser={currentUser}
