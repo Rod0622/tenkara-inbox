@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, Tag } from "lucide-react";
-import { useLabels } from "@/lib/hooks";
+import { useLabels, useFolders } from "@/lib/hooks";
 
 export default function LabelPicker({
   conversationId,
@@ -16,6 +16,7 @@ export default function LabelPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const allLabels = useLabels();
+  const allFolders = useFolders();
   const ref = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
@@ -50,8 +51,65 @@ export default function LabelPicker({
     }
   }, [open]);
 
+  // A stage label is a TOP-LEVEL label whose name matches a TOP-LEVEL,
+  // non-system folder (every folder auto-creates a same-named mirror label).
+  // Brand/account labels are top-level but don't match a folder, so they are
+  // not stages and can co-exist. Nested labels have a parent and co-exist too.
+  const stageLabelNames = useMemo(() => {
+    const folderNames = new Set(
+      (allFolders as any[])
+        .filter((f: any) => !f.parent_folder_id) // all TOP-LEVEL folders (incl. system Inbox)
+        .map((f: any) => String(f.name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    // Include system stage-like folders (Inbox) too — Inbox is a system folder
+    // but is a legitimate stage. We include ALL top-level folder names; brand
+    // labels simply won't match any folder name so they're naturally excluded.
+    return folderNames;
+  }, [allFolders]);
+
+  const isStageLabelId = (labelId: string): boolean => {
+    const lbl = (allLabels as any[]).find((l: any) => l.id === labelId);
+    if (!lbl || lbl.parent_label_id) return false;
+    return stageLabelNames.has(String(lbl.name || "").trim().toLowerCase());
+  };
+
+  // The conversation's CURRENT stage label (if any) among its applied labels.
+  const currentStageLabel = (): any | null => {
+    for (const id of Array.from(localLabelIds)) {
+      const lbl = (allLabels as any[]).find((l: any) => l.id === id);
+      if (lbl && !lbl.parent_label_id && stageLabelNames.has(String(lbl.name || "").trim().toLowerCase())) {
+        return lbl;
+      }
+    }
+    return null;
+  };
+
   const toggleLabel = async (labelId: string) => {
     const add = !localLabelIds.has(labelId);
+
+    // ─── Stage-label swap confirmation ────────────────────────────────
+    // If the user is ADDING a stage label and the thread already has a
+    // DIFFERENT stage label, adding it will move the thread to the new stage
+    // and remove the old stage label + its sub-labels. Confirm first, since
+    // it's a destructive change to the pipeline position. On cancel, abort
+    // entirely (no optimistic tick). On confirm, we send swapStage:true and
+    // let the server perform the move+swap, then refetch to reconcile chips.
+    let swapStage = false;
+    if (add && isStageLabelId(labelId)) {
+      const existingStage = currentStageLabel();
+      const addedLbl = (allLabels as any[]).find((l: any) => l.id === labelId);
+      if (existingStage && existingStage.id !== labelId) {
+        const ok = window.confirm(
+          `This thread is in the "${existingStage.name}" stage.\n\n` +
+          `Adding "${addedLbl?.name || "this label"}" will remove "${existingStage.name}" ` +
+          `and its sub-labels, and move the thread to the "${addedLbl?.name || "new"}" stage.\n\n` +
+          `Continue?`
+        );
+        if (!ok) return; // user cancelled — do nothing
+        swapStage = true;
+      }
+    }
 
     setLocalLabelIds((prev) => {
       const next = new Set(prev);
@@ -64,17 +122,49 @@ export default function LabelPicker({
       const res = await fetch("/api/conversations/labels", {
         method: add ? "POST" : "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, labelId }),
+        body: JSON.stringify({ conversationId, labelId, swapStage }),
       });
       if (!res.ok) throw new Error(`label ${add ? "add" : "remove"} failed (${res.status})`);
-      // Pass the delta up so the page can patch its activeConvo snapshot
-      // immediately (chips update even when the thread isn't in the main
-      // list, e.g. opened from search or bookmarks).
-      onToggle({
-        labelId,
-        added: add,
-        label: (allLabels as any[]).find((l: any) => l.id === labelId) || null,
-      });
+
+      // If the server performed a stage swap, the OLD stage label (and its
+      // children) were removed server-side. Our local optimistic set doesn't
+      // know about those removals, so ask the parent to refetch/reconcile the
+      // full label set rather than patching a single delta.
+      let didSwap = false;
+      try {
+        const json = await res.json();
+        didSwap = !!json?.stageSwapped;
+      } catch (_e) { /* no body — treat as normal add */ }
+
+      if (didSwap) {
+        // Drop the old stage label(s) from the local set immediately so chips
+        // don't briefly show two stages, then let the parent refetch confirm.
+        const existingStage = currentStageLabel();
+        setLocalLabelIds((prev) => {
+          const next = new Set(prev);
+          // remove any stage label that isn't the one we just added
+          for (const id of Array.from(next)) {
+            const lbl = (allLabels as any[]).find((l: any) => l.id === id);
+            if (
+              lbl && !lbl.parent_label_id &&
+              stageLabelNames.has(String(lbl.name || "").trim().toLowerCase()) &&
+              id !== labelId
+            ) {
+              next.delete(id);
+            }
+          }
+          return next;
+        });
+        // Signal a full reconcile (no single delta captures a multi-label swap).
+        onToggle();
+      } else {
+        // Normal single-label delta.
+        onToggle({
+          labelId,
+          added: add,
+          label: (allLabels as any[]).find((l: any) => l.id === labelId) || null,
+        });
+      }
     } catch (error) {
       // Roll back the optimistic change so the checkbox reflects reality.
       console.error("Label toggle failed:", error);

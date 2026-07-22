@@ -606,6 +606,133 @@ export async function swapFolderLabel(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// isStageLabel / swapStageByAddedLabel
+//
+// A "stage label" is a TOP-LEVEL label (parent_label_id IS NULL) whose name
+// matches a TOP-LEVEL, non-system folder — because every folder auto-creates a
+// same-named mirror label. Brand/account labels (e.g. "Vita Organica") are also
+// top-level but do NOT match a folder, so they are NOT stage labels and may
+// co-exist. Nested labels (parent_label_id set) co-exist with their parent
+// stage and are never treated as stages here.
+//
+// Stage labels are mutually exclusive: a conversation lives in exactly one
+// pipeline stage. The Move-to-folder and Close paths already enforce this by
+// swapping labels. This helper enforces the same invariant when a stage label
+// is ADDED directly (e.g. via the label picker or an external agent), which
+// otherwise bypasses the swap and produces the "two stage labels" corruption.
+//
+// Given the conversation and the newly-added stage label, it:
+//   1. Resolves the folder whose name matches the added stage label.
+//   2. Updates conversations.folder_id to that folder (full move parity).
+//   3. Delegates to swapFolderLabel(old→new) to strip the previous stage
+//      label + its children and apply the new stage label.
+//
+// Returns { swapped, removedStageName } so callers can surface a message.
+// Best-effort — never throws; on any failure the plain label add still stands.
+// ────────────────────────────────────────────────────────────────────
+
+export interface StageInfo {
+  isStage: boolean;
+  /** The label id (== the added label) when it is a stage label. */
+  stageLabelId?: string;
+  /** The folder whose name matches this stage label, scoped to the account. */
+  folderId?: string | null;
+  folderName?: string | null;
+}
+
+/**
+ * Determine whether `labelId` is a stage label for the given conversation's
+ * account, and if so which folder it maps to. Read-only.
+ */
+export async function resolveStageLabel(
+  conversationId: string,
+  labelId: string
+): Promise<StageInfo> {
+  const supabase = createServerClient();
+
+  // The label must be top-level to be a stage.
+  const { data: label } = await supabase
+    .from("labels")
+    .select("id, name, parent_label_id")
+    .eq("id", labelId)
+    .maybeSingle();
+  if (!label || label.parent_label_id) return { isStage: false };
+
+  // Find the conversation's account so we match the correct account's folder.
+  const { data: convo } = await supabase
+    .from("conversations")
+    .select("email_account_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convo?.email_account_id) return { isStage: false };
+
+  // Does a top-level folder on this account share the label's name?
+  const { data: folder } = await supabase
+    .from("folders")
+    .select("id, name, is_system, parent_folder_id")
+    .eq("email_account_id", convo.email_account_id)
+    .is("parent_folder_id", null)
+    .ilike("name", label.name)
+    .maybeSingle();
+
+  if (!folder) return { isStage: false };
+
+  return {
+    isStage: true,
+    stageLabelId: label.id,
+    folderId: folder.id,
+    folderName: folder.name,
+  };
+}
+
+/**
+ * Enforce single-stage when a stage label was just added. Updates folder_id to
+ * the added stage's folder and swaps labels (strip old stage + children, keep
+ * the new one). No-op if the added label is not a stage label.
+ */
+export async function swapStageByAddedLabel(
+  conversationId: string,
+  addedLabelId: string
+): Promise<{ swapped: boolean }> {
+  try {
+    const info = await resolveStageLabel(conversationId, addedLabelId);
+    if (!info.isStage || !info.folderId) return { swapped: false };
+
+    const supabase = createServerClient();
+
+    // Capture the conversation's current folder (the "old" stage) before moving.
+    const { data: convo } = await supabase
+      .from("conversations")
+      .select("folder_id")
+      .eq("id", conversationId)
+      .maybeSingle();
+    const oldFolderId = convo?.folder_id ?? null;
+    const newFolderId = info.folderId;
+
+    if (oldFolderId === newFolderId) {
+      // Already in this stage's folder — nothing to move; the label add stands.
+      return { swapped: false };
+    }
+
+    // Full move parity: update folder_id first, then swap the labels. This
+    // mirrors /api/conversations/move (which updates folder_id, then calls
+    // swapFolderLabel). swapFolderLabel strips the old stage label + children
+    // and applies the new stage label.
+    await supabase
+      .from("conversations")
+      .update({ folder_id: newFolderId })
+      .eq("id", conversationId);
+
+    await swapFolderLabel(conversationId, oldFolderId, newFolderId);
+
+    return { swapped: true };
+  } catch (e: any) {
+    console.error("[swapStageByAddedLabel] failed:", e?.message || e);
+    return { swapped: false };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // onNewConversationFromSync
 //
 // Called once per newly-created conversation during inbound sync (IMAP or

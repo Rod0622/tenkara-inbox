@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { runRulesForEvent } from "@/lib/rule-engine";
 import { notifyWatchers } from "@/lib/notifications";
+import { swapStageByAddedLabel } from "@/lib/folder-labels";
 
 // POST — Add label to conversation
 export async function POST(req: NextRequest) {
@@ -14,6 +15,27 @@ export async function POST(req: NextRequest) {
     .upsert({ conversation_id: conversationId, label_id: labelId });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // ─── Single-stage self-heal ──────────────────────────────────────────
+  // Stage labels (top-level labels matching a folder) are mutually exclusive:
+  // a conversation belongs to exactly one pipeline stage. Move/Close already
+  // enforce this by swapping labels, but adding a stage label directly (label
+  // picker, or an external agent) bypasses that and creates the "two stage
+  // labels" corruption. Here we self-heal: if the just-added label is a stage
+  // label that conflicts with the conversation's current stage, we move the
+  // conversation to the new stage's folder and strip the old stage label +
+  // its children (full parity with a drag/Move). This runs for EVERY caller —
+  // UI or API — so the invariant can never be violated regardless of source.
+  // The optional swapStage flag from the client only signals that the user
+  // already confirmed the swap in a dialog; the server behavior is identical
+  // with or without it. Best-effort — a swap failure never fails the add.
+  let stageSwapped = false;
+  try {
+    const result = await swapStageByAddedLabel(conversationId, labelId);
+    stageSwapped = result.swapped;
+  } catch (swapErr: any) {
+    console.error("[labels/POST] stage self-heal error:", swapErr?.message || swapErr);
+  }
 
   // Get label name for activity log
   const { data: label } = await supabase.from("labels").select("name").eq("id", labelId).single();
@@ -48,7 +70,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (_e) { /* best-effort */ }
 
-  return NextResponse.json({ success: true }, { status: 201 });
+  return NextResponse.json({ success: true, stageSwapped }, { status: 201 });
 }
 
 // DELETE — Remove label from conversation
