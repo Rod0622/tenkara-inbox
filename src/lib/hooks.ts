@@ -188,7 +188,7 @@ export function useFolders() {
   return folders;
 }
 
-export function useConversations(accountId: string | null) {
+export function useConversations(accountId: string | null, currentUserId: string | null = null) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -251,13 +251,22 @@ export function useConversations(accountId: string | null) {
           .neq("status", "merged")
           .order("last_message_at", { ascending: false })
           .limit(300),
-        supabase
-          .from("conversations")
-          .select(selectFields)
-          .not("assignee_id", "is", null)
-          .neq("status", "merged")
-          .order("last_message_at", { ascending: false })
-          .limit(200),
+        // Scope the "assigned" query to the CURRENT USER, not all assignees.
+        // Previously this fetched every user's assigned conversations capped at
+        // 200 system-wide, then filtered client-side — so on a busy system a
+        // user's own (older) assigned threads fell outside the 200-window and
+        // the debounced refetch made them vanish from the personal inbox.
+        // Scoping to the user guarantees ALL of their assigned threads load.
+        // When currentUserId is null (auth not resolved yet), skip this query.
+        currentUserId
+          ? supabase
+              .from("conversations")
+              .select(selectFields)
+              .eq("assignee_id", currentUserId)
+              .neq("status", "merged")
+              .order("last_message_at", { ascending: false })
+              .limit(500)
+          : Promise.resolve({ data: [], error: null } as any),
       ]);
 
       if (recentResult.error) {
@@ -291,7 +300,7 @@ export function useConversations(accountId: string | null) {
     }
 
     setLoading(false);
-  }, [accountId]);
+  }, [accountId, currentUserId]);
 
   useEffect(() => {
     fetchConversations();

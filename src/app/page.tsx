@@ -94,7 +94,12 @@ export default function InboxPage() {
   const [showCallModal, setShowCallModal] = useState(false);
   const [showTranscripts, setShowTranscripts] = useState(false);
 
-  const { conversations, refetch } = useConversations(activeMailbox);
+  const currentUser = useMemo(
+    () => teamMembers.find((m) => m.email === session?.user?.email) || null,
+    [teamMembers, session]
+  );
+
+  const { conversations, refetch } = useConversations(activeMailbox, currentUser?.id || null);
 
   // Keep the open conversation's labels in sync with the live (realtime-
   // updated) conversations list. activeConvo is standalone state captured when
@@ -117,11 +122,6 @@ export default function InboxPage() {
       );
     }
   }, [conversations]);
-
-  const currentUser = useMemo(
-    () => teamMembers.find((m) => m.email === session?.user?.email) || null,
-    [teamMembers, session]
-  );
 
   // Pinned conversation IDs for the current user. Refreshed on the global
   // "pins:changed" event so the Pinned view always reflects the latest set.
