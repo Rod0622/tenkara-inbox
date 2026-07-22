@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, Tag } from "lucide-react";
-import { useLabels, useFolders } from "@/lib/hooks";
+import { useLabels } from "@/lib/hooks";
+import { isStageLabelId } from "@/lib/stage-labels";
 
 export default function LabelPicker({
   conversationId,
@@ -16,7 +17,6 @@ export default function LabelPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const allLabels = useLabels();
-  const allFolders = useFolders();
   const ref = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [localLabelIds, setLocalLabelIds] = useState<Set<string>>(new Set());
@@ -51,35 +51,16 @@ export default function LabelPicker({
     }
   }, [open]);
 
-  // A stage label is a TOP-LEVEL label whose name matches a TOP-LEVEL,
-  // non-system folder (every folder auto-creates a same-named mirror label).
-  // Brand/account labels are top-level but don't match a folder, so they are
-  // not stages and can co-exist. Nested labels have a parent and co-exist too.
-  const stageLabelNames = useMemo(() => {
-    const folderNames = new Set(
-      (allFolders as any[])
-        .filter((f: any) => !f.parent_folder_id) // all TOP-LEVEL folders (incl. system Inbox)
-        .map((f: any) => String(f.name || "").trim().toLowerCase())
-        .filter(Boolean)
-    );
-    // Include system stage-like folders (Inbox) too — Inbox is a system folder
-    // but is a legitimate stage. We include ALL top-level folder names; brand
-    // labels simply won't match any folder name so they're naturally excluded.
-    return folderNames;
-  }, [allFolders]);
-
-  const isStageLabelId = (labelId: string): boolean => {
-    const lbl = (allLabels as any[]).find((l: any) => l.id === labelId);
-    if (!lbl || lbl.parent_label_id) return false;
-    return stageLabelNames.has(String(lbl.name || "").trim().toLowerCase());
-  };
+  // Stage labels are identified by a canonical ID set (shared with the server),
+  // NOT by folder-name matching — pipeline stages like "2 - Quotes" exist only
+  // as labels with no backing folder, so a folder heuristic would miss them.
+  // Brand/account and nested labels are not in the set, so they co-exist.
 
   // The conversation's CURRENT stage label (if any) among its applied labels.
   const currentStageLabel = (): any | null => {
     for (const id of Array.from(localLabelIds)) {
-      const lbl = (allLabels as any[]).find((l: any) => l.id === id);
-      if (lbl && !lbl.parent_label_id && stageLabelNames.has(String(lbl.name || "").trim().toLowerCase())) {
-        return lbl;
+      if (isStageLabelId(id)) {
+        return (allLabels as any[]).find((l: any) => l.id === id) || { id, name: "current stage" };
       }
     }
     return null;
@@ -139,19 +120,12 @@ export default function LabelPicker({
       if (didSwap) {
         // Drop the old stage label(s) from the local set immediately so chips
         // don't briefly show two stages, then let the parent refetch confirm.
-        const existingStage = currentStageLabel();
         setLocalLabelIds((prev) => {
           const next = new Set(prev);
-          // remove any stage label that isn't the one we just added
+          // remove any OTHER stage label (the old stage) so chips don't briefly
+          // show two stages; the parent refetch reconciles children too.
           for (const id of Array.from(next)) {
-            const lbl = (allLabels as any[]).find((l: any) => l.id === id);
-            if (
-              lbl && !lbl.parent_label_id &&
-              stageLabelNames.has(String(lbl.name || "").trim().toLowerCase()) &&
-              id !== labelId
-            ) {
-              next.delete(id);
-            }
+            if (isStageLabelId(id) && id !== labelId) next.delete(id);
           }
           return next;
         });
