@@ -1185,6 +1185,33 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
             }
             await supabase.from("conversations").update(convoUpdate).eq("id", conversationId);
 
+            // Run the rules engine + notifications for this Gmail message.
+            // WHY THIS EXISTS: the Gmail sync branch previously never called
+            // runRulesForMessage — only the generic IMAP branch (further below)
+            // did. As a result, inbound replies on Gmail accounts triggered NO
+            // notifications: assignees never got a "New reply" (reply_received
+            // was never created for anyone), and inbound watcher notifications
+            // never fired either. Rules (auto-label, auto-assign, etc.) also
+            // never ran on Gmail mail. This mirrors the IMAP branch call so
+            // Gmail messages get the same rule + notification handling.
+            // Best-effort — never block or fail the sync on a rule error.
+            try {
+              const triggerType = isOutbound ? "outgoing" : "incoming";
+              if (conversationId) await runRulesForMessage(conversationId, {
+                conversation_id: conversationId,
+                subject: cleanSubject || subject || "",
+                from_email: fromEmail,
+                from_name: fromName,
+                to_addresses: toAddresses,
+                cc_addresses: ccAddresses || "",
+                body_text: bodyText || "",
+                email_account_id: accountId,
+                has_attachments: !!hasAttachments,
+              }, triggerType);
+            } catch (ruleErr: any) {
+              console.error(`[gmail-sync] rule engine error for ${msgId}:`, ruleErr?.message);
+            }
+
             result.newMessages++;
             processedCount++;
             // Track both the oldest and newest timestamps processed this run.
