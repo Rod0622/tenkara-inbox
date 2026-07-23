@@ -418,9 +418,9 @@ export async function POST(req: NextRequest) {
 
   // ── 8c. Notify ──
   // Pre-assigned: ONLY the assignee is notified (plus an "assigned"
-  // activity-log entry mirroring the assign API). Unassigned: broadcast to
-  // every team member with access to the account PLUS all admins (deduped),
-  // exactly as before. Best-effort — never block or fail the agent response.
+  // activity-log entry mirroring the assign API). Unassigned: NO notification
+  // is sent (see the note after this block) — an unassigned draft just shows
+  // up in Pending Outreach. Best-effort — never block or fail the agent response.
   if (emailAccountId && assignedMember) {
     try {
       const accountLabel = accountFromName || accountFromEmail || "an account";
@@ -446,44 +446,15 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       console.error("[external/conversations] assignee notify failed:", e?.message);
     }
-  } else if (emailAccountId) {
-    try {
-      const [accessRes, adminsRes] = await Promise.all([
-        supabase
-          .from("account_access")
-          .select("team_member_id")
-          .eq("email_account_id", emailAccountId),
-        supabase
-          .from("team_members")
-          .select("id")
-          .eq("role", "admin"),
-      ]);
-      const memberIds = Array.from(
-        new Set(
-          [
-            ...((accessRes.data || []).map((r: any) => r.team_member_id)),
-            ...((adminsRes.data || []).map((r: any) => r.id)),
-          ].filter((id: string) => !!id)
-        )
-      );
-      if (memberIds.length > 0) {
-        const accountLabel = accountFromName || accountFromEmail || "an account";
-        const supplierLabel = toName || toEmail || "a supplier";
-        await createNotifications(
-          memberIds.map((uid) => ({
-            user_id: uid,
-            type: "pending_outreach_draft",
-            title: "New outreach draft",
-            body: `${token.name} created a draft to ${supplierLabel} in ${accountLabel} — Pending Outreach.`,
-            conversation_id: conv.id,
-            actor_id: null,
-          }))
-        );
-      }
-    } catch (e: any) {
-      console.error("[external/conversations] pending-outreach notify failed:", e?.message);
-    }
   }
+  // Unassigned agent drafts intentionally send NO notification. Previously we
+  // broadcast a "New outreach draft" notification to every team member with
+  // access to the account plus all admins, which was far too noisy — an
+  // unassigned draft would ping the whole account team. Per product decision,
+  // only the ASSIGNED user is notified (handled in the branch above); an
+  // unassigned draft simply appears in Pending Outreach with no notification.
+  // The agent_conversation_created activity-log entry below still records the
+  // draft for the audit trail, so nothing is lost from the operator's history.
 
   // ── 9. Activity log (fire-and-forget) ──
   // The conv shows "Sammy agent v1 created this conversation" in the
