@@ -36,8 +36,10 @@ export default function SidebarTeamList({
 
   useEffect(() => {
     fetchMembers();
-    // Refresh team OOO status every 60s
-    const id = setInterval(() => { if (document.visibilityState === "visible") fetchMembers(); }, 60000);
+    // Refresh team OOO status every 5 min (was 60s). Team OOO changes rarely,
+    // so a slower cadence keeps indicators reasonably fresh while cutting a
+    // steady per-tab egress stream. Still guarded to visible tabs only.
+    const id = setInterval(() => { if (document.visibilityState === "visible") fetchMembers(); }, 300000);
     return () => clearInterval(id);
   }, []);
 

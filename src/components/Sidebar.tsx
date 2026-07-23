@@ -202,7 +202,7 @@ export default function Sidebar({
     fetchNotifs();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchNotifs();
-    }, 15000);
+    }, 30000); // 30s (was 15s) — notifications poll runs for every user/tab all day.
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
@@ -217,9 +217,10 @@ export default function Sidebar({
         setMeIsOOO(!!data.is_currently_ooo);
       } catch (_e) {}
     };
+    // OOO status rarely changes mid-session, so fetch once on mount instead of
+    // polling — removes a steady per-user/per-tab egress stream for no real
+    // freshness benefit. It refreshes naturally on next load/navigation.
     fetchOwnOOO();
-    const id = setInterval(() => { if (document.visibilityState === "visible") fetchOwnOOO(); }, 60000);
-    return () => clearInterval(id);
   }, [currentUser?.id]);
 
   // Fetch count of conversations the user is watching
