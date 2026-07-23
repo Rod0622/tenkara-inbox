@@ -99,7 +99,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ count: scoped.length });
     }
 
-    return NextResponse.json({ drafts: scoped });
+    // EGRESS OPTIMIZATION: this endpoint is polled every ~15s per open tab.
+    // Shipping the full body_html (agent drafts are large HTML) on every poll
+    // was a major PostgREST egress driver. The list UI only needs a short body
+    // PREVIEW; the full body is fetched on demand at send time via
+    // GET /api/drafts?id=<draftId>. So we strip body_html/body_text from the
+    // polled payload and emit a server-truncated `body_preview` (300 chars)
+    // computed the same way the UI did (text first, else stripped HTML).
+    const stripTags = (html: string) =>
+      html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const slimmed = scoped.map((d: any) => {
+      const previewSource =
+        (d.body_text && d.body_text.trim())
+          ? d.body_text
+          : (d.body_html ? stripTags(d.body_html) : "");
+      const { body_text, body_html, ...rest } = d;
+      return { ...rest, body_preview: previewSource.slice(0, 300) };
+    });
+
+    return NextResponse.json({ drafts: slimmed });
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || "Unexpected error" },

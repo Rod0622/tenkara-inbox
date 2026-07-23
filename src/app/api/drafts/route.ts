@@ -18,6 +18,26 @@ export async function GET(req: NextRequest) {
   const authorId = req.nextUrl.searchParams.get("author_id");
   const emailAccountId = req.nextUrl.searchParams.get("email_account_id");
   const standaloneOnly = req.nextUrl.searchParams.get("standalone") === "true";
+  const draftId = req.nextUrl.searchParams.get("id");
+
+  // Single-draft fetch by id. Used to pull the FULL body on demand (e.g. at
+  // send time) so list views (like Pending Outreach) can poll a lightweight
+  // preview instead of shipping full bodies on every refresh. Returns one draft.
+  if (draftId) {
+    const { data: one, error: oneErr } = await supabase
+      .from("email_drafts")
+      .select(`
+        *,
+        conversation:conversations(id, subject, from_name, from_email, email_account_id),
+        account:email_accounts(id, name, email),
+        author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
+      `)
+      .eq("id", draftId)
+      .maybeSingle();
+    if (oneErr) return NextResponse.json({ error: oneErr.message }, { status: 500 });
+    if (!one) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+    return NextResponse.json({ draft: one });
+  }
 
   let query = supabase
     .from("email_drafts")

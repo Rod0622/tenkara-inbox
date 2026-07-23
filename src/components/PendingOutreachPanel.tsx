@@ -47,8 +47,9 @@ interface PendingDraft {
   id: string;
   conversation_id: string | null;
   subject: string | null;
-  body_text: string | null;
-  body_html: string | null;
+  // List payload carries only a short preview (egress optimization). The full
+  // body is fetched on demand at send time via GET /api/drafts?id=.
+  body_preview: string | null;
   to_addresses: string | null;
   cc_addresses: string | null;
   bcc_addresses: string | null;
@@ -152,7 +153,7 @@ export default function PendingOutreachPanel({
       // share of egress. Active tab is unaffected; refocus refetches below.
       if (typeof document !== "undefined" && document.hidden) return;
       if (!inflightRef.current) fetchDrafts();
-    }, 15000);
+    }, 30000); // 30s poll (was 15s) — halves request frequency for egress.
     const onFocus = () => {
       if (!inflightRef.current) fetchDrafts();
     };
@@ -187,6 +188,23 @@ export default function PendingOutreachPanel({
     }
     setSendingId(draft.id);
     try {
+      // The list payload no longer includes the full body (egress optimization),
+      // so fetch it on demand here before sending.
+      let fullBody = "";
+      try {
+        const bodyRes = await fetch(`/api/drafts?id=${draft.id}`);
+        if (bodyRes.ok) {
+          const bodyJson = await bodyRes.json();
+          fullBody = bodyJson?.draft?.body_html || bodyJson?.draft?.body_text || "";
+        }
+      } catch (_e) { /* fall through — send with empty body guarded below */ }
+
+      if (!fullBody) {
+        setSendingId(null);
+        alert("Could not load the draft body. Please refresh and try again.");
+        return;
+      }
+
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,7 +215,7 @@ export default function PendingOutreachPanel({
           cc: normalizeAddressList(draft.cc_addresses),
           bcc: normalizeAddressList(draft.bcc_addresses),
           subject: draft.subject || draft.conversation?.subject || "",
-          body: draft.body_html || draft.body_text || "",
+          body: fullBody,
           actor_id: currentUser?.id || null,
         }),
       });
@@ -473,10 +491,7 @@ export default function PendingOutreachPanel({
 
                   {/* Row 3: body preview */}
                   <div className="text-xs text-[var(--text-muted)] line-clamp-2 mb-3">
-                    {(draft.body_text || stripHtml(draft.body_html || "")).slice(
-                      0,
-                      240
-                    ) || "(empty body)"}
+                    {(draft.body_preview || "").slice(0, 240) || "(empty body)"}
                   </div>
 
                   {/* Row 4: actions — sender (read-only if preset) + send + discard + open */}
@@ -674,19 +689,6 @@ function normalizeAddressList(raw: string | null | undefined): string {
     }
   }
   return s.replace(/\\+/g, "").replace(/["']/g, "").trim();
-}
-
-function stripHtml(s: string): string {
-  return s
-    .replace(/<\/(p|div|h[1-6]|blockquote|li)>/gi, "\n\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function humanizeAge(iso: string): string {
