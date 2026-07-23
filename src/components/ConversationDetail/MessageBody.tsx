@@ -28,6 +28,43 @@ import { useEffect, useRef, useState } from "react";
  *   - Each <mark> gets a data-match-idx so the existing match-navigation
  *     (which queries mark[data-match-idx] from the DOM) works unchanged.
  */
+/**
+ * Strip email HTML of anything that can leak into or break the host app layout.
+ *
+ * Why: email bodies (esp. newsletters / templated Outlook mail) often ship a
+ * full document with <head><style> blocks containing AGGRESSIVE GLOBAL rules
+ * like `div { height:100% }` or `div { margin:0!important }`. When injected via
+ * dangerouslySetInnerHTML into the app DOM, those global selectors escape the
+ * email and restyle the app's own divs — `div{height:100%}` on a container
+ * whose parent has no fixed height computes to height:0, collapsing the message
+ * body to nothing (the "blank/distorted email" bug). ~463 messages carry such
+ * rules. Inline element-level style="..." attributes are SAFE (scoped to their
+ * element) and are preserved, so formatting fidelity stays high.
+ *
+ * We parse with the browser's DOMParser (no dependency), then:
+ *   - remove <style>, <meta>, <link>, <script>, <base>, <title> nodes
+ *   - unwrap the document: return only <body>'s inner HTML (drops <html>/<head>)
+ *
+ * SSR-safe: if DOMParser isn't available (server), return the input unchanged;
+ * the effect re-runs on the client where DOMParser exists.
+ */
+function sanitizeEmailHtml(html: string): string {
+  if (!html) return html;
+  if (typeof window === "undefined" || typeof window.DOMParser === "undefined") {
+    return html; // server render — sanitize on the client pass
+  }
+  try {
+    const doc = new window.DOMParser().parseFromString(html, "text/html");
+    // Remove elements whose GLOBAL styles/behaviour can leak into the app.
+    doc.querySelectorAll("style, meta, link, script, base, title").forEach((n) => n.remove());
+    // Return the body's inner HTML (unwraps <html>/<head>/<body>). Inline
+    // style="" attributes on the remaining elements are kept intact.
+    return doc.body ? doc.body.innerHTML : html;
+  } catch {
+    return html; // parse failure — fall back to raw (never crash rendering)
+  }
+}
+
 export default function MessageBody({
   messageId,
   bodyHtml,
@@ -41,18 +78,18 @@ export default function MessageBody({
   searchQuery?: string;
   matchStartIndex?: number;
 }) {
-  const [resolvedHtml, setResolvedHtml] = useState<string>(bodyHtml);
+  const [resolvedHtml, setResolvedHtml] = useState<string>(() => sanitizeEmailHtml(bodyHtml));
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // Fast path: no cid: references in the body → nothing to resolve.
+    // Fast path: no cid: references in the body → sanitize + render.
     if (!/cid:/i.test(bodyHtml)) {
-      setResolvedHtml(bodyHtml);
+      setResolvedHtml(sanitizeEmailHtml(bodyHtml));
       return;
     }
 
-    // Show the original HTML immediately, then upgrade once we resolve.
-    setResolvedHtml(bodyHtml);
+    // Show the sanitized HTML immediately, then upgrade once we resolve cids.
+    setResolvedHtml(sanitizeEmailHtml(bodyHtml));
 
     let cancelled = false;
     (async () => {
@@ -77,7 +114,7 @@ export default function MessageBody({
         });
 
         if (!cancelled && rewritten !== bodyHtml) {
-          setResolvedHtml(rewritten);
+          setResolvedHtml(sanitizeEmailHtml(rewritten));
         }
       } catch {
         /* silent — the original HTML stays */
