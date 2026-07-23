@@ -494,9 +494,28 @@ export function useConversationDetail(conversationId: string | null) {
 
   const fetchMessages = useCallback(async () => {
     if (!conversationId) { setMessages([]); return; }
+    // Explicit columns only (was select("*")). The thread render reads exactly
+    // these fields; selecting them explicitly avoids pulling any unused columns.
+    // body_html/body_text ARE needed here (the open thread renders full bodies),
+    // so they stay — this isn't a body-trimming change, just dropping dead cols.
     const { data, error } = await supabase
       .from("messages")
-      .select("*")
+      .select(`
+        id,
+        conversation_id,
+        from_name,
+        from_email,
+        to_addresses,
+        cc_addresses,
+        subject,
+        body_html,
+        body_text,
+        snippet,
+        is_outbound,
+        has_attachments,
+        sent_at,
+        created_at
+      `)
       .eq("conversation_id", conversationId)
       .order("sent_at");
     if (error) { console.error("Messages fetch error:", error); setMessages([]); }
