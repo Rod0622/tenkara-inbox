@@ -188,14 +188,7 @@ export function useFolders() {
   return folders;
 }
 
-export function useConversations(accountId: string | null, currentUserId: string | null = null) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchConversations = useCallback(async () => {
-    setLoading(true);
-
-    const selectFields = `
+const CONVERSATION_SELECT_FIELDS = `
         id,
         email_account_id,
         folder_id,
@@ -224,6 +217,14 @@ export function useConversations(accountId: string | null, currentUserId: string
         )
       `;
 
+export function useConversations(accountId: string | null, currentUserId: string | null = null) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+
+  const fetchConversations = useCallback(async () => {
+    setLoading(true);
+
     if (accountId) {
       // Specific account: fetch all for that account.
       // Note: we DO include status='merged' here so the Archive folder view
@@ -231,7 +232,7 @@ export function useConversations(accountId: string | null, currentUserId: string
       // non-Archive views via the isArchiveFolder check.
       const { data, error } = await supabase
         .from("conversations")
-        .select(selectFields)
+        .select(CONVERSATION_SELECT_FIELDS)
         .eq("email_account_id", accountId)
         .order("last_message_at", { ascending: false })
         .limit(500);
@@ -247,7 +248,7 @@ export function useConversations(accountId: string | null, currentUserId: string
       const [recentResult, assignedResult] = await Promise.all([
         supabase
           .from("conversations")
-          .select(selectFields)
+          .select(CONVERSATION_SELECT_FIELDS)
           .neq("status", "merged")
           .order("last_message_at", { ascending: false })
           .limit(300),
@@ -261,7 +262,7 @@ export function useConversations(accountId: string | null, currentUserId: string
         currentUserId
           ? supabase
               .from("conversations")
-              .select(selectFields)
+              .select(CONVERSATION_SELECT_FIELDS)
               .eq("assignee_id", currentUserId)
               .neq("status", "merged")
               .order("last_message_at", { ascending: false })
@@ -302,18 +303,126 @@ export function useConversations(accountId: string | null, currentUserId: string
     setLoading(false);
   }, [accountId, currentUserId]);
 
+  // Membership test: does a freshly-fetched conversation row belong in the
+  // CURRENT view? Mirrors the filters in fetchConversations so a delta'd row
+  // is inserted/kept/removed correctly.
+  //   - Account-scoped view: row.email_account_id must match (merged included,
+  //     so the Archive view still renders shells).
+  //   - Personal view: exclude merged; otherwise keep (assigned or recent).
+  //     Slightly more inclusive than the paginated fetch, but it only ever
+  //     KEEPS rows that a full refetch would also show — never hides.
+  const rowBelongsInView = useCallback((row: any): boolean => {
+    if (!row) return false;
+    if (accountId) return row.email_account_id === accountId;
+    return row.status !== "merged";
+  }, [accountId]);
+
+  // Batched delta application. Given a set of changed conversation ids (and a
+  // set known to be deleted), fetch ONLY those rows (with joins) and splice
+  // them into the current list — instead of re-downloading the whole 300/500
+  // list on every realtime event. This is the main egress win: a sync that
+  // touches N conversations costs one N-row query, not one ~800-row query per
+  // event. Falls back to a full refetch on any error or on deletes (a deleted
+  // row can't be refetched, and removing by id from a stale array is safe but
+  // we prefer correctness). Best-effort throughout.
+  const applyConversationDeltas = useCallback(async (
+    changedIds: string[],
+    hadDelete: boolean
+  ) => {
+    // Deletes (or nothing to do) → safest path is a full refetch.
+    if (hadDelete) { fetchConversations(); return; }
+    const ids = Array.from(new Set(changedIds)).filter(Boolean);
+    if (ids.length === 0) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT_FIELDS)
+        .in("id", ids);
+      if (error) { fetchConversations(); return; } // fallback
+
+      const fetched = (data || []) as unknown as Conversation[];
+      const fetchedById = new Map(fetched.map((c) => [c.id, c]));
+
+      setConversations((prev) => {
+        const next: Conversation[] = [];
+        const handled = new Set<string>();
+
+        // Walk existing list: replace changed rows (if still in view) or drop
+        // them (if they no longer belong); keep untouched rows as-is.
+        for (const existing of prev) {
+          if (fetchedById.has(existing.id)) {
+            const updated = fetchedById.get(existing.id)! as any;
+            handled.add(existing.id);
+            if (rowBelongsInView(updated)) next.push(updated as Conversation);
+            // else: row left the view (e.g. merged / moved account) → drop it
+          } else {
+            next.push(existing);
+          }
+        }
+
+        // Insert brand-new rows that weren't already in the list.
+        for (const c of fetched) {
+          if (!handled.has(c.id) && rowBelongsInView(c as any)) {
+            next.push(c);
+          }
+        }
+
+        // Re-sort by last_message_at desc (same as fetchConversations).
+        next.sort((a, b) => {
+          const aTime = (a as any).last_message_at || (a as any).created_at || "";
+          const bTime = (b as any).last_message_at || (b as any).created_at || "";
+          return bTime.localeCompare(aTime);
+        });
+        return next;
+      });
+    } catch (_e) {
+      fetchConversations(); // fallback on any unexpected error
+    }
+  }, [accountId, currentUserId, fetchConversations, rowBelongsInView]);
+
   useEffect(() => {
     fetchConversations();
 
-    // Debounced refetch: a sync (or any burst) can fire many Realtime events in
-    // a short window. Coalesce them into ONE trailing refetch (~1.5s) instead of
-    // re-running the 500-row list query per event — this was a major egress and
-    // CPU driver. A single change still refreshes within ~1.5s, imperceptible
-    // for a conversation list.
+    // Debounced BATCHED DELTA: a sync (or any burst) fires many realtime events
+    // in a short window. We coalesce them, then fetch ONLY the changed rows and
+    // splice them in — instead of re-downloading the whole ~800-row list per
+    // event (the previous behavior, a major egress driver). We collect the set
+    // of changed conversation ids during the debounce window; on flush we batch
+    // them into one .in("id",[...]) fetch via applyConversationDeltas. Deletes
+    // fall back to a full refetch (a deleted row can't be refetched).
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedRefetch = () => {
+    let pendingIds = new Set<string>();
+    let pendingDelete = false;
+    const scheduleFlush = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => { fetchConversations(); }, 1500);
+      debounceTimer = setTimeout(() => {
+        const ids = Array.from(pendingIds);
+        const hadDelete = pendingDelete;
+        pendingIds = new Set<string>();
+        pendingDelete = false;
+        applyConversationDeltas(ids, hadDelete);
+      }, 1500);
+    };
+    // source: "conversations" → id is on the row itself; DELETE means a
+    // conversation was removed (full refetch). "labels" → the change is on
+    // conversation_labels; we need its conversation_id to know which row to
+    // refetch. If a label event doesn't carry a conversation_id (Realtime
+    // DELETE payloads may include only the PK depending on replica identity),
+    // fall back to a full refetch so a removed label can't linger on a chip.
+    const noteChange = (payload: any, source: "conversations" | "labels") => {
+      const evt = payload?.eventType || payload?.type;
+      if (source === "conversations") {
+        if (evt === "DELETE") pendingDelete = true;
+        const id = payload?.new?.id || payload?.old?.id;
+        if (id) pendingIds.add(id);
+      } else {
+        const convId =
+          payload?.new?.conversation_id || payload?.old?.conversation_id;
+        if (convId) pendingIds.add(convId);
+        else pendingDelete = true; // unresolved label change → full refetch
+      }
+      scheduleFlush();
     };
 
     const channel = supabase
@@ -321,7 +430,7 @@ export function useConversations(accountId: string | null, currentUserId: string
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "conversations" },
-        () => debouncedRefetch()
+        (payload: any) => noteChange(payload, "conversations")
       )
       // NOTE: the unfiltered `messages` subscription was removed here. The list
       // only shows message-derived fields (last_message_at, preview,
@@ -335,7 +444,7 @@ export function useConversations(accountId: string | null, currentUserId: string
       .on(
         "postgres_changes",
         { event: "*", schema: "inbox", table: "conversation_labels" },
-        () => debouncedRefetch()
+        (payload: any) => noteChange(payload, "labels")
       )
       .subscribe();
 
@@ -343,7 +452,7 @@ export function useConversations(accountId: string | null, currentUserId: string
       if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
-  }, [fetchConversations]);
+  }, [fetchConversations, applyConversationDeltas]);
 
   return { conversations, loading, refetch: fetchConversations };
 }
