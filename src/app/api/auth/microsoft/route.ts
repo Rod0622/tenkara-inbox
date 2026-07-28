@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       const { data, error } = await supabase.from("email_accounts").update(accountFields).eq("id", id).select().single();
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      // Ensure auto-labels + Completed folder exist for this account.
+      // Ensure auto-labels exist for this account.
       // Best-effort — do not fail the request if this hook errors.
       try {
         if (id) await ensureAccountLabels(id);
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     const { data: newAccount, error: createErr } = await supabase.from("email_accounts").insert(accountFields).select().single();
     if (createErr) return NextResponse.json({ error: createErr.message }, { status: 500 });
 
-    // Ensure auto-labels + Completed folder for the new account.
+    // Ensure auto-labels for the new account.
     try {
       if (newAccount?.id) await ensureAccountLabels(newAccount.id);
     } catch (e: any) {

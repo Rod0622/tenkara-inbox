@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       accountId = created?.id || null;
     }
 
-    // Ensure auto-labels + Completed folder. Best-effort — do not fail the request.
+    // Ensure auto-labels. Best-effort — do not fail the request.
     try {
       if (accountId) await ensureAccountLabels(accountId);
     } catch (e: any) {

@@ -196,7 +196,13 @@ export async function labelManualCreatedConversation(
 // Creates:
 //   • A label with the account's display name (e.g. "Operations")
 //   • The global "Inbox" label (if it doesn't already exist)
-//   • A "Completed" folder for this account (if it doesn't already exist)
+//
+// NOTE: this used to also create a per-account "Completed" system folder.
+// That was removed on 2026-07-28. It was unwanted, it regenerated on every
+// account (re)connect — which would have silently undone the manual cleanup
+// eight times over during the credential rotation — and no caller ever read
+// the id it returned. "Completed Orders" is a real pipeline stage and is
+// unrelated to this.
 //
 // Returns the IDs so callers can apply them right away if they want.
 // ────────────────────────────────────────────────────────────────────
@@ -204,7 +210,6 @@ export async function labelManualCreatedConversation(
 export interface AccountLabelIds {
   account_label_id: string | null;
   inbox_label_id: string | null;
-  completed_folder_id: string | null;
 }
 
 export async function ensureAccountLabels(accountId: string): Promise<AccountLabelIds> {
@@ -218,7 +223,7 @@ export async function ensureAccountLabels(accountId: string): Promise<AccountLab
 
   if (acctErr || !account) {
     console.error("[ensureAccountLabels] account not found:", accountId);
-    return { account_label_id: null, inbox_label_id: null, completed_folder_id: null };
+    return { account_label_id: null, inbox_label_id: null };
   }
 
   // Account label name = account.name (the display name set when connecting)
@@ -230,50 +235,7 @@ export async function ensureAccountLabels(accountId: string): Promise<AccountLab
   // Global Inbox label
   const inbox_label_id = await ensureGlobalLabel("Inbox");
 
-  // Per-account Completed folder
-  let completed_folder_id: string | null = null;
-  const { data: existingCompleted } = await supabase
-    .from("folders")
-    .select("id")
-    .eq("email_account_id", accountId)
-    .ilike("name", "Completed")
-    .limit(1)
-    .maybeSingle();
-
-  if (existingCompleted?.id) {
-    completed_folder_id = existingCompleted.id;
-  } else {
-    // Determine sort_order — append at the end
-    const { data: maxOrder } = await supabase
-      .from("folders")
-      .select("sort_order")
-      .eq("email_account_id", accountId)
-      .order("sort_order", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const nextOrder = (maxOrder?.sort_order ?? -1) + 1;
-
-    const { data: created, error } = await supabase
-      .from("folders")
-      .insert({
-        email_account_id: accountId,
-        name: "Completed",
-        icon: "✅",
-        color: "#4ADE80",
-        sort_order: nextOrder,
-        is_system: true,
-      })
-      .select("id")
-      .single();
-
-    if (error) {
-      console.error("[ensureAccountLabels] failed to create Completed folder:", error.message);
-    } else {
-      completed_folder_id = created?.id || null;
-    }
-  }
-
-  return { account_label_id, inbox_label_id, completed_folder_id };
+  return { account_label_id, inbox_label_id };
 }
 
 // ────────────────────────────────────────────────────────────────────

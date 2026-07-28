@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
       accountId = created?.id || null;
     }
 
-    // Ensure auto-labels + Completed folder. Best-effort.
+    // Ensure auto-labels. Best-effort.
     try {
       if (accountId) await ensureAccountLabels(accountId);
     } catch (e: any) {
