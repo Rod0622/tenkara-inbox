@@ -143,6 +143,16 @@ export async function ensureSuperAgentLabel(): Promise<string | null> {
 //     (only when the conversation is unassigned — assigned convos go to
 //     the assignee's plate, not the shared inbox triage)
 //
+// `destination` controls WHERE an unassigned conversation is filed:
+//   • "inbox"            — the account's Inbox folder + Inbox label (default;
+//                          manual UI creation and leak-review splits)
+//   • "pending_outreach" — the account's Pending Outreach folder + Pending
+//                          Outreach label, and NO Inbox label. Used for agent
+//                          initial outreach so it stops mixing with real
+//                          supplier threads in Inbox.
+// Assigned conversations ignore `destination` entirely — they go to the
+// assignee's personal inbox with no folder, as before.
+//
 // Mirrors onNewConversationFromSync's inbound behavior, but for
 // human/agent-created conversations rather than synced mail.
 //
@@ -152,32 +162,71 @@ export async function ensureSuperAgentLabel(): Promise<string | null> {
 export async function labelManualCreatedConversation(
   conversationId: string,
   accountId: string,
-  isUnassigned: boolean
+  isUnassigned: boolean,
+  destination: "inbox" | "pending_outreach" = "inbox"
 ): Promise<void> {
   try {
     const supabase = createServerClient();
-    const { account_label_id, inbox_label_id } = await ensureAccountLabels(accountId);
+    const {
+      account_label_id,
+      inbox_label_id,
+      pending_outreach_folder_id,
+      pending_outreach_label_id,
+    } = await ensureAccountLabels(accountId);
     const labelsToApply: Array<string | null> = [account_label_id];
 
     if (isUnassigned) {
-      labelsToApply.push(inbox_label_id);
+      const toPendingOutreach = destination === "pending_outreach";
 
-      // Place in the account's Inbox folder so it appears in that account's
-      // inbox triage (and under Inbox → Pending Outreach for agent drafts).
-      const { data: inboxFolder } = await supabase
-        .from("folders")
-        .select("id")
-        .eq("email_account_id", accountId)
-        .ilike("name", "Inbox")
-        .eq("is_system", true)
-        .limit(1)
-        .maybeSingle();
+      // Marker label for the destination folder. Pending Outreach is a folder
+      // marker, NOT a pipeline stage — it is deliberately absent from
+      // STAGE_LABEL_IDS so the stage failproofing ignores it.
+      labelsToApply.push(toPendingOutreach ? pending_outreach_label_id : inbox_label_id);
 
-      if (inboxFolder?.id) {
+      let targetFolderId: string | null = null;
+
+      if (toPendingOutreach) {
+        // Prefer the id resolved during ensureAccountLabels. Fall back to a
+        // direct lookup so a deliberately-deleted-then-restored folder is
+        // still found (ensureAccountLabels will not recreate it once the
+        // account has been bootstrapped).
+        targetFolderId = pending_outreach_folder_id;
+        if (!targetFolderId) {
+          const { data: poFolder } = await supabase
+            .from("folders")
+            .select("id")
+            .eq("email_account_id", accountId)
+            .ilike("name", PENDING_OUTREACH_NAME)
+            .limit(1)
+            .maybeSingle();
+          targetFolderId = poFolder?.id ?? null;
+        }
+      } else {
+        const { data: inboxFolder } = await supabase
+          .from("folders")
+          .select("id")
+          .eq("email_account_id", accountId)
+          .ilike("name", "Inbox")
+          .eq("is_system", true)
+          .limit(1)
+          .maybeSingle();
+        targetFolderId = inboxFolder?.id ?? null;
+      }
+
+      if (targetFolderId) {
         await supabase
           .from("conversations")
-          .update({ folder_id: inboxFolder.id })
+          .update({ folder_id: targetFolderId })
           .eq("id", conversationId);
+      } else if (toPendingOutreach) {
+        // Never silently drop an agent conversation into no-folder limbo.
+        console.error(
+          "[labelManualCreatedConversation] no Pending Outreach folder for account",
+          accountId,
+          "— conversation",
+          conversationId,
+          "left unfiled"
+        );
       }
     }
 
@@ -196,6 +245,16 @@ export async function labelManualCreatedConversation(
 // Creates:
 //   • A label with the account's display name (e.g. "Operations")
 //   • The global "Inbox" label (if it doesn't already exist)
+//   • The global "Pending Outreach" label (folder marker, NOT a stage — it is
+//     deliberately absent from STAGE_LABEL_IDS)
+//   • A per-account "Pending Outreach" folder — but ONLY ONCE, guarded by
+//     email_accounts.folders_bootstrapped_at.
+//
+// Why the guard: this function runs on EVERY connect, including reconnects.
+// The old "Completed" folder had no guard, so it silently regenerated after
+// every manual cleanup — and would have done so eight times over during the
+// credential rotation. With the guard, a folder deliberately deleted by an
+// operator stays deleted, and a reconnect is a no-op.
 //
 // NOTE: this used to also create a per-account "Completed" system folder.
 // That was removed on 2026-07-28. It was unwanted, it regenerated on every
@@ -207,9 +266,15 @@ export async function labelManualCreatedConversation(
 // Returns the IDs so callers can apply them right away if they want.
 // ────────────────────────────────────────────────────────────────────
 
+export const PENDING_OUTREACH_NAME = "Pending Outreach";
+const PENDING_OUTREACH_COLOR = "#A67C00";
+const PENDING_OUTREACH_ICON = "\u{1F4E4}";
+
 export interface AccountLabelIds {
   account_label_id: string | null;
   inbox_label_id: string | null;
+  pending_outreach_folder_id: string | null;
+  pending_outreach_label_id: string | null;
 }
 
 export async function ensureAccountLabels(accountId: string): Promise<AccountLabelIds> {
@@ -217,13 +282,18 @@ export async function ensureAccountLabels(accountId: string): Promise<AccountLab
 
   const { data: account, error: acctErr } = await supabase
     .from("email_accounts")
-    .select("id, name, email")
+    .select("id, name, email, folders_bootstrapped_at")
     .eq("id", accountId)
     .maybeSingle();
 
   if (acctErr || !account) {
     console.error("[ensureAccountLabels] account not found:", accountId);
-    return { account_label_id: null, inbox_label_id: null };
+    return {
+      account_label_id: null,
+      inbox_label_id: null,
+      pending_outreach_folder_id: null,
+      pending_outreach_label_id: null,
+    };
   }
 
   // Account label name = account.name (the display name set when connecting)
@@ -235,7 +305,76 @@ export async function ensureAccountLabels(accountId: string): Promise<AccountLab
   // Global Inbox label
   const inbox_label_id = await ensureGlobalLabel("Inbox");
 
-  return { account_label_id, inbox_label_id };
+  // Global Pending Outreach label. Idempotent — matches the label seeded by
+  // the 2026-07-27 backfill (bg_color = color + "20"), so no duplicate.
+  const pending_outreach_label_id = await ensureGlobalLabel(PENDING_OUTREACH_NAME, {
+    color: PENDING_OUTREACH_COLOR,
+    parentLabelId: null,
+  });
+
+  // Per-account Pending Outreach folder — bootstrap-once (see header note).
+  let pending_outreach_folder_id: string | null = null;
+  try {
+    const { data: existingFolder } = await supabase
+      .from("folders")
+      .select("id")
+      .eq("email_account_id", accountId)
+      .ilike("name", PENDING_OUTREACH_NAME)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingFolder?.id) {
+      pending_outreach_folder_id = existingFolder.id;
+    } else if (!(account as any).folders_bootstrapped_at) {
+      // First bootstrap for this account: create it and append at the end of
+      // the account's folder order.
+      const { data: lastFolder } = await supabase
+        .from("folders")
+        .select("sort_order")
+        .eq("email_account_id", accountId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const { data: created, error: createErr } = await supabase
+        .from("folders")
+        .insert({
+          email_account_id: accountId,
+          name: PENDING_OUTREACH_NAME,
+          icon: PENDING_OUTREACH_ICON,
+          color: PENDING_OUTREACH_COLOR,
+          sort_order: ((lastFolder as any)?.sort_order ?? -1) + 1,
+          is_system: true,
+        })
+        .select("id")
+        .single();
+
+      if (createErr) {
+        console.error("[ensureAccountLabels] Pending Outreach folder insert failed:", createErr.message);
+      } else {
+        pending_outreach_folder_id = created?.id ?? null;
+      }
+    }
+    // else: already bootstrapped and the folder is gone — an operator deleted
+    // it deliberately. Do NOT recreate.
+
+    // Stamp the account as bootstrapped so reconnects never re-create folders.
+    if (!(account as any).folders_bootstrapped_at) {
+      await supabase
+        .from("email_accounts")
+        .update({ folders_bootstrapped_at: new Date().toISOString() })
+        .eq("id", accountId);
+    }
+  } catch (e: any) {
+    console.error("[ensureAccountLabels] Pending Outreach bootstrap failed:", e?.message || e);
+  }
+
+  return {
+    account_label_id,
+    inbox_label_id,
+    pending_outreach_folder_id,
+    pending_outreach_label_id,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────

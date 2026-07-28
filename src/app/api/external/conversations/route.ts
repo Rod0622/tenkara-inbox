@@ -410,7 +410,7 @@ export async function POST(req: NextRequest) {
       // Pre-assigned ones follow the assign API's convention instead:
       // folder stays null (assignee's personal inbox); they still appear
       // in Pending Outreach, which is driven by the draft, not the folder.
-      await labelManualCreatedConversation(conv.id, emailAccountId, !assignedMember);
+      await labelManualCreatedConversation(conv.id, emailAccountId, !assignedMember, "pending_outreach");
     }
   } catch (e: any) {
     console.error("[external/conversations] auto-label failed:", e?.message);
