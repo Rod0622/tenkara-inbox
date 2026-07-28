@@ -9,9 +9,14 @@ import { notifyWatchers } from "@/lib/notifications";
 import { cleanSubject as cleanSubjectFn } from "@/lib/email";
 import { dispatchDraftWebhook } from "@/lib/api-token-webhook";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
-import { onNewConversationFromSync } from "@/lib/folder-labels";
+import { onNewConversationFromSync, PENDING_OUTREACH_NAME } from "@/lib/folder-labels";
+import { STAGE_LABEL_IDS } from "@/lib/stage-labels";
 
 const MICROSOFT_PROVIDERS = ["microsoft"];
+
+// "1 - Inquiries" — the pipeline entry stage applied when an unclaimed
+// Pending Outreach thread is sent and carries no stage label yet.
+const INQUIRIES_LABEL_ID = "c7121538-123d-4d22-9f73-3242a2e1ecc1";
 
 function shouldSendViaGraph(account: any): boolean {
   if (account.provider === "microsoft") return true;
@@ -701,6 +706,105 @@ export async function POST(req: NextRequest) {
         }
       } catch (e: any) {
         console.error("[send] agent-draft handling error:", e?.message || e);
+      }
+
+      // ── Phase 3: Pending Outreach lifecycle ────────────────────────
+      // An unassigned conversation sitting in the account's Pending Outreach
+      // folder is unclaimed agent initial outreach. Whoever sends from it
+      // claims it. On send:
+      //   1. assign to the sender
+      //   2. clear folder_id so it moves to that person's personal inbox
+      //      (assigned conversations live on the assignee's plate, not in a
+      //      shared account folder — same convention as the assign API)
+      //   3. drop the "Pending Outreach" marker label, since it's a folder
+      //      marker and the conversation has left the folder
+      //   4. apply "1 - Inquiries" ONLY if no stage label is present yet
+      //
+      // Gated on folder + unassigned, not on the presence of an agent draft:
+      // if someone replies manually from an unclaimed outreach thread they
+      // have still claimed it. Best-effort — a failure here must never roll
+      // back a successful send.
+      try {
+        const { data: convo } = await supabase
+          .from("conversations")
+          .select("id, assignee_id, folder_id")
+          .eq("id", conversationId)
+          .maybeSingle();
+
+        if (convo && !convo.assignee_id && convo.folder_id && actorId) {
+          const { data: currentFolder } = await supabase
+            .from("folders")
+            .select("id, name")
+            .eq("id", convo.folder_id)
+            .maybeSingle();
+
+          const inPendingOutreach =
+            (currentFolder?.name || "").trim().toLowerCase() ===
+            PENDING_OUTREACH_NAME.toLowerCase();
+
+          if (inPendingOutreach) {
+            // 1 + 2 — claim it and move it out of the shared folder.
+            const { error: claimErr } = await supabase
+              .from("conversations")
+              .update({ assignee_id: actorId, folder_id: null })
+              .eq("id", conversationId)
+              .is("assignee_id", null); // guard against a concurrent claim
+
+            if (claimErr) {
+              console.error("[send] Pending Outreach claim failed:", claimErr.message);
+            } else {
+              // 3 — remove the folder-marker label.
+              const { data: poLabel } = await supabase
+                .from("labels")
+                .select("id")
+                .ilike("name", PENDING_OUTREACH_NAME)
+                .is("parent_label_id", null)
+                .limit(1)
+                .maybeSingle();
+
+              if (poLabel?.id) {
+                await supabase
+                  .from("conversation_labels")
+                  .delete()
+                  .eq("conversation_id", conversationId)
+                  .eq("label_id", poLabel.id);
+              }
+
+              // 4 — stage label only if the thread has none. Read AFTER the
+              // marker removal so Pending Outreach can't be miscounted (it
+              // isn't in STAGE_LABEL_IDS, but this keeps the check honest if
+              // that ever changes).
+              const { data: existingLabels } = await supabase
+                .from("conversation_labels")
+                .select("label_id")
+                .eq("conversation_id", conversationId);
+
+              const hasStage = (existingLabels || []).some((r: any) =>
+                STAGE_LABEL_IDS.includes(r.label_id)
+              );
+
+              if (!hasStage) {
+                const { error: stageErr } = await supabase
+                  .from("conversation_labels")
+                  .insert({ conversation_id: conversationId, label_id: INQUIRIES_LABEL_ID });
+                if (stageErr && !/duplicate/i.test(stageErr.message)) {
+                  console.error("[send] 1-Inquiries apply failed:", stageErr.message);
+                }
+              }
+
+              supabase.from("activity_log").insert({
+                conversation_id: conversationId,
+                actor_id: actorId,
+                action: "pending_outreach_claimed",
+                details: { applied_stage: !hasStage ? "1 - Inquiries" : null },
+              }).then(({ error: logErr }) => {
+                if (logErr) console.error("[send] claim audit log failed:", logErr.message);
+              });
+            }
+          }
+        }
+      } catch (e: any) {
+        console.error("[send] Pending Outreach lifecycle error:", e?.message || e);
       }
     }
 
