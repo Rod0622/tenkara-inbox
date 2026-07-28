@@ -1013,3 +1013,54 @@ export async function onIncomingMessageReopenCheck(
     console.error("[onIncomingMessageReopenCheck] failed:", e?.message || e);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// clearPendingOutreachMarker
+//
+// "Pending Outreach" is a FOLDER MARKER label, not a pipeline stage. It is
+// only meaningful while the conversation actually sits in that folder.
+//
+// Assigning a conversation clears folder_id (assigned threads live on the
+// assignee's plate, not in a shared folder) — so the marker must go with it,
+// or you get a thread labelled for a folder it no longer occupies.
+//
+// This showed up in production on 2026-07-28: Sam's agent 04 creates a cold
+// outbound unassigned (→ Pending Outreach folder + marker) and then PATCHes an
+// assignee ~2s later (→ folder cleared, marker left behind). 28 threads in one
+// evening. Both assign paths now call this.
+//
+// The send lifecycle in /api/send does the equivalent inline as part of a
+// larger claim transaction (assign + clear folder + conditional 1-Inquiries);
+// it is deliberately not refactored to call this, to avoid re-testing the
+// highest-traffic route in the app for a cosmetic consolidation.
+//
+// Best-effort and idempotent — never throws, no-op when the label isn't there.
+// ────────────────────────────────────────────────────────────────────
+
+export async function clearPendingOutreachMarker(conversationId: string): Promise<void> {
+  try {
+    const supabase = createServerClient();
+
+    const { data: poLabel } = await supabase
+      .from("labels")
+      .select("id")
+      .ilike("name", PENDING_OUTREACH_NAME)
+      .is("parent_label_id", null)
+      .limit(1)
+      .maybeSingle();
+
+    if (!poLabel?.id) return;
+
+    const { error } = await supabase
+      .from("conversation_labels")
+      .delete()
+      .eq("conversation_id", conversationId)
+      .eq("label_id", poLabel.id);
+
+    if (error) {
+      console.error("[clearPendingOutreachMarker] failed:", error.message);
+    }
+  } catch (e: any) {
+    console.error("[clearPendingOutreachMarker] failed:", e?.message || e);
+  }
+}

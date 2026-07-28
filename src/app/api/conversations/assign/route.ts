@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { notifyEmailAssigned, notifyWatchers } from "@/lib/notifications";
 import { runRulesForEvent } from "@/lib/rule-engine";
+import { clearPendingOutreachMarker } from "@/lib/folder-labels";
 
 // PATCH /api/conversations/assign — assign or unassign a conversation
 export async function PATCH(req: NextRequest) {
@@ -41,6 +42,12 @@ export async function PATCH(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Assigning cleared folder_id above, so the "Pending Outreach" folder marker
+  // is now stale — strip it. No-op for threads that never carried it.
+  if (assignee_id) {
+    await clearPendingOutreachMarker(conversation_id);
   }
 
   // Log assign or unassign in activity log

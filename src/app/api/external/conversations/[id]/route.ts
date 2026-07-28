@@ -6,6 +6,7 @@ import { authenticateBearer, hasScope } from "@/lib/api-token-auth";
 import { checkAndRecordRateLimit, rateLimitedResponse } from "@/lib/api-token-rate-limit";
 import { fetchAttachmentsForMessages, toExternalAttachment } from "@/lib/external-attachments";
 import { notifyEmailAssigned, notifyWatchers } from "@/lib/notifications";
+import { clearPendingOutreachMarker } from "@/lib/folder-labels";
 
 // ── GET /api/external/conversations/[id] ───────────────────────────────
 //
@@ -314,6 +315,13 @@ export async function PATCH(
     .update(updatePayload)
     .eq("id", convo.id);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  // Assigning cleared folder_id above, so the "Pending Outreach" folder marker
+  // is stale — strip it. This is the exact path that left 28 mislabelled
+  // threads on 2026-07-28: agent creates unassigned, then assigns ~2s later.
+  if (assigneeChanged && newAssigneeId) {
+    await clearPendingOutreachMarker(convo.id);
+  }
 
   // Audit + notifications — best-effort past this point; the assignment
   // itself has already succeeded.
