@@ -188,7 +188,7 @@ export function useFolders() {
   return folders;
 }
 
-const CONVERSATION_SELECT_FIELDS = `
+export const CONVERSATION_SELECT_FIELDS = `
         id,
         email_account_id,
         folder_id,
@@ -455,6 +455,130 @@ export function useConversations(accountId: string | null, currentUserId: string
   }, [fetchConversations, applyConversationDeltas]);
 
   return { conversations, loading, refetch: fetchConversations };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// usePersonalDraftQueue
+//
+// Backs the Personal Drafts view. Membership comes from the server
+// (/api/drafts?personal_queue=…): every unsent draft on a conversation
+// assigned to the user OR authored by the user, across every folder and
+// stage — and excluding unclaimed Pending Outreach drafts.
+//
+// Two-step on purpose:
+//   1. the API returns queue membership + the draft rows
+//   2. we hydrate the CONVERSATION rows here, client-side, with
+//      CONVERSATION_SELECT_FIELDS
+//
+// Step 2 is what lets the Drafts view reuse the normal ConversationList +
+// ConversationDetail layout: the conversations come back in exactly the
+// shape the inbox already uses. It also means the queue doesn't depend on
+// whether a thread happens to be inside useConversations' recent-300
+// window — an agent draft on an old assigned thread still shows.
+// ────────────────────────────────────────────────────────────────────
+
+export function usePersonalDraftQueue(userId: string | null, enabled: boolean) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [standaloneCount, setStandaloneCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const fetchQueue = useCallback(async () => {
+    if (!userId || !enabled) {
+      setConversations([]);
+      setDrafts([]);
+      setStandaloneCount(0);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(
+        "/api/drafts?personal_queue=" + encodeURIComponent(userId)
+      );
+      if (!res.ok) throw new Error("personal_queue fetch failed: " + res.status);
+      const json = await res.json();
+
+      setDrafts(json.drafts || []);
+      setStandaloneCount(json.standalone_count || 0);
+
+      const ids: string[] = json.conversation_ids || [];
+      if (!ids.length) {
+        setConversations([]);
+        return;
+      }
+
+      // Chunk the id list. A single .in() with hundreds of uuids builds a very
+      // long querystring — the same class of failure as the bulk-discard 414.
+      const CHUNK = 100;
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        chunks.push(ids.slice(i, i + CHUNK));
+      }
+
+      const results = await Promise.all(
+        chunks.map((chunk) =>
+          supabase
+            .from("conversations")
+            .select(CONVERSATION_SELECT_FIELDS)
+            .in("id", chunk)
+            .neq("status", "merged")
+        )
+      );
+
+      const rows: Conversation[] = [];
+      const seen = new Set<string>();
+      for (const r of results) {
+        if (r.error) {
+          console.error("[usePersonalDraftQueue] hydrate error:", r.error.message);
+          continue;
+        }
+        for (const c of (r.data || []) as unknown as Conversation[]) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            rows.push(c);
+          }
+        }
+      }
+
+      // Order by the draft queue, not by thread recency: the point of this
+      // view is working through drafts, so the most recently touched DRAFT
+      // should sit at the top.
+      const draftOrder = new Map<string, number>();
+      (json.drafts || []).forEach((d: any, i: number) => {
+        const cid = d?.conversation?.id;
+        if (cid && !draftOrder.has(cid)) draftOrder.set(cid, i);
+      });
+      rows.sort(
+        (a, b) =>
+          (draftOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+          (draftOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+      );
+
+      setConversations(rows);
+    } catch (e: any) {
+      console.error("[usePersonalDraftQueue] failed:", e?.message || e);
+      setConversations([]);
+      setDrafts([]);
+      setStandaloneCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, enabled]);
+
+  useEffect(() => {
+    fetchQueue();
+    if (!enabled) return;
+    // Only polls while the Drafts view is actually open, and at 30s to match
+    // the poll cadence set during the egress work.
+    const t = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchQueue();
+    }, 30000);
+    return () => clearInterval(t);
+  }, [fetchQueue, enabled]);
+
+  return { conversations, drafts, standaloneCount, loading, refetch: fetchQueue };
 }
 
 export function useConversationDetail(conversationId: string | null) {

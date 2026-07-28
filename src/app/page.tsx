@@ -7,6 +7,7 @@ import { createBrowserClient } from "@/lib/supabase";
 import {
   useActions,
   useConversations,
+  usePersonalDraftQueue,
   useEmailAccounts,
   useFolders,
   useTasks,
@@ -291,7 +292,29 @@ export default function InboxPage() {
   const isAccountDraftsView = activeView === "account-drafts" && !!activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
+  // Personal Drafts queue. Only fetches/polls while that view is open.
+  const {
+    conversations: draftQueueConversations,
+    standaloneCount: draftStandaloneCount,
+    refetch: refetchDraftQueue,
+  } = usePersonalDraftQueue(currentUser?.id || null, isDraftsView);
+
   const displayConversations = useMemo(() => {
+    // Personal Drafts has its own source of truth — the server-side queue,
+    // not the account/folder-filtered list. Returns early so none of the
+    // mailbox/folder/stage logic below applies to it.
+    if (isDraftsView) {
+      const q = debouncedSearchQuery.trim().toLowerCase();
+      if (q.length < 2) return draftQueueConversations;
+      return draftQueueConversations.filter(
+        (c: any) =>
+          c.subject?.toLowerCase().includes(q) ||
+          c.from_name?.toLowerCase().includes(q) ||
+          c.from_email?.toLowerCase().includes(q) ||
+          c.preview?.toLowerCase().includes(q)
+      );
+    }
+
     let filtered = conversations;
 
     const selectedFolder = activeFolder
@@ -468,6 +491,8 @@ export default function InboxPage() {
     return filtered;
   }, [
     conversations,
+    isDraftsView,
+    draftQueueConversations,
     folders,
     activeMailbox,
     activeFolder,
@@ -815,17 +840,6 @@ export default function InboxPage() {
               onOpenConversation={openConversationFromTask}
             />
           </Panel>
-        ) : isDraftsView ? (
-          <Panel defaultSize={86} minSize={50} order={2} id="content-drafts">
-            <DraftsPanel
-              currentUser={currentUser}
-              onOpenConversation={(conversationId) => {
-                setActiveView("inbox");
-                window.location.hash = `#conversation=${conversationId}`;
-              }}
-              onOpenCompose={() => setActiveView("compose")}
-            />
-          </Panel>
         ) : isAccountDraftsView ? (
           // Per-account Drafts view — same panel, scoped to one email account
           // and showing drafts from ALL team members.
@@ -845,6 +859,28 @@ export default function InboxPage() {
           <>
             {/* ── Panel 2: ConversationList (or per-folder Pending Outreach sub-view) ── */}
             <Panel defaultSize={22} minSize={15} maxSize={45} order={2} id="conversation-list">
+              {/* Option A — standalone compose drafts have no conversation, so
+                  they can't render in the list/detail split. Surface them as a
+                  banner that opens the compose modal instead of hiding them. */}
+              {isDraftsView && draftStandaloneCount > 0 && (
+                <button
+                  onClick={() => setActiveView("compose")}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    background: "var(--bg-secondary)",
+                    border: "none",
+                    borderBottom: "1px solid var(--border-color)",
+                    color: "var(--text-primary)",
+                    fontSize: 13,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {draftStandaloneCount} standalone draft
+                  {draftStandaloneCount === 1 ? "" : "s"} — open compose
+                </button>
+              )}
               {folderSubView === "pending_outreach" && activeFolder ? (
                 <PendingOutreachPanel
                   currentUser={currentUser}
@@ -892,7 +928,21 @@ export default function InboxPage() {
                 onAddTask={handleAddTask}
                 onUpdateTask={handleUpdateTask}
                 onAssign={handleAssign}
-                onSendReply={actions.sendReply}
+                onSendReply={async (
+                  conversationId: string,
+                  text: string,
+                  attachments?: { name: string; type: string; data: string }[],
+                  cc?: string,
+                  bcc?: string,
+                  to?: string,
+                  subject?: string
+                ) => {
+                  await actions.sendReply(conversationId, text, attachments, cc, bcc, to, subject);
+                  // Sending deletes the draft, so the thread must drop out of
+                  // the Personal Drafts queue right away rather than waiting
+                  // for the 30s poll. No-op outside that view.
+                  if (isDraftsView) refetchDraftQueue();
+                }}
                 onMoveToFolder={handleMoveToFolder}
                 globalSearchQuery={debouncedSearchQuery.trim().length >= 2 ? debouncedSearchQuery : ""}
                 onLabelsChange={(delta) => {
