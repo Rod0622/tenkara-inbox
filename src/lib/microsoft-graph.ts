@@ -2,7 +2,7 @@ import { createServerClient } from "@/lib/supabase";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
-import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, resolveConversationCounterparty, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 
@@ -404,12 +404,16 @@ export async function syncMicrosoftAccount(accountId: string, timeBudgetMs?: num
               isOutbound ? null : fromName,
               internalCtx
             );
+            const counterparty = resolveConversationCounterparty({
+              isOutbound, fromEmail, fromName, toAddresses: toAddrForLookup,
+            });
             const { data: nc, error: ce } = await supabase.from("conversations").insert({
               email_account_id: accountId,
               thread_id: email.conversationId ? `ms:${email.conversationId}` : `ms:${email.id}`,
               subject: subj,
-              from_name: fromName || fromEmail || "Unknown",
-              from_email: fromEmail,
+              // COUNTERPARTY, not our account — see resolveConversationCounterparty.
+              from_name: counterparty.from_name,
+              from_email: counterparty.from_email,
               preview: decodeEmailText(email.bodyPreview || "").slice(0, 200),
               is_unread: !isOutbound, status: "open",
               last_message_at: inboundTs,

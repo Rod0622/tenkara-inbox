@@ -8,7 +8,7 @@ import { uploadAttachmentToStorage, type AttachmentUploadInput } from "@/lib/att
 import { decodeEmailText, decodeEmailTextPreserveNewlines } from "@/lib/decode-email-text";
 import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
 import { mergeConversation } from "@/lib/merge-conversations";
-import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, resolveConversationCounterparty, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 
 // ── Types ────────────────────────────────────────────
@@ -634,12 +634,20 @@ export async function syncEmailAccount(accountId: string): Promise<SyncResult> {
                 isOutbound ? null : fromName,
                 internalCtx
               );
+              // from_name/from_email identify the COUNTERPARTY, not us. On an
+              // outbound-first thread the From header is our own account.
+              const counterparty = resolveConversationCounterparty({
+                isOutbound,
+                fromEmail,
+                fromName,
+                toAddresses,
+              });
 
               const { data: nc, error: ce } = await supabase.from("conversations").insert({
                 email_account_id: accountId,
                 thread_id: `gmail:${msgData.threadId || msgId}`,
                 subject: cleanSubject || "(No Subject)",
-                from_name: fromName, from_email: fromEmail,
+                from_name: counterparty.from_name, from_email: counterparty.from_email,
                 preview: snippet.slice(0, 200),
                 is_unread: !isOutbound,
                 // Spam-flagged messages create conversations with status="spam"
@@ -1854,14 +1862,24 @@ async function findOrCreateConversation(
   }
 
   // Strategy 4: Create new conversation
+  // Direction matters here: if this first message is OUTBOUND, the From header
+  // is our own account, and writing that as from_email would record us as the
+  // counterparty. accountEmail is already a parameter, so isOutbound() below
+  // gives us what we need.
+  const counterparty = resolveConversationCounterparty({
+    isOutbound: isOutbound(email.fromEmail, accountEmail),
+    fromEmail: email.fromEmail,
+    fromName: email.fromName,
+    toAddresses: email.toAddresses,
+  });
   const { data: newConvo, error } = await supabase
     .from("conversations")
     .insert({
       email_account_id: accountId,
       thread_id: email.messageId || `uid:${email.uid}`,
       subject: normalizedSubject || email.subject,
-      from_name: email.fromName,
-      from_email: email.fromEmail,
+      from_name: counterparty.from_name,
+      from_email: counterparty.from_email,
       preview: email.snippet,
       is_unread: true,
       status: "open",

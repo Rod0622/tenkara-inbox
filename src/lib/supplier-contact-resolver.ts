@@ -275,3 +275,53 @@ export async function ensureSupplierContact(
   }
   return (created as any)?.id || null;
 }
+
+// ────────────────────────────────────────────────────────────────────
+// resolveConversationCounterparty
+//
+// Picks the values for conversations.from_name / from_email.
+//
+// CODEBASE CONVENTION: from_name / from_email on a CONVERSATION identify the
+// COUNTERPARTY (the supplier), not our own account. Every downstream consumer
+// reads them that way — the reply editor's To fallback, supplier grouping,
+// responsiveness scoring.
+//
+// The bug this exists to prevent: when the FIRST synced message of a thread is
+// OUTBOUND (which is the normal case here — initial outreach lands in Inbox,
+// not Sent), taking from_email straight off the message's From header records
+// OUR OWN address as the counterparty. As of 2026-07-28 that had happened to
+// ~1,285 conversations across 8 accounts and was still accruing daily.
+//
+// For outbound, the counterparty is the first recipient. Name is usually
+// unknown on that path, so we fall back to the email itself — mirroring the
+// external API's `sanitizedToName || toEmail` convention. The supplier card
+// (supplier_contact_id) carries the authoritative name.
+//
+// Returns nulls-free strings so callers can spread directly into an insert.
+// ────────────────────────────────────────────────────────────────────
+
+export function resolveConversationCounterparty(args: {
+  isOutbound: boolean;
+  fromEmail: string | null | undefined;
+  fromName: string | null | undefined;
+  toAddresses: string | null | undefined;
+}): { from_email: string; from_name: string } {
+  const fromEmail = (args.fromEmail || "").trim();
+  const fromName = (args.fromName || "").trim();
+
+  if (!args.isOutbound) {
+    // Inbound: the sender IS the counterparty. Unchanged behaviour.
+    return { from_email: fromEmail, from_name: fromName || fromEmail || "Unknown" };
+  }
+
+  // Outbound: the counterparty is the first recipient.
+  const counterparty = (extractFirstEmail(args.toAddresses || "") || "").trim();
+
+  if (!counterparty) {
+    // No recipient to work with. Prefer an empty string over silently writing
+    // our own address, which is the failure mode this function prevents.
+    return { from_email: "", from_name: "Unknown" };
+  }
+
+  return { from_email: counterparty, from_name: counterparty };
+}

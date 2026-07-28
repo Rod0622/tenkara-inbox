@@ -1,7 +1,7 @@
 import { refreshMicrosoftToken } from "@/lib/microsoft-oauth";
 import { onNewConversationFromSync, onIncomingMessageReopenCheck } from "@/lib/folder-labels";
 import { cleanSubject as cleanSubjectFn, sanitizeBodyHtml } from "@/lib/email";
-import { ensureSupplierContact, loadInternalContext, extractFirstEmail, type InternalContext } from "@/lib/supplier-contact-resolver";
+import { ensureSupplierContact, loadInternalContext, extractFirstEmail, resolveConversationCounterparty, type InternalContext } from "@/lib/supplier-contact-resolver";
 import { dispatchMessageReceivedWebhook } from "@/lib/api-token-webhook";
 import { uploadAttachmentToStorage } from "@/lib/attachments-storage";
 
@@ -204,12 +204,19 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
             isOutbound ? null : fromNameForInsert,
             internalCtx
           );
+          const counterparty = resolveConversationCounterparty({
+            isOutbound,
+            fromEmail: fromEmailForInsert,
+            fromName: fromNameForInsert,
+            toAddresses: toAddrForLookup,
+          });
           const { data: nc, error: ce } = await supabase.from("conversations").insert({
             email_account_id: accountId,
             thread_id: email.conversationId ? "ms:" + email.conversationId : "ms:" + email.id,
             subject: subj,
-            from_name: fromNameForInsert || fromEmailForInsert || "Unknown",
-            from_email: fromEmailForInsert,
+            // COUNTERPARTY, not our account — see resolveConversationCounterparty.
+            from_name: counterparty.from_name,
+            from_email: counterparty.from_email,
             preview: (email.bodyPreview || "").slice(0, 200),
             is_unread: !isOutbound,
             status: "open",
