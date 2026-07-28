@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
   const emailAccountId = req.nextUrl.searchParams.get("email_account_id");
   const standaloneOnly = req.nextUrl.searchParams.get("standalone") === "true";
   const draftId = req.nextUrl.searchParams.get("id");
+  // Personal Drafts queue mode — see the block below.
+  const personalQueueUserId = req.nextUrl.searchParams.get("personal_queue");
 
   // Single-draft fetch by id. Used to pull the FULL body on demand (e.g. at
   // send time) so list views (like Pending Outreach) can poll a lightweight
@@ -37,6 +39,103 @@ export async function GET(req: NextRequest) {
     if (oneErr) return NextResponse.json({ error: oneErr.message }, { status: 500 });
     if (!one) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
     return NextResponse.json({ draft: one });
+  }
+
+  // ── Personal Drafts queue ────────────────────────────────────────
+  // Every unsent draft the given user needs to act on, across EVERY folder
+  // and stage:
+  //   • agent drafts on conversations assigned to them (incl. mid-pipeline
+  //     threads, e.g. an agent reply on a thread already in 2 - Quotes)
+  //   • drafts they authored themselves, even on threads assigned elsewhere
+  //   • their own standalone compose drafts (conversation_id null)
+  //
+  // EXCLUDED: drafts on UNASSIGNED conversations sitting in a Pending Outreach
+  // folder. Those are unclaimed team outreach — they belong to the shared
+  // Pending Outreach folder until someone sends one and thereby claims it.
+  //
+  // Note there is no "sent" flag to filter on: drafts are deleted on send
+  // (see /api/send Phase 2), so every row here is by definition unsent.
+  //
+  // Membership is an OR across a join, which PostgREST can't express in a
+  // single request, so it's two queries merged and deduped by draft id.
+  if (personalQueueUserId) {
+    const SELECT_WITH_FOLDER = `
+      *,
+      conversation:conversations!inner(
+        id, subject, from_name, from_email, email_account_id,
+        assignee_id, folder_id,
+        folder:folders(id, name)
+      ),
+      account:email_accounts(id, name, email),
+      author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
+    `;
+    // Same shape, LEFT join. Written out rather than derived from the string
+    // above: a derived .replace() would silently fall back to the inner join
+    // if the select were ever reworded, which would drop standalone drafts.
+    const SELECT_LEFT_JOIN = `
+      *,
+      conversation:conversations(
+        id, subject, from_name, from_email, email_account_id,
+        assignee_id, folder_id,
+        folder:folders(id, name)
+      ),
+      account:email_accounts(id, name, email),
+      author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
+    `;
+
+    const [assignedRes, authoredRes] = await Promise.all([
+      // A — drafts on conversations assigned to this user (inner join so the
+      // embedded filter applies).
+      supabase
+        .from("email_drafts")
+        .select(SELECT_WITH_FOLDER)
+        .eq("conversation.assignee_id", personalQueueUserId)
+        .order("updated_at", { ascending: false }),
+      // B — drafts this user authored. Left join: standalone drafts have no
+      // conversation and must still come through.
+      supabase
+        .from("email_drafts")
+        .select(SELECT_LEFT_JOIN)
+        .eq("author_id", personalQueueUserId)
+        .order("updated_at", { ascending: false }),
+    ]);
+
+    if (assignedRes.error) {
+      return NextResponse.json({ error: assignedRes.error.message }, { status: 500 });
+    }
+    if (authoredRes.error) {
+      return NextResponse.json({ error: authoredRes.error.message }, { status: 500 });
+    }
+
+    const byId = new Map<string, any>();
+    for (const d of [...(assignedRes.data || []), ...(authoredRes.data || [])]) {
+      if (d?.id && !byId.has(d.id)) byId.set(d.id, d);
+    }
+
+    const merged = Array.from(byId.values()).filter((d: any) => {
+      const convo = d.conversation;
+      if (!convo) return true; // standalone compose draft — always the author's
+      const folderName = (convo.folder?.name || "").trim().toLowerCase();
+      const isUnclaimedOutreach =
+        !convo.assignee_id && folderName === "pending outreach";
+      return !isUnclaimedOutreach;
+    });
+
+    merged.sort((a: any, b: any) =>
+      String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+    );
+
+    return NextResponse.json({
+      drafts: merged,
+      // Conversation ids for the client to hydrate full conversation rows with
+      // its own CONVERSATION_SELECT_FIELDS — keeps one definition of the
+      // conversation shape and avoids depending on whatever happens to be in
+      // the recent-conversations window.
+      conversation_ids: Array.from(
+        new Set(merged.map((d: any) => d.conversation?.id).filter(Boolean))
+      ),
+      standalone_count: merged.filter((d: any) => !d.conversation).length,
+    });
   }
 
   let query = supabase
