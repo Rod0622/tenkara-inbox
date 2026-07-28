@@ -54,7 +54,7 @@ export async function GET(
   const { data: convo, error: convoErr } = await supabase
     .from("conversations")
     .select(
-      "id, subject, from_name, from_email, last_message_at, email_account_id, status, account:email_accounts(name)"
+      "id, subject, from_name, from_email, last_message_at, email_account_id, status, merged_into, account:email_accounts(name)"
     )
     .eq("id", params.id)
     .maybeSingle();
@@ -98,6 +98,19 @@ export async function GET(
       email_account_id: convo.email_account_id,
       account_name: (convo as any).account?.name || null,
       status: convo.status,
+      // Merge relationship. When an operator merges thread A INTO thread B,
+      // A's messages/tasks/notes/activity are MOVED (conversation_id updated
+      // in place — no inserts, so no message.received fires) and A is marked
+      // status="merged" with merged_into=B.
+      //
+      // For a partner tracking conversation ids: a non-null merged_into means
+      // this id is now a shell and the live thread is merged_into. Re-fetch
+      // that id to pick up messages that moved in — typically a supplier
+      // replying from a different domain than we outreached to.
+      //
+      // Unmerge sets merged_into back to null and status back to open, so
+      // polling this field reflects both directions.
+      merged_into: (convo as any).merged_into || null,
     },
     messages: messagesWithAttachments,
   });
@@ -113,6 +126,23 @@ export async function GET(
 //
 //   { "assignee_email": "mildred@trytenkara.com" }   → assign / reassign
 //   { "assignee_email": null }                       → unassign
+//   { "status": "closed" }                           → close (reversible)
+//   { "status": "trash" }                            → move to trash
+//
+// At least one of assignee_email / status must be present; both may be sent
+// together. Only "closed" and "trash" are accepted for status — there is no
+// "archived" status in this system (Archive is a FOLDER, not a status), and
+// open/snoozed/spam/merged are not partner-settable.
+//
+// status exists for the agent-side "drop lead" flow: deleting the staged
+// draft leaves an empty conversation shell that still lists in the operator's
+// Inbox (page.tsx treats folder_id IS NULL as belonging to the system Inbox
+// view). Closing it removes it from the open view while staying reversible
+// and auditable — deliberately not a hard DELETE.
+//
+// GUARD: status changes are refused when the conversation already has
+// messages. The drop-lead case is a never-sent shell (0 messages); once real
+// mail exists, hiding the thread is an operator decision, not an agent one.
 //
 // Keyed by the team member's Tenkara login email (case-insensitive).
 // Unlike create (which warns and proceeds), an unmatched email here is a
@@ -159,26 +189,49 @@ export async function PATCH(
       { status: 400 }
     );
   }
-  if (!("assignee_email" in (body || {}))) {
+  const hasAssignee = "assignee_email" in (body || {});
+  const hasStatus = "status" in (body || {});
+
+  if (!hasAssignee && !hasStatus) {
     return NextResponse.json(
-      { error: "missing_field", detail: "assignee_email is required (string to assign, null to unassign)" },
+      { error: "missing_field", detail: "at least one of assignee_email or status is required" },
       { status: 400 }
     );
   }
-  const rawAssignee = body.assignee_email;
-  if (rawAssignee !== null && (typeof rawAssignee !== "string" || !rawAssignee.trim())) {
-    return NextResponse.json(
-      { error: "invalid_field", detail: "assignee_email must be a non-empty string or null" },
-      { status: 400 }
-    );
+
+  let assigneeEmail: string | null = null;
+  if (hasAssignee) {
+    const rawAssignee = body.assignee_email;
+    if (rawAssignee !== null && (typeof rawAssignee !== "string" || !rawAssignee.trim())) {
+      return NextResponse.json(
+        { error: "invalid_field", detail: "assignee_email must be a non-empty string or null" },
+        { status: 400 }
+      );
+    }
+    assigneeEmail = rawAssignee === null ? null : rawAssignee.trim().toLowerCase();
   }
-  const assigneeEmail: string | null = rawAssignee === null ? null : rawAssignee.trim().toLowerCase();
+
+  const PARTNER_SETTABLE_STATUSES = ["closed", "trash"];
+  let newStatus: string | null = null;
+  if (hasStatus) {
+    const rawStatus = body.status;
+    if (typeof rawStatus !== "string" || !PARTNER_SETTABLE_STATUSES.includes(rawStatus.trim().toLowerCase())) {
+      return NextResponse.json(
+        {
+          error: "invalid_field",
+          detail: `status must be one of: ${PARTNER_SETTABLE_STATUSES.join(", ")}`,
+        },
+        { status: 400 }
+      );
+    }
+    newStatus = rawStatus.trim().toLowerCase();
+  }
 
   const supabase = createServerClient();
 
   const { data: convo, error: convoErr } = await supabase
     .from("conversations")
-    .select("id, subject, thread_id, assignee_id")
+    .select("id, subject, thread_id, assignee_id, status")
     .eq("id", params.id)
     .maybeSingle();
   if (convoErr) return NextResponse.json({ error: convoErr.message }, { status: 500 });
@@ -192,9 +245,30 @@ export async function PATCH(
     );
   }
 
+  // Empty-shell guard for status changes (see header note).
+  if (newStatus) {
+    const { count: msgCount, error: cntErr } = await supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", convo.id);
+    if (cntErr) return NextResponse.json({ error: cntErr.message }, { status: 500 });
+    if ((msgCount || 0) > 0) {
+      return NextResponse.json(
+        {
+          error: "conflict",
+          detail:
+            "status may only be changed on a conversation with no messages. " +
+            "This thread has real mail — closing it is an operator decision.",
+          message_count: msgCount,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // Resolve the target assignee (null = unassign).
   let newAssignee: { id: string; name: string } | null = null;
-  if (assigneeEmail) {
+  if (hasAssignee && assigneeEmail) {
     const { data: member } = await supabase
       .from("team_members")
       .select("id, name, email, is_active")
@@ -209,50 +283,78 @@ export async function PATCH(
     newAssignee = { id: member.id, name: member.name };
   }
 
-  const newAssigneeId = newAssignee?.id || null;
-  if ((convo.assignee_id || null) === newAssigneeId) {
+  const newAssigneeId = hasAssignee ? (newAssignee?.id || null) : (convo.assignee_id || null);
+  const assigneeChanged = hasAssignee && (convo.assignee_id || null) !== newAssigneeId;
+  const statusChanged = !!newStatus && convo.status !== newStatus;
+
+  // Nothing to do — no writes, no notifications. Preserves the existing
+  // assignee-only idempotent behaviour.
+  if (!assigneeChanged && !statusChanged) {
     return NextResponse.json({
       success: true,
       conversation_id: convo.id,
       assignee_id: newAssigneeId,
       assignee_name: newAssignee?.name || null,
+      status: convo.status,
       changed: false,
     });
   }
 
+  const updatePayload: Record<string, any> = {};
+  if (assigneeChanged) {
+    updatePayload.assignee_id = newAssigneeId;
+    // Assigning moves the conversation to the assignee's personal inbox
+    // (folder cleared); unassigning leaves it where it was.
+    if (newAssigneeId) updatePayload.folder_id = null;
+  }
+  if (statusChanged) updatePayload.status = newStatus;
+
   const { error: updErr } = await supabase
     .from("conversations")
-    .update({
-      assignee_id: newAssigneeId,
-      // Assigning moves the conversation to the assignee's personal inbox
-      // (folder cleared); unassigning leaves it where it was.
-      ...(newAssigneeId ? { folder_id: null } : {}),
-    })
+    .update(updatePayload)
     .eq("id", convo.id);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
   // Audit + notifications — best-effort past this point; the assignment
   // itself has already succeeded.
   try {
-    await supabase.from("activity_log").insert({
-      conversation_id: convo.id,
-      actor_id: newAssigneeId || convo.assignee_id,
-      action: newAssigneeId ? "assigned" : "unassigned",
-      details: {
-        assignee_id: newAssigneeId,
-        previous_assignee_id: convo.assignee_id || null,
-        assigned_by_agent: token.name,
-      },
-    });
+    const rows: any[] = [];
+    if (assigneeChanged) {
+      rows.push({
+        conversation_id: convo.id,
+        actor_id: newAssigneeId || convo.assignee_id,
+        action: newAssigneeId ? "assigned" : "unassigned",
+        details: {
+          assignee_id: newAssigneeId,
+          previous_assignee_id: convo.assignee_id || null,
+          assigned_by_agent: token.name,
+        },
+      });
+    }
+    if (statusChanged) {
+      // "closed" matches the in-app close route's action name so both show
+      // identically in the activity timeline.
+      rows.push({
+        conversation_id: convo.id,
+        actor_id: null,
+        action: newStatus === "closed" ? "closed" : "trashed",
+        details: {
+          new_status: newStatus,
+          previous_status: convo.status,
+          changed_by_agent: token.name,
+        },
+      });
+    }
+    if (rows.length) await supabase.from("activity_log").insert(rows);
   } catch (e: any) {
     console.error("[external/conversations] PATCH activity log failed:", e?.message);
   }
 
   try {
-    if (newAssigneeId) {
+    if (assigneeChanged && newAssigneeId) {
       await notifyEmailAssigned(convo.id, newAssigneeId, null, convo.subject || "Conversation");
     }
-    await notifyWatchers(convo.id, "assignee_change", {
+    if (assigneeChanged) await notifyWatchers(convo.id, "assignee_change", {
       title: newAssignee
         ? `${token.name} assigned this conversation to ${newAssignee.name}`
         : `${token.name} unassigned this conversation`,
@@ -269,6 +371,7 @@ export async function PATCH(
     conversation_id: convo.id,
     assignee_id: newAssigneeId,
     assignee_name: newAssignee?.name || null,
+    status: statusChanged ? newStatus : convo.status,
     changed: true,
   });
 }
