@@ -374,6 +374,21 @@ export async function POST(req: NextRequest) {
 // fails (best-effort).
 export async function DELETE(req: NextRequest) {
   const supabase = createServerClient();
+
+  // OPTIONAL bearer auth. When a valid API token is present the caller is an
+  // external agent, and a conversation-scoped delete is narrowed to that
+  // token's OWN drafts (see the conversationId branch below).
+  //
+  // Why this matters: an operator can have their own hand-written draft on the
+  // same thread as an agent draft. Those are distinguished at the DRAFT level
+  // by email_drafts.created_by_agent — NOT by the "Super Agent" label, which
+  // lives on the CONVERSATION and therefore marks both drafts alike.
+  //
+  // Without a token (the app UI / operator path) behaviour is unchanged.
+  // Operators discarding agent drafts is the intended review workflow.
+  const agentToken = await authenticateBearer(req);
+  const agentScope = agentToken?.name || null;
+
   const id = req.nextUrl.searchParams.get("id");
   // Bulk discard: ?ids=<uuid>,<uuid>,... — used by Pending Outreach's
   // multi-select delete. Same lifecycle as single discard (per-draft
@@ -418,10 +433,12 @@ export async function DELETE(req: NextRequest) {
       .in("id", ids);
     draftsToDelete = (data || []) as DraftRow[];
   } else if (conversationId) {
-    const { data } = await supabase
+    let sel = supabase
       .from("email_drafts")
       .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
       .eq("conversation_id", conversationId);
+    if (agentScope) sel = sel.eq("created_by_agent", agentScope);
+    const { data } = await sel;
     draftsToDelete = (data || []) as DraftRow[];
   } else {
     return NextResponse.json({ error: "id, ids, or conversation_id required" }, { status: 400 });
@@ -435,7 +452,11 @@ export async function DELETE(req: NextRequest) {
     const { error } = await supabase.from("email_drafts").delete().in("id", ids);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (conversationId) {
-    const { error } = await supabase.from("email_drafts").delete().eq("conversation_id", conversationId);
+    let del = supabase.from("email_drafts").delete().eq("conversation_id", conversationId);
+    // Agent callers may only clear their own drafts on the thread — never an
+    // operator's hand-written one.
+    if (agentScope) del = del.eq("created_by_agent", agentScope);
+    const { error } = await del;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

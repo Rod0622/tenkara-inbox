@@ -920,22 +920,26 @@ export default function Sidebar({
                             >
                               Closed
                             </button>
-                            <button
-                              onClick={() => {
-                                window.location.hash = "";
-                                setActiveFolder(folder.id);
-                                setActiveMailbox(mb.id);
-                                setActiveView("inbox");
-                                if (setFolderSubView) setFolderSubView("pending_outreach");
-                              }}
-                              className={`text-left px-2 py-0.5 rounded text-[11px] transition-colors ${
-                                isFolderActive && folderSubView === "pending_outreach"
-                                  ? "bg-[var(--border)] text-[var(--text-primary)]"
-                                  : "text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-secondary)]"
-                              }`}
-                            >
-                              Pending Outreach
-                            </button>
+                            {/* REMOVED 2026-07-29 — nested "Pending Outreach"
+                                sub-view button.
+
+                                Pending Outreach is now a real TOP-LEVEL folder
+                                per account (created by ensureAccountLabels,
+                                bootstrap-once). Unassigned agent conversations
+                                are filed into it directly.
+
+                                This nested button filtered drafts by
+                                conversation.folder_id === activeFolder, so once
+                                the 2026-07-27 migration moved those threads out
+                                of Inbox and into the Pending Outreach folder, it
+                                matched nothing and rendered EMPTY under every
+                                folder — which reads as data loss to operators.
+
+                                Only the button is removed. The underlying
+                                folderSubView === "pending_outreach" machinery
+                                still exists in page.tsx and ConversationList and
+                                is simply now unreachable; removing that properly
+                                is a separate, more invasive change. */}
                           </div>
                         )}
                       </div>
