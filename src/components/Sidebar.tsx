@@ -1001,6 +1001,20 @@ export default function Sidebar({
             <Target size={16} />
             <span>Outreach Tracker</span>
           </Link>
+          {/* Leak Review — visible to ALL users as of 2026-07-29, not just
+              admins. Note this was never actually restricted: neither
+              /leak-review nor any of its five API routes enforce a role, so a
+              non-admin typing the URL already had full access including split.
+              Moving the link out of the admin block only makes it
+              discoverable. If it should be genuinely admin-only in future,
+              the guard has to go on the page and the API routes, not here. */}
+          <Link
+            href="/leak-review"
+            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
+          >
+            <AlertTriangle size={16} />
+            <span>Leak Review</span>
+          </Link>
           {currentUser.role === "admin" && (
             <>
               <Link
@@ -1009,13 +1023,6 @@ export default function Sidebar({
               >
                 <BarChart3 size={16} />
                 <span>Dashboard</span>
-              </Link>
-              <Link
-                href="/leak-review"
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface)] transition-all w-full"
-              >
-                <AlertTriangle size={16} />
-                <span>Leak Review</span>
               </Link>
               <Link
                 href="/settings"
