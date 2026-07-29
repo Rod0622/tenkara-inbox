@@ -192,7 +192,11 @@ export default function Sidebar({
         setNotifCount(notifs.filter((n: any) => !n.is_read).length);
 
         // Fetch drafts count
-        const draftsRes = await fetch(`/api/drafts?author_id=${currentUser.id}`);
+        // Must use the SAME rule as the Drafts view (personal_queue), not
+        // author_id. author_id counts every draft this user authored including
+        // ones on OTHER people's threads, which the view deliberately
+        // excludes — so the badge read 43 while the list showed 6.
+        const draftsRes = await fetch(`/api/drafts?personal_queue=${currentUser.id}`);
         if (draftsRes.ok) { const d = await draftsRes.json(); setDraftsCount((d.drafts || []).length); }
 
         // Check for due follow-up reminders
