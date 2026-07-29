@@ -59,82 +59,130 @@ export async function GET(req: NextRequest) {
   // Membership is an OR across a join, which PostgREST can't express in a
   // single request, so it's two queries merged and deduped by draft id.
   if (personalQueueUserId) {
-    const SELECT_WITH_FOLDER = `
-      *,
-      conversation:conversations!inner(
-        id, subject, from_name, from_email, email_account_id,
-        assignee_id, folder_id,
-        folder:folders(id, name)
-      ),
-      account:email_accounts(id, name, email),
-      author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
-    `;
-    // Same shape, LEFT join. Written out rather than derived from the string
-    // above: a derived .replace() would silently fall back to the inner join
-    // if the select were ever reworded, which would drop standalone drafts.
-    const SELECT_LEFT_JOIN = `
-      *,
-      conversation:conversations(
-        id, subject, from_name, from_email, email_account_id,
-        assignee_id, folder_id,
-        folder:folders(id, name)
-      ),
-      account:email_accounts(id, name, email),
-      author:team_members!email_drafts_author_id_fkey(id, name, initials, color)
-    `;
+    // ── Personal Drafts queue ──────────────────────────────────────────
+    // Membership (Rod's decision 2026-07-29, "option B"):
+    //   1. any draft on a conversation ASSIGNED TO the user
+    //   2. drafts the user AUTHORED on an UNASSIGNED conversation
+    //   3. the user's own standalone drafts (no conversation)
+    //
+    // DELIBERATELY EXCLUDED: drafts the user authored on a conversation
+    // assigned to SOMEONE ELSE. Those used to appear here (the earlier rule
+    // included all authored drafts regardless of assignment), which surfaced
+    // 24 of Rod's drafts sitting on Mildred's / Sharmaine's / Carvey's
+    // threads. The conversation list shows the THREAD's assignee, so they
+    // read as other people's work. They remain reachable by opening the
+    // thread — they are not deleted, just not in this queue.
+    //
+    // ALSO EXCLUDED: drafts on unassigned conversations in a Pending Outreach
+    // folder — unclaimed team outreach belongs to the shared folder until
+    // someone sends one and thereby claims it.
+    //
+    // No PostgREST embedded-resource filters here. The previous version used
+    // .eq("conversation.assignee_id", …) against a !inner join; that class of
+    // filter fails silently if the path isn't resolved, and silent-wrong is
+    // the worst failure mode for an access rule. Everything below filters on
+    // plain top-level columns and then re-checks in JS.
+    //
+    // Bodies are NOT selected. This endpoint feeds a LIST; body_html /
+    // body_text are large and were a material part of the ~3s open latency.
+    // The editor fetches the body per-draft via ?id= when a draft is opened.
+    const DRAFT_LIST_FIELDS =
+      "id, conversation_id, email_account_id, author_id, created_by_agent, " +
+      "created_by_token_id, subject, to_addresses, cc_addresses, " +
+      "requires_sender_selection, source, is_reply, created_at, updated_at";
 
-    const [assignedRes, authoredRes] = await Promise.all([
-      // A — drafts on conversations assigned to this user (inner join so the
-      // embedded filter applies).
-      supabase
+    // 1. Conversations assigned to this user.
+    const { data: myConvos, error: mcErr } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("assignee_id", personalQueueUserId);
+    if (mcErr) return NextResponse.json({ error: mcErr.message }, { status: 500 });
+    const myConvoIds = (myConvos || []).map((r: any) => r.id);
+
+    // 2. Drafts on those conversations. Chunked: a long .in() list builds a
+    //    very long querystring (same class of failure as the bulk-discard 414).
+    const CHUNK = 100;
+    const draftsOnMyConvos: any[] = [];
+    for (let i = 0; i < myConvoIds.length; i += CHUNK) {
+      const slice = myConvoIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
         .from("email_drafts")
-        .select(SELECT_WITH_FOLDER)
-        .eq("conversation.assignee_id", personalQueueUserId)
-        .order("updated_at", { ascending: false }),
-      // B — drafts this user authored. Left join: standalone drafts have no
-      // conversation and must still come through.
-      supabase
-        .from("email_drafts")
-        .select(SELECT_LEFT_JOIN)
-        .eq("author_id", personalQueueUserId)
-        .order("updated_at", { ascending: false }),
-    ]);
-
-    if (assignedRes.error) {
-      return NextResponse.json({ error: assignedRes.error.message }, { status: 500 });
-    }
-    if (authoredRes.error) {
-      return NextResponse.json({ error: authoredRes.error.message }, { status: 500 });
+        .select(DRAFT_LIST_FIELDS)
+        .in("conversation_id", slice);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      draftsOnMyConvos.push(...(data || []));
     }
 
+    // 3. Drafts this user authored (any thread, plus standalone).
+    const { data: authored, error: aErr } = await supabase
+      .from("email_drafts")
+      .select(DRAFT_LIST_FIELDS)
+      .eq("author_id", personalQueueUserId);
+    if (aErr) return NextResponse.json({ error: aErr.message }, { status: 500 });
+
+    // 4. Assignment + folder for every conversation referenced above, so the
+    //    rule can be applied without trusting an embedded filter.
     const byId = new Map<string, any>();
-    for (const d of [...(assignedRes.data || []), ...(authoredRes.data || [])]) {
+    for (const d of [...draftsOnMyConvos, ...(authored || [])]) {
       if (d?.id && !byId.has(d.id)) byId.set(d.id, d);
     }
+    const allDrafts = Array.from(byId.values());
+    const convoIds = Array.from(
+      new Set(allDrafts.map((d: any) => d.conversation_id).filter(Boolean))
+    );
 
-    const merged = Array.from(byId.values()).filter((d: any) => {
-      const convo = d.conversation;
-      if (!convo) return true; // standalone compose draft — always the author's
-      const folderName = (convo.folder?.name || "").trim().toLowerCase();
-      const isUnclaimedOutreach =
-        !convo.assignee_id && folderName === "pending outreach";
-      return !isUnclaimedOutreach;
+    const convoMeta = new Map<string, { assignee_id: string | null; folder: string }>();
+    for (let i = 0; i < convoIds.length; i += CHUNK) {
+      const slice = convoIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from("conversations")
+        .select("id, assignee_id, folder:folders(name)")
+        .in("id", slice);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      for (const c of (data || []) as any[]) {
+        convoMeta.set(c.id, {
+          assignee_id: c.assignee_id || null,
+          folder: (c.folder?.name || "").trim().toLowerCase(),
+        });
+      }
+    }
+
+    // 5. Apply the rule.
+    const merged = allDrafts.filter((d: any) => {
+      // Standalone: mine if I authored it.
+      if (!d.conversation_id) return d.author_id === personalQueueUserId;
+
+      const meta = convoMeta.get(d.conversation_id);
+      if (!meta) return false; // conversation missing/merged away
+
+      // Unclaimed team outreach stays in the shared folder.
+      if (!meta.assignee_id && meta.folder === "pending outreach") return false;
+
+      // (1) assigned to me — any draft on it, including an agent's.
+      if (meta.assignee_id === personalQueueUserId) return true;
+
+      // (2) mine, on a thread nobody has claimed.
+      if (!meta.assignee_id && d.author_id === personalQueueUserId) return true;
+
+      // Authored by me but assigned to someone else → excluded.
+      return false;
     });
 
+    // Newest draft activity first. The client may reverse this for its
+    // oldest-first sort; ordering here is the canonical queue order.
     merged.sort((a: any, b: any) =>
       String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
     );
 
     return NextResponse.json({
       drafts: merged,
-      // Conversation ids for the client to hydrate full conversation rows with
-      // its own CONVERSATION_SELECT_FIELDS — keeps one definition of the
-      // conversation shape and avoids depending on whatever happens to be in
-      // the recent-conversations window.
+      // Conversation ids for the client to hydrate full conversation rows using
+      // its own CONVERSATION_SELECT_FIELDS — one definition of the conversation
+      // shape, and independent of the recent-conversations window.
       conversation_ids: Array.from(
-        new Set(merged.map((d: any) => d.conversation?.id).filter(Boolean))
+        new Set(merged.map((d: any) => d.conversation_id).filter(Boolean))
       ),
-      standalone_count: merged.filter((d: any) => !d.conversation).length,
+      standalone_count: merged.filter((d: any) => !d.conversation_id).length,
     });
   }
 

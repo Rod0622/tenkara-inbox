@@ -292,6 +292,11 @@ export default function InboxPage() {
   const isAccountDraftsView = activeView === "account-drafts" && !!activeMailbox && !activeFolder;
   const isNewConversation = activeView === "new-conversation";
 
+  // Personal Drafts sort. "newest" = most recently touched draft first
+  // (the canonical queue order the API returns); "oldest" = first-in first,
+  // for working a backlog from the bottom up.
+  const [draftSort, setDraftSort] = useState<"newest" | "oldest">("newest");
+
   // Personal Drafts queue. Only fetches/polls while that view is open.
   const {
     conversations: draftQueueConversations,
@@ -305,14 +310,21 @@ export default function InboxPage() {
     // mailbox/folder/stage logic below applies to it.
     if (isDraftsView) {
       const q = debouncedSearchQuery.trim().toLowerCase();
-      if (q.length < 2) return draftQueueConversations;
-      return draftQueueConversations.filter(
-        (c: any) =>
-          c.subject?.toLowerCase().includes(q) ||
-          c.from_name?.toLowerCase().includes(q) ||
-          c.from_email?.toLowerCase().includes(q) ||
-          c.preview?.toLowerCase().includes(q)
-      );
+      let list = draftQueueConversations;
+      if (q.length >= 2) {
+        list = list.filter(
+          (c: any) =>
+            c.subject?.toLowerCase().includes(q) ||
+            c.from_name?.toLowerCase().includes(q) ||
+            c.from_email?.toLowerCase().includes(q) ||
+            c.preview?.toLowerCase().includes(q)
+        );
+      }
+      // The hook returns newest-draft-first. Oldest-first is that reversed —
+      // deliberately NOT a re-sort on conversation fields, because the queue
+      // is ordered by DRAFT activity, not thread recency.
+      if (draftSort === "oldest") list = [...list].reverse();
+      return list;
     }
 
     let filtered = conversations;
@@ -493,6 +505,7 @@ export default function InboxPage() {
     conversations,
     isDraftsView,
     draftQueueConversations,
+    draftSort,
     folders,
     activeMailbox,
     activeFolder,
@@ -862,6 +875,46 @@ export default function InboxPage() {
               {/* Option A — standalone compose drafts have no conversation, so
                   they can't render in the list/detail split. Surface them as a
                   banner that opens the compose modal instead of hiding them. */}
+              {isDraftsView && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "6px 12px",
+                    borderBottom: "1px solid var(--border-color)",
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    {displayConversations.length} draft
+                    {displayConversations.length === 1 ? "" : "s"}
+                  </span>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {(["newest", "oldest"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setDraftSort(mode)}
+                        style={{
+                          padding: "3px 8px",
+                          borderRadius: 4,
+                          border: "none",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          background:
+                            draftSort === mode ? "var(--border-color)" : "transparent",
+                          color:
+                            draftSort === mode
+                              ? "var(--text-primary)"
+                              : "var(--text-muted)",
+                        }}
+                      >
+                        {mode === "newest" ? "Last in" : "First in"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {isDraftsView && draftStandaloneCount > 0 && (
                 <button
                   onClick={() => setActiveView("compose")}
