@@ -274,28 +274,101 @@ export async function syncMicrosoftOAuthAccount(accountId: string): Promise<{
         const toAddr = (email.toRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
         const ccAddr = (email.ccRecipients || []).map((r: any) => r.emailAddress?.address).filter(Boolean).join(", ");
 
-        const { data: insMs, error: me } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          provider_message_id: providerId,
-          from_name: email.from?.emailAddress?.name || "Unknown",
-          from_email: email.from?.emailAddress?.address || "",
-          to_addresses: toAddr,
-          cc_addresses: ccAddr,
-          subject: email.subject || "(No Subject)",
-          body_text: bodyText.slice(0, 5000),
-          body_html: bodyHtml,
-          snippet: (email.bodyPreview || bodyText).slice(0, 200),
-          is_outbound: isOutbound,
-          has_attachments: email.hasAttachments || false,
-          sent_at: email.sentDateTime || email.receivedDateTime || new Date().toISOString(),
-        }).select("id").single();
+        const msSentAt = email.sentDateTime || email.receivedDateTime || new Date().toISOString();
 
-        if (me || !insMs) {
-          console.error("MS OAuth sync: message insert failed:", me?.message || "no row");
-          continue;
+        // ── Reconcile against locally-stored outbound messages ─────────────
+        // /api/send cannot learn the real InternetMessageId: Graph's sendMail
+        // returns nothing useful, so send/route.ts:379 stores a SYNTHETIC id,
+        // "graph-oauth:<Date.now()>". When Graph later syncs the same email
+        // back from Sent Items, its id is "ms:<internetMessageId>" — a totally
+        // different value — so the provider_message_id dedup Set above cannot
+        // match it and we insert a SECOND copy of our own sent email.
+        //
+        // That is exactly what happened: 2,317 duplicate groups on Bobber Labs
+        // (microsoft_oauth) versus 37-91 on the Google accounts, which have the
+        // equivalent reconciliation. Gmail avoids this because /api/send there
+        // stores the real RFC822 Message-ID.
+        //
+        // microsoft-graph.ts (client-credentials path) already solved this;
+        // this is that logic ported to the OAuth path, tightened in two ways:
+        //   • ±60s instead of ±5min — observed real gap is ~1 second
+        //   • candidate MUST carry a "graph-oauth:" id, not merely "not ms:",
+        //     so this can only ever match a row /api/send created and can never
+        //     collapse two genuinely distinct emails
+        const fromEmailLower = (email.from?.emailAddress?.address || "").toLowerCase();
+        const isOurAccount = !!fromEmailLower && fromEmailLower === account.email.toLowerCase();
+        let reconciledId: string | null = null;
+
+        if (isOutbound && isOurAccount) {
+          const windowMs = 60 * 1000;
+          const lo = new Date(new Date(msSentAt).getTime() - windowMs).toISOString();
+          const hi = new Date(new Date(msSentAt).getTime() + windowMs).toISOString();
+
+          const { data: candidates } = await supabase
+            .from("messages")
+            .select("id, provider_message_id")
+            .eq("conversation_id", conversationId)
+            .eq("is_outbound", true)
+            .eq("subject", email.subject || "(No Subject)")
+            .ilike("from_email", account.email)
+            .gte("sent_at", lo)
+            .lte("sent_at", hi)
+            .limit(5);
+
+          const local = (candidates || []).find((r: any) =>
+            String(r.provider_message_id || "").startsWith("graph-oauth:")
+          );
+
+          if (local?.id) {
+            // Upgrade the local row to the real provider id rather than
+            // inserting. Also refresh the body from Graph's copy, which is
+            // canonical (it went through Exchange).
+            const { error: upErr } = await supabase
+              .from("messages")
+              .update({
+                provider_message_id: providerId,
+                body_html: bodyHtml || undefined,
+                body_text: bodyText.slice(0, 5000) || undefined,
+                has_attachments: email.hasAttachments || false,
+              })
+              .eq("id", local.id);
+            if (upErr) {
+              console.error("MS OAuth sync: outbound reconcile failed:", upErr.message);
+            } else {
+              reconciledId = local.id;
+            }
+          }
         }
 
-        result.newMessages++;
+        let insertedId: string | null = null;
+        if (!reconciledId) {
+          const { data: insRow, error: me } = await supabase.from("messages").insert({
+            conversation_id: conversationId,
+            provider_message_id: providerId,
+            from_name: email.from?.emailAddress?.name || "Unknown",
+            from_email: email.from?.emailAddress?.address || "",
+            to_addresses: toAddr,
+            cc_addresses: ccAddr,
+            subject: email.subject || "(No Subject)",
+            body_text: bodyText.slice(0, 5000),
+            body_html: bodyHtml,
+            snippet: (email.bodyPreview || bodyText).slice(0, 200),
+            is_outbound: isOutbound,
+            has_attachments: email.hasAttachments || false,
+            sent_at: msSentAt,
+          }).select("id").single();
+
+          if (me || !insRow) {
+            console.error("MS OAuth sync: message insert failed:", me?.message || "no row");
+            continue;
+          }
+          insertedId = insRow.id;
+          result.newMessages++;
+        }
+
+        // The DB row this Graph email landed on — a fresh insert OR the
+        // reconciled local outbound row. Attachments link to this.
+        const insMs = { id: (reconciledId || insertedId) as string };
 
         // ── Attachment capture (incremental syncs only) ──
         // Same treatment as the other three sync paths: fetch attachment
