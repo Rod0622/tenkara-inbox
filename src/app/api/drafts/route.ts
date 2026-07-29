@@ -169,7 +169,15 @@ export async function GET(req: NextRequest) {
 //      token-authed POSTs:
 //        - author_id can be null (the agent isn't a team_member)
 //        - email_account_id can be null (operator picks sender at review time)
-//        - created_by_agent is set to the token's name (e.g. "Sammy Agent v1")
+//        - created_by_agent is set to the token's NAME (e.g. "Sammy agent v1")
+//        - created_by_token_id is set to the token's stable UUID
+//
+//      Partners should match on created_by_token_id, NOT created_by_agent.
+//      The name is mutable: renaming a token would silently break any
+//      name-based filter with no error (the filter just matches nothing).
+//      Note the value is lowercase "agent" — this comment previously said
+//      "Sammy Agent v1", and a well-meaning "correction" to the token name
+//      to match it is exactly the failure mode described above.
 //        - requires_sender_selection is true when email_account_id is null,
 //          which the UI uses to block Send until an operator picks an account
 //      Uniqueness for agent drafts is keyed on (conversation_id, created_by_agent)
@@ -278,6 +286,7 @@ export async function POST(req: NextRequest) {
     };
     if (isAgentRequest) {
       updatePayload.created_by_agent = agentToken!.name;
+      updatePayload.created_by_token_id = agentToken!.id;
       updatePayload.requires_sender_selection = requiresSenderSelection;
     } else if (email_account_id) {
       // Operator manually selected an account on a draft that previously
@@ -329,6 +338,7 @@ export async function POST(req: NextRequest) {
   };
   if (isAgentRequest) {
     insertPayload.created_by_agent = agentToken!.name;
+    insertPayload.created_by_token_id = agentToken!.id;
     insertPayload.requires_sender_selection = requiresSenderSelection;
   }
 
@@ -414,6 +424,7 @@ export async function DELETE(req: NextRequest) {
     id: string;
     conversation_id: string | null;
     created_by_agent: string | null;
+    created_by_token_id: string | null;
     email_account_id: string | null;
     subject: string | null;
     to_addresses: string | null;
@@ -423,19 +434,19 @@ export async function DELETE(req: NextRequest) {
   if (id) {
     const { data } = await supabase
       .from("email_drafts")
-      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .select("id, conversation_id, created_by_agent, created_by_token_id, email_account_id, subject, to_addresses")
       .eq("id", id);
     draftsToDelete = (data || []) as DraftRow[];
   } else if (ids.length > 0) {
     const { data } = await supabase
       .from("email_drafts")
-      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .select("id, conversation_id, created_by_agent, created_by_token_id, email_account_id, subject, to_addresses")
       .in("id", ids);
     draftsToDelete = (data || []) as DraftRow[];
   } else if (conversationId) {
     let sel = supabase
       .from("email_drafts")
-      .select("id, conversation_id, created_by_agent, email_account_id, subject, to_addresses")
+      .select("id, conversation_id, created_by_agent, created_by_token_id, email_account_id, subject, to_addresses")
       .eq("conversation_id", conversationId);
     if (agentScope) sel = sel.eq("created_by_agent", agentScope);
     const { data } = await sel;
@@ -478,7 +489,11 @@ export async function DELETE(req: NextRequest) {
           conversation_id: d.conversation_id,
           actor_id: null,
           action: "agent_draft_discarded",
-          details: { agent_name: d.created_by_agent, draft_id: d.id },
+          details: {
+            agent_name: d.created_by_agent,
+            agent_token_id: d.created_by_token_id,
+            draft_id: d.id,
+          },
         }).then(({ error: logErr }) => {
           if (logErr) console.error("[drafts/DELETE] audit log failed:", logErr.message);
         });
