@@ -651,6 +651,12 @@ export default function ConversationDetail({
             body_html: replyText,
             is_reply: true,
             source: "manual",
+            // Update the draft we actually LOADED (see the draft-load effect
+            // above — it may be an AGENT's draft, since operators review those).
+            // Without this the server matched only (conversation_id, author_id),
+            // never matching an agent row, and every review forked a copy under
+            // the operator's name.
+            draft_id: loadedDraftId || undefined,
           }),
         });
         if (res.ok) {
@@ -660,7 +666,10 @@ export default function ConversationDetail({
       } catch { /* silent */ }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [replyText, replyTo, replySubject, replyCc, replyBcc, convo?.id, showReplyEditor]);
+  // loadedDraftId is in the deps so the timer closure always carries the id of
+  // the draft currently loaded. This settles rather than looping: after a save
+  // the response returns the SAME id, so setLoadedDraftId is a no-op bailout.
+  }, [replyText, replyTo, replySubject, replyCc, replyBcc, convo?.id, showReplyEditor, loadedDraftId]);
 
   // (Modal auto-save effect moved further down — see "Auto-save Reply modal
   // draft" below — to be declared AFTER the modal state.)

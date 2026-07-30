@@ -245,6 +245,7 @@ export async function POST(req: NextRequest) {
     body_text,
     is_reply,
     source,
+    draft_id,
   } = body;
 
   // Try to authenticate as a bearer-token request. If null, this is a normal
@@ -287,13 +288,36 @@ export async function POST(req: NextRequest) {
     body_text ?? (body_html || "").replace(/<[^>]*>/g, "").slice(0, 5000);
 
   // Find an existing draft to update.
+  //   - EXPLICIT draft_id: update THAT row (see below)
   //   - Agent flow:    match (conversation_id, created_by_agent = token.name)
   //   - Session flow:  match (conversation_id, author_id) or (NULL, author_id) for standalone
+  //
+  // Why draft_id exists: the reply editor loads whichever draft is on the
+  // thread — including an AGENT's, since operators are the reviewers. Without
+  // an explicit id, a session save matched only (conversation_id, author_id),
+  // which can never match an agent row, so every review INSERTED a near-
+  // identical copy under the operator's name. 221 such forks accumulated
+  // across 14 people between 2026-06-04 and 07-29 (Mildred alone: 138).
+  //
+  // With draft_id the editor updates the row it actually loaded, so reviewing
+  // an agent draft edits the agent's draft. That also keeps created_by_agent
+  // intact, so it stays in the right person's queue and the draft id Sam's
+  // draft.sent webhook references stays stable.
   let existingQuery = supabase
     .from("email_drafts")
-    .select("id");
+    .select("id, created_by_agent, source");
 
-  if (isAgentRequest) {
+  if (draft_id) {
+    // Scoped to the same conversation so a stale or wrong id from the client
+    // can never retarget a draft on a different thread. If it doesn't match,
+    // we fall through to an insert exactly as before.
+    existingQuery = existingQuery.eq("id", draft_id);
+    if (conversation_id) {
+      existingQuery = existingQuery.eq("conversation_id", conversation_id);
+    } else {
+      existingQuery = existingQuery.is("conversation_id", null);
+    }
+  } else if (isAgentRequest) {
     existingQuery = existingQuery
       .eq("conversation_id", conversation_id)
       .eq("created_by_agent", agentToken!.name);
@@ -329,7 +353,14 @@ export async function POST(req: NextRequest) {
       body_text: computedBodyText,
       email_account_id: email_account_id || null,
       is_reply: is_reply ?? !!conversation_id,
-      source: source || (isAgentRequest ? "agent" : "manual"),
+      // Preserve provenance. An operator editing an AGENT draft (reached via
+      // draft_id) must not flip source to "manual" — the Pending Outreach
+      // tooling classifies agent drafts on source = 'agent', and
+      // created_by_agent stays set, so the two must not disagree.
+      source:
+        (existing as any).created_by_agent && !isAgentRequest
+          ? (existing as any).source || "agent"
+          : source || (isAgentRequest ? "agent" : "manual"),
       updated_at: new Date().toISOString(),
     };
     if (isAgentRequest) {
