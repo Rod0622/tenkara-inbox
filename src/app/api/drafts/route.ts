@@ -332,12 +332,34 @@ export async function POST(req: NextRequest) {
 
   const { data: existing } = await existingQuery.maybeSingle();
 
+  // ── Inherit the sending account on REPLIES ─────────────────────────────
+  // A reply can only ever go out from the mailbox that owns the thread, so
+  // asking an operator to pick is pure friction — and a place to pick wrong.
+  // If the agent didn't specify an account but the conversation has one, use
+  // the conversation's.
+  //
+  // Initial outreach is different: a brand-new thread genuinely has no owning
+  // mailbox until someone chooses, so requires_sender_selection stays true
+  // there and the picker still appears.
+  let resolvedAccountId: string | null = email_account_id || null;
+  if (!resolvedAccountId && conversation_id) {
+    const { data: parentConvo } = await supabase
+      .from("conversations")
+      .select("email_account_id")
+      .eq("id", conversation_id)
+      .maybeSingle();
+    if (parentConvo?.email_account_id) {
+      resolvedAccountId = parentConvo.email_account_id;
+    }
+  }
+
   // requires_sender_selection: only meaningful for agent drafts where no
-  // account was specified. The operator must pick an account before Send.
+  // account could be resolved — i.e. initial outreach on a thread that has no
+  // owning mailbox yet. The operator must pick before Send in that case.
   // Once they pick (in the UI), email_account_id is set and this flag
   // should be cleared — handled by the existing flow that updates the
   // draft body / metadata.
-  const requiresSenderSelection = isAgentRequest && !email_account_id;
+  const requiresSenderSelection = isAgentRequest && !resolvedAccountId;
 
   if (existing) {
     // Build the update payload. For agent drafts, also propagate created_by_agent
@@ -351,7 +373,7 @@ export async function POST(req: NextRequest) {
       subject,
       body_html,
       body_text: computedBodyText,
-      email_account_id: email_account_id || null,
+      email_account_id: resolvedAccountId,
       is_reply: is_reply ?? !!conversation_id,
       // Preserve provenance. An operator editing an AGENT draft (reached via
       // draft_id) must not flip source to "manual" — the Pending Outreach
@@ -404,7 +426,7 @@ export async function POST(req: NextRequest) {
   // Create new draft
   const insertPayload: any = {
     conversation_id: conversation_id || null,
-    email_account_id: email_account_id || null,
+    email_account_id: resolvedAccountId,
     author_id: isAgentRequest ? null : (author_id || null),
     to_addresses,
     cc_addresses,
